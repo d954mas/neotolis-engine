@@ -131,6 +131,81 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
     return blob;
 }
 
+/* Build a font blob over an arbitrary SORTED codepoint set. Every glyph shares
+ * `advance`, so a resolved glyph's advance identifies WHICH resource won a
+ * codepoint present in more than one (first-wins). Codepoints must be sorted
+ * ascending (bsearch precondition). Coords in font units. Caller frees. */
+static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, const uint32_t *codepoints, uint16_t glyph_count, int16_t advance,
+                                           uint32_t *out_size) {
+    const uint32_t contour_size = 18U; /* 1 contour, 2 line segments — matches build_test_font_blob_with_metrics */
+    uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
+    uint32_t glyphs_size = (uint32_t)glyph_count * (uint32_t)sizeof(NtFontGlyphEntry);
+    uint32_t total_size = header_size + glyphs_size + ((uint32_t)glyph_count * contour_size);
+
+    uint8_t *blob = (uint8_t *)calloc(total_size, 1);
+    NT_ASSERT(blob);
+
+    NtFontAssetHeader hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic = NT_FONT_MAGIC;
+    hdr.version = NT_FONT_VERSION;
+    hdr.glyph_count = glyph_count;
+    hdr.units_per_em = units_per_em;
+    hdr.ascent = ascent;
+    hdr.descent = descent;
+    hdr.line_gap = line_gap;
+    memcpy(blob, &hdr, sizeof(hdr));
+
+    uint32_t data_base = header_size + glyphs_size;
+    for (uint16_t g = 0; g < glyph_count; g++) {
+        NtFontGlyphEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        entry.codepoint = codepoints[g];
+        entry.data_offset = data_base + ((uint32_t)g * contour_size);
+        entry.advance = advance;
+        entry.bbox_x0 = 0;
+        entry.bbox_y0 = -200;
+        entry.bbox_x1 = 400;
+        entry.bbox_y1 = 800;
+        entry.curve_count = 2;
+        entry.kern_count = 0;
+        memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
+    }
+
+    for (uint16_t g = 0; g < glyph_count; g++) {
+        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
+        uint16_t cc = 1;
+        memcpy(wp, &cc, 2);
+        wp += 2;
+        uint16_t sc = 2;
+        memcpy(wp, &sc, 2);
+        wp += 2;
+        int16_t sx = 0;
+        int16_t sy = 0;
+        memcpy(wp, &sx, 2);
+        wp += 2;
+        memcpy(wp, &sy, 2);
+        wp += 2;
+        wp[0] = 0;
+        wp[1] = 0;
+        wp += 2;
+        int16_t d1x = 400;
+        int16_t d1y = 0;
+        memcpy(wp, &d1x, 2);
+        wp += 2;
+        memcpy(wp, &d1y, 2);
+        wp += 2;
+        int16_t d2x = 0;
+        int16_t d2y = 800;
+        memcpy(wp, &d2x, 2);
+        wp += 2;
+        memcpy(wp, &d2y, 2);
+    }
+
+    *out_size = total_size;
+    return blob;
+}
+
 /* ---- Helper: register font blob as test resource ---- */
 
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
@@ -1062,6 +1137,88 @@ void test_font_hotswap_handle_reuse_after_deactivate(void) {
     free(blob_b);
 }
 
+/* ---- FONT-04 / D-10: fallback resolution ORDER (first-wins) + tofu terminal ----
+ *
+ * Two resources merged into ONE nt_font_t (base first, fallback second) with
+ * overlapping coverage. Pins that:
+ *   (a) a codepoint present in BOTH resolves to the FIRST-added resource — via
+ *       glyph identity (advance), not merely "non-tofu";
+ *   (b) a codepoint present only in the second resolves to the second;
+ *   (c) a codepoint in NEITHER resolves to the single font-level tofu (sentinel
+ *       0xFFFFFFFF) and that tofu is TERMINAL — a second distinct miss returns
+ *       the SAME tofu entry, so no intermediate resource emits its own tofu. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_fallback_order_first_wins(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    /* Base owns 'A' + shared 'M' + shared CJK 0x4E2D (advance 500);
+     * fallback owns shared 'M' + 'Z' + shared CJK 0x4E2D (advance 700).
+     * Codepoints are pre-sorted per blob (bsearch precondition). */
+    const uint32_t base_cps[3] = {'A', 'M', 0x4E2DU};
+    const uint32_t fb_cps[3] = {'M', 'Z', 0x4E2DU};
+    uint32_t base_sz = 0;
+    uint32_t fb_sz = 0;
+    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 3, 500, &base_sz);
+    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 3, 700, &fb_sz);
+
+    nt_resource_t base_res = register_font_resource("fb_base", base, base_sz);
+    nt_resource_t fb_res = register_font_resource("fb_fallback", fb, fb_sz);
+
+    /* Fixed order: base FIRST, fallback SECOND → base wins shared codepoints. */
+    nt_font_add(font, base_res);
+    nt_font_add(font, fb_res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* (a) shared ASCII 'M' → base (advance 500), NOT fallback (700).
+     * ASCII exercises the ascii_glyph_idx fast path. */
+    const nt_glyph_cache_entry_t *m = nt_font_lookup_glyph(font, 'M');
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_FALSE(m->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('M', m->codepoint);
+    TEST_ASSERT_EQUAL_INT16(500, m->advance);
+
+    /* (a') shared non-ASCII 0x4E2D → base (500) via the bsearch first-wins loop
+     * (codepoint >= 128 bypasses the ascii fast path). */
+    const nt_glyph_cache_entry_t *cjk = nt_font_lookup_glyph(font, 0x4E2DU);
+    TEST_ASSERT_NOT_NULL(cjk);
+    TEST_ASSERT_FALSE(cjk->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0x4E2DU, cjk->codepoint);
+    TEST_ASSERT_EQUAL_INT16(500, cjk->advance);
+
+    /* (b) 'A' only in base → base (500). */
+    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_FALSE(a->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, a->advance);
+
+    /* (b') 'Z' only in fallback → second resource (700). */
+    const nt_glyph_cache_entry_t *z = nt_font_lookup_glyph(font, 'Z');
+    TEST_ASSERT_NOT_NULL(z);
+    TEST_ASSERT_FALSE(z->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('Z', z->codepoint);
+    TEST_ASSERT_EQUAL_INT16(700, z->advance);
+
+    /* (c) '#' in NEITHER → single font-level tofu, sentinel 0xFFFFFFFF. */
+    const nt_glyph_cache_entry_t *miss1 = nt_font_lookup_glyph(font, '#');
+    TEST_ASSERT_NOT_NULL(miss1);
+    TEST_ASSERT_TRUE(miss1->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, miss1->codepoint);
+
+    /* Terminal: a DIFFERENT miss returns the SAME tofu entry — proves one
+     * font-level tofu, not a per-resource tofu leaking through the cascade. */
+    const nt_glyph_cache_entry_t *miss2 = nt_font_lookup_glyph(font, '@');
+    TEST_ASSERT_NOT_NULL(miss2);
+    TEST_ASSERT_TRUE(miss2->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, miss2->codepoint);
+    TEST_ASSERT_EQUAL_PTR(miss1, miss2);
+
+    nt_font_destroy(font);
+    free(base);
+    free(fb);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -1090,6 +1247,7 @@ int main(void) {
     RUN_TEST(test_font_get_metrics);
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
+    RUN_TEST(test_font_fallback_order_first_wins);
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
