@@ -31,7 +31,7 @@ static void clear_glyph_cache(nt_font_slot_t *slot);
 static void font_test_shutdown_packs(void);
 #endif
 
-// #region Resolve-callback lifecycle (#159 — on_resolve/on_cleanup + PIN_BLOB)
+// #region Resolve-callback lifecycle — on_resolve/on_cleanup + PIN_BLOB
 /* Zero-copy provider: a {blob,size} view into the winning pack blob, stored in
  * the resource slot's user_data. Fonts decode glyphs lazily from the live blob,
  * so the winner PINs its pack (NT_RESOURCE_BEHAVIOR_PIN_BLOB) — the resolve pass
@@ -949,7 +949,7 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     s_font.slots = (nt_font_slot_t *)calloc((size_t)desc->max_fonts + 1, sizeof(nt_font_slot_t));
     NT_ASSERT(s_font.slots);
 
-    /* #159: fonts are zero-copy consumers — a no-op activator marks the slot READY,
+    /* Fonts are zero-copy consumers — a no-op activator marks the slot READY,
      * on_resolve/on_cleanup manage the {blob,size} view, and PIN_BLOB keeps the
      * winning pack blob resident so live glyph reads never dangle. */
     nt_resource_set_activator(NT_ASSET_FONT, font_activate, font_deactivate);
@@ -1096,7 +1096,7 @@ void nt_font_step(void) {
              * Multi-provider mismatch breaks the shared-metrics invariant — normalize in the builder. */
             if (slot->metrics_set && !metrics_match) {
                 /* Single-provider mismatch = legitimate hot-swap. Multi-provider mismatch violates the
-                 * shared-metrics invariant (builder D-03 UPM-normalization should prevent it). Flush on ANY
+                 * shared-metrics invariant (builder UPM-normalization should prevent it). Flush on ANY
                  * mismatch — NT_ASSERT is a no-op in shipping, so gating the flush on it would leave the
                  * glyph/measure caches baked against the stale metrics the overwrite below replaces. */
                 NT_ASSERT(active_count == 1 && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
@@ -1858,8 +1858,8 @@ void nt_font_measure_invalidate(nt_font_t font) {
 #ifdef NT_TEST_ACCESS
 
 // #region Test-only real-pack registry
-/* #159 migrated fonts onto on_resolve/on_cleanup, which feed the font its bytes
- * from the RESIDENT pack blob. Virtual packs carry no blob (asset_data_ptr is
+/* Fonts read bytes zero-copy from the RESIDENT pack blob via on_resolve/on_cleanup.
+ * Virtual packs carry no blob (asset_data_ptr is
  * NULL when pack->blob == NULL), so tests must drive the resolve pass through a
  * real parsed pack. These helpers wrap a font blob in a single-asset .ntpack,
  * mount + parse it, and hand back a token; parse_pack keeps a zero-copy pointer,

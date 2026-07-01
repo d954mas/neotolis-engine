@@ -1375,7 +1375,7 @@ void test_blob_policy_keep(void) {
     (void)remove("build/test_blob_keep.ntpack");
 }
 
-/* ---- PIN_BLOB ref-balance tests (FONT-03 / D-05: pin transfers on winner-change, balances to 0) ---- */
+/* ---- PIN_BLOB ref-balance tests — pin transfers on winner-change, balances to 0 ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_ref_balance_winner_change(void) {
@@ -1450,9 +1450,9 @@ void test_blob_pin_ref_absent_without_flag(void) {
     free(blob);
 }
 
-/* CR-02: a same-step unmount+remount of the SAME pack_id reuses the packs[] index; the pin
- * transfer must re-key on mount_seq (not index) so the fresh mount stays pinned. Before the fix
- * old_pack == new_pack skipped the transfer and blob_ref stayed 0 -> UAF on the live font blob. */
+/* A same-step unmount+remount of the SAME pack_id reuses the packs[] index; the pin
+ * transfer must re-key on mount_seq (not index) so the fresh mount stays pinned. Keying on
+ * index would skip the transfer (old_pack == new_pack), leaving blob_ref at 0 -> UAF. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_ref_survives_reregister(void) {
     nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
@@ -1491,9 +1491,9 @@ void test_blob_pin_ref_survives_reregister(void) {
     free(blob2);
 }
 
-/* ---- PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) ---- */
+/* ---- PIN_BLOB eviction / unmount safety ---- */
 
-/* D-06: a referenced NT_BLOB_AUTO blob survives TTL expiry (timer-freeze); ref->0 -> fresh TTL grace, then evicts. */
+/* A referenced NT_BLOB_AUTO blob survives TTL expiry (timer-freeze); ref->0 -> fresh TTL grace, then evicts. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     nt_hash32_t pid = nt_hash32_str("pin_evict_pack");
@@ -1538,7 +1538,7 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     free(blob);
 }
 
-/* D-07: NT_BLOB_AUTO behaves as KEEP while referenced; the skip log is edge-triggered (once, not per-frame). */
+/* NT_BLOB_AUTO behaves as KEEP while referenced; the skip log is edge-triggered (once, not per-frame). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_auto_as_keep_one_shot_log(void) {
     nt_hash32_t pid = nt_hash32_str("pin_keep_pack");
@@ -1572,7 +1572,7 @@ void test_blob_pin_auto_as_keep_one_shot_log(void) {
     free(blob);
 }
 
-/* D-08: unmount while referenced -> no crash, aggregate resets to 0 (no double-free), consumer renders tofu. */
+/* Unmount while referenced -> no crash, aggregate resets to 0 (no double-free), consumer renders tofu. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_unmount_while_referenced(void) {
     nt_hash32_t pid = nt_hash32_str("pin_unmount_pack");
@@ -1592,7 +1592,7 @@ void test_blob_pin_unmount_while_referenced(void) {
     TEST_ASSERT_EQUAL_UINT32(88, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* referenced -> triggers unmount error log */
 
-    /* Unmount overrides the ref (D-08): proceeds, one-shot error log, teardown clears blob_ref (single-source) */
+    /* Unmount overrides the ref: proceeds, one-shot error log, teardown clears blob_ref (single-source) */
     nt_resource_unmount(pid);
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
 
@@ -2775,12 +2775,12 @@ int main(void) {
     /* Blob policy tests */
     RUN_TEST(test_blob_policy_keep);
 
-    /* PIN_BLOB ref-balance tests (FONT-03 / D-05) */
+    /* PIN_BLOB ref-balance tests */
     RUN_TEST(test_blob_pin_ref_balance_winner_change);
     RUN_TEST(test_blob_pin_ref_absent_without_flag);
     RUN_TEST(test_blob_pin_ref_survives_reregister);
 
-    /* PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) */
+    /* PIN_BLOB eviction / unmount safety */
     RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
     RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
     RUN_TEST(test_blob_pin_unmount_while_referenced);

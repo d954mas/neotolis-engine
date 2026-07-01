@@ -3523,7 +3523,7 @@ static void read_first_contour_point(const NtFontAssetHeader *hdr, const NtFontG
     memcpy(out_y, p + 2, 2);
 }
 
-/* D-03: baking with target_units_per_em rescales metrics/contours by target/src. */
+/* Baking with target_units_per_em rescales metrics/contours by target/src. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_font_upm_normalize_rescales(void) {
     const char *ttf_path = find_test_ttf();
@@ -3562,7 +3562,7 @@ void test_font_upm_normalize_rescales(void) {
     int16_t nat_py = 0;
     read_first_contour_point(hdr_nat, &g_nat[0], &nat_px, &nat_py);
 
-    /* --- Bake 2: 2x UPM (scale up toward max, D-03) --- */
+    /* --- Bake 2: 2x UPM (scale up toward max) --- */
     uint16_t target = (uint16_t)(src_upm * 2);
     const char *pack_sc = TMP_DIR "/test_font_upm_scaled.ntpack";
     NtBuilderContext *ctx2 = nt_builder_start_pack(pack_sc);
@@ -3698,7 +3698,7 @@ void test_font_upm_normalize_scales_kern(void) {
     free(data_sc);
 }
 
-/* D-03 / Pitfall 4: a rescale that would exceed INT16_MAX must trap (never wrap). */
+/* A rescale that would exceed INT16_MAX must trap (never wrap). */
 void test_font_upm_normalize_overflow_asserts(void) {
     const char *ttf_path = find_test_ttf();
     if (!ttf_path) {

@@ -235,7 +235,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
 
 /* Font decode: TTF -> final NT_ASSET_FONT binary (like mesh path).
- * target_units_per_em: 0 = natural UPM; non-zero rescales metrics/contours to that UPM (D-03). */
+ * target_units_per_em: 0 = natural UPM; non-zero rescales metrics/contours to that UPM. */
 nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, uint16_t target_units_per_em, uint8_t **out_data, uint32_t *out_size);
 
 /* Internal encode functions -- called from finish_pack (encode phase) */

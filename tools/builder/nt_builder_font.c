@@ -473,7 +473,7 @@ static inline void write_varlen_delta(uint8_t **wp, int delta) {
 
 // #region UPM normalize
 /* Rescale a font-unit value by num/den (round half away from zero).
- * int32 result; caller range-checks into int16 (D-03, Pitfall 4 — never wrap silently). */
+ * int32 result; caller range-checks into int16 — never wrap silently. */
 static int32_t upm_rescale(int v, uint32_t num, uint32_t den) {
     int64_t scaled = (int64_t)v * (int64_t)num;
     int64_t half = (int64_t)(den / 2U);
@@ -711,8 +711,8 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #endregion
 
     // #region UPM normalize setup
-    /* D-03: rescale all metrics/contours to a caller target UPM so different-UPM fonts merge.
-     * target=0 (or == natural) → no rescale, byte-identical to today. Scale toward max UPM. */
+    /* Rescale all metrics/contours to a caller target UPM so different-UPM fonts merge.
+     * target=0 (or == natural) → no rescale, byte-identical. Scale toward max UPM. */
     uint16_t out_upm = src_upm;
     bool rescale = false;
     uint32_t upm_num = 1;
@@ -854,7 +854,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #endregion
 
     // #region Build header
-    /* D-03: header vmetrics rescale to the target UPM (int16 range-checked). */
+    /* Header vmetrics rescale to the target UPM (int16 range-checked). */
     if (rescale) {
         int32_t s_ascent = upm_rescale(ascent, upm_num, upm_den);
         int32_t s_descent = upm_rescale(descent, upm_num, upm_den);

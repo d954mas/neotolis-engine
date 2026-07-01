@@ -290,7 +290,7 @@ static void resource_resolve_pass(void) {
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
-        // #region PIN_BLOB ref-transfer (OQ-1 Option A: resolve-pass owns the pin, no on_cleanup dependency)
+        // #region PIN_BLOB pin transfer — resolve pass is the single owner (no on_cleanup decrement)
         if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
             /* Pin identity is the winning pack's mount_seq, NOT its packs[] index: a same-step
              * unmount+remount of one pack_id reuses the index but is a DIFFERENT blob. Keying on
@@ -685,7 +685,7 @@ void nt_resource_step(void) {
             if (pack->blob_ttl_ms == 0) {
                 continue;
             }
-            // #region blob-pin evict gate (D-06/D-07): a referenced blob is held as KEEP + timer-frozen
+            // #region blob-pin evict gate — a referenced blob is held as KEEP + timer-frozen
             if (pack->blob_ref > 0) {
                 /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
                  * blob and never bump last-access, so freeze the TTL clock: ref->0 starts a fresh grace. */
@@ -807,7 +807,7 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    /* D-08: the developer owns unmount — proceed even while referenced, but warn ONCE (outside the
+    /* The developer owns unmount — proceed even while referenced, but warn ONCE (outside the
      * per-asset loop, not per iteration). Eviction respects the ref (skip); unmount overrides it.
      * Teardown clears blob_ref via the memset below, so the resolve pass's guarded decrement finds
      * 0 and skips — single-source reconciliation, no double-free. Consumers render tofu next resolve. */

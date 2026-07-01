@@ -204,8 +204,8 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
 
 /* ---- Helper: register a font blob as a test resource ----
  *
- * #159 migrated fonts onto on_resolve/on_cleanup, which feed the font its bytes
- * from a resident pack blob — virtual packs carry none. nt_font_test_register_data
+ * Fonts read bytes zero-copy from a resident pack blob via on_resolve/on_cleanup;
+ * virtual packs carry none. nt_font_test_register_data
  * wraps the blob in a real parsed pack (owned by the font module, freed on
  * shutdown) and returns a token; nt_font_test_resource requests it. */
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
@@ -1055,7 +1055,7 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
 
 /* ---- FONT-02k: pack unmount clears stale provider + metrics ----
  *
- * #159 model: unmount drops the winner; the resolve pass fires font_on_cleanup
+ * Unmount drops the winner; the resolve pass fires font_on_cleanup
  * (frees the {blob,size} holder) and the epoch-gated font_step then flushes the
  * glyph cache and resets metrics. After unmount + a resource/font step the font
  * has no provider and measure_n short-circuits at !metrics_set. */
@@ -1094,12 +1094,12 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- FONT-03 / D-08: unmount a font's pack WHILE it is referenced ----
+/* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
  *
- * Integration proof of the #159 fix: the font reads glyph bytes zero-copy from
- * the pinned pack blob, then the pack is unmounted while the pin is held. The
- * unmount overrides the pin (D-08), the resolve pass frees the holder exactly
- * once (no double-free), and the font degrades cleanly — no dangling read. */
+ * The font reads glyph bytes zero-copy from the pinned pack blob, then the pack
+ * is unmounted while the pin is held. The unmount overrides the pin, the resolve
+ * pass frees the holder exactly once (no double-free), and the font degrades
+ * cleanly — no dangling read. */
 void test_font_unmount_while_referenced_renders_tofu(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1125,7 +1125,7 @@ void test_font_unmount_while_referenced_renders_tofu(void) {
     TEST_ASSERT_TRUE(z->is_tofu);
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, z->codepoint);
 
-    /* Unmount while referenced (D-08): no crash, holder freed once (no double-free). */
+    /* Unmount while referenced: no crash, holder freed once (no double-free). */
     nt_font_test_deactivate(tok);
     nt_resource_step();
     nt_font_step();
@@ -1140,7 +1140,7 @@ void test_font_unmount_while_referenced_renders_tofu(void) {
     free(blob);
 }
 
-/* ---- FONT-04 / D-10: fallback resolution ORDER (first-wins) + tofu terminal ----
+/* ---- FONT-04: fallback resolution ORDER (first-wins) + tofu terminal ----
  *
  * Two resources merged into ONE nt_font_t (base first, fallback second) with
  * overlapping coverage. Pins that:
@@ -1222,7 +1222,7 @@ void test_font_fallback_order_first_wins(void) {
     free(fb);
 }
 
-/* ---- FONT-02 / D-11: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
+/* ---- FONT-02: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
  *
  * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
  * (find_glyph_in_pack) — heap-free, no parse step, bounded. This confirms that
@@ -1264,7 +1264,7 @@ void test_font_cmap_bounded_no_parse(void) {
     free(blob);
 }
 
-/* ---- FONT-01 / D-03: two resources at a COMMON (builder-normalized) UPM merge
+/* ---- FONT-01: two resources at a COMMON (builder-normalized) UPM merge
  * into one font without tripping the shared-metrics assert ----
  *
  * Two source fonts of different NATURAL UPM (latin ~1000, CJK 2048) that the
@@ -1278,7 +1278,7 @@ void test_font_merged_different_upm_no_metrics_assert(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
-    const uint16_t common_upm = 2048U; /* = max(1000, 2048), scaled toward max (D-03) */
+    const uint16_t common_upm = 2048U; /* = max(1000, 2048), scaled toward max */
     const int16_t asc = 1600;
     const int16_t descent = -400;
     const int16_t lg = 0;
