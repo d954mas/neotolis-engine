@@ -790,6 +790,14 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
+    /* D-08: the developer owns unmount — proceed even while referenced, but warn ONCE (outside the
+     * per-asset loop, not per iteration). Eviction respects the ref (skip); unmount overrides it.
+     * Teardown clears blob_ref via the memset below, so the resolve pass's guarded decrement finds
+     * 0 and skips — single-source reconciliation, no double-free. Consumers render tofu next resolve. */
+    if (pack->blob_ref > 0) {
+        NT_LOG_ERROR("unmount pack 0x%08x while blob referenced (ref=%u) — consumers will render tofu", pack_id.value, pack->blob_ref);
+    }
+
     /* Deactivate READY assets and clear all assets belonging to this pack */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
