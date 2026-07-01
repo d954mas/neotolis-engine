@@ -836,6 +836,55 @@ void test_measure_n_invalidates_on_resource_change(void) {
     free(blob_b);
 }
 
+/* ---- Adding an ALREADY-published resource forces a rescan ----
+ *
+ * The epoch gate short-circuits nt_font_step when the resource publication
+ * epoch is unchanged. If the added resource was already published (its epoch
+ * already consumed by a prior step), only the resource-set dirty flag can
+ * force the rescan. Signature: attaching the resource must flush the measure
+ * cache (ascii_index_dirty) so the next measure is a MISS. */
+void test_font_add_already_published_forces_rescan(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_font_blob(&size_a);
+    nt_resource_t res_a = register_font_resource("font_pub_a", blob_a, size_a);
+    nt_font_add(font, res_a);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Publish res_b AND let the font module consume that epoch WITHOUT adding
+     * res_b to the font — now epoch == last_resolve_epoch. */
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_test_font_blob(&size_b);
+    nt_resource_t res_b = register_font_resource("font_pub_b", blob_b, size_b);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_test_reset_measure_counters();
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    /* Add the already-published res_b with NO intervening nt_resource_step, so
+     * the publication epoch does not move. Only the rescan flag can pick it up. */
+    nt_font_add(font, res_b);
+    nt_font_step();
+
+    /* Fixed: rescan flushes the measure cache -> MISS. Broken: epoch gate
+     * early-returns, cache survives -> HIT. */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font));
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
 /* ---- FONT-02e: custom measure_cache_size (64 entries) ---- */
 
 void test_measure_n_cache_custom_size(void) {
@@ -1315,6 +1364,7 @@ int main(void) {
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);
     RUN_TEST(test_measure_n_invalidates_on_resource_change);
+    RUN_TEST(test_font_add_already_published_forces_rescan);
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);

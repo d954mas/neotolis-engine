@@ -1033,14 +1033,16 @@ void nt_font_step(void) {
 
     s_font.frame_counter++;
 
-    /* Epoch-gate the resource rescan (OQ-2): when no published slot changed since
-     * the last step, this is O(1). The context-restore rebuild above still runs
-     * every frame; only the winner/metrics reconciliation is gated. */
+    /* Epoch-gate the resource rescan: when no published slot changed since the
+     * last step and no font's resource set was mutated, this is O(1). The
+     * context-restore rebuild above still runs every frame; only the
+     * winner/metrics reconciliation is gated. */
     uint32_t epoch = nt_resource_publication_epoch();
-    if (epoch == s_font.last_resolve_epoch) {
+    if (epoch == s_font.last_resolve_epoch && !s_font.needs_resource_rescan) {
         return;
     }
     s_font.last_resolve_epoch = epoch;
+    s_font.needs_resource_rescan = false;
 
     for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
         if (!nt_pool_slot_alive(&s_font.pool, i)) {
@@ -1320,6 +1322,10 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     slot->resources[slot->resource_count] = resource;
     slot->resource_handles[slot->resource_count] = 0; /* resolved in step */
     slot->resource_count++;
+
+    /* Adding an already-published resource won't bump the publication epoch, so
+     * force the next step to rescan instead of short-circuiting on the epoch gate. */
+    s_font.needs_resource_rescan = true;
 }
 
 /* ---- Query ---- */

@@ -82,6 +82,7 @@ typedef struct {
     nt_font_slot_t *slots;       /* [capacity+1], index 0 reserved */
     uint32_t frame_counter;      /* LRU tick */
     uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
+    bool needs_resource_rescan;  /* a font's resource set changed; epoch alone won't reflect it */
     nt_font_pre_flush_fn pre_flush_fn;
     bool initialized;
 } nt_font_state_t;
