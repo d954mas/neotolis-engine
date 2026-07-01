@@ -669,6 +669,19 @@ void nt_resource_step(void) {
             if (pack->blob_ttl_ms == 0) {
                 continue;
             }
+            // #region blob-pin evict gate (D-06/D-07): a referenced blob is held as KEEP + timer-frozen
+            if (pack->blob_ref > 0) {
+                /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
+                 * blob and never bump last-access, so freeze the TTL clock: ref->0 starts a fresh grace. */
+                pack->blob_last_access_ms = now_ms;
+                if (!pack->blob_evict_skip_logged) {
+                    NT_LOG_WARN("blob pack %u referenced (ref=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_ref);
+                    pack->blob_evict_skip_logged = 1; /* edge-trigger: never log per-frame */
+                }
+                continue;
+            }
+            pack->blob_evict_skip_logged = 0; /* no longer referenced — re-arm the one-shot */
+            // #endregion
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
                 /* Only free blobs owned by resource system (loaded via I/O).
                  * Caller-owned blobs (parse_pack direct) have io_type == NT_IO_NONE. */
