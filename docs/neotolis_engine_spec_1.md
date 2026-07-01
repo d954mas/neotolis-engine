@@ -1549,6 +1549,7 @@ void *nt_resource_get_user_data(handle);
 
 Behavior flags:
 - `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
+- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see §17.6.2). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
 
 **on_resolve** fires in Phase D for the published winner when:
 - published asset identity changes
@@ -1564,6 +1565,23 @@ Behavior flags:
 Publication change detection uses three pieces of state: published asset identity (`resolve_asset_idx`), published `runtime_handle`, and aux synchronization (`user_data_asset_idx`). Placeholder substitution does not trigger `on_resolve` — placeholders are visual fallbacks, not real winners.
 
 `resource_step()` may run more than one resolve pass in the same frame when `on_post_resolve` work creates new slots that need resolution. The pass count is bounded.
+
+### 17.6.2 Blob pinning (Phase 72 addition)
+
+Two consumption models exist for asset types that derive state from pack bytes:
+
+- **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
+- **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
+
+**Ref-count (`NtPackMeta.blob_ref`).** Each pack carries a `uint32_t blob_ref`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass is the sole owner** of the count: when a `PIN_BLOB` slot's winning *pack* changes it decrements the old pack and increments the new one, transferring the pin correct-by-construction. A winner-change that stays on the same pack is a no-op. Consumers never call ref/unref themselves, so an `on_cleanup` (which does not fire on winner-*change*) cannot double-count. The decrement is guarded with real control flow (`if (blob_ref > 0)`), not an assert — asserts are compiled out in shipping builds.
+
+**Eviction vs. the pin (`NT_BLOB_AUTO`).**
+- **Timer-freeze (D-06):** while `blob_ref > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
+- **AUTO-as-KEEP (D-07):** a referenced `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_ref` returns to 0), never per frame.
+
+**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_ref > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_ref` as a single source of truth, so the resolve-pass guarded decrement then finds 0 and skips — no double-free. The zero-copy consumer loses its provider and degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+
+The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_ref` and surfaced in the devapi `resource.list` group.
 
 ## 17.7 Virtual packs
 
@@ -1847,11 +1865,13 @@ typedef struct {
     uint32_t retry_time_ms;
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
+    uint32_t blob_ref; /* Phase 72: PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
+    uint8_t blob_evict_skip_logged; /* Phase 72: edge-trigger for the AUTO-as-KEEP one-shot log */
     char load_path[256];
 } NtPackMeta;
 ```
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_ref` (Phase 72) is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see §17.6.2 for the full lifecycle.
 
 ## 18.6 JS bridge — fetch contract
 
