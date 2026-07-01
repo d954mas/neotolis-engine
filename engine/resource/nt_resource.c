@@ -1421,8 +1421,19 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
             continue;
         }
         if (seen == i) {
+            /* Per-asset ref (A4): report the pack aggregate only for the published winner of a
+             * PIN_BLOB slot — that asset is the one pinning the blob; others report 0. */
+            uint32_t blob_ref = 0;
+            uint16_t si = slot_map_find(meta->resource_id);
+            if (si != 0) {
+                const NtResourceSlot *slot = &s_resource.slots[si];
+                if (slot->asset_type == meta->asset_type && slot->resolve_asset_idx == a && (s_resource.activators[slot->asset_type].behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
+                    blob_ref = s_resource.packs[meta->pack_index].blob_ref;
+                }
+            }
             *out = (nt_resource_asset_info_t){
                 .resource_id = meta->resource_id,
+                .blob_ref = blob_ref,
                 .pack_index = meta->pack_index,
                 .type = meta->asset_type,
                 .state = meta->state,
@@ -1658,6 +1669,27 @@ uint32_t nt_resource_test_pack_blob_ref(uint16_t pack_index) {
         return 0;
     }
     return s_resource.packs[pack_index].blob_ref;
+}
+
+uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index) {
+    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return 0;
+    }
+    return s_resource.packs[pack_index].blob != NULL ? 1 : 0;
+}
+
+uint32_t nt_resource_test_pack_blob_last_access(uint16_t pack_index) {
+    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return 0;
+    }
+    return s_resource.packs[pack_index].blob_last_access_ms;
+}
+
+uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index) {
+    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return 0;
+    }
+    return s_resource.packs[pack_index].blob_evict_skip_logged;
 }
 
 #endif /* NT_TEST_ACCESS */

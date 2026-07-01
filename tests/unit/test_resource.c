@@ -1450,6 +1450,119 @@ void test_blob_pin_ref_absent_without_flag(void) {
     free(blob);
 }
 
+/* ---- PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) ---- */
+
+/* D-06: a referenced NT_BLOB_AUTO blob survives TTL expiry (timer-freeze); ref->0 -> fresh TTL grace, then evicts. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_eviction_skip_and_timer_freeze(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_evict_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_evict_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    /* Establish the pin first (default KEEP) — a real font resolves before eviction pressure arrives. */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 77);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
+
+    /* (1) Apply AUTO pressure; TTL expires while referenced -> NOT evicted, timer refreshed, logged once */
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+    uint32_t access_before = nt_resource_test_pack_blob_last_access(0);
+    nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));           /* held as KEEP */
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0));       /* one-shot fired */
+    TEST_ASSERT_TRUE(nt_resource_test_pack_blob_last_access(0) >= access_before); /* timer-freeze refresh */
+
+    /* (2) Drop the winner -> ref returns to 0 (Phase C that frame still saw ref>0 and refreshed) */
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+
+    /* (3) Fresh full TTL grace after ref->0, then eviction resumes and the one-shot re-arms */
+    nt_time_sleep(0.005);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));     /* evicted now */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_evict_skip_logged(0)); /* re-armed */
+
+    (void)h;
+    free(blob);
+}
+
+/* D-07: NT_BLOB_AUTO behaves as KEEP while referenced; the skip log is edge-triggered (once, not per-frame). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_auto_as_keep_one_shot_log(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_keep_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_keep_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    /* Establish the pin first (default KEEP), then apply AUTO pressure. */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
+
+    /* Many steps past TTL: blob stays resident and the flag is set once and never toggles.
+     * The skip log is gated by `if (!blob_evict_skip_logged)`, so a stable flag == single emission. */
+    nt_time_sleep(0.005);
+    for (int i = 0; i < 20; i++) {
+        nt_resource_step();
+        TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
+        TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0));
+    }
+
+    (void)h;
+    free(blob);
+}
+
+/* D-08: unmount while referenced -> no crash, aggregate resets to 0 (no double-free), consumer renders tofu. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_unmount_while_referenced(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_unmount_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_unmount_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 88);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(88, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* referenced -> triggers unmount error log */
+
+    /* Unmount overrides the ref (D-08): proceeds, one-shot error log, teardown clears blob_ref (single-source) */
+    nt_resource_unmount(pid);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+
+    /* Consumer loses its provider (tofu); the resolve-pass guarded decrement finds 0 -> no underflow/double-free */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+
+    free(blob);
+}
+
 /* ---- Invalidate tests ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2588,6 +2701,11 @@ int main(void) {
     /* PIN_BLOB ref-balance tests (FONT-03 / D-05) */
     RUN_TEST(test_blob_pin_ref_balance_winner_change);
     RUN_TEST(test_blob_pin_ref_absent_without_flag);
+
+    /* PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) */
+    RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
+    RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
+    RUN_TEST(test_blob_pin_unmount_while_referenced);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);
