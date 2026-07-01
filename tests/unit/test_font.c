@@ -1219,6 +1219,101 @@ void test_font_fallback_order_first_wins(void) {
     free(fb);
 }
 
+/* ---- FONT-02 / D-11: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
+ *
+ * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
+ * (find_glyph_in_pack) — heap-free, no parse step, bounded. This confirms that
+ * without adding any new cmap/bitmap structure. Uses nt_font_lookup_metrics
+ * (CPU-only: no GPU upload, no glyph cache touch) so the assertion exercises
+ * the bare bsearch path, and covers its boundaries: first, last, interior hit,
+ * below-first / interior-gap / above-last misses. Non-ASCII codepoints force
+ * the bsearch loop (ASCII would take the ascii_glyph_idx fast path instead). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_cmap_bounded_no_parse(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    /* Sparse, SORTED, all >= 128 → every lookup goes through find_glyph_in_pack. */
+    const uint32_t cps[4] = {0x100U, 0x200U, 0x20ACU, 0x4E2DU};
+    uint32_t sz = 0;
+    uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4, 600, &sz);
+    nt_resource_t res = register_font_resource("cmap_bounded", blob, sz);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Present — first, interior, interior, last all resolve to the real glyph. */
+    for (int i = 0; i < 4; i++) {
+        nt_glyph_metrics_t hit = nt_font_lookup_metrics(font, cps[i]);
+        TEST_ASSERT_TRUE(hit.found);
+        TEST_ASSERT_EQUAL_INT16(600, hit.advance);
+    }
+
+    /* Absent — bsearch not-found boundaries: below first, gap between entries,
+     * above last. Each returns the tofu fallback metrics (found = false). */
+    const uint32_t absent[3] = {0x0FFU, 0x150U, 0x30000U};
+    for (int i = 0; i < 3; i++) {
+        nt_glyph_metrics_t miss = nt_font_lookup_metrics(font, absent[i]);
+        TEST_ASSERT_FALSE(miss.found);
+    }
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-01 / D-03: two resources at a COMMON (builder-normalized) UPM merge
+ * into one font without tripping the shared-metrics assert ----
+ *
+ * Two source fonts of different NATURAL UPM (latin ~1000, CJK 2048) that the
+ * builder (Plan 01) normalized to a COMMON units_per_em with the primary
+ * driving vmetrics. At runtime both headers carry identical metrics, so adding
+ * BOTH into one nt_font_t simultaneously must NOT fire the multi-resource
+ * mismatch assert (nt_font.c:1087), and nt_font_get_metrics reports the common
+ * UPM. Both resources also resolve their own glyphs within the one font. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_merged_different_upm_no_metrics_assert(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    const uint16_t common_upm = 2048U; /* = max(1000, 2048), scaled toward max (D-03) */
+    const int16_t asc = 1600;
+    const int16_t descent = -400;
+    const int16_t lg = 0;
+    const uint32_t latin_cps[2] = {'A', 'M'};       /* base: half-em advance */
+    const uint32_t cjk_cps[2] = {0x4E2DU, 0x4E8CU}; /* CJK: full-width advance */
+    uint32_t latin_sz = 0;
+    uint32_t cjk_sz = 0;
+    uint8_t *latin = build_font_blob_codepoints(common_upm, asc, descent, lg, latin_cps, 2, 1024, &latin_sz);
+    uint8_t *cjk = build_font_blob_codepoints(common_upm, asc, descent, lg, cjk_cps, 2, 2048, &cjk_sz);
+
+    nt_resource_t latin_res = register_font_resource("merge_latin", latin, latin_sz);
+    nt_resource_t cjk_res = register_font_resource("merge_cjk", cjk, cjk_sz);
+
+    /* Primary (latin) FIRST drives line height; CJK second. Simultaneous merge. */
+    nt_font_add(font, latin_res);
+    nt_font_add(font, cjk_res);
+    nt_resource_step();
+    nt_font_step(); /* must NOT abort on the shared-metrics assert */
+
+    nt_font_metrics_t m = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(common_upm, m.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(asc, m.ascent);
+    TEST_ASSERT_EQUAL_INT16(descent, m.descent);
+    TEST_ASSERT_EQUAL_INT16((int16_t)(asc - descent + lg), m.line_height);
+
+    /* Both resources resolve within the one font (base + CJK). */
+    nt_glyph_metrics_t latin_g = nt_font_lookup_metrics(font, 'A');
+    TEST_ASSERT_TRUE(latin_g.found);
+    TEST_ASSERT_EQUAL_INT16(1024, latin_g.advance);
+    nt_glyph_metrics_t cjk_g = nt_font_lookup_metrics(font, 0x4E2DU);
+    TEST_ASSERT_TRUE(cjk_g.found);
+    TEST_ASSERT_EQUAL_INT16(2048, cjk_g.advance);
+
+    nt_font_destroy(font);
+    free(latin);
+    free(cjk);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -1248,6 +1343,8 @@ int main(void) {
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
     RUN_TEST(test_font_fallback_order_first_wins);
+    RUN_TEST(test_font_cmap_bounded_no_parse);
+    RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
