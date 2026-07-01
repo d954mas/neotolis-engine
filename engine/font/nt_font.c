@@ -72,6 +72,13 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
     if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
+        /* Reject: the resolve pass already moved the pin to this corrupt winner's pack, so the
+         * previous blob is now unpinned and evictable — stop pointing at it. Degrade to tofu. */
+        nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
+        if (p != NULL) {
+            p->data = NULL;
+            p->size = 0;
+        }
         return;
     }
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
@@ -1086,11 +1093,13 @@ void nt_font_step(void) {
             /* Single-provider mismatch = hot-swap (accept new metrics + flush).
              * Multi-provider mismatch breaks the shared-metrics invariant — normalize in the builder. */
             if (slot->metrics_set && !metrics_match) {
+                /* Single-provider mismatch = legitimate hot-swap. Multi-provider mismatch violates the
+                 * shared-metrics invariant (builder D-03 UPM-normalization should prevent it). Flush on ANY
+                 * mismatch — NT_ASSERT is a no-op in shipping, so gating the flush on it would leave the
+                 * glyph/measure caches baked against the stale metrics the overwrite below replaces. */
                 NT_ASSERT(active_count == 1 && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
-                if (active_count == 1) {
-                    need_flush = true;
-                    changed = true;
-                }
+                need_flush = true;
+                changed = true;
             }
             slot->metrics.ascent = hdr->ascent;
             slot->metrics.descent = hdr->descent;
