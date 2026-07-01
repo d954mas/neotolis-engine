@@ -79,11 +79,9 @@ struct nt_font_slot_s {
 
 typedef struct {
     nt_pool_t pool;
-    nt_font_slot_t *slots; /* [capacity+1], index 0 reserved */
-    void *data_entries;    /* nt_font_data_entry_t[], allocated in init */
-    uint32_t data_capacity;
-    uint32_t data_count;
-    uint32_t frame_counter; /* LRU tick */
+    nt_font_slot_t *slots;       /* [capacity+1], index 0 reserved */
+    uint32_t frame_counter;      /* LRU tick */
+    uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
     nt_font_pre_flush_fn pre_flush_fn;
     bool initialized;
 } nt_font_state_t;

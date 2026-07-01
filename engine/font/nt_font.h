@@ -142,10 +142,13 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
+/* #159 test helpers — drive the on_resolve/on_cleanup path via a real parsed pack
+ * (virtual packs carry no blob). register_data returns a 1-based token; resource()
+ * requests it; deactivate() unmounts; reregister() re-mounts the same (pid,rid). */
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
-
-/* Imitate the FILE-pack deactivator path (skipped for VIRTUAL packs). */
-void nt_font_test_deactivate(uint32_t runtime_handle);
+nt_resource_t nt_font_test_resource(uint32_t token);
+void nt_font_test_deactivate(uint32_t token);
+void nt_font_test_reregister(uint32_t token, const uint8_t *data, uint32_t size);
 
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
