@@ -89,8 +89,9 @@ typedef struct {
 
 /* Font options for add_font */
 typedef struct {
-    const char *charset;       /* UTF-8 string of characters to include (required, NULL = assert) */
-    const char *resource_name; /* optional resource_id override (NULL = derive from path) */
+    const char *charset;          /* UTF-8 string of characters to include (required, NULL = assert) */
+    const char *resource_name;    /* optional resource_id override (NULL = derive from path) */
+    uint16_t target_units_per_em; /* rescale metrics to this UPM (0 = natural); set = max member UPM for merged fallback (D-03) */
 } nt_font_opts_t;
 
 /* Printable ASCII charset (U+0020-U+007E, 95 characters) */
