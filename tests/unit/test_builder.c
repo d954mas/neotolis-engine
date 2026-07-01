@@ -3610,6 +3610,94 @@ void test_font_upm_normalize_rescales(void) {
     free(data_sc);
 }
 
+/* Read the first kern pair (right glyph index + value) of glyph `g`.
+ * Kern entries sit at data_offset, before the contour data. */
+static bool read_first_kern(const NtFontAssetHeader *hdr, const NtFontGlyphEntry *g, uint16_t *out_right, int16_t *out_value) {
+    if (g->kern_count == 0) {
+        return false;
+    }
+    const NtFontKernEntry *kerns = (const NtFontKernEntry *)((const uint8_t *)hdr + g->data_offset);
+    *out_right = kerns[0].right_glyph_index;
+    *out_value = kerns[0].value;
+    return true;
+}
+
+/* Kern values live in font units like advance/bbox — UPM rescale must scale them too. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_upm_normalize_scales_kern(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *charset = "AVToWa"; /* AV/To/Wa commonly kern */
+
+    /* --- Bake 1: natural UPM (raw path, target = 0) --- */
+    const char *pack_nat = TMP_DIR "/test_font_kern_nat.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_nat);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_font_opts_t opts_nat = {.charset = charset, .resource_name = NULL, .target_units_per_em = 0};
+    nt_builder_add_font(ctx, ttf_path, &opts_nat);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    uint32_t sz_nat = 0;
+    char *data_nat = nt_builder_read_file(pack_nat, &sz_nat);
+    TEST_ASSERT_NOT_NULL(data_nat);
+    const NtAssetEntry *ent_nat = (const NtAssetEntry *)(data_nat + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_nat = (const NtFontAssetHeader *)(data_nat + ent_nat->offset);
+    const NtFontGlyphEntry *g_nat = (const NtFontGlyphEntry *)((const uint8_t *)hdr_nat + sizeof(NtFontAssetHeader));
+    uint16_t src_upm = hdr_nat->units_per_em;
+    TEST_ASSERT_TRUE(src_upm > 0);
+
+    /* Find the first glyph carrying a kern pair; glyph order is codepoint-sorted
+     * and identical across bakes, so the index is stable. */
+    uint32_t ki = hdr_nat->glyph_count;
+    uint16_t nat_right = 0;
+    int16_t nat_val = 0;
+    for (uint32_t i = 0; i < hdr_nat->glyph_count; i++) {
+        if (read_first_kern(hdr_nat, &g_nat[i], &nat_right, &nat_val)) {
+            ki = i;
+            break;
+        }
+    }
+    if (ki == hdr_nat->glyph_count) {
+        free(data_nat);
+        TEST_IGNORE_MESSAGE("Test font has no kern pairs for this charset");
+        return;
+    }
+    TEST_ASSERT_TRUE(nat_val != 0);
+
+    /* --- Bake 2: 2x UPM --- */
+    uint16_t target = (uint16_t)(src_upm * 2);
+    const char *pack_sc = TMP_DIR "/test_font_kern_scaled.ntpack";
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack_sc);
+    TEST_ASSERT_NOT_NULL(ctx2);
+    nt_font_opts_t opts_sc = {.charset = charset, .resource_name = NULL, .target_units_per_em = target};
+    nt_builder_add_font(ctx2, ttf_path, &opts_sc);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    uint32_t sz_sc = 0;
+    char *data_sc = nt_builder_read_file(pack_sc, &sz_sc);
+    TEST_ASSERT_NOT_NULL(data_sc);
+    const NtAssetEntry *ent_sc = (const NtAssetEntry *)(data_sc + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_sc = (const NtFontAssetHeader *)(data_sc + ent_sc->offset);
+    const NtFontGlyphEntry *g_sc = (const NtFontGlyphEntry *)((const uint8_t *)hdr_sc + sizeof(NtFontAssetHeader));
+
+    uint16_t sc_right = 0;
+    int16_t sc_val = 0;
+    TEST_ASSERT_TRUE(read_first_kern(hdr_sc, &g_sc[ki], &sc_right, &sc_val));
+    TEST_ASSERT_EQUAL_UINT16(nat_right, sc_right); /* same pair, stable ordering */
+
+    /* Fixed: kern scales with UPM (~2x). Broken: raw copy leaves it at nat_val. */
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_val * 2), sc_val);
+
+    free(data_nat);
+    free(data_sc);
+}
+
 /* D-03 / Pitfall 4: a rescale that would exceed INT16_MAX must trap (never wrap). */
 void test_font_upm_normalize_overflow_asserts(void) {
     const char *ttf_path = find_test_ttf();
@@ -5549,6 +5637,7 @@ int main(void) {
     RUN_TEST(test_font_missing_codepoint_asserts);
     RUN_TEST(test_font_null_charset_asserts);
     RUN_TEST(test_font_upm_normalize_rescales);
+    RUN_TEST(test_font_upm_normalize_scales_kern);
     RUN_TEST(test_font_upm_normalize_overflow_asserts);
     RUN_TEST(test_font_dump_pack);
     RUN_TEST(test_font_charset_dedup);

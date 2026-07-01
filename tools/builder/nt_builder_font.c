@@ -817,7 +817,13 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                     continue;
                 }
                 kern_pairs[total_kerns + kc].right_glyph_index = triples[ti].right;
-                kern_pairs[total_kerns + kc].value = triples[ti].value;
+                int32_t kv = triples[ti].value;
+                if (rescale) {
+                    /* Kern is in font units like advance/bbox — must scale with UPM or it desyncs. */
+                    kv = upm_rescale(triples[ti].value, upm_num, upm_den);
+                    NT_BUILD_ASSERT(kv >= INT16_MIN && kv <= INT16_MAX && "UPM rescale: kern value overflows int16");
+                }
+                kern_pairs[total_kerns + kc].value = (int16_t)kv;
                 kc++;
                 ti++;
             }
