@@ -1375,6 +1375,81 @@ void test_blob_policy_keep(void) {
     (void)remove("build/test_blob_keep.ntpack");
 }
 
+/* ---- PIN_BLOB ref-balance tests (FONT-03 / D-05: pin transfers on winner-change, balances to 0) ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_ref_balance_winner_change(void) {
+    nt_hash32_t pid_a = nt_hash32_str("pin_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("pin_pack_b");
+    nt_hash64_t rid = nt_hash64_str("pin_shared_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+
+    /* A high priority (pack_index 0), B low (pack_index 1) -- both provide rid */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 1));
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, size_a));
+
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, size_b));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* A */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* B */
+    nt_resource_step();
+
+    /* (a) A wins -> A pinned once, B zero */
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1));
+
+    /* (b) raise B above A -> winner changes pack, pin transfers (no leak) */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid_b, 20));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(1));
+
+    /* (c) unmount current winner (B) -> its ref drops to 0 (no underflow), A becomes winner and pins once */
+    nt_resource_unmount(pid_b);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1));
+
+    free(blob_a);
+    free(blob_b);
+}
+
+void test_blob_pin_ref_absent_without_flag(void) {
+    nt_hash32_t pid = nt_hash32_str("nopin_pack");
+    nt_hash64_t rid = nt_hash64_str("nopin_res");
+
+    /* No PIN_BLOB flag on NT_ASSET_MESH (setUp re-init cleared it) */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 42);
+    nt_resource_step();
+
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0)); /* no flag -> never pinned */
+
+    free(blob);
+}
+
 /* ---- Invalidate tests ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2509,6 +2584,10 @@ int main(void) {
 
     /* Blob policy tests */
     RUN_TEST(test_blob_policy_keep);
+
+    /* PIN_BLOB ref-balance tests (FONT-03 / D-05) */
+    RUN_TEST(test_blob_pin_ref_balance_winner_change);
+    RUN_TEST(test_blob_pin_ref_absent_without_flag);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);
