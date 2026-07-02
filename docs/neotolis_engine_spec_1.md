@@ -1500,6 +1500,7 @@ typedef struct {
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
+    uint32_t pinned_pack_seq;        /* mount_seq of the pack this slot PIN_BLOB-pins (0 = none); survives packs[] index reuse */
     void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
