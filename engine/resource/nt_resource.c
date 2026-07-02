@@ -683,18 +683,18 @@ void nt_resource_step(void) {
             if (pack->blob_ttl_ms == 0) {
                 continue;
             }
-            // #region blob-pin evict gate — a referenced blob is held as KEEP + timer-frozen
+            // #region blob-pin evict gate — a pinned blob is held as KEEP + timer-frozen
             if (pack->blob_pins > 0) {
                 /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
-                 * blob and never bump last-access, so freeze the TTL clock: ref->0 starts a fresh grace. */
+                 * blob and never bump last-access, so freeze the TTL clock: pins->0 starts a fresh grace. */
                 pack->blob_last_access_ms = now_ms;
                 if (!pack->blob_evict_skip_logged) {
-                    NT_LOG_WARN("blob pack %u referenced (ref=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
+                    NT_LOG_WARN("blob pack %u pinned (pins=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
                     pack->blob_evict_skip_logged = 1; /* edge-trigger: never log per-frame */
                 }
                 continue;
             }
-            pack->blob_evict_skip_logged = 0; /* no longer referenced — re-arm the one-shot */
+            pack->blob_evict_skip_logged = 0; /* no longer pinned — re-arm the one-shot */
             // #endregion
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
                 /* Only free blobs owned by resource system (loaded via I/O).
@@ -805,11 +805,11 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    /* Developer owns unmount — proceed even while referenced, warn ONCE. Teardown's memset below clears
+    /* Developer owns unmount — proceed even while pinned, warn ONCE. Teardown's memset below clears
      * blob_pins, so the resolve pass's guarded decrement finds 0 and skips (no double-free); consumers
      * render tofu next resolve. */
     if (pack->blob_pins > 0) {
-        NT_LOG_ERROR("unmount pack 0x%08x while blob referenced (ref=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
+        NT_LOG_ERROR("unmount pack 0x%08x while blob pinned (pins=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
     }
 
     /* Deactivate READY assets and clear all assets belonging to this pack */
