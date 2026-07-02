@@ -122,13 +122,15 @@ static bool asset_blob_resident(const NtAssetMeta *meta) {
 static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) { return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : meta->runtime_handle; }
 
 static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
+    /* PIN_BLOB is a hard precondition, independent of AUX_BACKED: a zero-copy provider needs a real
+     * resident blob, so a dual-flagged asset on a blobless/virtual pack is never publishable. */
+    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0 && s_resource.packs[meta->pack_index].blob == NULL) {
+        return false;
+    }
     if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0) {
         return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
     }
-    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-        return s_resource.packs[meta->pack_index].blob != NULL; /* zero-copy provider needs a real resident blob; virtual packs have none */
-    }
-    return true;
+    return true; /* PIN_BLOB-with-real-blob and plain assets */
 }
 
 static const uint8_t *asset_data_ptr(const NtAssetMeta *meta, uint32_t *out_size) {

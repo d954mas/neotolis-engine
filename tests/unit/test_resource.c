@@ -1749,6 +1749,45 @@ void test_blob_pin_virtual_pack_not_publishable(void) {
     free(blob);
 }
 
+/* PIN_BLOB is a hard precondition even when AUX_BACKED is also set: a dual-flagged asset on a
+ * blobless virtual pack must NOT publish, because the AUX_BACKED branch alone would (wrongly) accept
+ * a virtual pack that carries no resident blob for the zero-copy view. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_and_aux_virtual_pack_not_publishable(void) {
+    reset_resolve_state();
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB | NT_RESOURCE_BEHAVIOR_AUX_BACKED);
+
+    nt_hash32_t pid_file = nt_hash32_str("pin_aux_vp_file");
+    nt_hash32_t pid_virt = nt_hash32_str("pin_aux_vp_virt");
+    nt_hash64_t rid = nt_hash64_str("pin_aux_vp_res");
+
+    /* File pack (index 0) at low priority — real resident blob, handle 100. */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, size));
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
+
+    /* Virtual pack (index 1) at HIGHER priority — no blob, handle 200. */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid_virt, rid, NT_ASSET_MESH, 200));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+
+    /* Without the hard PIN_BLOB precondition the AUX_BACKED branch would publish the higher-priority
+     * virtual asset (handle 200) and pin the blobless virtual pack. With it, the file wins. */
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* file pinned */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1)); /* virtual never pinned */
+
+    free(blob);
+}
+
 /* ---- Invalidate tests ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2896,6 +2935,7 @@ int main(void) {
     RUN_TEST(test_blob_pin_unmount_severs_provider_synchronously);
     RUN_TEST(test_blob_pin_unpublishable_when_blob_evicted_before_pin);
     RUN_TEST(test_blob_pin_virtual_pack_not_publishable);
+    RUN_TEST(test_blob_pin_and_aux_virtual_pack_not_publishable);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);
