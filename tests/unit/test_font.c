@@ -1053,6 +1053,59 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     free(blob_b);
 }
 
+/* ---- FONT-02j: same-metrics winner-swap flushes glyph/measure caches + ASCII index ----
+ *
+ * A hot-reload (or higher-priority override) to a DIFFERENT blob with IDENTICAL header metrics
+ * repoints the provider and bumps the resolve epoch, but presence and metrics are unchanged. Without
+ * winner-identity tracking, font_step's presence + metrics checks both pass and the glyph/measure
+ * caches keep serving the OLD blob's advances (and the ASCII index maps to the old glyph table).
+ * The published winner handle (unique per font_activate) is the identity token that catches this. */
+void test_font_flushes_on_same_metrics_winner_swap(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    const uint32_t cps[] = {(uint32_t)'A'};
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 500, &size_a);
+    uint32_t tok = nt_font_test_register_data(blob_a, size_a);
+    nt_resource_t res = nt_font_test_resource(tok);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Cache 'A' (glyph + measure) against the first winner: advance 500. */
+    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a1);
+    TEST_ASSERT_EQUAL_INT16(500, a1->advance);
+    nt_text_size_t m1 = nt_font_measure(font, "A", 1000.0F, 0.0F);
+    uint32_t gen_before = nt_font_get_cache_generation(font);
+
+    /* Hot-reload the SAME (pid, rid) with IDENTICAL metrics but advance 700 — one step, no intervening
+     * font_step. Presence stays true and metrics match; only the winner handle changes. */
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 700, &size_b);
+    nt_font_test_reregister(tok, blob_b, size_b);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Metrics unchanged -> the swap is invisible to the presence + metrics checks. */
+    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
+
+    /* Identity-driven flush: glyph cache re-decodes (ASCII fast-path -> new glyph table) and the
+     * measure cache is cleared, so both report the new advance. Without the fix these stay 500. */
+    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a2);
+    TEST_ASSERT_EQUAL_INT16(700, a2->advance);
+    nt_text_size_t m2 = nt_font_measure(font, "A", 1000.0F, 0.0F);
+    TEST_ASSERT_TRUE(m2.width != m1.width);
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
 /* ---- FONT-02k: pack unmount clears stale provider + metrics ----
  *
  * Unmount drops the winner; the resolve pass fires font_on_cleanup
@@ -1367,6 +1420,7 @@ int main(void) {
     RUN_TEST(test_font_add_already_published_forces_rescan);
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
+    RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);

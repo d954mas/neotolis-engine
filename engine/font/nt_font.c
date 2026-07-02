@@ -1052,21 +1052,25 @@ void nt_font_step(void) {
 
         // #region Snapshot the current provider set (winner may have changed pack)
         bool res_now[NT_FONT_MAX_SOURCES_PER_FONT];
+        uint32_t handle_now[NT_FONT_MAX_SOURCES_PER_FONT];
         uint8_t active_count = 0;
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             uint32_t bs = 0;
             const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
             res_now[ri] = (blob != NULL && bs >= sizeof(NtFontAssetHeader));
+            /* Winner-identity token: font_activate returns a UNIQUE seq per activation, so a winner-swap
+             * or hot-reload changes the handle even when presence and header metrics are unchanged. */
+            handle_now[ri] = res_now[ri] ? nt_resource_get(slot->resources[ri]) : 0U;
             if (res_now[ri]) {
                 active_count++;
             }
         }
         // #endregion
 
-        bool changed = false; /* provider set or metrics changed -> rebuild ascii + measure cache */
+        bool changed = false; /* provider set, identity, or metrics changed -> rebuild ascii + measure cache */
         bool need_flush = false;
 
-        // #region Detect provider gain/loss vs the cached resolved flags
+        // #region Detect provider gain/loss/identity-swap vs the cached winner handles
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             bool was = (slot->resource_handles[ri] != 0);
             if (was != res_now[ri]) {
@@ -1074,6 +1078,12 @@ void nt_font_step(void) {
                 if (was) {
                     need_flush = true; /* lost a provider -> cached glyphs decoded from it are stale */
                 }
+            } else if (res_now[ri] && slot->resource_handles[ri] != handle_now[ri]) {
+                /* Same presence, different activation (same-metrics override/patch pack or hot-reload of a
+                 * repacked font): provider now views a different blob -> glyph/measure caches + ASCII index
+                 * are decoded from the OLD blob and must be flushed even though metrics match. */
+                changed = true;
+                need_flush = true;
             }
         }
         // #endregion
@@ -1115,9 +1125,10 @@ void nt_font_step(void) {
         }
         // #endregion
 
-        /* Commit cached resolved flags (1 = provider present) after all detection. */
+        /* Commit the published winner handle (0 = absent) after all detection — one token carries
+         * both presence (nonzero) and identity (value), so the next step detects swaps with no ABA. */
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-            slot->resource_handles[ri] = res_now[ri] ? 1U : 0U;
+            slot->resource_handles[ri] = handle_now[ri];
         }
 
         if (changed) {
