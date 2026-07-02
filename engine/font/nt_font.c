@@ -72,8 +72,8 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         return; /* evicted/absent — keep existing view; PIN_BLOB winner is unpublishable while blob==NULL */
     }
     if (size < sizeof(NtFontAssetHeader)) {
-        /* Present but truncated: the resolve pass already moved the pin to this short blob's pack, so the
-         * old blob is now unpinned/evictable — stop viewing it. Degrade to tofu (control flow, not assert:
+        /* Present but truncated: this pack is now the published winner, so the previous winner's pack is
+         * no longer pinned and may be evicted — stop viewing it. Degrade to tofu (control flow, not assert:
          * malformed data is a runtime safety-net path, and NT_ASSERT is a no-op in shipping). */
         font_provider_clear(user_data);
         return;
@@ -83,8 +83,8 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
     if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
-        /* Reject: the resolve pass already moved the pin to this corrupt winner's pack, so the
-         * previous blob is now unpinned and evictable — stop pointing at it. Degrade to tofu. */
+        /* Reject: this corrupt pack is now the published winner, so the previous winner's pack is
+         * no longer pinned and may be evicted — stop pointing at it. Degrade to tofu. */
         font_provider_clear(user_data);
         return;
     }
@@ -100,7 +100,7 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
 }
 
 static void font_on_cleanup(void *user_data) {
-    /* Free the holder only — the pin is balanced by the resolve/unmount machinery. */
+    /* Free the holder only — the blob pin is rebuilt from the winners by the resolve pass, so there is nothing to release here. */
     free(user_data);
 }
 
@@ -1108,8 +1108,6 @@ void nt_font_step(void) {
             if (slot->metrics_set && metrics_match) {
                 continue;
             }
-            /* Single-provider mismatch = hot-swap (accept new metrics + flush).
-             * Multi-provider mismatch breaks the shared-metrics invariant — normalize in the builder. */
             if (slot->metrics_set && !metrics_match) {
                 /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
                  * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is

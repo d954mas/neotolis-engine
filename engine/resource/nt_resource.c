@@ -130,7 +130,7 @@ static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *
     if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0) {
         return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
     }
-    return true; /* PIN_BLOB-with-real-blob and plain assets */
+    return true;
 }
 
 static const uint8_t *asset_data_ptr(const NtAssetMeta *meta, uint32_t *out_size) {
@@ -1445,8 +1445,7 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
             continue;
         }
         if (seen == i) {
-            /* Per-asset ref (A4): report the pack aggregate only for the published winner of a
-             * PIN_BLOB slot — that asset is the one pinning the blob; others report 0. */
+            /* Report the pack aggregate only for the published winner of a PIN_BLOB slot — that asset pins the blob; others report 0. */
             uint32_t blob_pins = 0;
             uint16_t si = slot_map_find(meta->resource_id);
             if (si != 0) {

@@ -99,7 +99,7 @@ typedef struct {
     /* I/O request linkage */
     uint32_t io_request_id;         /* nt_http or nt_fs handle.id */
     uint8_t io_type;                /* nt_io_type_t */
-    uint8_t blob_evict_skip_logged; /* edge-trigger: Phase C runs every frame — log AUTO-as-KEEP skip once, re-arm on ref->0 */
+    uint8_t blob_evict_skip_logged; /* edge-trigger: Phase C runs every frame — log AUTO-as-KEEP skip once, re-arm when pins reach 0 */
     /* Retry state */
     uint16_t attempt_count;
     uint32_t retry_delay_ms;

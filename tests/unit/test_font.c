@@ -1139,8 +1139,9 @@ void test_font_file_pack_unmount_cleans_state(void) {
 }
 
 /* ---- Present-but-truncated winner swap clears the provider (no stale blob read) ----
- * A swap to a resident-but-truncated blob (< header) moved the pin off the old pack, so keeping the
- * old provider reads now-unpinned bytes. font_on_resolve must clear it (not return like evicted-blob).
+ * A swap to a resident-but-truncated blob (< header) makes it the published winner, so the old pack
+ * is no longer pinned and keeping the old provider reads now-unpinned bytes. font_on_resolve must
+ * clear it (not return like evicted-blob).
  * The old pack stays mounted so the stale read is deterministic: without the fix units_per_em stays. */
 void test_font_truncated_winner_swap_clears_provider(void) {
     nt_font_create_desc_t desc = test_font_desc();
@@ -1352,10 +1353,10 @@ void test_font_cmap_bounded_no_parse(void) {
  * into one font without tripping the shared-metrics assert ----
  *
  * Two source fonts of different NATURAL UPM (latin ~1000, CJK 2048) that the
- * builder (Plan 01) normalized to a COMMON units_per_em with the primary
+ * builder normalized to a COMMON units_per_em with the primary
  * driving vmetrics. At runtime both headers carry identical metrics, so adding
  * BOTH into one nt_font_t simultaneously must NOT fire the multi-resource
- * mismatch assert (nt_font.c:1087), and nt_font_get_metrics reports the common
+ * shared-metrics mismatch assert, and nt_font_get_metrics reports the common
  * UPM. Both resources also resolve their own glyphs within the one font. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_font_merged_different_upm_no_metrics_assert(void) {

@@ -1417,7 +1417,7 @@ void test_blob_pin_balance_winner_change(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(1));
 
-    /* (c) unmount current winner (B) -> its ref drops to 0 (no underflow), A becomes winner and pins once */
+    /* (c) unmount winner B -> its pins recompute to 0; A becomes winner and pins once */
     nt_resource_unmount(pid_b);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
@@ -1450,10 +1450,8 @@ void test_blob_pin_absent_without_flag(void) {
     free(blob);
 }
 
-/* A same-step unmount+remount of the SAME pack_id reuses the packs[] index for a DIFFERENT blob.
- * The rebuild recomputes blob_pins from the current winner, so the fresh mount is counted (==1).
- * An old index-keyed maintained transfer would have skipped it (old_pack == new_pack), leaving
- * blob_pins at 0 -> UAF — a failure mode this rebuild-from-winners design cannot hit. */
+/* Reused packs[] index for a different blob: the resolve rebuild recomputes blob_pins from the
+ * current winner, so the fresh mount counts (==1). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_survives_reregister(void) {
     nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
@@ -1484,7 +1482,7 @@ void test_blob_pin_survives_reregister(void) {
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 200);
     nt_resource_step();
 
-    /* Rebuild counts the fresh winner on the reused index; an index-keyed transfer would leave 0. */
+    /* Rebuild counts the fresh winner on the reused index. */
     TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
 
