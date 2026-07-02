@@ -32,7 +32,10 @@ typedef enum {
 
 typedef enum {
     NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
-    NT_BLOB_AUTO = 1, /* auto-evict after TTL since last access */
+    /* Auto-evict blob after TTL since last access. Plain assets (texture/mesh) have no re-download path,
+     * so an evicted plain blob is lost on re-activation (e.g. WebGL context loss) — use KEEP for those;
+     * zero-copy (PIN_BLOB) blobs are held resident by the pin. */
+    NT_BLOB_AUTO = 1,
 } nt_blob_policy_t;
 
 /* ---- I/O request type ---- */
