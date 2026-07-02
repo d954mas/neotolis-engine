@@ -3691,7 +3691,7 @@ void test_font_upm_normalize_scales_kern(void) {
     TEST_ASSERT_TRUE(read_first_kern(hdr_sc, &g_sc[ki], &sc_right, &sc_val));
     TEST_ASSERT_EQUAL_UINT16(nat_right, sc_right); /* same pair, stable ordering */
 
-    /* Fixed: kern scales with UPM (~2x). Broken: raw copy leaves it at nat_val. */
+    /* kern must scale with UPM (~2x); a raw copy would leave it at nat_val */
     TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_val * 2), sc_val);
 
     free(data_nat);

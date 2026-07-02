@@ -874,8 +874,8 @@ void test_font_add_already_published_forces_rescan(void) {
     nt_font_add(font, res_b);
     nt_font_step();
 
-    /* Fixed: rescan flushes the measure cache -> MISS. Broken: epoch gate
-     * early-returns, cache survives -> HIT. */
+    /* rescan flushes the measure cache -> the next measure MISSes (the publication
+     * epoch did not move, so only the rescan flag can invalidate the cache) */
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font));

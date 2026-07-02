@@ -96,7 +96,7 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
 /* ---- Helper: register font blob as test resource ---- */
 
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* #159: fonts resolve bytes from a resident pack blob, so wrap the blob in a
+    /* fonts resolve bytes from a resident pack blob, so wrap the blob in a
      * real parsed pack (owned by the font module) rather than a virtual pack. */
     (void)name;
     return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
