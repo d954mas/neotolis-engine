@@ -572,6 +572,27 @@ static void test_resource_list_resource_id_hex_string(void) {
     cJSON_Delete(root);
 }
 
+/* Every flat assets[] entry carries blob_ref (the pack's PIN_BLOB aggregate). Register one asset
+   and assert the field is present as a number (0 here — not a PIN_BLOB winner). */
+static void test_resource_list_assets_have_blob_ref(void) {
+    nt_hash32_t pid = nt_hash32_str("blobref_pack");
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid, 0));
+    nt_hash64_t rid = {0xB10B12EF00000001ULL};
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid, rid, 0U, 7U));
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":true}}"));
+    cJSON *assets = cJSON_GetObjectItemCaseSensitive(result_of(root), "assets");
+    TEST_ASSERT_TRUE(cJSON_IsArray(assets));
+    TEST_ASSERT_TRUE(cJSON_GetArraySize(assets) > 0);
+    cJSON *a = NULL;
+    cJSON_ArrayForEach(a, assets) {
+        cJSON *br = cJSON_GetObjectItemCaseSensitive(a, "blob_ref");
+        TEST_ASSERT_TRUE(cJSON_IsNumber(br));   /* field always present */
+        TEST_ASSERT_EQUAL_INT(0, br->valueint); /* virtual asset: not a PIN_BLOB winner */
+    }
+    cJSON_Delete(root);
+}
+
 /* The flat assets[] is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX. Register more than the
    cap, then assert the returned array length == cap, assets_truncated == true, and asset_total is the
    HONEST real count (not clamped). The entity-cap true-branch needs a 4096-entity working set or a
@@ -737,6 +758,7 @@ int main(void) {
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);
     RUN_TEST(test_resource_list_include_assets_flat);
+    RUN_TEST(test_resource_list_assets_have_blob_ref);
     RUN_TEST(test_resource_list_bad_params);
     RUN_TEST(test_resource_list_resource_id_hex_string);
     RUN_TEST(test_resource_list_assets_cap_trips);

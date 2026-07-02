@@ -1493,7 +1493,7 @@ typedef struct {
     uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
     uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
     int16_t resolve_prio;            /* priority of currently published winner */
-    uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
+    uint32_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
     uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
     uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
     uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
@@ -1512,8 +1512,8 @@ typedef struct {
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
     int16_t target_prio;               /* priority of target winner */
     int16_t candidate_prio;            /* priority of publishable candidate */
-    uint16_t target_seq;               /* mount_seq of target winner */
-    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
+    uint32_t target_seq;               /* mount_seq of target winner */
+    uint32_t candidate_seq;            /* mount_seq of publishable candidate */
     uint16_t target_asset_idx;         /* assets[] index of target winner */
     uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
     uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */
@@ -1848,7 +1848,7 @@ typedef struct {
     int16_t priority;    /* higher = wins on conflict */
     uint8_t pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
     uint8_t mounted;     /* 1 if slot occupied */
-    uint16_t mount_seq;  /* monotonic mount order tiebreak */
+    uint32_t mount_seq;  /* monotonic mount order tiebreak (runtime-only, not serialized) */
     uint8_t pack_state;  /* nt_pack_state_t */
     uint8_t blob_policy; /* NT_BLOB_KEEP or NT_BLOB_AUTO */
     const uint8_t *blob; /* loaded pack bytes, may be NULL after eviction */
@@ -2754,7 +2754,7 @@ A bot inspects engine state through the devapi **obs** command group — a thin 
 | `perf.stats` | `{channels?, budget_ms?}` | `{channels:object,user_channels:object,fps_low_1pct,fps_low_01pct,over_budget_pct,budget_ms}` | **READ** windowed `nt_metrics` aggregates (`samples`/`avg`/`min`/`max`/`median`/`p95`/`p99`/`p99_9`; null aggregates when `samples:0`) per requested-or-all fixed channels + user channels; `budget_ms` (finite, > 0, default 16.67) drives `over_budget_pct` and is echoed back |
 | `perf.reset` | `{}` | `{reset:true}` | clear the metrics window (counts → 0) without tearing down state |
 | `entity.list` | `{offset?, limit?, component?, all?, any?, none?}` | `{total,entities:[{id,index,generation,enabled,<component>:{...}}]}` | **READ** live entities: core fields (`id`/`index`/`generation`/`enabled`) plus **each present component as a named group** by the generic `nt_entity_introspect` walk — a component with no `describe()` still emits an empty `{}` (presence visible; a marker component is filterable + shown). The obs layer names no component, so a new one appears here with zero edits. Component-set filter: an entity passes if it has **every** `all` + **at least one** `any` (when present) + **none** of `none` (`component:"x"` is sugar for `all:["x"]`); an unknown component → `bad_params`. No world matrix; fully paginated against the honest `total` (two heap-free passes) |
-| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count}],assets?:[{resource_id,type,state,pack_index}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); `pack_index` is the raw packs[] slot (not the public `pack_id`); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
+| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count}],assets?:[{resource_id,type,state,pack_index,blob_ref}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); `pack_index` is the raw packs[] slot (not the public `pack_id`); `blob_ref` is the pack's PIN_BLOB aggregate pin count (nonzero only for the published winner of a PIN_BLOB slot); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
 
 `offset`/`limit` (and `n`, `pack_id`) are parsed **exactly**: a non-finite, fractional, or out-of-range number is `bad_params`, never silently truncated.
 
