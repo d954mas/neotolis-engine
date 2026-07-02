@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 4d6dcc4
+# Commit: 714537c
 
 ## WASM Section Sizes
 
@@ -12,18 +12,18 @@ Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                 186 B
-Code              628980 B
-Data              234232 B
-Custom             36741 B
+Elem                 190 B
+Code              629185 B
+Data              234224 B
+Custom             36700 B
 ---------------- ----------
-TOTAL             901769 B
+TOTAL             901929 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-47955 B   frame
+48146 B   frame
 47110 B   nt_gfx_activate_texture
 34486 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 32805 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
@@ -46,7 +46,7 @@ TOTAL             901769 B
  7822 B   basist::bc7f::fast_pack_bc7_rgba_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  7389 B   basist::encode_bc1(void*, unsigned char const*, unsigned int)
  7337 B   basist::bc7f::fast_pack_bc7_rgba_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
- 7306 B   main
+ 7247 B   main
  6837 B   basist::bc7f::pack_mode4_or_5(unsigned char*, basist::color_rgba const*, unsigned int, float, unsigned int, float*, unsigned int*)
  6557 B   basist::bc7f::fast_pack_bc7_rgb_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  6370 B   basist::transcode_4x4_block(basist::block_format, unsigned int, unsigned int, void*, unsigned char*, basist::color32 const*, unsigned int, unsigned int, unsigned int, int, int, bool, bool, unsigned int, basist::etc1f::pack_etc1_state&, int)
@@ -55,7 +55,7 @@ TOTAL             901769 B
  4825 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
 
 Total functions: 372
-Total code size: 628330 B
+Total code size: 628538 B
 
 ## Per-Module Contributions
 
@@ -85,7 +85,7 @@ libnt_core.a                2628 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       5530 B
 libnt_entity.a              6348 B
-libnt_font.a              197560 B
+libnt_font.a              197262 B
 libnt_fs_stub.a             2706 B
 libnt_gfx_stub.a           31960 B
 libnt_hash.a                4108 B
@@ -102,7 +102,7 @@ libnt_mesh_renderer.a       8060 B
 libnt_metrics.a            56720 B
 libnt_pool.a                1376 B
 libnt_render.a              5436 B
-libnt_resource.a          187138 B
+libnt_resource.a          188712 B
 libnt_shape_renderer.a   1140976 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
@@ -120,4 +120,4 @@ libnt_window_stub.a         2476 B
 ## Data Segments Summary
 
 Segments: 234
-Total data size: 232501 B
+Total data size: 232493 B

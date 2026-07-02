@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: 4d6dcc4
+# Commit: 714537c
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                 170 B
-Code              578586 B
-Data              232742 B
+Code              578912 B
+Data              232806 B
 Custom             35891 B
 ---------------- ----------
-TOTAL             848946 B
+TOTAL             849336 B
 
 ## Top 30 Functions by Size
 
@@ -29,7 +29,7 @@ TOTAL             848946 B
 21446 B   basist::astc_ldr_t::grid_weight_dct::decode_block_weights(float, unsigned int, astc_helpers::log_astc_block&, basist::bitwise_decoder*, basist::astc_ldr_t::astc_block_grid_data const*, basist::astc_ldr_t::grid_weight_dct::block_stats*, basisu::vector<float>&, basist::astc_ldr_t::dct_syms const*) const
 21368 B   nt_basisu_transcode_level
 18527 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
-17632 B   frame
+17937 B   frame
 15883 B   basist::bc7f::pack_mode0_or_2_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 12551 B   basist::bc7f::pack_mode1_or_3_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 11817 B   basist::astc_6x6_hdr::fast_encode_bc6h_2subsets_pattern(unsigned int, unsigned int, unsigned short const*, basist::vec3F const*, float const*, double&, basist::bc6h_logical_block&, long long, int, int, int, basist::astc_6x6_hdr::fast_bc6h_params const&)
@@ -51,11 +51,11 @@ TOTAL             848946 B
  6370 B   basist::transcode_4x4_block(basist::block_format, unsigned int, unsigned int, void*, unsigned char*, basist::color32 const*, unsigned int, unsigned int, unsigned int, int, int, bool, bool, unsigned int, basist::etc1f::pack_etc1_state&, int)
  6022 B   basist::bc7f::fast_pack_bc7_rgb_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  5674 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5543 B   main
+ 5553 B   main
  4825 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
 
 Total functions: 337
-Total code size: 578000 B
+Total code size: 578326 B
 
 ## Per-Module Contributions
 
@@ -79,12 +79,12 @@ libnt_material_comp.a       2302 B
 libnt_mesh_comp.a           2164 B
 libnt_mesh_renderer.a       8060 B
 libnt_render.a              5436 B
-libnt_resource.a          187138 B
+libnt_resource.a          188712 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
 libnt_window.a              4616 B
 ------------------------ ----------
-TOTAL (linked)            341840 B
+TOTAL (linked)            343414 B
 
 Not linked to atlas:
 libnt_app_stub.a            2620 B
@@ -95,7 +95,7 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_debug_overlay.a       2212 B
-libnt_font.a              197560 B
+libnt_font.a              197262 B
 libnt_fs_stub.a             2706 B
 libnt_gfx_stub.a           31960 B
 libnt_input_stub.a         23432 B
@@ -120,4 +120,4 @@ libnt_window_stub.a         2476 B
 ## Data Segments Summary
 
 Segments: 234
-Total data size: 231017 B
+Total data size: 231081 B

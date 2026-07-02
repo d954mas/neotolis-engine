@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 4d6dcc4
+# Commit: 714537c
 
 ## WASM Section Sizes
 
@@ -84,7 +84,7 @@ libnt_comp_storage.a        2008 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       5530 B
 libnt_entity.a              6348 B
-libnt_font.a              197560 B
+libnt_font.a              197262 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
 libnt_gfx_stub.a           31960 B
@@ -104,7 +104,7 @@ libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
 libnt_render.a              5436 B
-libnt_resource.a          187138 B
+libnt_resource.a          188712 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
 libnt_sprite_renderer.a    48294 B
