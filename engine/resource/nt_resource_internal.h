@@ -107,7 +107,7 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_pins; /* PIN_BLOB aggregate: count of published winners pinning this pack's blob (O(1) Phase-C gate) */
+    uint32_t blob_pins; /* published PIN_BLOB winners pinning this pack's blob; rebuilt from winners each resolve pass, gates Phase-C eviction */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
 } NtPackMeta;
@@ -129,7 +129,6 @@ typedef struct {
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
-    uint32_t pinned_pack_seq;        /* mount_seq of the pack this slot PIN_BLOB-pins (0 = none); survives packs[] index reuse */
     void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 

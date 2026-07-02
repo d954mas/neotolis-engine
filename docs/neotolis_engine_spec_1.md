@@ -1500,7 +1500,6 @@ typedef struct {
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
-    uint32_t pinned_pack_seq;        /* mount_seq of the pack this slot PIN_BLOB-pins (0 = none); survives packs[] index reuse */
     void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
@@ -1574,7 +1573,7 @@ Two consumption models exist for asset types that derive state from pack bytes:
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
 - **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
 
-**Pin count (`NtPackMeta.blob_pins`).** Each pack carries a `uint32_t blob_pins`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass is the sole owner** of the count: when a `PIN_BLOB` slot's winning *pack* changes it decrements the old pack and increments the new one, transferring the pin correct-by-construction. A winner-change that stays on the same pack is a no-op. Consumers never pin/unpin themselves, so an `on_cleanup` (which does not fire on winner-*change*) cannot double-count. The decrement is guarded with real control flow (`if (blob_pins > 0)`), not an assert — asserts are compiled out in shipping builds.
+**Pin count (`NtPackMeta.blob_pins`).** Each pack carries a `uint32_t blob_pins`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass owns the count and rebuilds it from scratch each pass**: it resets every pack's `blob_pins` to 0 at the top of the pass, then increments the winning pack once per published `PIN_BLOB` winner as it publishes them. Because the count is *derived* from the current published winners rather than transferred on winner-change, it self-heals — there is no per-slot pin identity to keep in sync, so `packs[]` index reuse (same-step unmount+remount), sequence wrap, or a winner dropping cannot corrupt it. Consumers never pin/unpin themselves. Phase-C eviction reads the previous pass's rebuilt count via a real `if (blob_pins > 0)` gate (an assert would be compiled out in shipping builds).
 
 **Eviction vs. the pin (`NT_BLOB_AUTO`).**
 - **Timer-freeze (D-06):** while `blob_pins > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.

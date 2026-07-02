@@ -165,6 +165,11 @@ static void resource_resolve_pass(void) {
     NtResolveTemp *resolve_temp = (NtResolveTemp *)calloc(NT_RESOURCE_MAX_SLOTS + 1, sizeof(NtResolveTemp));
     NT_ASSERT(resolve_temp);
 
+    /* PIN_BLOB pin count is rebuilt from the published winners in D.4 below — clear it first. */
+    for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+        s_resource.packs[pi].blob_pins = 0;
+    }
+
     /* D.1: Prepare per-pass transient candidates */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
@@ -290,27 +295,11 @@ static void resource_resolve_pass(void) {
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
-        // #region PIN_BLOB pin transfer — resolve pass is the single owner (no on_cleanup decrement)
-        if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-            /* Pin identity = winning pack's mount_seq, NOT its packs[] index: a remount reuses the
-             * index for a DIFFERENT blob. Stale pins are zeroed by unmount, so the decrement no-ops. */
-            const uint16_t new_pack = next_has_real_winner ? s_resource.assets[next_asset_idx].pack_index : UINT16_MAX;
-            const uint32_t new_seq = (new_pack < NT_RESOURCE_MAX_PACKS) ? s_resource.packs[new_pack].mount_seq : 0;
-            const uint32_t old_seq = slot->pinned_pack_seq; /* 0 = this slot holds no pin */
-            if (old_seq != new_seq) {
-                /* Release the previous pin only if that exact mount is still resident. Real if-guards,
-                 * not NT_ASSERT — assert is a no-op in shipping (NT_ASSERT_MODE=OFF). */
-                if (old_seq != 0) {
-                    const bool prev_has_winner = slot->prev_resolve_asset_idx < s_resource.asset_hwm;
-                    const uint16_t old_pack = prev_has_winner ? s_resource.assets[slot->prev_resolve_asset_idx].pack_index : UINT16_MAX;
-                    if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].mount_seq == old_seq && s_resource.packs[old_pack].blob_pins > 0) {
-                        s_resource.packs[old_pack].blob_pins--;
-                    }
-                }
-                if (new_pack < NT_RESOURCE_MAX_PACKS) {
-                    s_resource.packs[new_pack].blob_pins++;
-                }
-                slot->pinned_pack_seq = new_seq;
+        // #region PIN_BLOB pin count — rebuilt from published winners (reset at top of resolve pass)
+        if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0 && next_has_real_winner) {
+            const uint16_t win_pack = s_resource.assets[next_asset_idx].pack_index;
+            if (win_pack < NT_RESOURCE_MAX_PACKS) {
+                s_resource.packs[win_pack].blob_pins++;
             }
         }
         // #endregion
@@ -448,7 +437,7 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
         s_resource.free_queue[i] = (uint16_t)(NT_RESOURCE_MAX_SLOTS - i); /* top has lowest */
     }
 
-    s_resource.next_mount_seq = 1; /* 0 reserved as the "unpinned" sentinel for NtResourceSlot.pinned_pack_seq */
+    s_resource.next_mount_seq = 1; /* monotonic mount-order counter for the resolve tiebreak */
     s_resource.activate_time_budget_ms = NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS;
     s_resource.retry_max_attempts = 0; /* infinite by default */
     s_resource.retry_base_delay_ms = 500;
@@ -751,7 +740,6 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
     slot->prev_resolve_asset_idx = UINT16_MAX;
     slot->user_data_asset_idx = UINT16_MAX;
     slot->prev_runtime_handle = 0;
-    slot->pinned_pack_seq = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
     slot->user_data = NULL;
