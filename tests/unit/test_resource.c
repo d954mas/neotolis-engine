@@ -1375,10 +1375,10 @@ void test_blob_policy_keep(void) {
     (void)remove("build/test_blob_keep.ntpack");
 }
 
-/* ---- PIN_BLOB ref-balance tests — pin transfers on winner-change, balances to 0 ---- */
+/* ---- PIN_BLOB tests — blob_pins rebuilt from winners each pass, goes to 0 when unpinned ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_ref_balance_winner_change(void) {
+void test_blob_pin_balance_winner_change(void) {
     nt_hash32_t pid_a = nt_hash32_str("pin_pack_a");
     nt_hash32_t pid_b = nt_hash32_str("pin_pack_b");
     nt_hash64_t rid = nt_hash64_str("pin_shared_res");
@@ -1410,7 +1410,7 @@ void test_blob_pin_ref_balance_winner_change(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1));
 
-    /* (b) raise B above A -> winner changes pack, pin transfers (no leak) */
+    /* (b) raise B above A -> winner changes pack, pin follows the winner (rebuilt, no leak) */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid_b, 20));
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
@@ -1428,7 +1428,7 @@ void test_blob_pin_ref_balance_winner_change(void) {
     free(blob_b);
 }
 
-void test_blob_pin_ref_absent_without_flag(void) {
+void test_blob_pin_absent_without_flag(void) {
     nt_hash32_t pid = nt_hash32_str("nopin_pack");
     nt_hash64_t rid = nt_hash64_str("nopin_res");
 
@@ -1450,11 +1450,12 @@ void test_blob_pin_ref_absent_without_flag(void) {
     free(blob);
 }
 
-/* A same-step unmount+remount of the SAME pack_id reuses the packs[] index; the pin
- * transfer must re-key on mount_seq (not index) so the fresh mount stays pinned. Keying on
- * index would skip the transfer (old_pack == new_pack), leaving blob_pins at 0 -> UAF. */
+/* A same-step unmount+remount of the SAME pack_id reuses the packs[] index for a DIFFERENT blob.
+ * The rebuild recomputes blob_pins from the current winner, so the fresh mount is counted (==1).
+ * An old index-keyed maintained transfer would have skipped it (old_pack == new_pack), leaving
+ * blob_pins at 0 -> UAF — a failure mode this rebuild-from-winners design cannot hit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_blob_pin_ref_survives_reregister(void) {
+void test_blob_pin_survives_reregister(void) {
     nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
     nt_hash64_t rid = nt_hash64_str("pin_reregister_res");
 
@@ -1472,8 +1473,8 @@ void test_blob_pin_ref_survives_reregister(void) {
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* winner pins the first mount */
 
-    /* Same-step hot-reload: unmount + remount the same pack_id -> packs[] index 0 is reused,
-     * but the new mount gets a fresh mount_seq. No resolve/step between unmount and remount. */
+    /* Same-step hot-reload: unmount + remount the same pack_id -> packs[] index 0 is reused
+     * for a different blob. No resolve/step between unmount and remount. */
     nt_resource_unmount(pid);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     uint32_t size2 = 0;
@@ -1483,7 +1484,7 @@ void test_blob_pin_ref_survives_reregister(void) {
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 200);
     nt_resource_step();
 
-    /* Winner re-pinned on the reused index; before the mount_seq re-key this was 0. */
+    /* Rebuild counts the fresh winner on the reused index; an index-keyed transfer would leave 0. */
     TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
 
@@ -1599,7 +1600,7 @@ void test_blob_pin_unmount_while_referenced(void) {
     nt_resource_unmount(pid);
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
-    /* Consumer loses its provider (tofu); the resolve-pass guarded decrement finds 0 -> no underflow/double-free */
+    /* Consumer loses its provider (tofu); the resolve rebuild recomputes blob_pins as 0 for the now-absent winner -> no underflow/double-free */
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
@@ -2922,9 +2923,9 @@ int main(void) {
     RUN_TEST(test_blob_policy_keep);
 
     /* PIN_BLOB ref-balance tests */
-    RUN_TEST(test_blob_pin_ref_balance_winner_change);
-    RUN_TEST(test_blob_pin_ref_absent_without_flag);
-    RUN_TEST(test_blob_pin_ref_survives_reregister);
+    RUN_TEST(test_blob_pin_balance_winner_change);
+    RUN_TEST(test_blob_pin_absent_without_flag);
+    RUN_TEST(test_blob_pin_survives_reregister);
 
     /* PIN_BLOB eviction / unmount safety */
     RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);

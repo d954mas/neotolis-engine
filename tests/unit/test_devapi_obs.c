@@ -574,7 +574,7 @@ static void test_resource_list_resource_id_hex_string(void) {
 
 /* Every flat assets[] entry carries blob_pins (the pack's PIN_BLOB aggregate). Register one asset
    and assert the field is present as a number (0 here — not a PIN_BLOB winner). */
-static void test_resource_list_assets_have_blob_ref(void) {
+static void test_resource_list_assets_have_blob_pins(void) {
     nt_hash32_t pid = nt_hash32_str("blobref_pack");
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid, 0));
     nt_hash64_t rid = {0xB10B12EF00000001ULL};
@@ -758,7 +758,7 @@ int main(void) {
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);
     RUN_TEST(test_resource_list_include_assets_flat);
-    RUN_TEST(test_resource_list_assets_have_blob_ref);
+    RUN_TEST(test_resource_list_assets_have_blob_pins);
     RUN_TEST(test_resource_list_bad_params);
     RUN_TEST(test_resource_list_resource_id_hex_string);
     RUN_TEST(test_resource_list_assets_cap_trips);

@@ -86,7 +86,7 @@ typedef enum {
     NT_RESOURCE_BEHAVIOR_AUX_BACKED = 1 << 0,
     /* Zero-copy consumers (fonts) read the live pack blob through a raw pointer, so the
      * published winner must PIN its pack blob. The resolve pass owns the pin (per-pack
-     * aggregate NtPackMeta.blob_pins) and transfers it on winner-change. */
+     * aggregate NtPackMeta.blob_pins), rebuilt from the published winners each resolve pass. */
     NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
 } nt_resource_behavior_t;
 

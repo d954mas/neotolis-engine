@@ -794,8 +794,8 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
     /* Developer owns unmount — proceed even while pinned, warn ONCE. Teardown's memset below clears
-     * blob_pins, so the resolve pass's guarded decrement finds 0 and skips (no double-free); consumers
-     * render tofu next resolve. */
+     * blob_pins; the next resolve rebuilds it from the current winners, and this now-absent pack is
+     * simply not counted (no stale pin, no double-free); consumers render tofu next resolve. */
     if (pack->blob_pins > 0) {
         NT_LOG_ERROR("unmount pack 0x%08x while blob pinned (pins=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
     }
