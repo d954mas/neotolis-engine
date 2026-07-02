@@ -104,7 +104,7 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_ref; /* PIN_BLOB aggregate: count of published winners pinning this pack's blob (O(1) Phase-C gate) */
+    uint32_t blob_pins; /* PIN_BLOB aggregate: count of published winners pinning this pack's blob (O(1) Phase-C gate) */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
 } NtPackMeta;

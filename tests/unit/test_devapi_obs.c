@@ -572,7 +572,7 @@ static void test_resource_list_resource_id_hex_string(void) {
     cJSON_Delete(root);
 }
 
-/* Every flat assets[] entry carries blob_ref (the pack's PIN_BLOB aggregate). Register one asset
+/* Every flat assets[] entry carries blob_pins (the pack's PIN_BLOB aggregate). Register one asset
    and assert the field is present as a number (0 here — not a PIN_BLOB winner). */
 static void test_resource_list_assets_have_blob_ref(void) {
     nt_hash32_t pid = nt_hash32_str("blobref_pack");
@@ -586,7 +586,7 @@ static void test_resource_list_assets_have_blob_ref(void) {
     TEST_ASSERT_TRUE(cJSON_GetArraySize(assets) > 0);
     cJSON *a = NULL;
     cJSON_ArrayForEach(a, assets) {
-        cJSON *br = cJSON_GetObjectItemCaseSensitive(a, "blob_ref");
+        cJSON *br = cJSON_GetObjectItemCaseSensitive(a, "blob_pins");
         TEST_ASSERT_TRUE(cJSON_IsNumber(br));   /* field always present */
         TEST_ASSERT_EQUAL_INT(0, br->valueint); /* virtual asset: not a PIN_BLOB winner */
     }

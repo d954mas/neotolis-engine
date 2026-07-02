@@ -693,9 +693,9 @@ static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
     /* pack_index = the raw packs[] slot (matches resource.list's pack_id filter resolution), not the
        public pack_id; named explicitly so a bot does not mistake it for the pack's id. */
     devapi_add_number(o, "pack_index", (double)ai->pack_index);
-    /* blob_ref = PIN_BLOB pins held via this asset's pack (nonzero only when it is the published
+    /* blob_pins = PIN_BLOB pins held via this asset's pack (nonzero only when it is the published
        winner of a pinning slot, e.g. NT_ASSET_FONT); answers "which asset pins this pack blob". */
-    devapi_add_number(o, "blob_ref", (double)ai->blob_ref);
+    devapi_add_number(o, "blob_pins", (double)ai->blob_pins);
     cJSON_bool added = cJSON_AddItemToArray(assets, o);
     NT_ASSERT(added);
     (void)added;
@@ -855,7 +855,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
-        .result_shape = "{total:number,packs:[{id,state,priority,asset_count}],assets?:[{resource_id:string,type,state,pack_index,blob_ref}],asset_total?:number,assets_truncated?:bool}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count}],assets?:[{resource_id:string,type,state,pack_index,blob_pins}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",
         .side_effects = "none",
     },

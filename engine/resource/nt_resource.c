@@ -303,12 +303,12 @@ static void resource_resolve_pass(void) {
                 if (old_seq != 0) {
                     const bool prev_has_winner = slot->prev_resolve_asset_idx < s_resource.asset_hwm;
                     const uint16_t old_pack = prev_has_winner ? s_resource.assets[slot->prev_resolve_asset_idx].pack_index : UINT16_MAX;
-                    if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].mount_seq == old_seq && s_resource.packs[old_pack].blob_ref > 0) {
-                        s_resource.packs[old_pack].blob_ref--;
+                    if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].mount_seq == old_seq && s_resource.packs[old_pack].blob_pins > 0) {
+                        s_resource.packs[old_pack].blob_pins--;
                     }
                 }
                 if (new_pack < NT_RESOURCE_MAX_PACKS) {
-                    s_resource.packs[new_pack].blob_ref++;
+                    s_resource.packs[new_pack].blob_pins++;
                 }
                 slot->pinned_pack_seq = new_seq;
             }
@@ -684,12 +684,12 @@ void nt_resource_step(void) {
                 continue;
             }
             // #region blob-pin evict gate — a referenced blob is held as KEEP + timer-frozen
-            if (pack->blob_ref > 0) {
+            if (pack->blob_pins > 0) {
                 /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
                  * blob and never bump last-access, so freeze the TTL clock: ref->0 starts a fresh grace. */
                 pack->blob_last_access_ms = now_ms;
                 if (!pack->blob_evict_skip_logged) {
-                    NT_LOG_WARN("blob pack %u referenced (ref=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_ref);
+                    NT_LOG_WARN("blob pack %u referenced (ref=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
                     pack->blob_evict_skip_logged = 1; /* edge-trigger: never log per-frame */
                 }
                 continue;
@@ -806,10 +806,10 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
     /* Developer owns unmount — proceed even while referenced, warn ONCE. Teardown's memset below clears
-     * blob_ref, so the resolve pass's guarded decrement finds 0 and skips (no double-free); consumers
+     * blob_pins, so the resolve pass's guarded decrement finds 0 and skips (no double-free); consumers
      * render tofu next resolve. */
-    if (pack->blob_ref > 0) {
-        NT_LOG_ERROR("unmount pack 0x%08x while blob referenced (ref=%u) — consumers will render tofu", pack_id.value, pack->blob_ref);
+    if (pack->blob_pins > 0) {
+        NT_LOG_ERROR("unmount pack 0x%08x while blob referenced (ref=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
     }
 
     /* Deactivate READY assets and clear all assets belonging to this pack */
@@ -1459,18 +1459,18 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
         if (seen == i) {
             /* Per-asset ref (A4): report the pack aggregate only for the published winner of a
              * PIN_BLOB slot — that asset is the one pinning the blob; others report 0. */
-            uint32_t blob_ref = 0;
+            uint32_t blob_pins = 0;
             uint16_t si = slot_map_find(meta->resource_id);
             if (si != 0) {
                 const NtResourceSlot *slot = &s_resource.slots[si];
                 if (slot->asset_type == meta->asset_type && slot->asset_type < NT_RESOURCE_MAX_ASSET_TYPES && slot->resolve_asset_idx == a &&
                     (s_resource.activators[slot->asset_type].behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-                    blob_ref = s_resource.packs[meta->pack_index].blob_ref;
+                    blob_pins = s_resource.packs[meta->pack_index].blob_pins;
                 }
             }
             *out = (nt_resource_asset_info_t){
                 .resource_id = meta->resource_id,
-                .blob_ref = blob_ref,
+                .blob_pins = blob_pins,
                 .pack_index = meta->pack_index,
                 .type = meta->asset_type,
                 .state = meta->state,
@@ -1701,11 +1701,11 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
     }
 }
 
-uint32_t nt_resource_test_pack_blob_ref(uint16_t pack_index) {
+uint32_t nt_resource_test_pack_blob_pins(uint16_t pack_index) {
     if (pack_index >= NT_RESOURCE_MAX_PACKS) {
         return 0;
     }
-    return s_resource.packs[pack_index].blob_ref;
+    return s_resource.packs[pack_index].blob_pins;
 }
 
 uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index) {

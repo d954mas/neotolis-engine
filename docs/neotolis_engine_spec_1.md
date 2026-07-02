@@ -1574,15 +1574,15 @@ Two consumption models exist for asset types that derive state from pack bytes:
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
 - **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
 
-**Ref-count (`NtPackMeta.blob_ref`).** Each pack carries a `uint32_t blob_ref`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass is the sole owner** of the count: when a `PIN_BLOB` slot's winning *pack* changes it decrements the old pack and increments the new one, transferring the pin correct-by-construction. A winner-change that stays on the same pack is a no-op. Consumers never call ref/unref themselves, so an `on_cleanup` (which does not fire on winner-*change*) cannot double-count. The decrement is guarded with real control flow (`if (blob_ref > 0)`), not an assert — asserts are compiled out in shipping builds.
+**Ref-count (`NtPackMeta.blob_pins`).** Each pack carries a `uint32_t blob_pins`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass is the sole owner** of the count: when a `PIN_BLOB` slot's winning *pack* changes it decrements the old pack and increments the new one, transferring the pin correct-by-construction. A winner-change that stays on the same pack is a no-op. Consumers never call ref/unref themselves, so an `on_cleanup` (which does not fire on winner-*change*) cannot double-count. The decrement is guarded with real control flow (`if (blob_pins > 0)`), not an assert — asserts are compiled out in shipping builds.
 
 **Eviction vs. the pin (`NT_BLOB_AUTO`).**
-- **Timer-freeze (D-06):** while `blob_ref > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
-- **AUTO-as-KEEP (D-07):** a referenced `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_ref` returns to 0), never per frame.
+- **Timer-freeze (D-06):** while `blob_pins > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
+- **AUTO-as-KEEP (D-07):** a referenced `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 
-**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_ref > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_ref` as a single source of truth, so the resolve-pass guarded decrement then finds 0 and skips — no double-free. The zero-copy consumer loses its provider and degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins` as a single source of truth, so the resolve-pass guarded decrement then finds 0 and skips — no double-free. The zero-copy consumer loses its provider and degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
-The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_ref` and surfaced in the devapi `resource.list` group.
+The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 
 ## 17.7 Virtual packs
 
@@ -1866,13 +1866,13 @@ typedef struct {
     uint32_t retry_time_ms;
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_ref; /* Phase 72: PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
+    uint32_t blob_pins; /* Phase 72: PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
     uint8_t blob_evict_skip_logged; /* Phase 72: edge-trigger for the AUTO-as-KEEP one-shot log */
     char load_path[256];
 } NtPackMeta;
 ```
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_ref` (Phase 72) is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see §17.6.2 for the full lifecycle.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` (Phase 72) is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see §17.6.2 for the full lifecycle.
 
 ## 18.6 JS bridge — fetch contract
 
@@ -2757,7 +2757,7 @@ A bot inspects engine state through the devapi **obs** command group — a thin 
 | `perf.stats` | `{channels?, budget_ms?}` | `{channels:object,user_channels:object,fps_low_1pct,fps_low_01pct,over_budget_pct,budget_ms}` | **READ** windowed `nt_metrics` aggregates (`samples`/`avg`/`min`/`max`/`median`/`p95`/`p99`/`p99_9`; null aggregates when `samples:0`) per requested-or-all fixed channels + user channels; `budget_ms` (finite, > 0, default 16.67) drives `over_budget_pct` and is echoed back |
 | `perf.reset` | `{}` | `{reset:true}` | clear the metrics window (counts → 0) without tearing down state |
 | `entity.list` | `{offset?, limit?, component?, all?, any?, none?}` | `{total,entities:[{id,index,generation,enabled,<component>:{...}}]}` | **READ** live entities: core fields (`id`/`index`/`generation`/`enabled`) plus **each present component as a named group** by the generic `nt_entity_introspect` walk — a component with no `describe()` still emits an empty `{}` (presence visible; a marker component is filterable + shown). The obs layer names no component, so a new one appears here with zero edits. Component-set filter: an entity passes if it has **every** `all` + **at least one** `any` (when present) + **none** of `none` (`component:"x"` is sugar for `all:["x"]`); an unknown component → `bad_params`. No world matrix; fully paginated against the honest `total` (two heap-free passes) |
-| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count}],assets?:[{resource_id,type,state,pack_index,blob_ref}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); `pack_index` is the raw packs[] slot (not the public `pack_id`); `blob_ref` is the pack's PIN_BLOB aggregate pin count (nonzero only for the published winner of a PIN_BLOB slot); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
+| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count}],assets?:[{resource_id,type,state,pack_index,blob_pins}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); `pack_index` is the raw packs[] slot (not the public `pack_id`); `blob_pins` is the pack's PIN_BLOB aggregate pin count (nonzero only for the published winner of a PIN_BLOB slot); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
 
 `offset`/`limit` (and `n`, `pack_id`) are parsed **exactly**: a non-finite, fractional, or out-of-range number is `bad_params`, never silently truncated.
 

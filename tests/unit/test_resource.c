@@ -1407,22 +1407,22 @@ void test_blob_pin_ref_balance_winner_change(void) {
 
     /* (a) A wins -> A pinned once, B zero */
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1));
 
     /* (b) raise B above A -> winner changes pack, pin transfers (no leak) */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid_b, 20));
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(1));
 
     /* (c) unmount current winner (B) -> its ref drops to 0 (no underflow), A becomes winner and pins once */
     nt_resource_unmount(pid_b);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1));
 
     free(blob_a);
     free(blob_b);
@@ -1445,14 +1445,14 @@ void test_blob_pin_ref_absent_without_flag(void) {
     nt_resource_step();
 
     TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0)); /* no flag -> never pinned */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0)); /* no flag -> never pinned */
 
     free(blob);
 }
 
 /* A same-step unmount+remount of the SAME pack_id reuses the packs[] index; the pin
  * transfer must re-key on mount_seq (not index) so the fresh mount stays pinned. Keying on
- * index would skip the transfer (old_pack == new_pack), leaving blob_ref at 0 -> UAF. */
+ * index would skip the transfer (old_pack == new_pack), leaving blob_pins at 0 -> UAF. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_ref_survives_reregister(void) {
     nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
@@ -1470,7 +1470,7 @@ void test_blob_pin_ref_survives_reregister(void) {
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* winner pins the first mount */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* winner pins the first mount */
 
     /* Same-step hot-reload: unmount + remount the same pack_id -> packs[] index 0 is reused,
      * but the new mount gets a fresh mount_seq. No resolve/step between unmount and remount. */
@@ -1485,7 +1485,7 @@ void test_blob_pin_ref_survives_reregister(void) {
 
     /* Winner re-pinned on the reused index; before the mount_seq re-key this was 0. */
     TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
 
     free(blob);
     free(blob2);
@@ -1511,7 +1511,7 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 77);
     nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
 
     /* (1) Apply AUTO pressure; TTL expires while referenced -> NOT evicted, timer refreshed, logged once */
@@ -1529,7 +1529,7 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     /* (2) Drop the winner -> ref returns to 0 (Phase C that frame still saw ref>0 and refreshed) */
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
     nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     /* (3) Fresh full TTL grace after ref->0, then eviction resumes and the one-shot re-arms */
     nt_time_sleep(0.005);
@@ -1559,7 +1559,7 @@ void test_blob_pin_auto_as_keep_one_shot_log(void) {
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
     nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
     nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
 
     /* Many steps past TTL: blob stays resident and the flag is set once and never toggles.
@@ -1593,16 +1593,16 @@ void test_blob_pin_unmount_while_referenced(void) {
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 88);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(88, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* referenced -> triggers unmount error log */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* referenced -> triggers unmount error log */
 
-    /* Unmount overrides the ref: proceeds, one-shot error log, teardown clears blob_ref (single-source) */
+    /* Unmount overrides the ref: proceeds, one-shot error log, teardown clears blob_pins (single-source) */
     nt_resource_unmount(pid);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     /* Consumer loses its provider (tofu); the resolve-pass guarded decrement finds 0 -> no underflow/double-free */
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     free(blob);
 }
@@ -1659,7 +1659,7 @@ void test_blob_pin_unmount_severs_provider_synchronously(void) {
 
     /* Provider resolved into the live blob and pinned it. */
     TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
 
     /* Unmount frees the blob; the provider view must be severed inline — NO intervening resolve/step —
      * so no read can dereference the freed blob. The published winner state is reconciled by the next
@@ -1671,7 +1671,7 @@ void test_blob_pin_unmount_severs_provider_synchronously(void) {
     nt_resource_step();
     TEST_ASSERT_NULL(nt_resource_get_user_data(h));
     TEST_ASSERT_FALSE(nt_resource_is_ready(h));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     /* blob is owned + freed by unmount; do not free here. */
 }
@@ -1693,12 +1693,12 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     TEST_ASSERT_NOT_NULL(blob);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
 
-    /* No consumer yet -> blob_ref stays 0; TTL expiry evicts the blob before
+    /* No consumer yet -> blob_pins stays 0; TTL expiry evicts the blob before
      * any pin is established. */
     nt_time_sleep(0.005);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     /* Consumer arrives; the asset reports READY but its blob is gone. The
      * PIN_BLOB provider must NOT publish as a usable winner. */
@@ -1741,8 +1741,8 @@ void test_blob_pin_virtual_pack_not_publishable(void) {
      * on the resident file pack, never transfers to the blobless virtual pack. */
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* file pinned */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1)); /* virtual never pinned */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* file pinned */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1)); /* virtual never pinned */
 
     free(blob);
 }
@@ -1780,8 +1780,8 @@ void test_blob_pin_and_aux_virtual_pack_not_publishable(void) {
      * virtual asset (handle 200) and pin the blobless virtual pack. With it, the file wins. */
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* file pinned */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1)); /* virtual never pinned */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0)); /* file pinned */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(1)); /* virtual never pinned */
 
     free(blob);
 }
