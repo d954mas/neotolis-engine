@@ -32,21 +32,17 @@ static void font_test_shutdown_packs(void);
 #endif
 
 // #region Resolve-callback lifecycle — on_resolve/on_cleanup + PIN_BLOB
-/* Zero-copy provider: a {blob,size} view into the winning pack blob, stored in
- * the resource slot's user_data. Fonts decode glyphs lazily from the live blob,
- * so the winner PINs its pack (NT_RESOURCE_BEHAVIOR_PIN_BLOB) — the resolve pass
- * owns the pin; the font never ref/unrefs it. */
+/* Zero-copy provider: a {blob,size} view into the winning pack blob, held in the slot's user_data.
+ * Fonts decode glyphs lazily from the live blob, so the winner PINs its pack (PIN_BLOB); the resolve
+ * pass owns the pin, the font never ref/unrefs it. */
 typedef struct {
     const uint8_t *data;
     uint32_t size;
 } nt_font_provider_t;
 
-/* No-op activator — the real work is in font_on_resolve. Returns a UNIQUE handle
- * per activation (not a constant like atlas): the font is not aux-backed, so the
- * resolve pass detects a winner-change / re-activation only via a handle change
- * (on_cleanup does not fire on winner-CHANGE). A same-pack remount that reuses the
- * old asset index would otherwise be missed, leaving user_data pointing at a freed
- * blob. The handle value itself is never interpreted — glyphs read via user_data. */
+/* No-op activator — real work is in font_on_resolve. Returns a UNIQUE handle per activation (font is
+ * not aux-backed, so the resolve pass detects a winner-change only via a handle change); a reused
+ * handle would leave user_data pointing at a freed blob. The value is never interpreted. */
 static uint32_t s_font_activate_seq;
 static uint32_t font_activate(const uint8_t *data, uint32_t size) {
     (void)data;
@@ -1044,10 +1040,9 @@ void nt_font_step(void) {
 
     s_font.frame_counter++;
 
-    /* Epoch-gate the resource rescan: when no published slot changed since the
-     * last step and no font's resource set was mutated, this is O(1). The
-     * context-restore rebuild above still runs every frame; only the
-     * winner/metrics reconciliation is gated. */
+    /* Epoch-gate the resource rescan: O(1) when no published slot changed and no font's resource set
+     * was mutated. The context-restore rebuild above still runs every frame; only the winner/metrics
+     * reconciliation is gated. */
     uint32_t epoch = nt_resource_publication_epoch();
     if (epoch == s_font.last_resolve_epoch && !s_font.needs_resource_rescan) {
         return;
@@ -1116,10 +1111,9 @@ void nt_font_step(void) {
             /* Single-provider mismatch = hot-swap (accept new metrics + flush).
              * Multi-provider mismatch breaks the shared-metrics invariant — normalize in the builder. */
             if (slot->metrics_set && !metrics_match) {
-                /* Single-provider mismatch = legitimate hot-swap. Multi-provider mismatch violates the
-                 * shared-metrics invariant (builder UPM-normalization should prevent it). Flush on ANY
-                 * mismatch — NT_ASSERT is a no-op in shipping, so gating the flush on it would leave the
-                 * glyph/measure caches baked against the stale metrics the overwrite below replaces. */
+                /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
+                 * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is
+                 * a no-op in shipping, so gating the flush on it would keep caches baked against stale metrics. */
                 NT_ASSERT(active_count == 1 && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
                 need_flush = true;
                 changed = true;
@@ -1880,13 +1874,9 @@ void nt_font_measure_invalidate(nt_font_t font) {
 #ifdef NT_TEST_ACCESS
 
 // #region Test-only real-pack registry
-/* Fonts read bytes zero-copy from the RESIDENT pack blob via on_resolve/on_cleanup.
- * Virtual packs carry no blob (asset_data_ptr is
- * NULL when pack->blob == NULL), so tests must drive the resolve pass through a
- * real parsed pack. These helpers wrap a font blob in a single-asset .ntpack,
- * mount + parse it, and hand back a token; parse_pack keeps a zero-copy pointer,
- * so the wrapper is retained until the pack is deactivated or the module shuts
- * down. Keyed by token so remount / hot-swap reuse the same (pid, rid) slot. */
+/* Fonts read bytes zero-copy from a RESIDENT pack blob (virtual packs carry none), so tests wrap a
+ * font blob in a real single-asset .ntpack, mount + parse it, and return a token. parse_pack keeps a
+ * zero-copy pointer, so the wrapper is retained until deactivate/shutdown; keyed by token for remount. */
 
 #define NT_FONT_TEST_MAX_PACKS 128
 typedef struct {

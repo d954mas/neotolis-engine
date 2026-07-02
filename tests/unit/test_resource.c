@@ -1712,10 +1712,8 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     free(blob);
 }
 
-/* A blobless VIRTUAL pack must never publish a PIN_BLOB winner: the zero-copy
- * provider views into a real pack blob, which a virtual pack has none of. Even at
- * higher priority the virtual entry must lose to a resident file-pack blob and
- * must not steal the pin. */
+/* A blobless VIRTUAL pack must never publish a PIN_BLOB winner (the zero-copy view needs a real
+ * blob): even at higher priority it must lose to a resident file pack and never steal the pin. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_blob_pin_virtual_pack_not_publishable(void) {
     nt_hash32_t pid_file = nt_hash32_str("pin_vp_file");

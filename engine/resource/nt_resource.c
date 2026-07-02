@@ -292,10 +292,8 @@ static void resource_resolve_pass(void) {
 
         // #region PIN_BLOB pin transfer — resolve pass is the single owner (no on_cleanup decrement)
         if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-            /* Pin identity is the winning pack's mount_seq, NOT its packs[] index: a same-step
-             * unmount+remount of one pack_id reuses the index but is a DIFFERENT blob. Keying on
-             * mount_seq re-pins the fresh mount; the stale pin was already zeroed by unmount's
-             * memset, so the guarded decrement no-ops when that mount is gone. */
+            /* Pin identity = winning pack's mount_seq, NOT its packs[] index: a remount reuses the
+             * index for a DIFFERENT blob. Stale pins are zeroed by unmount, so the decrement no-ops. */
             const uint16_t new_pack = next_has_real_winner ? s_resource.assets[next_asset_idx].pack_index : UINT16_MAX;
             const uint32_t new_seq = (new_pack < NT_RESOURCE_MAX_PACKS) ? s_resource.packs[new_pack].mount_seq : 0;
             const uint32_t old_seq = slot->pinned_pack_seq; /* 0 = this slot holds no pin */
@@ -807,10 +805,9 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    /* The developer owns unmount — proceed even while referenced, but warn ONCE (outside the
-     * per-asset loop, not per iteration). Eviction respects the ref (skip); unmount overrides it.
-     * Teardown clears blob_ref via the memset below, so the resolve pass's guarded decrement finds
-     * 0 and skips — single-source reconciliation, no double-free. Consumers render tofu next resolve. */
+    /* Developer owns unmount — proceed even while referenced, warn ONCE. Teardown's memset below clears
+     * blob_ref, so the resolve pass's guarded decrement finds 0 and skips (no double-free); consumers
+     * render tofu next resolve. */
     if (pack->blob_ref > 0) {
         NT_LOG_ERROR("unmount pack 0x%08x while blob referenced (ref=%u) — consumers will render tofu", pack_id.value, pack->blob_ref);
     }
@@ -839,12 +836,9 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
         }
     }
 
-    /* Synchronously sever every zero-copy provider whose published winner lives in this pack BEFORE
-     * the blob is freed. PIN_BLOB providers keep a {data,size} view into the blob in slot->user_data;
-     * a font read between here and the next resolve pass would otherwise dereference freed memory.
-     * Only user_data is dropped — the published winner state is left to the resolve pass (needs_resolve
-     * below), which detects the winner-loss and bumps the publication epoch so consumers re-scan.
-     * AUX_BACKED providers copy data OUT (survive the free) and must NOT be severed here. */
+    /* Sever every zero-copy provider viewing this pack's blob BEFORE the free, else a font read before
+     * the next resolve pass dereferences freed memory. Drop only user_data; the resolve pass handles
+     * winner-loss. AUX_BACKED providers copy data OUT (survive the free), so must NOT be severed here. */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         if (slot->resource_id == 0 || slot->user_data == NULL || slot->resolve_asset_idx >= s_resource.asset_hwm) {

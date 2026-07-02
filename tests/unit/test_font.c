@@ -127,10 +127,8 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
     return blob;
 }
 
-/* Build a font blob over an arbitrary SORTED codepoint set. Every glyph shares
- * `advance`, so a resolved glyph's advance identifies WHICH resource won a
- * codepoint present in more than one (first-wins). Codepoints must be sorted
- * ascending (bsearch precondition). Coords in font units. Caller frees. */
+/* Build a font blob over a SORTED codepoint set (bsearch precondition). Every glyph shares `advance`,
+ * so a resolved glyph's advance identifies WHICH resource won a shared codepoint (first-wins). */
 static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, const uint32_t *codepoints, uint16_t glyph_count, int16_t advance,
                                            uint32_t *out_size) {
     const uint32_t contour_size = 18U; /* 1 contour, 2 line segments — matches build_test_font_blob_with_metrics */
@@ -203,11 +201,8 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
 }
 
 /* ---- Helper: register a font blob as a test resource ----
- *
- * Fonts read bytes zero-copy from a resident pack blob via on_resolve/on_cleanup;
- * virtual packs carry none. nt_font_test_register_data
- * wraps the blob in a real parsed pack (owned by the font module, freed on
- * shutdown) and returns a token; nt_font_test_resource requests it. */
+ * Fonts read zero-copy from a resident pack blob (virtual packs carry none), so register_data wraps
+ * the blob in a real parsed pack (freed on shutdown) and returns a token; resource() requests it. */
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
     (void)name;
     return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
@@ -837,12 +832,8 @@ void test_measure_n_invalidates_on_resource_change(void) {
 }
 
 /* ---- Adding an ALREADY-published resource forces a rescan ----
- *
- * The epoch gate short-circuits nt_font_step when the resource publication
- * epoch is unchanged. If the added resource was already published (its epoch
- * already consumed by a prior step), only the resource-set dirty flag can
- * force the rescan. Signature: attaching the resource must flush the measure
- * cache (ascii_index_dirty) so the next measure is a MISS. */
+ * Its epoch was already consumed, so the epoch gate stays closed; only the resource-set
+ * dirty flag can force the rescan that flushes the measure cache (next measure MISSes). */
 void test_font_add_already_published_forces_rescan(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1148,12 +1139,9 @@ void test_font_file_pack_unmount_cleans_state(void) {
 }
 
 /* ---- Present-but-truncated winner swap clears the provider (no stale blob read) ----
- *
- * A winner-swap to a resident-but-truncated blob (size < header) moved the pin off the old pack,
- * so keeping the old provider would read now-unpinned bytes. font_on_resolve must clear the provider
- * (not return early like the evicted-blob case); the font then loses its metrics and degrades to tofu
- * instead of serving the stale old blob. The old (valid) pack stays mounted so the stale-read path is
- * deterministic: without the fix, metrics keep reporting the old blob's units_per_em. */
+ * A swap to a resident-but-truncated blob (< header) moved the pin off the old pack, so keeping the
+ * old provider reads now-unpinned bytes. font_on_resolve must clear it (not return like evicted-blob).
+ * The old pack stays mounted so the stale read is deterministic: without the fix units_per_em stays. */
 void test_font_truncated_winner_swap_clears_provider(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
