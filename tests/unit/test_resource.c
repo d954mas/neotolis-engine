@@ -1604,6 +1604,75 @@ void test_blob_pin_unmount_while_referenced(void) {
     free(blob);
 }
 
+/* ---- Zero-copy provider callbacks (mirror the real font activator) ---- */
+
+typedef struct {
+    const uint8_t *data;
+    uint32_t size;
+} test_provider_t;
+
+static void test_provider_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
+    (void)runtime_handle;
+    if (data == NULL) {
+        return;
+    }
+    test_provider_t *p = (test_provider_t *)*user_data;
+    if (p == NULL) {
+        p = (test_provider_t *)calloc(1, sizeof(*p));
+        *user_data = p;
+    }
+    p->data = data; /* view into the live pack blob — dangles if the blob is freed under us */
+    p->size = size;
+}
+
+static void test_provider_on_cleanup(void *user_data) { free(user_data); }
+
+/* Unmount frees an I/O-owned pinned blob synchronously; the zero-copy provider viewing into it must
+ * be severed inline (user_data -> NULL) in the SAME call, before any read can dereference freed memory.
+ * Without the sever, user_data stays non-NULL (dangling) until the next resolve pass -> UAF window. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_unmount_severs_provider_synchronously(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_sever_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_sever_res");
+
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, test_provider_on_resolve, test_provider_on_cleanup);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    /* Ownership transfers to the resource system below (set_pack_io_type) -> unmount frees blob, not
+     * this function. The analyzer can't see the transfer, so suppress its leak false-positive here. */
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size); // NOLINT(clang-analyzer-unix.Malloc)
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size)); // NOLINT(clang-analyzer-unix.Malloc)
+
+    /* Hand blob ownership to the resource system so unmount frees it (mirrors an I/O-loaded pack). */
+    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
+    nt_resource_step();
+
+    /* Provider resolved into the live blob and pinned it. */
+    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+
+    /* Unmount frees the blob; the provider view must be severed inline — NO intervening resolve/step —
+     * so no read can dereference the freed blob. The published winner state is reconciled by the next
+     * resolve pass (winner-loss + epoch bump), matching the pre-existing unmount contract. */
+    nt_resource_unmount(pid);
+    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+
+    /* Next resolve reconciles the dropped winner. */
+    nt_resource_step();
+    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_FALSE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+
+    /* blob is owned + freed by unmount; do not free here. */
+}
+
 /* A PIN_BLOB winner whose NT_BLOB_AUTO blob was evicted before any consumer
  * pinned it must NOT publish READY — the zero-copy provider would view into
  * freed memory. asset_is_publishable gates it (needs a resident blob). */
@@ -2821,6 +2890,7 @@ int main(void) {
     RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
     RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
     RUN_TEST(test_blob_pin_unmount_while_referenced);
+    RUN_TEST(test_blob_pin_unmount_severs_provider_synchronously);
     RUN_TEST(test_blob_pin_unpublishable_when_blob_evicted_before_pin);
     RUN_TEST(test_blob_pin_virtual_pack_not_publishable);
 

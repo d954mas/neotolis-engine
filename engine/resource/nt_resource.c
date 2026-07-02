@@ -837,6 +837,31 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
         }
     }
 
+    /* Synchronously sever every zero-copy provider whose published winner lives in this pack BEFORE
+     * the blob is freed. PIN_BLOB providers keep a {data,size} view into the blob in slot->user_data;
+     * a font read between here and the next resolve pass would otherwise dereference freed memory.
+     * Only user_data is dropped — the published winner state is left to the resolve pass (needs_resolve
+     * below), which detects the winner-loss and bumps the publication epoch so consumers re-scan.
+     * AUX_BACKED providers copy data OUT (survive the free) and must NOT be severed here. */
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        NtResourceSlot *slot = &s_resource.slots[si];
+        if (slot->resource_id == 0 || slot->user_data == NULL || slot->resolve_asset_idx >= s_resource.asset_hwm) {
+            continue;
+        }
+        if (s_resource.assets[slot->resolve_asset_idx].pack_index != (uint16_t)pack_idx) {
+            continue;
+        }
+        uint8_t sever_atype = slot->asset_type;
+        if (sever_atype >= NT_RESOURCE_MAX_ASSET_TYPES || (s_resource.activators[sever_atype].behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) == 0) {
+            continue;
+        }
+        if (s_resource.activators[sever_atype].on_cleanup != NULL) {
+            s_resource.activators[sever_atype].on_cleanup(slot->user_data);
+        }
+        slot->user_data = NULL;
+        slot->user_data_asset_idx = UINT16_MAX;
+    }
+
     /* Free blob if it was loaded via I/O (resource system owns it).
      * Blobs provided directly via parse_pack are caller-owned. */
     if (pack->blob != NULL && pack->io_type != NT_IO_NONE) {
@@ -1706,6 +1731,13 @@ uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index) {
         return 0;
     }
     return s_resource.packs[pack_index].blob_evict_skip_logged;
+}
+
+void nt_resource_test_set_pack_io_type(uint16_t pack_index, uint8_t io_type) {
+    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return;
+    }
+    s_resource.packs[pack_index].io_type = io_type;
 }
 
 #endif /* NT_TEST_ACCESS */

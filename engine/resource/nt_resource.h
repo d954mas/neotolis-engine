@@ -251,6 +251,9 @@ uint32_t nt_resource_test_pack_blob_ref(uint16_t pack_index);
 uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index);
 uint32_t nt_resource_test_pack_blob_last_access(uint16_t pack_index);
 uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index);
+/* Force a pack's io_type so unmount frees its blob (simulates an I/O-owned pack for a
+ * parse_pack'd blob). Value is nt_io_type_t; nonzero hands blob ownership to the resource system. */
+void nt_resource_test_set_pack_io_type(uint16_t pack_index, uint8_t io_type);
 #endif
 // #endregion
 
