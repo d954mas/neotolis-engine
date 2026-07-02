@@ -1147,6 +1147,49 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
+/* ---- Present-but-truncated winner swap clears the provider (no stale blob read) ----
+ *
+ * A winner-swap to a resident-but-truncated blob (size < header) moved the pin off the old pack,
+ * so keeping the old provider would read now-unpinned bytes. font_on_resolve must clear the provider
+ * (not return early like the evicted-blob case); the font then loses its metrics and degrades to tofu
+ * instead of serving the stale old blob. The old (valid) pack stays mounted so the stale-read path is
+ * deterministic: without the fix, metrics keep reporting the old blob's units_per_em. */
+void test_font_truncated_winner_swap_clears_provider(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_font_blob(&size_a);
+    uint32_t tok_a = nt_font_test_register_data(blob_a, size_a);
+    nt_resource_t res = nt_font_test_resource(tok_a);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Warm a lookup against the valid winner. */
+    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a1);
+    TEST_ASSERT_FALSE(a1->is_tofu);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+
+    /* Swap the winner to a resident TRUNCATED blob (< header) in a SECOND pack sharing the rid; the
+     * later mount wins the tiebreak and the pin moves to it. Pack A stays mounted (its blob alive), so
+     * a stale provider would still read valid old bytes — the fix must clear it regardless. */
+    uint8_t truncated[sizeof(NtFontAssetHeader) - 1] = {0};
+    uint32_t tok_b = nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
+    (void)tok_b;
+    nt_resource_step();
+    nt_font_step();
+
+    /* Provider cleared -> no active source -> metrics reset (mirrors the unmount path). Without the fix
+     * the stale provider keeps viewing pack A's live blob and units_per_em stays non-zero. */
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+
+    nt_font_destroy(font);
+    free(blob_a);
+}
+
 /* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
  *
  * The font reads glyph bytes zero-copy from the pinned pack blob, then the pack
@@ -1423,6 +1466,7 @@ int main(void) {
     RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
+    RUN_TEST(test_font_truncated_winner_swap_clears_provider);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     return UNITY_END();
 }

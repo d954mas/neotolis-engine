@@ -61,10 +61,25 @@ static uint32_t font_activate(const uint8_t *data, uint32_t size) {
 static void font_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void font_provider_clear(void **user_data) {
+    nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
+    if (p != NULL) {
+        p->data = NULL;
+        p->size = 0;
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)runtime_handle;
-    /* Evicted/absent blob edge: keep existing user_data (mirror atlas_on_resolve). */
-    if (data == NULL || size < sizeof(NtFontAssetHeader)) {
+    if (data == NULL) {
+        return; /* evicted/absent — keep existing view; PIN_BLOB winner is unpublishable while blob==NULL */
+    }
+    if (size < sizeof(NtFontAssetHeader)) {
+        /* Present but truncated: the resolve pass already moved the pin to this short blob's pack, so the
+         * old blob is now unpinned/evictable — stop viewing it. Degrade to tofu (control flow, not assert:
+         * malformed data is a runtime safety-net path, and NT_ASSERT is a no-op in shipping). */
+        font_provider_clear(user_data);
         return;
     }
     /* Runtime safety net — real guard, not assert-only (NT_ASSERT is a no-op in shipping). */
@@ -74,11 +89,7 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
     if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
         /* Reject: the resolve pass already moved the pin to this corrupt winner's pack, so the
          * previous blob is now unpinned and evictable — stop pointing at it. Degrade to tofu. */
-        nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
-        if (p != NULL) {
-            p->data = NULL;
-            p->size = 0;
-        }
+        font_provider_clear(user_data);
         return;
     }
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
@@ -1956,6 +1967,21 @@ void nt_font_test_deactivate(uint32_t token) {
     }
     free(tp->pack_blob);
     tp->pack_blob = NULL;
+}
+
+uint32_t nt_font_test_register_shared_rid(uint32_t base_token, const uint8_t *data, uint32_t size) {
+    NT_ASSERT(base_token != 0 && base_token <= s_test_pack_count);
+    NT_ASSERT(s_test_pack_count < NT_FONT_TEST_MAX_PACKS);
+    uint32_t idx = s_test_pack_count++;
+    nt_font_test_pack_t *tp = &s_test_packs[idx];
+    memset(tp, 0, sizeof(*tp));
+    char name[32];
+    (void)snprintf(name, sizeof(name), "font_test_pack_%u", idx);
+    tp->pid = nt_hash32_str(name);              /* fresh pack id */
+    tp->rid = s_test_packs[base_token - 1].rid; /* shared resource id -> both packs publish one resource */
+    tp->used = true;
+    font_test_mount_parse(tp, data, size);
+    return idx + 1;
 }
 
 void nt_font_test_reregister(uint32_t token, const uint8_t *data, uint32_t size) {
