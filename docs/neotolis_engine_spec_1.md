@@ -2354,14 +2354,14 @@ add_texture(const char *path);
 add_shader(const char *path);
 add_material(const char *path);
 add_audio(const char *path);
-add_font(const char *path);
+add_font(const char *path, const nt_font_opts_t *opts);   /* opts: charset (required), name override, target_units_per_em */
 
 add_meshes(const char *pattern);
 add_textures(const char *pattern);
 add_shaders(const char *pattern);
 add_materials(const char *pattern);
 add_audios(const char *pattern);
-add_fonts(const char *pattern);
+add_fonts(const char *pattern, const nt_font_opts_t *opts);
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
  * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */
@@ -2373,6 +2373,8 @@ end_atlas(void);
 ```
 
 Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a `begin/add*/end` pattern because one atlas requires its full sprite set before packing can start — this is the only place in the API where multi-call grouping is required.
+
+**Font UPM normalization.** `nt_font_opts_t.target_units_per_em` rescales a font's metrics, glyph contours, and kern offsets to a target units-per-em value offline (0 = keep the source UPM). This is the contract that lets fallback fonts of different native UPM be mixed in one font: set every member of a fallback set to the same `target_units_per_em` (the max member UPM) so their metrics share one coordinate space and merge without tripping the runtime shared-metrics assert. Normalization is done in the builder so the runtime stays a simple safety net.
 
 ## 23.5 Builder stages
 
