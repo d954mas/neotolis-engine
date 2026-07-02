@@ -15,10 +15,6 @@
 #include "unity.h"
 /* clang-format on */
 
-/* ---- Virtual pack ID counter (unique per test) ---- */
-
-static uint32_t s_vpack_counter;
-
 /* ---- Test blob builder ---- */
 
 /*
@@ -131,22 +127,85 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
     return blob;
 }
 
-/* ---- Helper: register font blob as test resource ---- */
+/* Build a font blob over a SORTED codepoint set (bsearch precondition). Every glyph shares `advance`,
+ * so a resolved glyph's advance identifies WHICH resource won a shared codepoint (first-wins). */
+static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, const uint32_t *codepoints, uint16_t glyph_count, int16_t advance,
+                                           uint32_t *out_size) {
+    const uint32_t contour_size = 18U; /* 1 contour, 2 line segments — matches build_test_font_blob_with_metrics */
+    uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
+    uint32_t glyphs_size = (uint32_t)glyph_count * (uint32_t)sizeof(NtFontGlyphEntry);
+    uint32_t total_size = header_size + glyphs_size + ((uint32_t)glyph_count * contour_size);
 
+    uint8_t *blob = (uint8_t *)calloc(total_size, 1);
+    NT_ASSERT(blob);
+
+    NtFontAssetHeader hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic = NT_FONT_MAGIC;
+    hdr.version = NT_FONT_VERSION;
+    hdr.glyph_count = glyph_count;
+    hdr.units_per_em = units_per_em;
+    hdr.ascent = ascent;
+    hdr.descent = descent;
+    hdr.line_gap = line_gap;
+    memcpy(blob, &hdr, sizeof(hdr));
+
+    uint32_t data_base = header_size + glyphs_size;
+    for (uint16_t g = 0; g < glyph_count; g++) {
+        NtFontGlyphEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        entry.codepoint = codepoints[g];
+        entry.data_offset = data_base + ((uint32_t)g * contour_size);
+        entry.advance = advance;
+        entry.bbox_x0 = 0;
+        entry.bbox_y0 = -200;
+        entry.bbox_x1 = 400;
+        entry.bbox_y1 = 800;
+        entry.curve_count = 2;
+        entry.kern_count = 0;
+        memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
+    }
+
+    for (uint16_t g = 0; g < glyph_count; g++) {
+        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
+        uint16_t cc = 1;
+        memcpy(wp, &cc, 2);
+        wp += 2;
+        uint16_t sc = 2;
+        memcpy(wp, &sc, 2);
+        wp += 2;
+        int16_t sx = 0;
+        int16_t sy = 0;
+        memcpy(wp, &sx, 2);
+        wp += 2;
+        memcpy(wp, &sy, 2);
+        wp += 2;
+        wp[0] = 0;
+        wp[1] = 0;
+        wp += 2;
+        int16_t d1x = 400;
+        int16_t d1y = 0;
+        memcpy(wp, &d1x, 2);
+        wp += 2;
+        memcpy(wp, &d1y, 2);
+        wp += 2;
+        int16_t d2x = 0;
+        int16_t d2y = 800;
+        memcpy(wp, &d2x, 2);
+        wp += 2;
+        memcpy(wp, &d2y, 2);
+    }
+
+    *out_size = total_size;
+    return blob;
+}
+
+/* ---- Helper: register a font blob as a test resource ----
+ * Fonts read zero-copy from a resident pack blob (virtual packs carry none), so register_data wraps
+ * the blob in a real parsed pack (freed on shutdown) and returns a token; resource() requests it. */
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* Register blob into font data side table to get a handle */
-    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
-
-    /* Create virtual pack and register resource */
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_%s_%u", name, s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str(name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
-
-    return nt_resource_request(rid, NT_ASSET_FONT);
+    (void)name;
+    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
 }
 
 /* ---- Default create descriptor for tests ---- */
@@ -170,11 +229,10 @@ void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    s_vpack_counter = 0;
 }
 
 void tearDown(void) {
-    nt_font_shutdown();
+    nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
     nt_resource_shutdown();
     nt_hash_shutdown();
     nt_gfx_shutdown();
@@ -773,6 +831,51 @@ void test_measure_n_invalidates_on_resource_change(void) {
     free(blob_b);
 }
 
+/* ---- Adding an ALREADY-published resource forces a rescan ----
+ * Its epoch was already consumed, so the epoch gate stays closed; only the resource-set
+ * dirty flag can force the rescan that flushes the measure cache (next measure MISSes). */
+void test_font_add_already_published_forces_rescan(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_font_blob(&size_a);
+    nt_resource_t res_a = register_font_resource("font_pub_a", blob_a, size_a);
+    nt_font_add(font, res_a);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Publish res_b AND let the font module consume that epoch WITHOUT adding
+     * res_b to the font — now epoch == last_resolve_epoch. */
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_test_font_blob(&size_b);
+    nt_resource_t res_b = register_font_resource("font_pub_b", blob_b, size_b);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_test_reset_measure_counters();
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    /* Add the already-published res_b with NO intervening nt_resource_step, so
+     * the publication epoch does not move. Only the rescan flag can pick it up. */
+    nt_font_add(font, res_b);
+    nt_font_step();
+
+    /* rescan flushes the measure cache -> the next measure MISSes (the publication
+     * epoch did not move, so only the rescan flag can invalidate the cache) */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font));
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
 /* ---- FONT-02e: custom measure_cache_size (64 entries) ---- */
 
 void test_measure_n_cache_custom_size(void) {
@@ -813,18 +916,11 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_t font = nt_font_create(&desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
 
-    /* Register inline so we keep pack_id for unmount (the shared helper
-     * uses a counter-suffixed pack name and doesn't expose the id). */
+    /* Keep the token so we can unmount the pack. */
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_unload_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str("font_unload");
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
-    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    uint32_t tok = nt_font_test_register_data(blob, blob_size);
+    nt_resource_t res = nt_font_test_resource(tok);
 
     nt_font_add(font, res);
     nt_resource_step();
@@ -842,7 +938,7 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_metrics_t pre = nt_font_get_metrics(font);
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, pre.units_per_em);
 
-    nt_resource_unmount(pid);
+    nt_font_test_deactivate(tok);
     nt_resource_step();
     nt_font_step();
 
@@ -876,30 +972,21 @@ void test_font_recovers_after_remount(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_remount_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str("font_remount");
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
-    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    uint32_t tok = nt_font_test_register_data(blob, blob_size);
+    nt_resource_t res = nt_font_test_resource(tok);
     nt_font_add(font, res);
     nt_resource_step();
     nt_font_step();
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    nt_resource_unmount(pid);
+    nt_font_test_deactivate(tok);
     nt_resource_step();
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    /* Remount without re-adding to the font — step must pick up the
-     * new runtime handle through the existing slot->resources[ri]. */
-    uint32_t data_handle2 = nt_font_test_register_data(blob, blob_size);
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle2);
+    /* Remount under the SAME (pid, rid) without re-adding to the font — the
+     * epoch-gated step must re-resolve the provider through slot->resources[ri]. */
+    nt_font_test_reregister(tok, blob, blob_size);
     nt_resource_step();
     nt_font_step();
 
@@ -925,14 +1012,8 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
 
     uint32_t size_a = 0;
     uint8_t *blob_a = build_test_font_blob(&size_a);
-    uint32_t handle_a = nt_font_test_register_data(blob_a, size_a);
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_hotswap_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str("font_hotswap");
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_a);
-    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    uint32_t tok = nt_font_test_register_data(blob_a, size_a);
+    nt_resource_t res = nt_font_test_resource(tok);
     nt_font_add(font, res);
     nt_resource_step();
     nt_font_step();
@@ -943,13 +1024,12 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
 
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
-    /* No intervening font_step between unmount and remount. */
+    /* reregister = unmount old + mount new under the same (pid, rid) with NO
+     * intervening font_step. Single-provider metrics mismatch -> hot-swap: accept
+     * the new metrics + flush, no shared-metrics assert. */
     uint32_t size_b = 0;
     uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
-    uint32_t handle_b = nt_font_test_register_data(blob_b, size_b);
-    nt_resource_unmount(pid);
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_b);
+    nt_font_test_reregister(tok, blob_b, size_b);
     nt_resource_step();
     nt_font_step();
 
@@ -964,25 +1044,73 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     free(blob_b);
 }
 
-/* ---- FONT-02k: FILE-pack unmount without remount cleans state inline ----
+/* ---- FONT-02j: same-metrics winner-swap flushes glyph/measure caches + ASCII index ----
  *
- * deactivate_font must finish all slot cleanup before returning — without
- * waiting for the next nt_font_step. Asserts metrics/cache state are
- * already reset after just unmount + deactivate, no extra tick. */
+ * A hot-reload (or higher-priority override) to a DIFFERENT blob with IDENTICAL header metrics
+ * repoints the provider and bumps the resolve epoch, but presence and metrics are unchanged. Without
+ * winner-identity tracking, font_step's presence + metrics checks both pass and the glyph/measure
+ * caches keep serving the OLD blob's advances (and the ASCII index maps to the old glyph table).
+ * The published winner handle (unique per font_activate) is the identity token that catches this. */
+void test_font_flushes_on_same_metrics_winner_swap(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    const uint32_t cps[] = {(uint32_t)'A'};
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 500, &size_a);
+    uint32_t tok = nt_font_test_register_data(blob_a, size_a);
+    nt_resource_t res = nt_font_test_resource(tok);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Cache 'A' (glyph + measure) against the first winner: advance 500. */
+    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a1);
+    TEST_ASSERT_EQUAL_INT16(500, a1->advance);
+    nt_text_size_t m1 = nt_font_measure(font, "A", 1000.0F, 0.0F);
+    uint32_t gen_before = nt_font_get_cache_generation(font);
+
+    /* Hot-reload the SAME (pid, rid) with IDENTICAL metrics but advance 700 — one step, no intervening
+     * font_step. Presence stays true and metrics match; only the winner handle changes. */
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 700, &size_b);
+    nt_font_test_reregister(tok, blob_b, size_b);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Metrics unchanged -> the swap is invisible to the presence + metrics checks. */
+    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
+
+    /* Identity-driven flush: glyph cache re-decodes (ASCII fast-path -> new glyph table) and the
+     * measure cache is cleared, so both report the new advance. Without the fix these stay 500. */
+    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a2);
+    TEST_ASSERT_EQUAL_INT16(700, a2->advance);
+    nt_text_size_t m2 = nt_font_measure(font, "A", 1000.0F, 0.0F);
+    TEST_ASSERT_TRUE(m2.width != m1.width);
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
+/* ---- FONT-02k: pack unmount clears stale provider + metrics ----
+ *
+ * Unmount drops the winner; the resolve pass fires font_on_cleanup
+ * (frees the {blob,size} holder) and the epoch-gated font_step then flushes the
+ * glyph cache and resets metrics. After unmount + a resource/font step the font
+ * has no provider and measure_n short-circuits at !metrics_set. */
 void test_font_file_pack_unmount_cleans_state(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_unmount_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str("font_unmount_clean");
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
-    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    uint32_t tok = nt_font_test_register_data(blob, blob_size);
+    nt_resource_t res = nt_font_test_resource(tok);
     nt_font_add(font, res);
     nt_resource_step();
     nt_font_step();
@@ -993,9 +1121,9 @@ void test_font_file_pack_unmount_cleans_state(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
-    /* No nt_font_step between unmount and the assertions. */
-    nt_resource_unmount(pid);
-    nt_font_test_deactivate(data_handle);
+    nt_font_test_deactivate(tok);
+    nt_resource_step(); /* resolve -> font_on_cleanup, provider lost */
+    nt_font_step();     /* epoch changed -> flush + clear metrics */
 
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
     TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
@@ -1010,56 +1138,268 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- FONT-02j: FILE-pack hot-swap with handle reuse ----
- *
- * Tighter than FONT-02i: activate_font reuses the freed data slot, so
- * handle_b == handle_a numerically. Step's `ver == resource_handles[ri]`
- * early-out would skip the reload unless deactivate_font already
- * invalidated the slot reference. */
-void test_font_hotswap_handle_reuse_after_deactivate(void) {
+/* ---- Present-but-truncated winner swap clears the provider (no stale blob read) ----
+ * A swap to a resident-but-truncated blob (< header) makes it the published winner, so the old pack
+ * is no longer pinned and keeping the old provider reads now-unpinned bytes. font_on_resolve must
+ * clear it (not return like evicted-blob).
+ * The old pack stays mounted so the stale read is deterministic: without the fix units_per_em stays. */
+void test_font_truncated_winner_swap_clears_provider(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
 
     uint32_t size_a = 0;
     uint8_t *blob_a = build_test_font_blob(&size_a);
-    uint32_t handle_a = nt_font_test_register_data(blob_a, size_a);
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_reuse_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str("font_reuse");
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_a);
-    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    uint32_t tok_a = nt_font_test_register_data(blob_a, size_a);
+    nt_resource_t res = nt_font_test_resource(tok_a);
     nt_font_add(font, res);
     nt_resource_step();
     nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
 
-    uint32_t gen_before = nt_font_get_cache_generation(font);
+    /* Warm a lookup against the valid winner. */
+    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a1);
+    TEST_ASSERT_FALSE(a1->is_tofu);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    /* Virtual-pack unmount skips the deactivator; invoke it manually. */
-    nt_resource_unmount(pid);
-    nt_font_test_deactivate(handle_a);
-
-    uint32_t size_b = 0;
-    uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
-    uint32_t handle_b = nt_font_test_register_data(blob_b, size_b);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(handle_a, handle_b, "test setup: activate_font must reuse the freed data slot to exercise the bug");
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_b);
+    /* Swap the winner to a resident TRUNCATED blob (< header) in a SECOND pack sharing the rid; the
+     * later mount wins the tiebreak and the pin moves to it. Pack A stays mounted (its blob alive), so
+     * a stale provider would still read valid old bytes — the fix must clear it regardless. */
+    uint8_t truncated[sizeof(NtFontAssetHeader) - 1] = {0};
+    uint32_t tok_b = nt_font_test_register_shared_rid(tok_a, truncated, (uint32_t)sizeof(truncated));
+    (void)tok_b;
     nt_resource_step();
     nt_font_step();
 
-    nt_font_metrics_t m_b = nt_font_get_metrics(font);
-    TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
-    TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
-    TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
-    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+    /* Provider cleared -> no active source -> metrics reset (mirrors the unmount path). Without the fix
+     * the stale provider keeps viewing pack A's live blob and units_per_em stays non-zero. */
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
     nt_font_destroy(font);
     free(blob_a);
-    free(blob_b);
+}
+
+/* ---- FONT-03: unmount a font's pack WHILE it is referenced ----
+ *
+ * The font reads glyph bytes zero-copy from the pinned pack blob, then the pack
+ * is unmounted while the pin is held. The unmount overrides the pin, the resolve
+ * pass frees the holder exactly once (no double-free), and the font degrades
+ * cleanly — no dangling read. */
+void test_font_unmount_while_referenced_renders_tofu(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint32_t tok = nt_font_test_register_data(blob, blob_size);
+    nt_resource_t res = nt_font_test_resource(tok);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Reference the blob: 'A' is a real glyph (zero-copy decode through the pin);
+     * 'Z' is absent -> the single font-level tofu sentinel (0xFFFFFFFF). */
+    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_FALSE(a->is_tofu);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+
+    const nt_glyph_cache_entry_t *z = nt_font_lookup_glyph(font, 'Z');
+    TEST_ASSERT_NOT_NULL(z);
+    TEST_ASSERT_TRUE(z->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, z->codepoint);
+
+    /* Unmount while referenced: no crash, holder freed once (no double-free). */
+    nt_font_test_deactivate(tok);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Sole provider gone -> metrics cleared; a previously-present codepoint now
+     * degrades to no-glyph (NULL) instead of dereferencing the freed provider. */
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NULL(a2);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-04: fallback resolution ORDER (first-wins) + tofu terminal ----
+ *
+ * Two resources merged into ONE nt_font_t (base first, fallback second) with
+ * overlapping coverage. Pins that:
+ *   (a) a codepoint present in BOTH resolves to the FIRST-added resource — via
+ *       glyph identity (advance), not merely "non-tofu";
+ *   (b) a codepoint present only in the second resolves to the second;
+ *   (c) a codepoint in NEITHER resolves to the single font-level tofu (sentinel
+ *       0xFFFFFFFF) and that tofu is TERMINAL — a second distinct miss returns
+ *       the SAME tofu entry, so no intermediate resource emits its own tofu. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_fallback_order_first_wins(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    /* Base owns 'A' + shared 'M' + shared CJK 0x4E2D (advance 500);
+     * fallback owns shared 'M' + 'Z' + shared CJK 0x4E2D (advance 700).
+     * Codepoints are pre-sorted per blob (bsearch precondition). */
+    const uint32_t base_cps[3] = {'A', 'M', 0x4E2DU};
+    const uint32_t fb_cps[3] = {'M', 'Z', 0x4E2DU};
+    uint32_t base_sz = 0;
+    uint32_t fb_sz = 0;
+    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 3, 500, &base_sz);
+    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 3, 700, &fb_sz);
+
+    nt_resource_t base_res = register_font_resource("fb_base", base, base_sz);
+    nt_resource_t fb_res = register_font_resource("fb_fallback", fb, fb_sz);
+
+    /* Fixed order: base FIRST, fallback SECOND → base wins shared codepoints. */
+    nt_font_add(font, base_res);
+    nt_font_add(font, fb_res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* (a) shared ASCII 'M' → base (advance 500), NOT fallback (700).
+     * ASCII exercises the ascii_glyph_idx fast path. */
+    const nt_glyph_cache_entry_t *m = nt_font_lookup_glyph(font, 'M');
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_FALSE(m->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('M', m->codepoint);
+    TEST_ASSERT_EQUAL_INT16(500, m->advance);
+
+    /* (a') shared non-ASCII 0x4E2D → base (500) via the bsearch first-wins loop
+     * (codepoint >= 128 bypasses the ascii fast path). */
+    const nt_glyph_cache_entry_t *cjk = nt_font_lookup_glyph(font, 0x4E2DU);
+    TEST_ASSERT_NOT_NULL(cjk);
+    TEST_ASSERT_FALSE(cjk->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0x4E2DU, cjk->codepoint);
+    TEST_ASSERT_EQUAL_INT16(500, cjk->advance);
+
+    /* (b) 'A' only in base → base (500). */
+    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_FALSE(a->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, a->advance);
+
+    /* (b') 'Z' only in fallback → second resource (700). */
+    const nt_glyph_cache_entry_t *z = nt_font_lookup_glyph(font, 'Z');
+    TEST_ASSERT_NOT_NULL(z);
+    TEST_ASSERT_FALSE(z->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('Z', z->codepoint);
+    TEST_ASSERT_EQUAL_INT16(700, z->advance);
+
+    /* (c) '#' in NEITHER → single font-level tofu, sentinel 0xFFFFFFFF. */
+    const nt_glyph_cache_entry_t *miss1 = nt_font_lookup_glyph(font, '#');
+    TEST_ASSERT_NOT_NULL(miss1);
+    TEST_ASSERT_TRUE(miss1->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, miss1->codepoint);
+
+    /* Terminal: a DIFFERENT miss returns the SAME tofu entry — proves one
+     * font-level tofu, not a per-resource tofu leaking through the cascade. */
+    const nt_glyph_cache_entry_t *miss2 = nt_font_lookup_glyph(font, '@');
+    TEST_ASSERT_NOT_NULL(miss2);
+    TEST_ASSERT_TRUE(miss2->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, miss2->codepoint);
+    TEST_ASSERT_EQUAL_PTR(miss1, miss2);
+
+    nt_font_destroy(font);
+    free(base);
+    free(fb);
+}
+
+/* ---- FONT-02: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
+ *
+ * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
+ * (find_glyph_in_pack) — heap-free, no parse step, bounded. This confirms that
+ * without adding any new cmap/bitmap structure. Uses nt_font_lookup_metrics
+ * (CPU-only: no GPU upload, no glyph cache touch) so the assertion exercises
+ * the bare bsearch path, and covers its boundaries: first, last, interior hit,
+ * below-first / interior-gap / above-last misses. Non-ASCII codepoints force
+ * the bsearch loop (ASCII would take the ascii_glyph_idx fast path instead). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_cmap_bounded_no_parse(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    /* Sparse, SORTED, all >= 128 → every lookup goes through find_glyph_in_pack. */
+    const uint32_t cps[4] = {0x100U, 0x200U, 0x20ACU, 0x4E2DU};
+    uint32_t sz = 0;
+    uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4, 600, &sz);
+    nt_resource_t res = register_font_resource("cmap_bounded", blob, sz);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Present — first, interior, interior, last all resolve to the real glyph. */
+    for (int i = 0; i < 4; i++) {
+        nt_glyph_metrics_t hit = nt_font_lookup_metrics(font, cps[i]);
+        TEST_ASSERT_TRUE(hit.found);
+        TEST_ASSERT_EQUAL_INT16(600, hit.advance);
+    }
+
+    /* Absent — bsearch not-found boundaries: below first, gap between entries,
+     * above last. Each returns the tofu fallback metrics (found = false). */
+    const uint32_t absent[3] = {0x0FFU, 0x150U, 0x30000U};
+    for (int i = 0; i < 3; i++) {
+        nt_glyph_metrics_t miss = nt_font_lookup_metrics(font, absent[i]);
+        TEST_ASSERT_FALSE(miss.found);
+    }
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-01: two resources at a COMMON (builder-normalized) UPM merge
+ * into one font without tripping the shared-metrics assert ----
+ *
+ * Two source fonts of different NATURAL UPM (latin ~1000, CJK 2048) that the
+ * builder normalized to a COMMON units_per_em with the primary
+ * driving vmetrics. At runtime both headers carry identical metrics, so adding
+ * BOTH into one nt_font_t simultaneously must NOT fire the multi-resource
+ * shared-metrics mismatch assert, and nt_font_get_metrics reports the common
+ * UPM. Both resources also resolve their own glyphs within the one font. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_merged_different_upm_no_metrics_assert(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    const uint16_t common_upm = 2048U; /* = max(1000, 2048), scaled toward max */
+    const int16_t asc = 1600;
+    const int16_t descent = -400;
+    const int16_t lg = 0;
+    const uint32_t latin_cps[2] = {'A', 'M'};       /* base: half-em advance */
+    const uint32_t cjk_cps[2] = {0x4E2DU, 0x4E8CU}; /* CJK: full-width advance */
+    uint32_t latin_sz = 0;
+    uint32_t cjk_sz = 0;
+    uint8_t *latin = build_font_blob_codepoints(common_upm, asc, descent, lg, latin_cps, 2, 1024, &latin_sz);
+    uint8_t *cjk = build_font_blob_codepoints(common_upm, asc, descent, lg, cjk_cps, 2, 2048, &cjk_sz);
+
+    nt_resource_t latin_res = register_font_resource("merge_latin", latin, latin_sz);
+    nt_resource_t cjk_res = register_font_resource("merge_cjk", cjk, cjk_sz);
+
+    /* Primary (latin) FIRST drives line height; CJK second. Simultaneous merge. */
+    nt_font_add(font, latin_res);
+    nt_font_add(font, cjk_res);
+    nt_resource_step();
+    nt_font_step(); /* must NOT abort on the shared-metrics assert */
+
+    nt_font_metrics_t m = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(common_upm, m.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(asc, m.ascent);
+    TEST_ASSERT_EQUAL_INT16(descent, m.descent);
+    TEST_ASSERT_EQUAL_INT16((int16_t)(asc - descent + lg), m.line_height);
+
+    /* Both resources resolve within the one font (base + CJK). */
+    nt_glyph_metrics_t latin_g = nt_font_lookup_metrics(font, 'A');
+    TEST_ASSERT_TRUE(latin_g.found);
+    TEST_ASSERT_EQUAL_INT16(1024, latin_g.advance);
+    nt_glyph_metrics_t cjk_g = nt_font_lookup_metrics(font, 0x4E2DU);
+    TEST_ASSERT_TRUE(cjk_g.found);
+    TEST_ASSERT_EQUAL_INT16(2048, cjk_g.advance);
+
+    nt_font_destroy(font);
+    free(latin);
+    free(cjk);
 }
 
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
@@ -1090,6 +1430,9 @@ int main(void) {
     RUN_TEST(test_font_get_metrics);
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
+    RUN_TEST(test_font_fallback_order_first_wins);
+    RUN_TEST(test_font_cmap_bounded_no_parse);
+    RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
@@ -1106,10 +1449,13 @@ int main(void) {
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);
     RUN_TEST(test_measure_n_invalidates_on_resource_change);
+    RUN_TEST(test_font_add_already_published_forces_rescan);
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
+    RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
-    RUN_TEST(test_font_hotswap_handle_reuse_after_deactivate);
+    RUN_TEST(test_font_truncated_winner_swap_clears_provider);
+    RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     return UNITY_END();
 }

@@ -84,6 +84,10 @@ typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resour
 typedef enum {
     NT_RESOURCE_BEHAVIOR_NONE = 0,
     NT_RESOURCE_BEHAVIOR_AUX_BACKED = 1 << 0,
+    /* Zero-copy consumers (fonts) read the live pack blob through a raw pointer, so the
+     * published winner must PIN its pack blob. The resolve pass owns the pin (per-pack
+     * aggregate NtPackMeta.blob_pins), rebuilt from the published winners each resolve pass. */
+    NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
 } nt_resource_behavior_t;
 
 /* ---- Descriptor ---- */
@@ -218,6 +222,7 @@ typedef struct {
 
 typedef struct {
     uint64_t resource_id; /* nt_hash64 value */
+    uint32_t blob_pins;   /* PIN_BLOB pins held via this asset's pack (0 unless it is the published winner of a pinning slot) */
     uint16_t pack_index;  /* index into the pack store (packs[]) */
     uint8_t type;         /* nt_asset_type_t */
     uint8_t state;        /* nt_asset_state_t value */
@@ -242,6 +247,13 @@ uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle);
 // #region test_access
 #ifdef NT_TEST_ACCESS
 void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);
+uint32_t nt_resource_test_pack_blob_pins(uint16_t pack_index);
+uint8_t nt_resource_test_pack_blob_resident(uint16_t pack_index);
+uint32_t nt_resource_test_pack_blob_last_access(uint16_t pack_index);
+uint8_t nt_resource_test_pack_evict_skip_logged(uint16_t pack_index);
+/* Force a pack's io_type so unmount frees its blob (simulates an I/O-owned pack for a
+ * parse_pack'd blob). Value is nt_io_type_t; nonzero hands blob ownership to the resource system. */
+void nt_resource_test_set_pack_io_type(uint16_t pack_index, uint8_t io_type);
 #endif
 // #endregion
 

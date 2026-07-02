@@ -471,6 +471,16 @@ static inline void write_varlen_delta(uint8_t **wp, int delta) {
     }
 }
 
+// #region UPM normalize
+/* Rescale a font-unit value by num/den (round half away from zero).
+ * int32 result; caller range-checks into int16 — never wrap silently. */
+static int32_t upm_rescale(int v, uint32_t num, uint32_t den) {
+    int64_t scaled = (int64_t)v * (int64_t)num;
+    int64_t half = (int64_t)(den / 2U);
+    return (int32_t)((scaled >= 0) ? (scaled + half) / (int64_t)den : -(((-scaled) + half) / (int64_t)den));
+}
+// #endregion
+
 /* Temporary point buffer for one contour (used during encoding) */
 typedef struct {
     int16_t x, y;
@@ -665,7 +675,7 @@ typedef struct {
 /* --- nt_builder_decode_font: TTF -> final NT_ASSET_FONT binary --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, uint8_t **out_data, uint32_t *out_size) {
+nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, uint16_t target_units_per_em, uint8_t **out_data, uint32_t *out_size) {
     if (!path || !charset || !out_data || !out_size) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -697,7 +707,22 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
      * PixelHeight maps to (ascent-descent), EmToPixels maps to actual EM size. */
     float scale = stbtt_ScaleForMappingEmToPixels(&font, 1.0F);
     NT_BUILD_ASSERT(scale > 0.0F && "decode_font: invalid em scale");
-    uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
+    uint16_t src_upm = (uint16_t)((1.0F / scale) + 0.5F);
+    // #endregion
+
+    // #region UPM normalize setup
+    /* Rescale all metrics/contours to a caller target UPM so different-UPM fonts merge.
+     * target=0 (or == natural) → no rescale, byte-identical. Scale toward max UPM. */
+    uint16_t out_upm = src_upm;
+    bool rescale = false;
+    uint32_t upm_num = 1;
+    uint32_t upm_den = 1;
+    if (target_units_per_em != 0 && target_units_per_em != src_upm) {
+        rescale = true;
+        out_upm = target_units_per_em;
+        upm_num = target_units_per_em;
+        upm_den = src_upm;
+    }
     // #endregion
 
     // #region Resolve all glyph indices upfront
@@ -726,6 +751,26 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     for (uint32_t i = 0; i < glyph_count; i++) {
         /* Analyze shape and cache vertices */
         vert_counts[i] = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, (stbtt_vertex **)&vert_cache_raw[i]);
+
+        // #region UPM normalize contour points
+        /* Rescale ABSOLUTE vertex coords BEFORE size/delta-encode — never scale deltas (accumulates rounding). */
+        if (rescale) {
+            stbtt_vertex *vs = (stbtt_vertex *)vert_cache_raw[i];
+            for (int k = 0; k < vert_counts[i]; k++) {
+                int32_t nx = upm_rescale(vs[k].x, upm_num, upm_den);
+                int32_t ny = upm_rescale(vs[k].y, upm_num, upm_den);
+                int32_t ncx = upm_rescale(vs[k].cx, upm_num, upm_den);
+                int32_t ncy = upm_rescale(vs[k].cy, upm_num, upm_den);
+                NT_BUILD_ASSERT(nx >= INT16_MIN && nx <= INT16_MAX && ny >= INT16_MIN && ny <= INT16_MAX && "UPM rescale: contour point overflows int16");
+                NT_BUILD_ASSERT(ncx >= INT16_MIN && ncx <= INT16_MAX && ncy >= INT16_MIN && ncy <= INT16_MAX && "UPM rescale: contour control point overflows int16");
+                vs[k].x = (stbtt_vertex_type)nx;
+                vs[k].y = (stbtt_vertex_type)ny;
+                vs[k].cx = (stbtt_vertex_type)ncx;
+                vs[k].cy = (stbtt_vertex_type)ncy;
+            }
+        }
+        // #endregion
+
         ginfo[i].curve_data_size = compute_curve_data_size((stbtt_vertex *)vert_cache_raw[i], vert_counts[i], &ginfo[i].total_segments, &ginfo[i].contour_count);
         total_curve_data += ginfo[i].curve_data_size;
     }
@@ -772,7 +817,13 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                     continue;
                 }
                 kern_pairs[total_kerns + kc].right_glyph_index = triples[ti].right;
-                kern_pairs[total_kerns + kc].value = triples[ti].value;
+                int32_t kv = triples[ti].value;
+                if (rescale) {
+                    /* Kern is in font units like advance/bbox — must scale with UPM or it desyncs. */
+                    kv = upm_rescale(triples[ti].value, upm_num, upm_den);
+                    NT_BUILD_ASSERT(kv >= INT16_MIN && kv <= INT16_MAX && "UPM rescale: kern value overflows int16");
+                }
+                kern_pairs[total_kerns + kc].value = (int16_t)kv;
                 kc++;
                 ti++;
             }
@@ -803,11 +854,24 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #endregion
 
     // #region Build header
+    /* Header vmetrics rescale to the target UPM (int16 range-checked). */
+    if (rescale) {
+        int32_t s_ascent = upm_rescale(ascent, upm_num, upm_den);
+        int32_t s_descent = upm_rescale(descent, upm_num, upm_den);
+        int32_t s_line_gap = upm_rescale(line_gap, upm_num, upm_den);
+        NT_BUILD_ASSERT(s_ascent >= INT16_MIN && s_ascent <= INT16_MAX && "UPM rescale: ascent overflows int16");
+        NT_BUILD_ASSERT(s_descent >= INT16_MIN && s_descent <= INT16_MAX && "UPM rescale: descent overflows int16");
+        NT_BUILD_ASSERT(s_line_gap >= INT16_MIN && s_line_gap <= INT16_MAX && "UPM rescale: line_gap overflows int16");
+        ascent = s_ascent;
+        descent = s_descent;
+        line_gap = s_line_gap;
+    }
+
     NtFontAssetHeader *hdr = (NtFontAssetHeader *)buffer;
     hdr->magic = NT_FONT_MAGIC;
     hdr->version = NT_FONT_VERSION;
     hdr->glyph_count = (uint16_t)glyph_count;
-    hdr->units_per_em = units_per_em;
+    hdr->units_per_em = out_upm;
     hdr->ascent = (int16_t)ascent;
     hdr->descent = (int16_t)descent;
     hdr->line_gap = (int16_t)line_gap;
@@ -829,6 +893,11 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         int advance = 0;
         int lsb = 0;
         stbtt_GetGlyphHMetrics(&font, ginfo[i].glyph_idx, &advance, &lsb);
+        if (rescale) {
+            int32_t s_adv = upm_rescale(advance, upm_num, upm_den);
+            NT_BUILD_ASSERT(s_adv >= INT16_MIN && s_adv <= INT16_MAX && "UPM rescale: advance overflows int16");
+            advance = s_adv;
+        }
         ge->advance = (int16_t)advance;
 
         int bx0 = 0;
@@ -836,6 +905,18 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         int bx1 = 0;
         int by1 = 0;
         if (stbtt_GetGlyphBox(&font, ginfo[i].glyph_idx, &bx0, &by0, &bx1, &by1)) {
+            if (rescale) {
+                int32_t s_bx0 = upm_rescale(bx0, upm_num, upm_den);
+                int32_t s_by0 = upm_rescale(by0, upm_num, upm_den);
+                int32_t s_bx1 = upm_rescale(bx1, upm_num, upm_den);
+                int32_t s_by1 = upm_rescale(by1, upm_num, upm_den);
+                NT_BUILD_ASSERT(s_bx0 >= INT16_MIN && s_bx0 <= INT16_MAX && s_bx1 >= INT16_MIN && s_bx1 <= INT16_MAX && "UPM rescale: bbox x overflows int16");
+                NT_BUILD_ASSERT(s_by0 >= INT16_MIN && s_by0 <= INT16_MAX && s_by1 >= INT16_MIN && s_by1 <= INT16_MAX && "UPM rescale: bbox y overflows int16");
+                bx0 = s_bx0;
+                by0 = s_by0;
+                bx1 = s_bx1;
+                by1 = s_by1;
+            }
             ge->bbox_x0 = (int16_t)bx0;
             ge->bbox_y0 = (int16_t)by0;
             ge->bbox_x1 = (int16_t)bx1;
@@ -913,7 +994,7 @@ void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_
      * nothing is leaked; EXPECT_BUILD_ASSERT in tests relies on this order) */
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_font(decode_path, opts->charset, &data, &size);
+    nt_build_result_t r = nt_builder_decode_font(decode_path, opts->charset, opts->target_units_per_em, &data, &size);
     free(resolved_path);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_font: decode failed");
 

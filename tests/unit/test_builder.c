@@ -3510,6 +3510,209 @@ void test_font_null_charset_asserts(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
 }
 
+/* Read the first absolute contour point (x,y) of glyph `g` into out_x/out_y.
+ * Layout: [contour_count u16][point_count u16][flags][first x i16][first y i16]... */
+static void read_first_contour_point(const NtFontAssetHeader *hdr, const NtFontGlyphEntry *g, int16_t *out_x, int16_t *out_y) {
+    const uint8_t *p = (const uint8_t *)hdr + g->data_offset + ((size_t)g->kern_count * sizeof(NtFontKernEntry));
+    p += 2; /* contour_count */
+    uint16_t point_count = 0;
+    memcpy(&point_count, p, 2);
+    p += 2;
+    p += NT_FONT_BITMASK_BYTES(point_count); /* on-curve flags */
+    memcpy(out_x, p, 2);
+    memcpy(out_y, p + 2, 2);
+}
+
+/* Baking with target_units_per_em rescales metrics/contours by target/src. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_upm_normalize_rescales(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    /* --- Bake 1: natural UPM (target = 0) --- */
+    const char *pack_nat = TMP_DIR "/test_font_upm_nat.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_nat);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_font_opts_t opts_nat = {.charset = "ABC", .resource_name = NULL, .target_units_per_em = 0};
+    nt_builder_add_font(ctx, ttf_path, &opts_nat);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    uint32_t sz_nat = 0;
+    char *data_nat = nt_builder_read_file(pack_nat, &sz_nat);
+    TEST_ASSERT_NOT_NULL(data_nat);
+    const NtAssetEntry *ent_nat = (const NtAssetEntry *)(data_nat + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_nat = (const NtFontAssetHeader *)(data_nat + ent_nat->offset);
+    const NtFontGlyphEntry *g_nat = (const NtFontGlyphEntry *)((const uint8_t *)hdr_nat + sizeof(NtFontAssetHeader));
+
+    uint16_t src_upm = hdr_nat->units_per_em;
+    TEST_ASSERT_TRUE(src_upm > 0);
+    int16_t nat_adv = g_nat[0].advance;
+    int16_t nat_bx0 = g_nat[0].bbox_x0;
+    int16_t nat_by0 = g_nat[0].bbox_y0;
+    int16_t nat_bx1 = g_nat[0].bbox_x1;
+    int16_t nat_by1 = g_nat[0].bbox_y1;
+    int16_t nat_asc = hdr_nat->ascent;
+    int16_t nat_desc = hdr_nat->descent;
+    int16_t nat_lg = hdr_nat->line_gap;
+    int16_t nat_px = 0;
+    int16_t nat_py = 0;
+    read_first_contour_point(hdr_nat, &g_nat[0], &nat_px, &nat_py);
+
+    /* --- Bake 2: 2x UPM (scale up toward max) --- */
+    uint16_t target = (uint16_t)(src_upm * 2);
+    const char *pack_sc = TMP_DIR "/test_font_upm_scaled.ntpack";
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack_sc);
+    TEST_ASSERT_NOT_NULL(ctx2);
+    nt_font_opts_t opts_sc = {.charset = "ABC", .resource_name = NULL, .target_units_per_em = target};
+    nt_builder_add_font(ctx2, ttf_path, &opts_sc);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    uint32_t sz_sc = 0;
+    char *data_sc = nt_builder_read_file(pack_sc, &sz_sc);
+    TEST_ASSERT_NOT_NULL(data_sc);
+    const NtAssetEntry *ent_sc = (const NtAssetEntry *)(data_sc + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_sc = (const NtFontAssetHeader *)(data_sc + ent_sc->offset);
+    const NtFontGlyphEntry *g_sc = (const NtFontGlyphEntry *)((const uint8_t *)hdr_sc + sizeof(NtFontAssetHeader));
+
+    /* (a) header UPM equals target */
+    TEST_ASSERT_EQUAL_UINT16(target, hdr_sc->units_per_em);
+
+    /* (b) advance + bbox scaled by 2 (ratio target/src = 2, exact within rounding) */
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_adv * 2), g_sc[0].advance);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_bx0 * 2), g_sc[0].bbox_x0);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_by0 * 2), g_sc[0].bbox_y0);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_bx1 * 2), g_sc[0].bbox_x1);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_by1 * 2), g_sc[0].bbox_y1);
+
+    /* header vmetrics scaled by 2 */
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_asc * 2), hdr_sc->ascent);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_desc * 2), hdr_sc->descent);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_lg * 2), hdr_sc->line_gap);
+
+    /* (c) first contour point scaled by 2 */
+    int16_t sc_px = 0;
+    int16_t sc_py = 0;
+    read_first_contour_point(hdr_sc, &g_sc[0], &sc_px, &sc_py);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_px * 2), sc_px);
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_py * 2), sc_py);
+
+    /* (d) glyph table still sorted by codepoint (FONT-02 bsearch precondition) */
+    TEST_ASSERT_EQUAL_UINT('A', g_sc[0].codepoint);
+    TEST_ASSERT_EQUAL_UINT('B', g_sc[1].codepoint);
+    TEST_ASSERT_EQUAL_UINT('C', g_sc[2].codepoint);
+
+    free(data_nat);
+    free(data_sc);
+}
+
+/* Read the first kern pair (right glyph index + value) of glyph `g`.
+ * Kern entries sit at data_offset, before the contour data. */
+static bool read_first_kern(const NtFontAssetHeader *hdr, const NtFontGlyphEntry *g, uint16_t *out_right, int16_t *out_value) {
+    if (g->kern_count == 0) {
+        return false;
+    }
+    const NtFontKernEntry *kerns = (const NtFontKernEntry *)((const uint8_t *)hdr + g->data_offset);
+    *out_right = kerns[0].right_glyph_index;
+    *out_value = kerns[0].value;
+    return true;
+}
+
+/* Kern values live in font units like advance/bbox — UPM rescale must scale them too. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_upm_normalize_scales_kern(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *charset = "AVToWa"; /* AV/To/Wa commonly kern */
+
+    /* --- Bake 1: natural UPM (raw path, target = 0) --- */
+    const char *pack_nat = TMP_DIR "/test_font_kern_nat.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_nat);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_font_opts_t opts_nat = {.charset = charset, .resource_name = NULL, .target_units_per_em = 0};
+    nt_builder_add_font(ctx, ttf_path, &opts_nat);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    uint32_t sz_nat = 0;
+    char *data_nat = nt_builder_read_file(pack_nat, &sz_nat);
+    TEST_ASSERT_NOT_NULL(data_nat);
+    const NtAssetEntry *ent_nat = (const NtAssetEntry *)(data_nat + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_nat = (const NtFontAssetHeader *)(data_nat + ent_nat->offset);
+    const NtFontGlyphEntry *g_nat = (const NtFontGlyphEntry *)((const uint8_t *)hdr_nat + sizeof(NtFontAssetHeader));
+    uint16_t src_upm = hdr_nat->units_per_em;
+    TEST_ASSERT_TRUE(src_upm > 0);
+
+    /* Find the first glyph carrying a kern pair; glyph order is codepoint-sorted
+     * and identical across bakes, so the index is stable. */
+    uint32_t ki = hdr_nat->glyph_count;
+    uint16_t nat_right = 0;
+    int16_t nat_val = 0;
+    for (uint32_t i = 0; i < hdr_nat->glyph_count; i++) {
+        if (read_first_kern(hdr_nat, &g_nat[i], &nat_right, &nat_val)) {
+            ki = i;
+            break;
+        }
+    }
+    if (ki == hdr_nat->glyph_count) {
+        free(data_nat);
+        TEST_IGNORE_MESSAGE("Test font has no kern pairs for this charset");
+        return;
+    }
+    TEST_ASSERT_TRUE(nat_val != 0);
+
+    /* --- Bake 2: 2x UPM --- */
+    uint16_t target = (uint16_t)(src_upm * 2);
+    const char *pack_sc = TMP_DIR "/test_font_kern_scaled.ntpack";
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack_sc);
+    TEST_ASSERT_NOT_NULL(ctx2);
+    nt_font_opts_t opts_sc = {.charset = charset, .resource_name = NULL, .target_units_per_em = target};
+    nt_builder_add_font(ctx2, ttf_path, &opts_sc);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    uint32_t sz_sc = 0;
+    char *data_sc = nt_builder_read_file(pack_sc, &sz_sc);
+    TEST_ASSERT_NOT_NULL(data_sc);
+    const NtAssetEntry *ent_sc = (const NtAssetEntry *)(data_sc + sizeof(NtPackHeader));
+    const NtFontAssetHeader *hdr_sc = (const NtFontAssetHeader *)(data_sc + ent_sc->offset);
+    const NtFontGlyphEntry *g_sc = (const NtFontGlyphEntry *)((const uint8_t *)hdr_sc + sizeof(NtFontAssetHeader));
+
+    uint16_t sc_right = 0;
+    int16_t sc_val = 0;
+    TEST_ASSERT_TRUE(read_first_kern(hdr_sc, &g_sc[ki], &sc_right, &sc_val));
+    TEST_ASSERT_EQUAL_UINT16(nat_right, sc_right); /* same pair, stable ordering */
+
+    /* kern must scale with UPM (~2x); a raw copy would leave it at nat_val */
+    TEST_ASSERT_INT16_WITHIN(1, (int16_t)(nat_val * 2), sc_val);
+
+    free(data_nat);
+    free(data_sc);
+}
+
+/* A rescale that would exceed INT16_MAX must trap (never wrap). */
+void test_font_upm_normalize_overflow_asserts(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_upm_overflow.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    /* 'A' cap-height at ~2048 UPM scaled to 65000 (~31x) exceeds INT16_MAX → guard traps */
+    nt_font_opts_t opts = {.charset = "A", .resource_name = NULL, .target_units_per_em = 65000};
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
+}
+
 void test_font_dump_pack(void) {
     const char *ttf_path = find_test_ttf();
     if (!ttf_path) {
@@ -5433,6 +5636,9 @@ int main(void) {
     RUN_TEST(test_font_kern_pairs);
     RUN_TEST(test_font_missing_codepoint_asserts);
     RUN_TEST(test_font_null_charset_asserts);
+    RUN_TEST(test_font_upm_normalize_rescales);
+    RUN_TEST(test_font_upm_normalize_scales_kern);
+    RUN_TEST(test_font_upm_normalize_overflow_asserts);
     RUN_TEST(test_font_dump_pack);
     RUN_TEST(test_font_charset_dedup);
     RUN_TEST(test_font_kern_values);

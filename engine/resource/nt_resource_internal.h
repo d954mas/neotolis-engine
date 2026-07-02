@@ -32,7 +32,10 @@ typedef enum {
 
 typedef enum {
     NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
-    NT_BLOB_AUTO = 1, /* auto-evict after TTL since last access */
+    /* Auto-evict blob after TTL since last access. Re-downloaded on demand: nt_resource_invalidate()
+     * resets an evicted pack to re-issue I/O, so re-activation (e.g. after GPU context loss) recovers it.
+     * Zero-copy (PIN_BLOB) blobs stay resident via the pin. */
+    NT_BLOB_AUTO = 1,
 } nt_blob_policy_t;
 
 /* ---- I/O request type ---- */
@@ -81,7 +84,7 @@ typedef struct {
     int16_t priority;    /* higher = wins on conflict, signed */
     uint8_t pack_type;   /* nt_pack_type_t */
     uint8_t mounted;     /* 1 if mounted, 0 if slot available */
-    uint16_t mount_seq;  /* monotonic mount order for tiebreak */
+    uint32_t mount_seq;  /* monotonic mount order for tiebreak (runtime-only, not serialized) */
     uint8_t pack_state;  /* nt_pack_state_t */
     uint8_t blob_policy; /* nt_blob_policy_t */
     const uint8_t *blob; /* loaded pack data */
@@ -94,9 +97,9 @@ typedef struct {
     uint32_t bytes_received;
     uint32_t bytes_total;
     /* I/O request linkage */
-    uint32_t io_request_id; /* nt_http or nt_fs handle.id */
-    uint8_t io_type;        /* nt_io_type_t */
-    uint8_t _pad2;
+    uint32_t io_request_id;         /* nt_http or nt_fs handle.id */
+    uint8_t io_type;                /* nt_io_type_t */
+    uint8_t blob_evict_skip_logged; /* edge-trigger: Phase C runs every frame — log AUTO-as-KEEP skip once, re-arm when pins reach 0 */
     /* Retry state */
     uint16_t attempt_count;
     uint32_t retry_delay_ms;
@@ -104,6 +107,7 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
+    uint32_t blob_pins; /* published PIN_BLOB winners pinning this pack's blob; rebuilt from winners each resolve pass, gates Phase-C eviction */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
 } NtPackMeta;
@@ -118,15 +122,14 @@ typedef struct {
     uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
     uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
     int16_t resolve_prio;            /* priority of currently published winner */
-    uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
+    uint32_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
     uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
     uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
     uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
-    uint8_t _pad[2];
-    void *user_data; /* per-slot auxiliary data (on_resolve/on_cleanup) */
+    void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 
 /* Transient per-slot state — only valid during resource_resolve_pass().
@@ -138,8 +141,8 @@ typedef struct {
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
     int16_t target_prio;               /* priority of target winner */
     int16_t candidate_prio;            /* priority of publishable candidate */
-    uint16_t target_seq;               /* mount_seq of target winner */
-    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
+    uint32_t target_seq;               /* mount_seq of target winner */
+    uint32_t candidate_seq;            /* mount_seq of publishable candidate */
     uint16_t target_asset_idx;         /* assets[] index of target winner */
     uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
     uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */

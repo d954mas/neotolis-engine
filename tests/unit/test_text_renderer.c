@@ -18,10 +18,6 @@
 #include "unity.h"
 /* clang-format on */
 
-/* ---- Virtual pack ID counter ---- */
-
-static uint32_t s_vpack_counter;
-
 /* ---- Test blob builder (identical to test_font.c) ---- */
 
 static uint8_t *build_test_font_blob(uint32_t *out_size) {
@@ -100,17 +96,10 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
 /* ---- Helper: register font blob as test resource ---- */
 
 static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
-
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "fp_%s_%u", name, s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t rid = nt_hash64_str(name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
-
-    return nt_resource_request(rid, NT_ASSET_FONT);
+    /* fonts resolve bytes from a resident pack blob, so wrap the blob in a
+     * real parsed pack (owned by the font module) rather than a virtual pack. */
+    (void)name;
+    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
 }
 
 /* ---- Shared test state ---- */
@@ -138,7 +127,6 @@ void setUp(void) {
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    s_vpack_counter = 0;
 
     /* Build font and create handle */
     s_blob = build_test_font_blob(&s_blob_size);
