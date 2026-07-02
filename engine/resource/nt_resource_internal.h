@@ -81,7 +81,7 @@ typedef struct {
     int16_t priority;    /* higher = wins on conflict, signed */
     uint8_t pack_type;   /* nt_pack_type_t */
     uint8_t mounted;     /* 1 if mounted, 0 if slot available */
-    uint16_t mount_seq;  /* monotonic mount order for tiebreak */
+    uint32_t mount_seq;  /* monotonic mount order for tiebreak (runtime-only, not serialized) */
     uint8_t pack_state;  /* nt_pack_state_t */
     uint8_t blob_policy; /* nt_blob_policy_t */
     const uint8_t *blob; /* loaded pack data */
@@ -119,14 +119,14 @@ typedef struct {
     uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
     uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
     int16_t resolve_prio;            /* priority of currently published winner */
-    uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
+    uint32_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
     uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
     uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
     uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
-    uint16_t pinned_pack_seq;        /* mount_seq of the pack this slot PIN_BLOB-pins (0 = none); survives packs[] index reuse */
+    uint32_t pinned_pack_seq;        /* mount_seq of the pack this slot PIN_BLOB-pins (0 = none); survives packs[] index reuse */
     void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 
@@ -139,8 +139,8 @@ typedef struct {
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
     int16_t target_prio;               /* priority of target winner */
     int16_t candidate_prio;            /* priority of publishable candidate */
-    uint16_t target_seq;               /* mount_seq of target winner */
-    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
+    uint32_t target_seq;               /* mount_seq of target winner */
+    uint32_t candidate_seq;            /* mount_seq of publishable candidate */
     uint16_t target_asset_idx;         /* assets[] index of target winner */
     uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
     uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */

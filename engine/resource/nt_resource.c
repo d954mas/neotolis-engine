@@ -32,7 +32,7 @@ static struct {
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
-    uint16_t next_mount_seq;       /* monotonic counter for mount order tiebreak */
+    uint32_t next_mount_seq;       /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;            /* high-water mark in assets[] */
     uint32_t publication_epoch;    /* bumps when published slot view changes */
     uint64_t placeholder_texture;  /* resource_id for fallback texture, 0 = none */
@@ -126,9 +126,7 @@ static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *
         return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
     }
     if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-        /* Zero-copy provider views into the blob — publishing READY without it
-         * resident hands on_resolve data=NULL and reports a usable tofu winner. */
-        return asset_blob_resident(meta);
+        return s_resource.packs[meta->pack_index].blob != NULL; /* zero-copy provider needs a real resident blob; virtual packs have none */
     }
     return true;
 }
@@ -221,7 +219,7 @@ static void resource_resolve_pass(void) {
         }
 
         int16_t prio = s_resource.packs[meta->pack_index].priority;
-        uint16_t seq = s_resource.packs[meta->pack_index].mount_seq;
+        uint32_t seq = s_resource.packs[meta->pack_index].mount_seq;
         uint32_t runtime_handle = asset_effective_runtime_handle(ai, meta);
         uint8_t behavior_flags = s_resource.activators[slot->asset_type].behavior_flags;
 
@@ -297,8 +295,8 @@ static void resource_resolve_pass(void) {
              * mount_seq re-pins the fresh mount; the stale pin was already zeroed by unmount's
              * memset, so the guarded decrement no-ops when that mount is gone. */
             const uint16_t new_pack = next_has_real_winner ? s_resource.assets[next_asset_idx].pack_index : UINT16_MAX;
-            const uint16_t new_seq = (new_pack < NT_RESOURCE_MAX_PACKS) ? s_resource.packs[new_pack].mount_seq : 0;
-            const uint16_t old_seq = slot->pinned_pack_seq; /* 0 = this slot holds no pin */
+            const uint32_t new_seq = (new_pack < NT_RESOURCE_MAX_PACKS) ? s_resource.packs[new_pack].mount_seq : 0;
+            const uint32_t old_seq = slot->pinned_pack_seq; /* 0 = this slot holds no pin */
             if (old_seq != new_seq) {
                 /* Release the previous pin only if that exact mount is still resident. Real if-guards,
                  * not NT_ASSERT — assert is a no-op in shipping (NT_ASSERT_MODE=OFF). */

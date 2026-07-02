@@ -1640,6 +1640,43 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     free(blob);
 }
 
+/* A blobless VIRTUAL pack must never publish a PIN_BLOB winner: the zero-copy
+ * provider views into a real pack blob, which a virtual pack has none of. Even at
+ * higher priority the virtual entry must lose to a resident file-pack blob and
+ * must not steal the pin. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_virtual_pack_not_publishable(void) {
+    nt_hash32_t pid_file = nt_hash32_str("pin_vp_file");
+    nt_hash32_t pid_virt = nt_hash32_str("pin_vp_virt");
+    nt_hash64_t rid = nt_hash64_str("pin_vp_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+
+    /* File pack (index 0) at low priority — real resident blob, handle 100 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, size));
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
+
+    /* Virtual pack (index 1) at HIGHER priority — no blob, handle 200 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid_virt, rid, NT_ASSET_MESH, 200));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+
+    /* File wins despite lower priority (virtual is unpublishable); the pin stays
+     * on the resident file pack, never transfers to the blobless virtual pack. */
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* file pinned */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(1)); /* virtual never pinned */
+
+    free(blob);
+}
+
 /* ---- Invalidate tests ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2785,6 +2822,7 @@ int main(void) {
     RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
     RUN_TEST(test_blob_pin_unmount_while_referenced);
     RUN_TEST(test_blob_pin_unpublishable_when_blob_evicted_before_pin);
+    RUN_TEST(test_blob_pin_virtual_pack_not_publishable);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);
