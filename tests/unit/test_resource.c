@@ -1519,9 +1519,12 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     uint32_t access_before = nt_resource_test_pack_blob_last_access(0);
     nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
     nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));           /* held as KEEP */
-    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0));       /* one-shot fired */
-    TEST_ASSERT_TRUE(nt_resource_test_pack_blob_last_access(0) >= access_before); /* timer-freeze refresh */
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));     /* held as KEEP */
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0)); /* one-shot fired */
+    /* Strictly greater: blob_last_access_ms is monotonic, so >= can never fail (removing the freeze
+     * leaves it equal, still passing). The 5ms sleep guarantees now_ms > access_before, so > passes
+     * only when the freeze actually refreshed the timer and fails if the freeze is deleted. */
+    TEST_ASSERT_TRUE(nt_resource_test_pack_blob_last_access(0) > access_before);
 
     /* (2) Drop the winner -> ref returns to 0 (Phase C that frame still saw ref>0 and refreshed) */
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
