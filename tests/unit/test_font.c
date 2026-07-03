@@ -1683,6 +1683,65 @@ void test_embolden_drops_collapsed_counter(void) {
     TEST_ASSERT_EQUAL_UINT16(12, n_zero);
 }
 
+/* Signed shoelace area of a closed int point ring (mirrors nt_font.c's internal). */
+static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
+    int64_t acc = 0;
+    for (uint16_t p = 0; p < n; p++) {
+        uint16_t q = (uint16_t)((p + 1) % n);
+        acc += ((int64_t)x[p] * y[q]) - ((int64_t)x[q] * y[p]);
+    }
+    return 0.5 * (double)acc;
+}
+
+/* Regression (#253 '8'/'B'/'@' waist): the OUTER contour of a glyph whose control
+ * polygon self-intersects at a concave waist under an outward offset, but whose
+ * |area| GROWS, must be KEPT — its self-overlap adds winding, stays filled, no hole.
+ * The discriminator is SHRINK, not self-intersection: only a shrinking hole is
+ * dropped. Before the shrink-guard fix, self-intersection alone dropped the outer, so
+ * the whole silhouette vanished (outline "breaks"). Fixture: a {5/2} pentagram ring —
+ * self-crossing at every W. Its CW orientation (negative area) grows under the sign=-1
+ * offset → KEPT; the same ring reversed (CCW, positive area) shrinks → DROPPED. Both
+ * self-intersect, so this proves the guard keys on shrink, not the crossing test. */
+void test_embolden_keeps_self_intersecting_outer(void) {
+    /* Pentagram tips connected every-other; CW (grows), 5 all-on-curve points. */
+    const int16_t star[5][2] = {{500, 950}, {802, 90}, {24, 620}, {976, 620}, {198, 90}};
+    uint8_t blob[128];
+    build_contour_blob_1(blob, star, 5);
+
+    /* W=0: all 5 curves emitted verbatim (collapse logic gated off). */
+    float cv[5 * 6];
+    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 5);
+    TEST_ASSERT_EQUAL_UINT16(5, n_zero);
+
+    /* Prove the premise at W=300: the offset ring still self-intersects AND its
+     * |area| grows (outer behavior, not a hole). */
+    int32_t px[5];
+    int32_t py[5];
+    uint8_t pon[5];
+    for (int i = 0; i < 5; i++) {
+        px[i] = star[i][0];
+        py[i] = star[i][1];
+        pon[i] = 1;
+    }
+    double area_before = ring_signed_area(px, py, 5);
+    nt_font_test_offset_points(px, py, pon, 5, 300.0F);
+    double area_after = ring_signed_area(px, py, 5);
+    TEST_ASSERT_TRUE(nt_font_test_contour_self_intersects(px, py, 5)); /* waist crosses */
+    TEST_ASSERT_TRUE(fabs(area_after) > fabs(area_before));            /* outer grows */
+
+    /* The fix: a growing self-intersecting outer is KEPT — all 5 curves still
+     * emitted. Pre-fix this returned 0 (silhouette vanished). */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 5);
+    TEST_ASSERT_EQUAL_UINT16(5, n_wide);
+
+    /* Same ring reversed is CCW: it self-intersects too but SHRINKS under the
+     * offset (a hole) → dropped. Proves the discriminator is shrink, not crossing. */
+    const int16_t star_rev[5][2] = {{198, 90}, {976, 620}, {24, 620}, {802, 90}, {500, 950}};
+    build_contour_blob_1(blob, star_rev, 5);
+    uint16_t n_hole = nt_font_test_decode_contours(blob, 300.0F, cv, 5);
+    TEST_ASSERT_EQUAL_UINT16(0, n_hole);
+}
+
 /* Direct unit of the self-intersection primitive: a proper crossing (bowtie quad)
  * is detected; a simple convex square and a triangle (n<4) are not; a shape that
  * merely shares a vertex (touching, not crossing) is not flagged. */
@@ -1931,6 +1990,7 @@ int main(void) {
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
     RUN_TEST(test_embolden_drops_collapsed_counter);
+    RUN_TEST(test_embolden_keeps_self_intersecting_outer);
     RUN_TEST(test_contour_self_intersects_primitive);
     /* DECO-01/02: (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);

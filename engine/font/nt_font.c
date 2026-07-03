@@ -736,15 +736,18 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         /* Embolden the point ring BEFORE conversion — offsetting nt_curve_t after
          * conversion tears shared endpoints (RESEARCH Anti-Pattern). */
         if (weight != 0.0F) {
-            /* Uniform outline: a counter whose offset polygon self-intersects would
-             * produce a winding-cancellation hole; drop it so it fills solid = correct
-             * dilation. Sign-flip catches a fully over-shot ring that inverted cleanly
-             * (no crossing). weight!=0 only keeps the regular path byte-identical. */
+            /* Only a HOLE shrinks under an outward offset; the OUTER grows. So gate the
+             * drop on shrink: a shrinking counter whose offset ring self-intersects (or
+             * inverts sign) cancels its winding → would hole → drop so it fills solid.
+             * The outer grows even when it self-intersects at a concave waist ('8'/'B'/'@')
+             * — its self-overlap adds winding, stays filled, must be KEPT. area_before~0
+             * makes the shrink test false → never dropped (safe). weight!=0 only keeps the
+             * regular path byte-identical. */
             double area_before = contour_signed_area(pts_x, pts_y, point_count);
             offset_points(pts_x, pts_y, pts_on, point_count, weight);
             double area_after = contour_signed_area(pts_x, pts_y, point_count);
-            if (contour_self_intersects(pts_x, pts_y, point_count) || (area_before > 0.0) != (area_after > 0.0)) {
-                continue; /* drop the collapsed counter — the outer grows, only holes trip this */
+            if (fabs(area_after) < fabs(area_before) && (contour_self_intersects(pts_x, pts_y, point_count) || (area_before > 0.0) != (area_after > 0.0))) {
+                continue; /* drop the collapsed hole — the outer grows, only shrinking holes trip this */
             }
         }
 
