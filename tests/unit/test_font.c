@@ -1663,6 +1663,42 @@ void test_cache_key_offset_zero_parity(void) {
     free(blob);
 }
 
+/* DECO-06: offset variants grow the stored quad bbox past the packed bbox so the
+ * emboldened edge is not clipped; the regular (key_offset=0) entry stays exactly
+ * the raw glyph bbox (byte-identity guard). */
+void test_embolden_entry_bbox_grows(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_bbox_grow", &blob);
+    nt_font_slot_t *slot = nt_font_get_slot(font);
+
+    const nt_glyph_cache_entry_t *reg = nt_font_lookup_glyph_offset(slot, 'A', 0);
+    const nt_glyph_cache_entry_t *bold = nt_font_lookup_glyph_offset(slot, 'A', 40);
+    TEST_ASSERT_NOT_NULL(reg);
+    TEST_ASSERT_NOT_NULL(bold);
+    TEST_ASSERT_FALSE(reg->is_tofu);
+    TEST_ASSERT_FALSE(bold->is_tofu);
+
+    /* Regular path byte-identical to the packed glyph bbox (see build_test_font_blob). */
+    TEST_ASSERT_EQUAL_INT16(0, reg->bbox_x0);
+    TEST_ASSERT_EQUAL_INT16(-200, reg->bbox_y0);
+    TEST_ASSERT_EQUAL_INT16(400, reg->bbox_x1);
+    TEST_ASSERT_EQUAL_INT16(800, reg->bbox_y1);
+
+    const int reg_w = reg->bbox_x1 - reg->bbox_x0;
+    const int reg_h = reg->bbox_y1 - reg->bbox_y0;
+    const int bold_w = bold->bbox_x1 - bold->bbox_x0;
+    const int bold_h = bold->bbox_y1 - bold->bbox_y0;
+
+    /* Union with the emboldened curve extent can only widen each axis. */
+    TEST_ASSERT_TRUE(bold_w >= reg_w);
+    TEST_ASSERT_TRUE(bold_h >= reg_h);
+    /* And it actually grew — the emboldened edge pushed past the packed bbox. */
+    TEST_ASSERT_TRUE((bold_w * bold_h) > (reg_w * reg_h));
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* Insert many (cp, offset) variants to force eviction, then re-lookup every live
  * entry: probe chains stay intact (identical fmix32 home in lookup/insert/remove
  * incl. backshift) — no orphaned/duplicated slots, no infinite probe. */
@@ -1811,6 +1847,7 @@ int main(void) {
     /* DECO-01/02: (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);
     RUN_TEST(test_cache_key_offset_zero_parity);
+    RUN_TEST(test_embolden_entry_bbox_grows);
     RUN_TEST(test_cache_evict_chain_integrity);
     RUN_TEST(test_quantize_weight_saturates);
     /* DECO-04: underline/strike metrics from v5 header */

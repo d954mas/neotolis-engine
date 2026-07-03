@@ -782,8 +782,6 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float bbox_y1 = (float)glyph->bbox_y1;
     float bbox_x0 = (float)glyph->bbox_x0;
     float bbox_x1 = (float)glyph->bbox_x1;
-    float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
-    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
     NT_ASSERT(slot->band_count <= NT_FONT_MAX_BANDS);
 
     // #region Precompute per-curve Y and X bounds
@@ -791,6 +789,8 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float ext_x_min = bbox_x0, ext_x_max = bbox_x1;
+    float ext_y_min = bbox_y0, ext_y_max = bbox_y1;
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         float ay = curves[ci].p0y;
         float by = curves[ci].p1y;
@@ -807,8 +807,23 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         float hix = ax > bx ? ax : bx;
         curve_x_min[ci] = lox < cx ? lox : cx;
         curve_x_max[ci] = hix > cx ? hix : cx;
+
+        ext_y_min = fminf(ext_y_min, curve_y_min[ci]);
+        ext_y_max = fmaxf(ext_y_max, curve_y_max[ci]);
+        ext_x_min = fminf(ext_x_min, curve_x_min[ci]);
+        ext_x_max = fmaxf(ext_x_max, curve_x_max[ci]);
     }
     // #endregion
+
+    // Offset variants grow past the packed bbox; widen bbox+bands so the emboldened edge isn't clipped (key_offset!=0 only keeps regular byte-identical).
+    if (key_offset != 0) {
+        bbox_x0 = floorf(ext_x_min);
+        bbox_y0 = floorf(ext_y_min);
+        bbox_x1 = ceilf(ext_x_max);
+        bbox_y1 = ceilf(ext_y_max);
+    }
+    float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
+    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
 
     // #region Count Y-band and X-band curve pairs
     /* Epsilon margin on band boundaries to avoid edge-case misses where
@@ -989,10 +1004,17 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->entry.curve_count = (uint16_t)(y_total + x_total);
     cs->entry.band_row = cache_idx;
     cs->entry.advance = glyph->advance;
-    cs->entry.bbox_x0 = glyph->bbox_x0;
-    cs->entry.bbox_y0 = glyph->bbox_y0;
-    cs->entry.bbox_x1 = glyph->bbox_x1;
-    cs->entry.bbox_y1 = glyph->bbox_y1;
+    if (key_offset != 0) {
+        cs->entry.bbox_x0 = (int16_t)bbox_x0;
+        cs->entry.bbox_y0 = (int16_t)bbox_y0;
+        cs->entry.bbox_x1 = (int16_t)bbox_x1;
+        cs->entry.bbox_y1 = (int16_t)bbox_y1;
+    } else {
+        cs->entry.bbox_x0 = glyph->bbox_x0;
+        cs->entry.bbox_y0 = glyph->bbox_y0;
+        cs->entry.bbox_x1 = glyph->bbox_x1;
+        cs->entry.bbox_y1 = glyph->bbox_y1;
+    }
     cs->entry.is_tofu = false;
     cs->key_offset = key_offset;
     cs->lru_frame = s_font.frame_counter;
