@@ -349,7 +349,177 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 }
 // #endregion
 
+// #region Decoration sentinel quad
+/* Solid decoration rect emitted as a sentinel "glyph" with band_count=0; the shader early-returns
+ * coverage=1 for band_count==0 (slug_text.frag), so this fills solid for underline/strike. Pixel-space
+ * corners (already includes pen/scale), so it flows through the same transform_point path as glyphs —
+ * correct under any model matrix (world / 3D), no scissor/viewport hijack. */
+static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
+    if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
+        nt_text_renderer_flush();
+    }
+    nt_text_vertex_t *v = &s_text.vertices[s_text.vertex_count];
+
+    float band0;
+    pack_uint_as_float(&band0, 0U); /* band_count=0 = decoration sentinel */
+    v[0].glyph_data[0] = 0.0F;
+    v[0].glyph_data[1] = 0.0F;
+    v[0].glyph_data[2] = 0.0F;
+    v[0].glyph_data[3] = band0;
+    /* bounds/texcoord unused: the shader returns before reading them for the sentinel. */
+    v[0].glyph_bounds[0] = 0.0F;
+    v[0].glyph_bounds[1] = 0.0F;
+    v[0].glyph_bounds[2] = 0.0F;
+    v[0].glyph_bounds[3] = 0.0F;
+    memcpy(v[0].color, color, 16);
+    v[0].depth_bias = glyph_bias;
+    v[1] = v[0];
+    v[2] = v[0];
+    v[3] = v[0];
+
+    transform_point(v[0].position, model, x0, y0); /* BL */
+    transform_point(v[1].position, model, x1, y0); /* BR */
+    transform_point(v[2].position, model, x1, y1); /* TR */
+    transform_point(v[3].position, model, x0, y1); /* TL */
+    v[0].texcoord[0] = 0.0F;
+    v[0].texcoord[1] = 0.0F;
+    v[1].texcoord[0] = 0.0F;
+    v[1].texcoord[1] = 0.0F;
+    v[2].texcoord[0] = 0.0F;
+    v[2].texcoord[1] = 0.0F;
+    v[3].texcoord[0] = 0.0F;
+    v[3].texcoord[1] = 0.0F;
+
+    s_text.vertex_count += 4;
+    s_text.glyph_count++;
+}
+// #endregion
+
 // #region Draw
+/* One painter-order glyph pass over the run: looks up each glyph at `key_offset`, emits at
+ * (pen + off) in `color`. Pen advance (kern, tracking, newline) is identical every pass so passes
+ * register exactly; the run is walked once per active pass (shadow, outline, fill) — grouped, never
+ * interleaved (premultiplied-alpha compositing breaks on per-glyph interleave when glyphs overlap). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, uint8_t band_count, nt_font_slot_t *slot,
+                            int16_t key_offset, const float color[4], float off_x, float off_y, float *glyph_bias) {
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t codepoint = 0;
+    uint32_t prev_cp = 0;
+    float pen_x = 0.0F;
+    float pen_y = 0.0F;
+    bool had_glyph_on_line = false;
+
+    for (; p < end; p++) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
+            }
+            continue;
+        }
+        if (codepoint == '\r') {
+            prev_cp = 0;
+            continue;
+        }
+        if (codepoint == '\n') {
+            pen_x = 0.0F;
+            pen_y -= line_advance;
+            prev_cp = 0;
+            had_glyph_on_line = false;
+            continue;
+        }
+        if (had_glyph_on_line) {
+            pen_x += letter_tracking;
+        }
+        if (prev_cp != 0) {
+            pen_x += (float)nt_font_get_kern_in_slot(slot, prev_cp, codepoint) * scale;
+        }
+
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_offset(slot, codepoint, key_offset);
+        if (!g) {
+            prev_cp = codepoint;
+            continue;
+        }
+        if (g->bbox_x1 > g->bbox_x0) {
+            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, band_count, *glyph_bias);
+            *glyph_bias += s_text.glyph_depth_bias;
+        }
+        pen_x += (float)g->advance * scale;
+        prev_cp = codepoint;
+        had_glyph_on_line = true;
+    }
+}
+
+/* One underline/strike sentinel quad per LINE (D-11: continuous per same-style segment; within one
+ * draw_n the whole run is one style, so the segment boundary is the newline). Y and thickness come from
+ * the scaled v5 metrics. Exact vertical sign is a visual-QA concern (73-06). */
+static void emit_line_deco_quads(const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, const float color[4], float *glyph_bias) {
+    if (s_text.underline) {
+        float top = pen_y + ((float)metrics.underline_position * scale); /* underline_position = top edge, below baseline */
+        float bot = pen_y + ((float)(metrics.underline_position - metrics.underline_thickness) * scale);
+        emit_decoration_quad(model, 0.0F, bot, x1, top, color, *glyph_bias);
+        *glyph_bias += s_text.glyph_depth_bias;
+    }
+    if (s_text.strikethrough) {
+        float bot = pen_y + ((float)metrics.strikeout_position * scale); /* strikeout_position = above baseline */
+        float top = pen_y + ((float)(metrics.strikeout_position + metrics.strikeout_size) * scale);
+        emit_decoration_quad(model, 0.0F, bot, x1, top, color, *glyph_bias);
+        *glyph_bias += s_text.glyph_depth_bias;
+    }
+}
+
+/* Walk the run once (advance only) to find each line's pixel extent, then emit its decoration quads. */
+static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, nt_font_metrics_t metrics,
+                                  const float color[4], float *glyph_bias) {
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t codepoint = 0;
+    uint32_t prev_cp = 0;
+    float pen_x = 0.0F;
+    float pen_y = 0.0F;
+    bool had_glyph_on_line = false;
+
+    for (; p < end; p++) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT;
+            }
+            continue;
+        }
+        if (codepoint == '\r') {
+            prev_cp = 0;
+            continue;
+        }
+        if (codepoint == '\n') {
+            if (had_glyph_on_line) {
+                emit_line_deco_quads(model, scale, pen_x, pen_y, metrics, color, glyph_bias);
+            }
+            pen_x = 0.0F;
+            pen_y -= line_advance;
+            prev_cp = 0;
+            had_glyph_on_line = false;
+            continue;
+        }
+        if (had_glyph_on_line) {
+            pen_x += letter_tracking;
+        }
+        if (prev_cp != 0) {
+            pen_x += (float)nt_font_get_kern_in_slot(slot, prev_cp, codepoint) * scale;
+        }
+
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_offset(slot, codepoint, 0); /* advance is weight-independent */
+        if (!g) {
+            prev_cp = codepoint;
+            continue;
+        }
+        pen_x += (float)g->advance * scale;
+        prev_cp = codepoint;
+        had_glyph_on_line = true;
+    }
+    if (had_glyph_on_line) {
+        emit_line_deco_quads(model, scale, pen_x, pen_y, metrics, color, glyph_bias);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     NT_ASSERT(s_text.initialized);
@@ -391,65 +561,37 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         m = oblique_model;
     }
 
-    uint32_t state = NT_UTF8_ACCEPT;
-    uint32_t codepoint = 0;
-    uint32_t prev_cp = 0;
-    float pen_x = 0.0F;
-    float pen_y = 0.0F;
-    float glyph_bias = 0.0F; /* accumulates per emitted glyph (clip-space depth bias) */
     /* Natural line advance from font metrics, plus user-supplied leading. */
     const float natural_line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
     const float line_advance = natural_line_advance + line_leading;
-    bool had_glyph_on_line = false;
 
     const uint8_t *p = (const uint8_t *)utf8;
     const uint8_t *end = p + len;
 
-    for (; p < end; p++) {
-        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
-            if (state == NT_UTF8_REJECT) {
-                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
-            }
-            continue;
-        }
+    /* Per-pass embolden cache key from the sticky weight (font units). Fill uses the weight; outline
+     * grows by outline_w; shadow reuses the outermost visible variant (outline if active, else fill) so
+     * it adds NO new cache entry (D-07). */
+    const float upm = (float)metrics.units_per_em;
+    const int16_t fill_key = nt_font_quantize_weight(s_text.weight_em * upm);
+    const bool outline_active = (s_text.outline_w > 0.0F);
+    const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.weight_em + s_text.outline_w) * upm) : fill_key);
+    const bool shadow_active = (s_text.shadow_color[3] > 0.0F);
 
-        if (codepoint == '\r') {
-            prev_cp = 0;
-            continue;
-        }
-        if (codepoint == '\n') {
-            pen_x = 0.0F;
-            pen_y -= line_advance;
-            prev_cp = 0;
-            had_glyph_on_line = false;
-            continue;
-        }
+    float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
 
-        if (had_glyph_on_line) {
-            pen_x += letter_tracking;
-        }
+    /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. */
+    if (shadow_active) {
+        const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.shadow_color, s_text.shadow_dx * scale, s_text.shadow_dy * scale, &glyph_bias);
+    }
+    if (outline_active) {
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.outline_color, 0.0F, 0.0F, &glyph_bias);
+    }
+    emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
 
-        /* Apply kern pair */
-        if (prev_cp != 0) {
-            int16_t kern = nt_font_get_kern_in_slot(slot, prev_cp, codepoint);
-            pen_x += (float)kern * scale;
-        }
-
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_in_slot(slot, codepoint);
-        if (!g) {
-            prev_cp = codepoint;
-            continue;
-        }
-
-        /* Emit quad if glyph has visible bbox */
-        if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, m, scale, pen_x, pen_y, color, band_count, glyph_bias);
-            glyph_bias += s_text.glyph_depth_bias;
-        }
-
-        pen_x += (float)g->advance * scale;
-        prev_cp = codepoint;
-        had_glyph_on_line = true;
+    /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
+    if (s_text.underline || s_text.strikethrough) {
+        emit_line_decorations(p, end, m, scale, letter_tracking, line_advance, slot, metrics, color, &glyph_bias);
     }
 }
 

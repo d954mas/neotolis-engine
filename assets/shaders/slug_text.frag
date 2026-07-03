@@ -87,6 +87,11 @@ float CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
 
 // Main coverage: Y-band horizontal ray + X-band vertical ray
 float SlugRender(vec2 coord) {
+    // band_count==0 is the decoration sentinel (underline/strike/solid quad): render solid.
+    // CalcCoverage(0,0,0,0) returns 0 today, so this explicit branch is required.
+    if (v_glyph.w == 0u)
+        return 1.0;
+
     uint curve_offset_y = v_glyph.x;
     uint band_row = v_glyph.y;
     uint curve_offset_x = v_glyph.z;
