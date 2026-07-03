@@ -38,6 +38,11 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
     hdr.ascent = 800;
     hdr.descent = -200;
     hdr.line_gap = 0;
+    /* v5 decoration metrics (font units): underline below baseline, strike above. */
+    hdr.underline_position = -100;
+    hdr.underline_thickness = 50;
+    hdr.strikeout_position = 250;
+    hdr.strikeout_size = 40;
     memcpy(blob, &hdr, sizeof(hdr));
 
     uint32_t data_base = header_size + glyphs_size;
@@ -591,6 +596,114 @@ void test_decoration_resets_on_reinit(void) {
     TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
 }
 
+/* ---- three-pass painter-order emit + sentinel decoration quad (DECO-01/02/03/04, DECO-06 pins) ---- */
+
+static const float s_black[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+
+/* Outline adds a second draw span (fill + outline pass) → exactly 2× the fill-only vertex count. */
+void test_outline_emits_extra_span(void) {
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    const uint32_t fill_only = nt_text_renderer_test_vertex_count();
+    TEST_ASSERT_EQUAL_UINT32(4U, fill_only); /* one visible glyph */
+    nt_text_renderer_flush();
+
+    nt_text_renderer_set_outline(0.05F, s_black);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(2U * fill_only, nt_text_renderer_test_vertex_count()); /* fill + outline */
+    nt_text_renderer_reset_decoration();
+}
+
+/* Shadow adds one more pass; shadow+outline = three passes. */
+void test_shadow_emits_extra_span(void) {
+    nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, s_black);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count()); /* fill + shadow */
+    nt_text_renderer_flush();
+
+    nt_text_renderer_set_outline(0.05F, s_black);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(12U, nt_text_renderer_test_vertex_count()); /* fill + outline + shadow */
+    nt_text_renderer_reset_decoration();
+}
+
+/* Shadow pass reuses the fill variant translated by (dx,dy)*scale — no new cache key, exact offset. */
+void test_shadow_pass_offset(void) {
+    /* size == units_per_em → scale 1.0, so a (5,-3) offset lands exactly 5/-3 world units. */
+    nt_text_renderer_set_shadow(5.0F, -3.0F, 0.0F, s_black);
+    nt_text_renderer_draw("A", s_identity, 1000.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_glyph_count()); /* shadow (quad0) + fill (quad1) */
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    float shadow_x = 0.0F;
+    float shadow_y = 0.0F;
+    float fill_x = 0.0F;
+    float fill_y = 0.0F;
+    memcpy(&shadow_x, v + 0, sizeof(float)); /* quad0 v0 = shadow */
+    memcpy(&shadow_y, v + sizeof(float), sizeof(float));
+    memcpy(&fill_x, v + ((size_t)4U * 72U), sizeof(float)); /* quad1 v0 = fill */
+    memcpy(&fill_y, v + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
+    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(shadow_x - fill_x));
+    TEST_ASSERT_EQUAL_INT32(-3, (int32_t)(shadow_y - fill_y));
+    nt_text_renderer_reset_decoration();
+}
+
+/* Passes emit GROUPED (all shadows, then all fills) — never interleaved per glyph. With "AB" the order
+ * must be [shadow_A, shadow_B, fill_A, fill_B]: both shadow quads sit +5 from their fills. If interleaved
+ * ([shadow_A, fill_A, shadow_B, fill_B]) quad1 would be fill_A and the +5 check on quad1 vs quad3 fails. */
+void test_passes_grouped_not_interleaved(void) {
+    nt_text_renderer_set_shadow(5.0F, 0.0F, 0.0F, s_black);
+    nt_text_renderer_draw("AB", s_identity, 1000.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_glyph_count()); /* 2 shadow + 2 fill */
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    float sh_a = 0.0F;
+    float sh_b = 0.0F;
+    float fl_a = 0.0F;
+    float fl_b = 0.0F;
+    memcpy(&sh_a, v + ((size_t)0U * 4U * 72U), sizeof(float)); /* quad0 = shadow_A */
+    memcpy(&sh_b, v + ((size_t)1U * 4U * 72U), sizeof(float)); /* quad1 = shadow_B */
+    memcpy(&fl_a, v + ((size_t)2U * 4U * 72U), sizeof(float)); /* quad2 = fill_A */
+    memcpy(&fl_b, v + ((size_t)3U * 4U * 72U), sizeof(float)); /* quad3 = fill_B */
+    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(sh_a - fl_a));
+    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
+    nt_text_renderer_reset_decoration();
+}
+
+/* Underline emits exactly ONE solid sentinel quad (band_count=0) per line after the glyph passes. */
+void test_underline_one_quad_per_segment(void) {
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    /* 2 fill glyphs + 1 underline quad. */
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_text_renderer_test_glyph_count());
+
+    /* The 3rd quad is the decoration sentinel: band_count (glyph_data[3]) packed as uint 0. */
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    uint32_t band_count = 0xFFFFFFFFU;
+    /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [3] at +12 = 32. */
+    memcpy(&band_count, v + ((size_t)8U * 72U) + 20U + 12U, sizeof(uint32_t));
+    TEST_ASSERT_EQUAL_UINT32(0U, band_count);
+    nt_text_renderer_reset_decoration();
+}
+
+/* One decoration quad PER LINE: two lines → two underline quads (continuous per same-style segment). */
+void test_underline_quad_per_line(void) {
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_draw("A\nB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    /* 2 fill glyphs + 2 underline quads (one per line). */
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_glyph_count());
+    nt_text_renderer_reset_decoration();
+}
+
+/* After reset_decoration a draw emits fill-only vertices (no pass/quad leak). */
+void test_reset_decoration_fill_only(void) {
+    nt_text_renderer_set_outline(0.05F, s_black);
+    nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, s_black);
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_reset_decoration();
+
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_glyph_count());
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -620,6 +733,13 @@ int main(void) {
     RUN_TEST(test_decoration_persists_across_restore);
     RUN_TEST(test_reset_decoration_clears_all);
     RUN_TEST(test_decoration_resets_on_reinit);
+    RUN_TEST(test_outline_emits_extra_span);
+    RUN_TEST(test_shadow_emits_extra_span);
+    RUN_TEST(test_shadow_pass_offset);
+    RUN_TEST(test_passes_grouped_not_interleaved);
+    RUN_TEST(test_underline_one_quad_per_segment);
+    RUN_TEST(test_underline_quad_per_line);
+    RUN_TEST(test_reset_decoration_fill_only);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();
