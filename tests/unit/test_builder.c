@@ -3510,6 +3510,193 @@ void test_font_null_charset_asserts(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
 }
 
+/* --- Decoration metric (v5) helpers --- */
+
+static uint16_t sfnt_be_u16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
+static int16_t sfnt_be_s16(const uint8_t *p) { return (int16_t)sfnt_be_u16(p); }
+static uint32_t sfnt_be_u32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
+
+/* Byte offset of the 16-byte sfnt directory ENTRY for `tag`, or 0 if absent. */
+static uint32_t sfnt_entry_off(const uint8_t *d, uint32_t sz, const char *tag) {
+    if (sz < 12) {
+        return 0;
+    }
+    uint16_t num = sfnt_be_u16(d + 4);
+    for (uint16_t i = 0; i < num; i++) {
+        uint32_t rec = 12U + (16U * (uint32_t)i);
+        if (rec + 16U > sz) {
+            return 0;
+        }
+        if (memcmp(d + rec, tag, 4) == 0) {
+            return rec;
+        }
+    }
+    return 0;
+}
+
+static bool write_blob(const char *path, const uint8_t *data, uint32_t sz) {
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    size_t w = fwrite(data, 1, sz, f);
+    (void)fclose(f);
+    return w == sz;
+}
+
+/* Bake `ttf_path` (charset "Ax", natural UPM) to `pack_path`; return malloc'd pack bytes,
+ * set *out_hdr to the font header inside it. Caller frees the returned buffer. */
+static char *bake_font_pack(const char *ttf_path, const char *pack_path, const NtFontAssetHeader **out_hdr) {
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    if (!ctx) {
+        return NULL;
+    }
+    nt_font_opts_t opts = {.charset = "Ax", .resource_name = NULL, .target_units_per_em = 0};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+    if (nt_builder_finish_pack(ctx) != NT_BUILD_OK) {
+        nt_builder_free_pack(ctx);
+        return NULL;
+    }
+    nt_builder_free_pack(ctx);
+    uint32_t sz = 0;
+    char *data = nt_builder_read_file(pack_path, &sz);
+    if (!data) {
+        return NULL;
+    }
+    const NtAssetEntry *entry = (const NtAssetEntry *)(data + sizeof(NtPackHeader));
+    *out_hdr = (const NtFontAssetHeader *)(data + entry->offset);
+    return data;
+}
+
+/* The v5 header is 24 bytes (compile-time contract + runtime confirmation). */
+void test_font_v5_header_size(void) {
+    TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontAssetHeader));
+    TEST_ASSERT_EQUAL_UINT(5, NT_FONT_VERSION);
+}
+
+/* Builder reads post/OS-2 raw and bakes them verbatim (natural UPM = no rescale). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_bakes_decoration_metrics_from_tables(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    uint32_t fsz = 0;
+    char *fraw = nt_builder_read_file(ttf_path, &fsz);
+    TEST_ASSERT_NOT_NULL(fraw);
+    const uint8_t *fd = (const uint8_t *)fraw;
+
+    uint32_t post_e = sfnt_entry_off(fd, fsz, "post");
+    uint32_t os2_e = sfnt_entry_off(fd, fsz, "OS/2");
+    if (post_e == 0 || os2_e == 0) {
+        free(fraw);
+        TEST_IGNORE_MESSAGE("test font lacks post/OS-2 -- covered by heuristic test");
+        return;
+    }
+    uint32_t post_off = sfnt_be_u32(fd + post_e + 8);
+    uint32_t os2_off = sfnt_be_u32(fd + os2_e + 8);
+    int16_t exp_ul_pos = sfnt_be_s16(fd + post_off + 8);
+    int16_t exp_ul_thk = sfnt_be_s16(fd + post_off + 10);
+    int16_t exp_so_sz = sfnt_be_s16(fd + os2_off + 26);
+    int16_t exp_so_pos = sfnt_be_s16(fd + os2_off + 28);
+    free(fraw);
+
+    const NtFontAssetHeader *hdr = NULL;
+    char *pack = bake_font_pack(ttf_path, TMP_DIR "/test_font_deco.ntpack", &hdr);
+    TEST_ASSERT_NOT_NULL(pack);
+    TEST_ASSERT_EQUAL_UINT(NT_FONT_VERSION, hdr->version);
+    TEST_ASSERT_EQUAL_INT16(exp_ul_pos, hdr->underline_position);
+    TEST_ASSERT_EQUAL_INT16(exp_ul_thk, hdr->underline_thickness);
+    TEST_ASSERT_EQUAL_INT16(exp_so_pos, hdr->strikeout_position);
+    TEST_ASSERT_EQUAL_INT16(exp_so_sz, hdr->strikeout_size);
+    free(pack);
+}
+
+/* Tables absent (tags clobbered) -> metric-correct heuristic, never zero/garbage. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_decoration_heuristic_when_tables_absent(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    uint32_t fsz = 0;
+    char *fraw = nt_builder_read_file(ttf_path, &fsz);
+    TEST_ASSERT_NOT_NULL(fraw);
+    uint8_t *fd = (uint8_t *)fraw;
+
+    uint32_t post_e = sfnt_entry_off(fd, fsz, "post");
+    uint32_t os2_e = sfnt_entry_off(fd, fsz, "OS/2");
+    /* Clobber the tags so find_table cannot locate either table (stbtt needs neither). */
+    const uint8_t bad_post[4] = {'x', 'x', 'x', 'x'};
+    const uint8_t bad_os2[4] = {'y', 'y', 'y', 'y'};
+    if (post_e) {
+        memcpy(fd + post_e, bad_post, 4);
+    }
+    if (os2_e) {
+        memcpy(fd + os2_e, bad_os2, 4);
+    }
+    const char *mut_ttf = TMP_DIR "/test_font_notables.ttf";
+    TEST_ASSERT_TRUE(write_blob(mut_ttf, fd, fsz));
+    free(fraw);
+
+    const NtFontAssetHeader *hdr = NULL;
+    char *pack = bake_font_pack(mut_ttf, TMP_DIR "/test_font_deco_heur.ntpack", &hdr);
+    TEST_ASSERT_NOT_NULL(pack);
+
+    /* Heuristic: underline below baseline, non-zero thickness, strike near mid x-height. */
+    TEST_ASSERT_EQUAL_INT16((int16_t)(hdr->descent / 2), hdr->underline_position);
+    TEST_ASSERT_EQUAL_INT16((int16_t)(hdr->units_per_em / 20), hdr->underline_thickness);
+    TEST_ASSERT_EQUAL_INT16((int16_t)(hdr->ascent * 3 / 10), hdr->strikeout_position);
+    TEST_ASSERT_EQUAL_INT16(hdr->underline_thickness, hdr->strikeout_size);
+    TEST_ASSERT_TRUE(hdr->underline_position < 0);
+    TEST_ASSERT_TRUE(hdr->underline_thickness > 0);
+    TEST_ASSERT_TRUE(hdr->strikeout_position > 0);
+    free(pack);
+}
+
+/* A hostile post-table offset past EOF must NOT OOB-read: bounds guard -> heuristic. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_decoration_truncated_table_no_oob(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    uint32_t fsz = 0;
+    char *fraw = nt_builder_read_file(ttf_path, &fsz);
+    TEST_ASSERT_NOT_NULL(fraw);
+    uint8_t *fd = (uint8_t *)fraw;
+
+    uint32_t post_e = sfnt_entry_off(fd, fsz, "post");
+    if (post_e == 0) {
+        free(fraw);
+        TEST_IGNORE_MESSAGE("test font lacks post table");
+        return;
+    }
+    /* Point the post table offset far beyond EOF -> offset+len > blob_size. */
+    fd[post_e + 8] = 0x7F;
+    fd[post_e + 9] = 0xFF;
+    fd[post_e + 10] = 0xFF;
+    fd[post_e + 11] = 0x00;
+    const char *mut_ttf = TMP_DIR "/test_font_trunc.ttf";
+    TEST_ASSERT_TRUE(write_blob(mut_ttf, fd, fsz));
+    free(fraw);
+
+    const NtFontAssetHeader *hdr = NULL;
+    char *pack = bake_font_pack(mut_ttf, TMP_DIR "/test_font_deco_trunc.ntpack", &hdr);
+    TEST_ASSERT_NOT_NULL(pack); /* no crash/OOB -> bake completed */
+
+    /* post fell back to heuristic; OS/2 (untouched) still real -> strike non-heuristic. */
+    TEST_ASSERT_EQUAL_INT16((int16_t)(hdr->descent / 2), hdr->underline_position);
+    TEST_ASSERT_EQUAL_INT16((int16_t)(hdr->units_per_em / 20), hdr->underline_thickness);
+    free(pack);
+}
+
 /* Read the first absolute contour point (x,y) of glyph `g` into out_x/out_y.
  * Layout: [contour_count u16][point_count u16][flags][first x i16][first y i16]... */
 static void read_first_contour_point(const NtFontAssetHeader *hdr, const NtFontGlyphEntry *g, int16_t *out_x, int16_t *out_y) {
@@ -5636,6 +5823,10 @@ int main(void) {
     RUN_TEST(test_font_kern_pairs);
     RUN_TEST(test_font_missing_codepoint_asserts);
     RUN_TEST(test_font_null_charset_asserts);
+    RUN_TEST(test_font_v5_header_size);
+    RUN_TEST(test_font_bakes_decoration_metrics_from_tables);
+    RUN_TEST(test_font_decoration_heuristic_when_tables_absent);
+    RUN_TEST(test_font_decoration_truncated_table_no_oob);
     RUN_TEST(test_font_upm_normalize_rescales);
     RUN_TEST(test_font_upm_normalize_scales_kern);
     RUN_TEST(test_font_upm_normalize_overflow_asserts);

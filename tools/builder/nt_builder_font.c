@@ -2,6 +2,7 @@
 #include "nt_builder_internal.h"
 #include "nt_font_format.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "stb_truetype.h"
 /* clang-format on */
 
@@ -481,6 +482,71 @@ static int32_t upm_rescale(int v, uint32_t num, uint32_t den) {
 }
 // #endregion
 
+// #region sfnt table read (decoration metrics)
+/* stbtt__find_table is static/unlinkable in this TU, so read the sfnt directory locally.
+ * TTF/OTF is big-endian; all reads are bounds-checked against the blob size (untrusted font). */
+static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
+static int16_t rd_s16(const uint8_t *p) { return (int16_t)rd_u16(p); }
+static uint32_t rd_u32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
+
+/* Return the blob-absolute offset of table `tag`, or 0 if absent/truncated. */
+static uint32_t find_table(const uint8_t *data, uint32_t fontstart, uint32_t size, const char tag[4]) {
+    if ((uint64_t)fontstart + 12U > size) {
+        return 0;
+    }
+    uint16_t num = rd_u16(data + fontstart + 4);
+    uint32_t dir = fontstart + 12U;
+    for (uint16_t i = 0; i < num; i++) {
+        uint32_t rec = dir + (16U * (uint32_t)i);
+        if ((uint64_t)rec + 16U > size) {
+            return 0; /* directory truncated */
+        }
+        const uint8_t *r = data + rec;
+        if (memcmp(r, tag, 4) == 0) {
+            return rd_u32(r + 8);
+        }
+    }
+    return 0;
+}
+
+/* Read post/OS-2 underline/strike (font units). Missing/truncated table -> metric heuristic.
+ * Values stay raw; caller UPM-rescales them alongside ascent/descent. */
+static void read_decoration_metrics(const stbtt_fontinfo *font, uint32_t blob_size, int ascent, int descent, uint16_t upm, int32_t *ul_pos, int32_t *ul_thk, int32_t *so_pos, int32_t *so_sz) {
+    static bool warned_post = false;
+    static bool warned_os2 = false;
+    const uint8_t *data = (const uint8_t *)font->data;
+    uint32_t fontstart = (uint32_t)font->fontstart;
+
+    /* post: underlinePosition @8, underlineThickness @10 (need >= 12 bytes). */
+    uint32_t post = find_table(data, fontstart, blob_size, "post");
+    if (post != 0 && (uint64_t)post + 12U <= blob_size) {
+        *ul_pos = rd_s16(data + post + 8);
+        *ul_thk = rd_s16(data + post + 10);
+    } else {
+        *ul_pos = descent / 2;   /* just below baseline */
+        *ul_thk = (int)upm / 20; /* ~0.05 em */
+        if (!warned_post) {
+            NT_LOG_WARN("font has no usable 'post' table -- using heuristic underline metrics");
+            warned_post = true;
+        }
+    }
+
+    /* OS/2: yStrikeoutSize @26, yStrikeoutPosition @28 (need >= 30 bytes). */
+    uint32_t os2 = find_table(data, fontstart, blob_size, "OS/2");
+    if (os2 != 0 && (uint64_t)os2 + 30U <= blob_size) {
+        *so_sz = rd_s16(data + os2 + 26);
+        *so_pos = rd_s16(data + os2 + 28);
+    } else {
+        *so_pos = ascent * 3 / 10; /* ~mid x-height (0.3 em ascent proxy) */
+        *so_sz = (*ul_thk != 0) ? *ul_thk : (int)upm / 20;
+        if (!warned_os2) {
+            NT_LOG_WARN("font has no usable 'OS/2' table -- using heuristic strikeout metrics");
+            warned_os2 = true;
+        }
+    }
+}
+// #endregion
+
 /* Temporary point buffer for one contour (used during encoding) */
 typedef struct {
     int16_t x, y;
@@ -708,6 +774,13 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     float scale = stbtt_ScaleForMappingEmToPixels(&font, 1.0F);
     NT_BUILD_ASSERT(scale > 0.0F && "decode_font: invalid em scale");
     uint16_t src_upm = (uint16_t)((1.0F / scale) + 0.5F);
+
+    /* Decoration metrics (raw font units) — rescaled with the vmetrics below. */
+    int32_t ul_pos = 0;
+    int32_t ul_thk = 0;
+    int32_t so_pos = 0;
+    int32_t so_sz = 0;
+    read_decoration_metrics(&font, file_size, ascent, descent, src_upm, &ul_pos, &ul_thk, &so_pos, &so_sz);
     // #endregion
 
     // #region UPM normalize setup
@@ -865,6 +938,17 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         ascent = s_ascent;
         descent = s_descent;
         line_gap = s_line_gap;
+
+        int32_t s_ul_pos = upm_rescale(ul_pos, upm_num, upm_den);
+        int32_t s_ul_thk = upm_rescale(ul_thk, upm_num, upm_den);
+        int32_t s_so_pos = upm_rescale(so_pos, upm_num, upm_den);
+        int32_t s_so_sz = upm_rescale(so_sz, upm_num, upm_den);
+        NT_BUILD_ASSERT(s_ul_pos >= INT16_MIN && s_ul_pos <= INT16_MAX && s_ul_thk >= INT16_MIN && s_ul_thk <= INT16_MAX && "UPM rescale: underline metric overflows int16");
+        NT_BUILD_ASSERT(s_so_pos >= INT16_MIN && s_so_pos <= INT16_MAX && s_so_sz >= INT16_MIN && s_so_sz <= INT16_MAX && "UPM rescale: strikeout metric overflows int16");
+        ul_pos = s_ul_pos;
+        ul_thk = s_ul_thk;
+        so_pos = s_so_pos;
+        so_sz = s_so_sz;
     }
 
     NtFontAssetHeader *hdr = (NtFontAssetHeader *)buffer;
@@ -875,6 +959,10 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     hdr->ascent = (int16_t)ascent;
     hdr->descent = (int16_t)descent;
     hdr->line_gap = (int16_t)line_gap;
+    hdr->underline_position = (int16_t)ul_pos;
+    hdr->underline_thickness = (int16_t)ul_thk;
+    hdr->strikeout_position = (int16_t)so_pos;
+    hdr->strikeout_size = (int16_t)so_sz;
     // #endregion
 
     // #region Build glyph entries and data blocks (no re-parsing)
