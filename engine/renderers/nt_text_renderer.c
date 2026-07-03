@@ -47,6 +47,18 @@ static struct {
      * baseline). 0 = upright. Same logical-state lifetime as glyph_depth_bias. */
     float oblique;
 
+    /* Sticky decoration state (D-12): same logical-state lifetime as oblique — preserved by restore_gpu,
+     * cleared by cold init/shutdown and reset_decoration. blur is stored for Phase-75 soft shadow, UNUSED. */
+    float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
+    float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
+    float outline_color[4]; /* outline pass RGBA */
+    float shadow_dx;        /* hard-shadow offset px */
+    float shadow_dy;        /* hard-shadow offset px */
+    float shadow_blur;      /* stored, UNUSED (soft shadow = Phase 75) */
+    float shadow_color[4];  /* shadow pass RGBA; alpha 0 = no shadow */
+    bool underline;         /* emit an underline sentinel quad per line */
+    bool strikethrough;     /* emit a strike sentinel quad per line */
+
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
 
@@ -201,8 +213,8 @@ void nt_text_renderer_restore_gpu(void) {
         return;
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
-     * glyph_depth_bias, oblique) is left untouched, so it survives by default — no save/restore list to
-     * forget when a field is added. */
+     * glyph_depth_bias, oblique, sticky decoration) is left untouched, so it survives by default — no
+     * save/restore list to forget when a field is added. */
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
@@ -453,6 +465,66 @@ void nt_text_renderer_set_oblique(float shear) {
     s_text.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
 }
 
+/* HARD isfinite guards (real if, not NT_ASSERT) — NT_ASSERT is a no-op in shipping and a NaN would
+ * poison offset_points / quantize where NaN != 0.0F (feedback_nt_assert_off_hard_guards). */
+void nt_text_renderer_set_weight(float weight_em) {
+    NT_ASSERT(s_text.initialized);
+    if (!isfinite(weight_em)) {
+        NT_ASSERT(0 && "nt_text_renderer_set_weight: weight must be finite");
+        return;
+    }
+    s_text.weight_em = weight_em; /* no clamp (locked Wave-0 decision); folded into the fill key_offset */
+}
+
+void nt_text_renderer_set_outline(float width, const float color[4]) {
+    NT_ASSERT(s_text.initialized);
+    NT_ASSERT(color != NULL);
+    if (!isfinite(width) || !isfinite(color[0]) || !isfinite(color[1]) || !isfinite(color[2]) || !isfinite(color[3])) {
+        NT_ASSERT(0 && "nt_text_renderer_set_outline: width/color must be finite");
+        return;
+    }
+    s_text.outline_w = width;
+    memcpy(s_text.outline_color, color, sizeof s_text.outline_color);
+}
+
+void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float color[4]) {
+    NT_ASSERT(s_text.initialized);
+    NT_ASSERT(color != NULL);
+    if (!isfinite(dx) || !isfinite(dy) || !isfinite(blur) || !isfinite(color[0]) || !isfinite(color[1]) || !isfinite(color[2]) || !isfinite(color[3])) {
+        NT_ASSERT(0 && "nt_text_renderer_set_shadow: offset/blur/color must be finite");
+        return;
+    }
+    s_text.shadow_dx = dx;
+    s_text.shadow_dy = dy;
+    s_text.shadow_blur = blur; /* stored, UNUSED this phase (soft = Phase 75) */
+    memcpy(s_text.shadow_color, color, sizeof s_text.shadow_color);
+}
+
+void nt_text_renderer_set_underline(bool enabled) {
+    NT_ASSERT(s_text.initialized);
+    s_text.underline = enabled;
+}
+
+void nt_text_renderer_set_strikethrough(bool enabled) {
+    NT_ASSERT(s_text.initialized);
+    s_text.strikethrough = enabled;
+}
+
+void nt_text_renderer_reset_decoration(void) {
+    NT_ASSERT(s_text.initialized);
+    /* One-shot clear of every decoration axis + oblique (D-13) so nothing leaks onto the next run. */
+    s_text.weight_em = 0.0F;
+    s_text.outline_w = 0.0F;
+    memset(s_text.outline_color, 0, sizeof s_text.outline_color);
+    s_text.shadow_dx = 0.0F;
+    s_text.shadow_dy = 0.0F;
+    s_text.shadow_blur = 0.0F;
+    memset(s_text.shadow_color, 0, sizeof s_text.shadow_color);
+    s_text.underline = false;
+    s_text.strikethrough = false;
+    s_text.oblique = 0.0F;
+}
+
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
 }
@@ -540,6 +612,10 @@ const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_mo
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
 float nt_text_renderer_test_oblique(void) { return s_text.oblique; }
+float nt_text_renderer_test_weight(void) { return s_text.weight_em; }
+float nt_text_renderer_test_outline_width(void) { return s_text.outline_w; }
+float nt_text_renderer_test_shadow_dx(void) { return s_text.shadow_dx; }
+bool nt_text_renderer_test_underline(void) { return s_text.underline; }
 float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif

@@ -542,6 +542,55 @@ void test_oblique_resets_on_reinit(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
 }
 
+/* ---- sticky decoration state lifetime (D-12/D-13) ---- */
+
+/* Decoration state is renderer state like oblique: survives a GPU context-loss restore. */
+void test_decoration_persists_across_restore(void) {
+    nt_text_renderer_set_weight(0.25F); /* exactly representable */
+    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    nt_text_renderer_set_outline(0.5F, red);
+    nt_text_renderer_set_shadow(2.0F, -1.0F, 0.0F, red);
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.25F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.5F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 2.0F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_underline());
+    nt_text_renderer_reset_decoration();
+}
+
+/* reset_decoration clears every axis (weight/outline/shadow/underline) AND oblique in one call. */
+void test_reset_decoration_clears_all(void) {
+    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    nt_text_renderer_set_weight(0.25F);
+    nt_text_renderer_set_outline(0.5F, red);
+    nt_text_renderer_set_shadow(2.0F, -1.0F, 0.0F, red);
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_set_strikethrough(true);
+    nt_text_renderer_set_oblique(0.5F);
+
+    nt_text_renderer_reset_decoration();
+
+    TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.0F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 0.0F);
+    TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
+}
+
+/* Cold shutdown/init clears decoration state (test isolation; no leak across renderer reinit). */
+void test_decoration_resets_on_reinit(void) {
+    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    nt_text_renderer_set_weight(0.25F);
+    nt_text_renderer_set_outline(0.5F, red);
+    nt_text_renderer_set_underline(true);
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.0F);
+    TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -568,6 +617,9 @@ int main(void) {
     RUN_TEST(test_oblique_leans_glyph_top);
     RUN_TEST(test_oblique_persists_across_restore);
     RUN_TEST(test_oblique_resets_on_reinit);
+    RUN_TEST(test_decoration_persists_across_restore);
+    RUN_TEST(test_reset_decoration_clears_all);
+    RUN_TEST(test_decoration_resets_on_reinit);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();

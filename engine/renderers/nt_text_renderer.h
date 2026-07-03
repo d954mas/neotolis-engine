@@ -57,6 +57,34 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
  * does not leak onto unrelated text. */
 void nt_text_renderer_set_oblique(float shear);
 
+/* ---- Sticky decoration state (D-12/D-13) ---- */
+/* All four mirror set_oblique's lifetime: kept across restore_gpu, cleared on cold init/shutdown, no
+ * flush (folded into the CPU emit). Every float arg is hard-guarded with a REAL if (!isfinite) — NOT an
+ * assert — because NT_ASSERT is a no-op in shipping and a NaN would poison the offset/quantize math.
+ * Call reset_decoration() (or set each back to 0) when done so state does not leak onto later text. */
+
+/* Synthetic weight in em units: subsequent fills emit an emboldened (positive) / thinned (negative)
+ * glyph variant via the (codepoint, weight) glyph cache. 0 (default) = the font's natural weight. */
+void nt_text_renderer_set_weight(float weight_em);
+
+/* Outline/stroke: subsequent draws emit an extra pass grown by `width` em beyond the fill weight, in
+ * `color`, behind the fill (painter order fill on top). width 0 (default) = no outline. */
+void nt_text_renderer_set_outline(float width, const float color[4]);
+
+/* Hard drop shadow: subsequent draws emit an extra pass offset by (dx,dy) px in `color`, behind
+ * everything, reusing the outline/fill glyph variant (no new cache key). `blur` is stored for the
+ * Phase-75 soft shadow but UNUSED here (hard shadow only). color alpha 0 (default) = no shadow. */
+void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float color[4]);
+
+/* Underline / strikethrough: subsequent draws emit one continuous solid quad per line at the font's
+ * scaled underline/strike metric. Sticky bools, cleared by reset_decoration. */
+void nt_text_renderer_set_underline(bool enabled);
+void nt_text_renderer_set_strikethrough(bool enabled);
+
+/* One-shot clear of ALL decoration state (weight, outline, shadow, underline/strike) AND oblique — the
+ * single call the UI runs after a decorated run so nothing leaks onto the next (D-13). */
+void nt_text_renderer_reset_decoration(void);
+
 void nt_text_renderer_flush(void);
 
 // #region test_access
@@ -78,6 +106,11 @@ const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
 float nt_text_renderer_test_glyph_depth_bias(void);
 float nt_text_renderer_test_oblique(void);
+/* Sticky decoration state accessors — pin the setter lifetime (persist across restore, reset clears). */
+float nt_text_renderer_test_weight(void);
+float nt_text_renderer_test_outline_width(void);
+float nt_text_renderer_test_shadow_dx(void);
+bool nt_text_renderer_test_underline(void);
 /* Largest oblique observed at a draw_n entry since the last reset_call_counters — pins the
  * SYNTH_ITALIC -> set_oblique wiring through the emit path (stub font emits no glyphs). */
 float nt_text_renderer_test_max_oblique(void);
