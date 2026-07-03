@@ -1726,6 +1726,45 @@ void test_quantize_weight_saturates(void) {
 
 /* ================= DECO-04: underline/strike metrics from v5 header ================= */
 
+/* nt_font_get_metrics surfaces the v5 header's underline/strike decoration fields;
+ * a font with no resolved resource returns zeros (no UB). */
+void test_font_decoration_metrics_from_header(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    /* Unresolved font: decoration metrics are zero. */
+    nt_font_metrics_t empty = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_INT16(0, empty.underline_position);
+    TEST_ASSERT_EQUAL_INT16(0, empty.underline_thickness);
+    TEST_ASSERT_EQUAL_INT16(0, empty.strikeout_position);
+    TEST_ASSERT_EQUAL_INT16(0, empty.strikeout_size);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    /* Poke known v5 decoration values into the header (calloc'd buffer is aligned). */
+    NtFontAssetHeader *h = (NtFontAssetHeader *)blob;
+    h->underline_position = -100;
+    h->underline_thickness = 60;
+    h->strikeout_position = 250;
+    h->strikeout_size = 55;
+
+    nt_resource_t res = register_font_resource("font_decoration", blob, blob_size);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_metrics_t m = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_INT16(-100, m.underline_position);
+    TEST_ASSERT_EQUAL_INT16(60, m.underline_thickness);
+    TEST_ASSERT_EQUAL_INT16(250, m.strikeout_position);
+    TEST_ASSERT_EQUAL_INT16(55, m.strikeout_size);
+    /* Core metrics still correct. */
+    TEST_ASSERT_EQUAL_INT16(800, m.ascent);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -1774,5 +1813,7 @@ int main(void) {
     RUN_TEST(test_cache_key_offset_zero_parity);
     RUN_TEST(test_cache_evict_chain_integrity);
     RUN_TEST(test_quantize_weight_saturates);
+    /* DECO-04: underline/strike metrics from v5 header */
+    RUN_TEST(test_font_decoration_metrics_from_header);
     return UNITY_END();
 }

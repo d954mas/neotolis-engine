@@ -1185,6 +1185,11 @@ void nt_font_step(void) {
             slot->metrics.line_gap = hdr->line_gap;
             slot->metrics.units_per_em = hdr->units_per_em;
             slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
+            /* v5 decoration metrics (DECO-04) — renderer scales by size/units_per_em to place quads. */
+            slot->metrics.underline_position = hdr->underline_position;
+            slot->metrics.underline_thickness = hdr->underline_thickness;
+            slot->metrics.strikeout_position = hdr->strikeout_position;
+            slot->metrics.strikeout_size = hdr->strikeout_size;
             slot->metrics_set = true;
         }
         if (!had_metrics && slot->metrics_set) {
