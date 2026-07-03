@@ -1722,33 +1722,43 @@ static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     return 0.5 * (double)acc;
 }
 
-/* #253 counter behavior: a counter narrower than the outline TRACES at a moderate
- * offset (interior stays a hole) and FILLS at a wide offset (collapses → dropped so it
- * renders solid = correct Minkowski dilation). The D2 phantom/mirror-flip class: an
- * over-shrunk counter must not leave a winding-0 hole. */
+/* #253 counter trace/fill boundary = the EXACT Minkowski erosion: a counter fills IFF its
+ * inradius (largest inscribed circle) <= R = W/2. Pure geometry, no fudge constant — the
+ * boundary is W = 2*inradius for ANY font (validated in bench_outline against fine-grid GT +
+ * analytic shapes on LilitaOne + Roboto). A square counter of half-width H has inradius = H,
+ * so it traces below W=2H and fills above; a wide RECTANGLE counter has inradius = the SMALLER
+ * half-dimension (inscribed circle, not bbox), pinning that the criterion is min-width. */
 void test_embolden_counter_traces_then_fills(void) {
-    /* Outer CW box; inner CCW counter square (half-width 100). */
+    /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100 -> boundary W=200. */
     const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
     const int16_t inner[4][2] = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
     uint8_t blob[256];
     build_contour_blob_2(blob, outer, 4, inner, 4);
     float cv[16 * 6];
 
-    /* Moderate (R=20 < 100): counter traced → 8 curves, interior (500,500) is a hole. */
-    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 16);
-    TEST_ASSERT_EQUAL_UINT16(8, n_mod);
-    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_mod));
-    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_mod, 500.0F, 500.0F)); /* counter open */
+    /* Just BELOW the boundary (W=180, R=90 < inradius 100): counter traced, interior a hole. */
+    uint16_t n_below = nt_font_test_decode_contours(blob, 180.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_below);
+    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_below));
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_below, 500.0F, 500.0F)); /* counter open */
 
-    /* Wide (R=150 > 100): counter collapses → dropped, only outer (4) remains; the
-     * former counter interior is now SOLID (no residual hole). */
-    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 16);
-    TEST_ASSERT_EQUAL_UINT16(4, n_wide);
-    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 500.0F)); /* filled */
+    /* Just ABOVE the boundary (W=220, R=110 > inradius 100): counter fills solid, no hole. */
+    uint16_t n_above = nt_font_test_decode_contours(blob, 220.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(4, n_above);
+    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_above, 500.0F, 500.0F)); /* filled */
 
     /* W=0 keeps both contours verbatim (offset gated off). */
     uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 16);
     TEST_ASSERT_EQUAL_UINT16(8, n_zero);
+
+    /* Min-width pin: a 600(wide) x 200(tall) counter has inradius = 100 (the SMALLER half-dim),
+     * so its boundary is STILL W=200 (not the 300 the width would imply). Traces at 180, fills at 220. */
+    const int16_t wide_inner[4][2] = {{200, 400}, {800, 400}, {800, 600}, {200, 600}};
+    build_contour_blob_2(blob, outer, 4, wide_inner, 4);
+    TEST_ASSERT_EQUAL_UINT16(8, nt_font_test_decode_contours(blob, 180.0F, cv, 16)); /* R=90 < 100 -> open */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nt_font_test_decode_contours(blob, 180.0F, cv, 16), 500.0F, 500.0F));
+    TEST_ASSERT_EQUAL_UINT16(4, nt_font_test_decode_contours(blob, 220.0F, cv, 16)); /* R=110 > 100 -> fills */
+    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, nt_font_test_decode_contours(blob, 220.0F, cv, 16), 500.0F, 500.0F));
 }
 
 /* #253 '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)

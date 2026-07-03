@@ -603,7 +603,6 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
 #define NT_FONT_OFFSET_MAX_XINGS 64 /* proper self-crossings/ring; overflow -> keep raw ring (= today) */
 #define NT_FONT_OFFSET_RING_MAX (NT_FONT_MAX_POINTS_PER_CONTOUR + (2 * NT_FONT_OFFSET_MAX_JOINS))
 #define NT_FONT_OFFSET_NODE_MAX (NT_FONT_OFFSET_RING_MAX + (2 * NT_FONT_OFFSET_MAX_XINGS))
-#define NT_FONT_OFFSET_SURVIVAL_KAPPA 0.75 /* eroded hole must reach >= kappa*R inside the base ring, else phantom */
 
 /* Offset+joins destination ring: offset_with_joins reads the base s_decode_pts_*, writes here,
  * so vertex adjacency reads pristine source coords (no in-place snapshot needed). */
@@ -755,61 +754,121 @@ static int find_offset_crossings(const int32_t *x, const int32_t *y, uint16_t n)
     return cnt;
 }
 
-/* Erosion-survival depth: max over ring vertices INSIDE the base ring of their distance
- * to the base ring. A phantom (point-reflected collapsed counter) hugs the base boundary
- * or lands outside it → small depth; a genuine eroded hole reaches ~R inside → large depth.
- * The inside test is essential: overshoot lands vertices far from the ring but in the fill. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static double ring_survival_depth(const int32_t *x, const int32_t *y, uint16_t n, const int32_t *bx, const int32_t *by, uint16_t bn) {
-    double best_max = 0.0;
-    for (uint16_t i = 0; i < n; i++) {
-        double px = (double)x[i] + 0.5; /* nudge off the integer lattice for the parity test */
-        double py = (double)y[i] + 0.5;
-        bool inside = false;
-        for (uint16_t j = 0; j < bn; j++) {
-            uint16_t j2 = (uint16_t)((j + 1) % bn);
-            double ay = (double)by[j];
-            double cy = (double)by[j2];
-            if ((ay > py) == (cy > py)) {
-                continue;
-            }
-            double tt = (py - ay) / (cy - ay);
-            double xi = (double)bx[j] + (tt * ((double)bx[j2] - (double)bx[j]));
-            if (xi > px) {
-                inside = !inside;
-            }
+/* Distance from (px,py) to the closed ring's boundary (min over edges). */
+static double ring_point_dist(double px, double py, const int32_t *x, const int32_t *y, uint16_t n) {
+    double best = 1e30;
+    for (uint16_t j = 0; j < n; j++) {
+        uint16_t j2 = (uint16_t)((j + 1) % n);
+        double ax = (double)x[j];
+        double ay = (double)y[j];
+        double vx = (double)x[j2] - ax;
+        double vy = (double)y[j2] - ay;
+        double wx = px - ax;
+        double wy = py - ay;
+        double vv = (vx * vx) + (vy * vy);
+        double tt = (vv > 1e-12) ? ((wx * vx) + (wy * vy)) / vv : 0.0;
+        if (tt < 0.0) {
+            tt = 0.0;
+        } else if (tt > 1.0) {
+            tt = 1.0;
         }
-        if (!inside) {
-            continue;
-        }
-        double dmin = 1e30;
-        for (uint16_t j = 0; j < bn; j++) {
-            uint16_t j2 = (uint16_t)((j + 1) % bn);
-            double ax = (double)bx[j];
-            double ay = (double)by[j];
-            double vx = (double)bx[j2] - ax;
-            double vy = (double)by[j2] - ay;
-            double wx = px - ax;
-            double wy = py - ay;
-            double vv = (vx * vx) + (vy * vy);
-            double tt = (vv > 1e-12) ? ((wx * vx) + (wy * vy)) / vv : 0.0;
-            if (tt < 0.0) {
-                tt = 0.0;
-            } else if (tt > 1.0) {
-                tt = 1.0;
-            }
-            double ddx = wx - (tt * vx);
-            double ddy = wy - (tt * vy);
-            double d2 = (ddx * ddx) + (ddy * ddy);
-            if (d2 < dmin) {
-                dmin = d2;
-            }
-        }
-        if (dmin > best_max) {
-            best_max = dmin;
+        double ddx = wx - (tt * vx);
+        double ddy = wy - (tt * vy);
+        double d2 = (ddx * ddx) + (ddy * ddy);
+        if (d2 < best) {
+            best = d2;
         }
     }
-    return sqrt(best_max);
+    return sqrt(best);
+}
+
+/* Even-odd containment of (px,py) in the closed ring. */
+static bool ring_point_inside(double px, double py, const int32_t *x, const int32_t *y, uint16_t n) {
+    bool inside = false;
+    for (uint16_t j = 0; j < n; j++) {
+        uint16_t j2 = (uint16_t)((j + 1) % n);
+        double ay = (double)y[j];
+        double cy = (double)y[j2];
+        if ((ay > py) == (cy > py)) {
+            continue;
+        }
+        double tt = (py - ay) / (cy - ay);
+        double xi = (double)x[j] + (tt * ((double)x[j2] - (double)x[j]));
+        if (xi > px) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+/* Inradius = radius of the largest inscribed disk (pole of inaccessibility). Polylabel-style
+ * quadtree refinement (heap-free bounded DFS): prune cells that cannot beat the running best,
+ * refine the promising ones to PREC. A counter's Minkowski erosion by R is non-empty IFF
+ * inradius > R — the exact geometric trace/fill boundary, no fudge constant (#253 calibration:
+ * matches the fine-grid GT on LilitaOne + Roboto + analytic circle/ellipse/square). */
+typedef struct {
+    double cx, cy, h;
+} nt_pa_cell_t;
+#define NT_FONT_INRADIUS_STACK 512
+#define NT_FONT_INRADIUS_PREC 0.25 /* sub-unit convergence; well below the weight-quantization step */
+static nt_pa_cell_t s_pa_stack[NT_FONT_INRADIUS_STACK];
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 3) {
+        return 0.0;
+    }
+    double minx = 1e30;
+    double miny = 1e30;
+    double maxx = -1e30;
+    double maxy = -1e30;
+    for (uint16_t i = 0; i < n; i++) {
+        double px = (double)x[i];
+        double py = (double)y[i];
+        minx = px < minx ? px : minx;
+        maxx = px > maxx ? px : maxx;
+        miny = py < miny ? py : miny;
+        maxy = py > maxy ? py : maxy;
+    }
+    double w = maxx - minx;
+    double ht = maxy - miny;
+    double cell = w < ht ? w : ht;
+    if (cell <= 0.0) {
+        return 0.0;
+    }
+    double half = cell * 0.5;
+    int nxc = (int)(w / cell) + 1; /* seed a cell grid over the bbox (integer induction) */
+    int nyc = (int)(ht / cell) + 1;
+    int sp = 0;
+    for (int iy = 0; iy < nyc && sp < NT_FONT_INRADIUS_STACK; iy++) {
+        for (int ix = 0; ix < nxc && sp < NT_FONT_INRADIUS_STACK; ix++) {
+            s_pa_stack[sp++] = (nt_pa_cell_t){minx + half + ((double)ix * cell), miny + half + ((double)iy * cell), half};
+        }
+    }
+    double bcx = minx + (w * 0.5);
+    double bcy = miny + (ht * 0.5);
+    double best = ring_point_inside(bcx, bcy, x, y, n) ? ring_point_dist(bcx, bcy, x, y, n) : -1.0;
+    int guard = 0;
+    while (sp > 0 && guard++ < 200000) {
+        nt_pa_cell_t c = s_pa_stack[--sp];
+        double d = ring_point_inside(c.cx, c.cy, x, y, n) ? ring_point_dist(c.cx, c.cy, x, y, n) : -ring_point_dist(c.cx, c.cy, x, y, n);
+        if (d > best) {
+            best = d;
+        }
+        if (c.h < NT_FONT_INRADIUS_PREC) {
+            continue;
+        }
+        if (d + (c.h * 1.4142135623730951) <= best) {
+            continue; /* prune: this cell cannot contain a deeper interior point */
+        }
+        double hh = c.h * 0.5;
+        if (sp + 4 <= NT_FONT_INRADIUS_STACK) {
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx - hh, c.cy - hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx + hh, c.cy - hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx - hh, c.cy + hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx + hh, c.cy + hh, hh};
+        }
+    }
+    return best > 0.0 ? best : 0.0;
 }
 
 /* Doubly-implicit node ring for uncrossing: next[] stays a permutation, so loops are
@@ -888,26 +947,20 @@ static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8
 }
 
 /* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
- * uncross (split crossings, rewire orientation-preserving) → signed-loop filter (drop
- * loops opposing the original winding = D1 notches) → erosion-survival (drop point-
- * reflected phantom counters = D2). base = pre-offset ring (survival reference). Winding
- * elsewhere is preserved; positive overlaps stay filled (shader CalcCoverage clamps). */
+ * Calibrated Minkowski gate (#253): a shrinker (counter) whose erosion by R empties —
+ * inradius(base) <= R — is dropped so it fills solid; this is the exact geometric
+ * trace/fill boundary (no fudge constant), superseding the vertex-depth proxy that filled
+ * early/late. Then uncross (split crossings, rewire orientation-preserving) → signed-loop
+ * filter (drop loops opposing the original winding = D1 notches). base = pre-offset ring.
+ * Winding elsewhere is preserved; positive overlaps stay filled (shader CalcCoverage clamps). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker, double r_off,
                              nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    if (is_shrinker && poly_inradius(bx, by, bn) <= r_off) {
+        return; /* counter's Minkowski erosion by R is empty -> fills solid (D2 phantom + collapse) */
+    }
     int nx = find_offset_crossings(ox, oy, on_n);
     if (nx <= 0) {
-        if (nx == 0 && a0 != 0.0) {
-            /* a0==0 is a degenerate ring (real fonts never emit one) — convert as-is, matching
-             * the pre-#253 path. The sliver |area|<1 drop is applied only to post-uncross loops. */
-            double a1 = contour_signed_area(ox, oy, on_n);
-            if ((a0 > 0.0) != (a1 > 0.0)) {
-                return; /* mirror-flip: counter collapsed past its center -> drop -> fills solid */
-            }
-            if (is_shrinker && ring_survival_depth(ox, oy, on_n, bx, by, bn) < NT_FONT_OFFSET_SURVIVAL_KAPPA * r_off) {
-                return; /* point-reflected phantom counter: drop -> fills solid */
-            }
-        }
         convert_point_ring(ox, oy, oon, on_n, curves, total_curves, max_curves); /* simple ring or overflow: raw */
         return;
     }
@@ -997,9 +1050,6 @@ static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t
         double la = contour_signed_area(s_offset_lx, s_offset_ly, (uint16_t)cnt);
         if (fabs(la) < 1.0 || (la > 0.0) != orig_pos) {
             continue; /* sliver or inverted loop (D1 winding-cancellation) */
-        }
-        if (is_shrinker && ring_survival_depth(s_offset_lx, s_offset_ly, (uint16_t)cnt, bx, by, bn) < NT_FONT_OFFSET_SURVIVAL_KAPPA * r_off) {
-            continue; /* phantom remnant of a collapsed counter (D2) */
         }
         convert_point_ring(s_offset_lx, s_offset_ly, s_offset_lon, (uint16_t)cnt, curves, total_curves, max_curves);
     }
