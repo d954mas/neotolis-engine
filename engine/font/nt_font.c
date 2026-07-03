@@ -595,32 +595,50 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
     }
 }
 
-/* Snapshot buffers so offset_points reads pre-offset neighbors (single-threaded decode). */
-static int32_t s_offset_ox[NT_FONT_MAX_POINTS_PER_CONTOUR];
-static int32_t s_offset_oy[NT_FONT_MAX_POINTS_PER_CONTOUR];
+/* CPU embolden + offset self-intersection resolution (DECO-01 / #253). All scratch is
+ * static preallocated (no heap on the decode miss path); caps from the 73-06 spike:
+ * reflex joins observed <=7/contour, self-crossings <=31 (齒 @0.32em). Overflow degrades
+ * to today's rendering (raw offset ring), never crashes. */
+#define NT_FONT_OFFSET_MAX_JOINS 64 /* reflex retraction joins/contour; beyond -> plain miter (>= today) */
+#define NT_FONT_OFFSET_MAX_XINGS 64 /* proper self-crossings/ring; overflow -> keep raw ring (= today) */
+#define NT_FONT_OFFSET_RING_MAX (NT_FONT_MAX_POINTS_PER_CONTOUR + (2 * NT_FONT_OFFSET_MAX_JOINS))
+#define NT_FONT_OFFSET_NODE_MAX (NT_FONT_OFFSET_RING_MAX + (2 * NT_FONT_OFFSET_MAX_XINGS))
+#define NT_FONT_OFFSET_SURVIVAL_KAPPA 0.75 /* eroded hole must reach >= kappa*R inside the base ring, else phantom */
 
-/* CPU embolden at the decoded point ring (DECO-01, RESEARCH Pattern 1).
- * sign=-1 grows the outer silhouette / shrinks counters for the builder's stbtt
- * winding; miter d capped at d_max=2.0 (geometry guard, independent of W). No W
- * clamp — set_weight applies the requested weight exactly (explicit-over-implicit);
- * the isfinite/1e-6/lrintf-on-finite guards keep output finite at any W. W_CAP_EM
- * (~0.04em) is a documented recommended ceiling only, NOT enforced here. */
-static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float W) {
-    (void)on;
+/* Offset+joins destination ring: offset_with_joins reads the base s_decode_pts_*, writes here,
+ * so vertex adjacency reads pristine source coords (no in-place snapshot needed). */
+static int32_t s_offset_x[NT_FONT_OFFSET_RING_MAX];
+static int32_t s_offset_y[NT_FONT_OFFSET_RING_MAX];
+static uint8_t s_offset_on[NT_FONT_OFFSET_RING_MAX];
+
+/* Offset a point ring by W (embolden), writing the result to a SEPARATE dst ring. sign=-1 grows
+ * the outer silhouette / shrinks counters for the builder's stbtt winding; miter d capped at
+ * d_max=2.0 (geometry guard). No W clamp — set_weight applies W exactly (explicit-over-implicit);
+ * the 1e-6 length guard + lrintf keep output finite at any W.
+ * At a cap-binding reflex corner of a GROWER ring, emit a Clipper-style retraction join (wall end
+ * at exact R, original vertex, wall end) so the converging offset walls cross at the true trim
+ * point; resolve_and_emit then excises the pocket (kills the 'W'-valley sealed-dent defect, D3).
+ * a0 = signed area of the source ring (winding reference). Thin (W<0) swaps grower/shrinker by
+ * symmetry (NOT raster-validated — see 73-06 findings). Returns dst point count. */
+static uint16_t offset_with_joins(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, int32_t *dx, int32_t *dy, uint8_t *don, float W, double a0) {
     if (W == 0.0F || n < 2) {
-        return; /* identity path — byte-identical to the un-emboldened decode */
+        for (uint16_t i = 0; i < n; i++) {
+            dx[i] = sx[i];
+            dy[i] = sy[i];
+            don[i] = son[i];
+        }
+        return n;
     }
-    for (uint16_t i = 0; i < n; i++) {
-        s_offset_ox[i] = x[i];
-        s_offset_oy[i] = y[i];
-    }
+    bool grower = (W > 0.0F) ? (a0 < 0.0) : (a0 > 0.0);
+    uint16_t joins = 0;
+    uint16_t m = 0;
     for (uint16_t i = 0; i < n; i++) {
         uint16_t p = (i == 0) ? (uint16_t)(n - 1) : (uint16_t)(i - 1);
         uint16_t q = (uint16_t)((i + 1) % n);
-        float inx = (float)(s_offset_ox[i] - s_offset_ox[p]);
-        float iny = (float)(s_offset_oy[i] - s_offset_oy[p]);
-        float oux = (float)(s_offset_ox[q] - s_offset_ox[i]);
-        float ouy = (float)(s_offset_oy[q] - s_offset_oy[i]);
+        float inx = (float)(sx[i] - sx[p]);
+        float iny = (float)(sy[i] - sy[p]);
+        float oux = (float)(sx[q] - sx[i]);
+        float ouy = (float)(sy[q] - sy[i]);
         float li = sqrtf((inx * inx) + (iny * iny)) + 1e-6F;
         float lo = sqrtf((oux * oux) + (ouy * ouy)) + 1e-6F;
         /* normals: rotate tangent -90 => n=(ty,-tx), normalized */
@@ -628,13 +646,36 @@ static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n,
         float niy = -inx / li;
         float nox = ouy / lo;
         float noy = -oux / lo;
-        float sx = nix + nox;
-        float sy = niy + noy;
-        float d = 1.0F / fmaxf(1.0F + ((nix * nox) + (niy * noy)), 0.25F); /* miter, clamped */
-        d = fminf(d, 2.0F);                                                /* hard cap: no convex spikes */
-        x[i] += (int32_t)lrintf(-sx * d * W * 0.5F);                       /* sign=-1 folded in */
-        y[i] += (int32_t)lrintf(-sy * d * W * 0.5F);
+        float dot = (nix * nox) + (niy * noy);
+        float turn = (inx * ouy) - (iny * oux);
+        bool reflex = (turn != 0.0F) && ((turn > 0.0F) != (a0 > 0.0));
+        if (grower && son[i] && reflex && dot <= -0.5F && joins < NT_FONT_OFFSET_MAX_JOINS && (uint32_t)m + 3 <= NT_FONT_OFFSET_RING_MAX) {
+            /* wall endpoints at exact R = W/2 along each edge normal (sign -1 folded in) */
+            dx[m] = sx[i] + (int32_t)lrintf(-nix * W * 0.5F);
+            dy[m] = sy[i] + (int32_t)lrintf(-niy * W * 0.5F);
+            don[m] = 1;
+            m++;
+            dx[m] = sx[i]; /* original vertex = retraction anchor */
+            dy[m] = sy[i];
+            don[m] = 1;
+            m++;
+            dx[m] = sx[i] + (int32_t)lrintf(-nox * W * 0.5F);
+            dy[m] = sy[i] + (int32_t)lrintf(-noy * W * 0.5F);
+            don[m] = 1;
+            m++;
+            joins++;
+            continue;
+        }
+        float ssx = nix + nox;
+        float ssy = niy + noy;
+        float d = 1.0F / fmaxf(1.0F + dot, 0.25F); /* miter, clamped */
+        d = fminf(d, 2.0F);                        /* hard cap: no convex spikes */
+        dx[m] = sx[i] + (int32_t)lrintf(-ssx * d * W * 0.5F);
+        dy[m] = sy[i] + (int32_t)lrintf(-ssy * d * W * 0.5F);
+        don[m] = son[i];
+        m++;
     }
+    return m;
 }
 
 /* Signed area of the closed point ring (shoelace); int64 accum avoids overflow. */
@@ -653,12 +694,32 @@ static int contour_orient(int32_t ax, int32_t ay, int32_t bx, int32_t by, int32_
     return (cross > 0) - (cross < 0);
 }
 
-/* True if the closed control polygon has a PROPER crossing between two non-adjacent
- * edges — a local self-intersection the global area test misses. O(n²) on the decode
- * miss path only. Shared vertices (collinear/touching) are NOT crossings. */
-static bool contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
+/* PROPER crossing between segments (a,b) and (c,d): all four orients non-zero and
+ * opposite on each edge. Shared vertices (collinear/touching) are NOT crossings. */
+static bool seg_proper_cross(int32_t ax, int32_t ay, int32_t bx, int32_t by, int32_t cx, int32_t cy, int32_t dx, int32_t dy) {
+    int o1 = contour_orient(ax, ay, bx, by, cx, cy);
+    int o2 = contour_orient(ax, ay, bx, by, dx, dy);
+    int o3 = contour_orient(cx, cy, dx, dy, ax, ay);
+    int o4 = contour_orient(cx, cy, dx, dy, bx, by);
+    return o1 != 0 && o2 != 0 && o3 != 0 && o4 != 0 && o1 != o2 && o3 != o4;
+}
+
+// #region Offset self-intersection resolution (#253) — uncross + signed-loop filter + survival
+/* One recorded self-crossing: the two crossing edges (i,i+1)x(j,j+1) and the rounded
+ * intersection point (grid-snapped like the int point ring). */
+typedef struct {
+    uint16_t ei, ej;
+    int32_t px, py;
+    double ti, tj;
+} nt_offset_xing_t;
+static nt_offset_xing_t s_offset_xings[NT_FONT_OFFSET_MAX_XINGS];
+
+/* Record all proper self-crossings of the ring (O(n²), decode miss path only). Returns
+ * count, or -1 on overflow (caller keeps the raw ring = today's rendering, never crashes). */
+static int find_offset_crossings(const int32_t *x, const int32_t *y, uint16_t n) {
+    int cnt = 0;
     if (n < 4) {
-        return false; /* triangle or less cannot self-cross */
+        return 0;
     }
     for (uint16_t i = 0; i < n; i++) {
         uint16_t i2 = (uint16_t)((i + 1) % n);
@@ -667,22 +728,288 @@ static bool contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t
             if (j == i2 || j2 == i) {
                 continue; /* adjacent edges share an endpoint */
             }
-            int o1 = contour_orient(x[i], y[i], x[i2], y[i2], x[j], y[j]);
-            int o2 = contour_orient(x[i], y[i], x[i2], y[i2], x[j2], y[j2]);
-            int o3 = contour_orient(x[j], y[j], x[j2], y[j2], x[i], y[i]);
-            int o4 = contour_orient(x[j], y[j], x[j2], y[j2], x[i2], y[i2]);
-            /* proper crossing: all four non-zero, opposite on each edge */
-            if (o1 != 0 && o2 != 0 && o3 != 0 && o4 != 0 && o1 != o2 && o3 != o4) {
-                return true;
+            if (!seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
+                continue;
+            }
+            if (cnt >= NT_FONT_OFFSET_MAX_XINGS) {
+                return -1;
+            }
+            double rx = (double)(x[i2] - x[i]);
+            double ry = (double)(y[i2] - y[i]);
+            double sxx = (double)(x[j2] - x[j]);
+            double syy = (double)(y[j2] - y[j]);
+            double den = (rx * syy) - (ry * sxx); /* != 0 for a proper crossing */
+            double qx = (double)(x[j] - x[i]);
+            double qy = (double)(y[j] - y[i]);
+            double t = ((qx * syy) - (qy * sxx)) / den;
+            double u = ((qx * ry) - (qy * rx)) / den;
+            s_offset_xings[cnt].ei = i;
+            s_offset_xings[cnt].ej = j;
+            s_offset_xings[cnt].ti = t;
+            s_offset_xings[cnt].tj = u;
+            s_offset_xings[cnt].px = (int32_t)lrint((double)x[i] + (t * rx));
+            s_offset_xings[cnt].py = (int32_t)lrint((double)y[i] + (t * ry));
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+/* Erosion-survival depth: max over ring vertices INSIDE the base ring of their distance
+ * to the base ring. A phantom (point-reflected collapsed counter) hugs the base boundary
+ * or lands outside it → small depth; a genuine eroded hole reaches ~R inside → large depth.
+ * The inside test is essential: overshoot lands vertices far from the ring but in the fill. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static double ring_survival_depth(const int32_t *x, const int32_t *y, uint16_t n, const int32_t *bx, const int32_t *by, uint16_t bn) {
+    double best_max = 0.0;
+    for (uint16_t i = 0; i < n; i++) {
+        double px = (double)x[i] + 0.5; /* nudge off the integer lattice for the parity test */
+        double py = (double)y[i] + 0.5;
+        bool inside = false;
+        for (uint16_t j = 0; j < bn; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % bn);
+            double ay = (double)by[j];
+            double cy = (double)by[j2];
+            if ((ay > py) == (cy > py)) {
+                continue;
+            }
+            double tt = (py - ay) / (cy - ay);
+            double xi = (double)bx[j] + (tt * ((double)bx[j2] - (double)bx[j]));
+            if (xi > px) {
+                inside = !inside;
+            }
+        }
+        if (!inside) {
+            continue;
+        }
+        double dmin = 1e30;
+        for (uint16_t j = 0; j < bn; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % bn);
+            double ax = (double)bx[j];
+            double ay = (double)by[j];
+            double vx = (double)bx[j2] - ax;
+            double vy = (double)by[j2] - ay;
+            double wx = px - ax;
+            double wy = py - ay;
+            double vv = (vx * vx) + (vy * vy);
+            double tt = (vv > 1e-12) ? ((wx * vx) + (wy * vy)) / vv : 0.0;
+            if (tt < 0.0) {
+                tt = 0.0;
+            } else if (tt > 1.0) {
+                tt = 1.0;
+            }
+            double ddx = wx - (tt * vx);
+            double ddy = wy - (tt * vy);
+            double d2 = (ddx * ddx) + (ddy * ddy);
+            if (d2 < dmin) {
+                dmin = d2;
+            }
+        }
+        if (dmin > best_max) {
+            best_max = dmin;
+        }
+    }
+    return sqrt(best_max);
+}
+
+/* Doubly-implicit node ring for uncrossing: next[] stays a permutation, so loops are
+ * clean cycles. Sized for the offset ring + two split nodes per crossing. */
+typedef struct {
+    int32_t x, y;
+    int next;
+    uint8_t on;
+    uint8_t used;
+} nt_offset_node_t;
+static nt_offset_node_t s_offset_nodes[NT_FONT_OFFSET_NODE_MAX];
+static int32_t s_offset_lx[NT_FONT_OFFSET_NODE_MAX];
+static int32_t s_offset_ly[NT_FONT_OFFSET_NODE_MAX];
+static uint8_t s_offset_lon[NT_FONT_OFFSET_NODE_MAX];
+// #endregion
+
+/* Walk a closed point ring into quadratic curves (TrueType rules; on-curve = degenerate
+ * line quad, off→off = implicit midpoint). Shared by the plain and resolved paths. */
+static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8_t *pon, uint16_t n, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    if (n == 0) {
+        return;
+    }
+    uint16_t i = 0;
+    uint16_t start = 0;
+    while (start < n && !pon[start]) {
+        start++;
+    }
+    if (start == n) {
+        start = 0; /* all off-curve: start from implicit midpoint of first two */
+    }
+    float cur_x;
+    float cur_y;
+    if (pon[start]) {
+        cur_x = (float)px[start];
+        cur_y = (float)py[start];
+        i = (uint16_t)((start + 1) % n);
+    } else {
+        cur_x = (float)(px[0] + px[1]) * 0.5F;
+        cur_y = (float)(py[0] + py[1]) * 0.5F;
+        i = 0;
+    }
+    uint16_t steps = 0;
+    while (steps < n) {
+        uint16_t idx = i % n;
+        if (pon[idx]) {
+            float ex = (float)px[idx];
+            float ey = (float)py[idx];
+            emit_curve(curves, total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
+            cur_x = ex;
+            cur_y = ey;
+            i = (idx + 1) % n;
+            steps++;
+        } else {
+            float cx = (float)px[idx];
+            float cy = (float)py[idx];
+            uint16_t next = (idx + 1) % n;
+            if (pon[next]) {
+                float ex = (float)px[next];
+                float ey = (float)py[next];
+                emit_curve(curves, total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
+                cur_x = ex;
+                cur_y = ey;
+                i = (next + 1) % n;
+                steps += 2;
+            } else {
+                float mx = (cx + (float)px[next]) * 0.5F;
+                float my = (cy + (float)py[next]) * 0.5F;
+                emit_curve(curves, total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
+                cur_x = mx;
+                cur_y = my;
+                i = next; /* don't skip next — it becomes the control for the next segment */
+                steps++;
             }
         }
     }
-    return false;
+}
+
+/* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
+ * uncross (split crossings, rewire orientation-preserving) → signed-loop filter (drop
+ * loops opposing the original winding = D1 notches) → erosion-survival (drop point-
+ * reflected phantom counters = D2). base = pre-offset ring (survival reference). Winding
+ * elsewhere is preserved; positive overlaps stay filled (shader CalcCoverage clamps). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker, double r_off,
+                             nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    int nx = find_offset_crossings(ox, oy, on_n);
+    if (nx <= 0) {
+        if (nx == 0 && a0 != 0.0) {
+            /* a0==0 is a degenerate ring (real fonts never emit one) — convert as-is, matching
+             * the pre-#253 path. The sliver |area|<1 drop is applied only to post-uncross loops. */
+            double a1 = contour_signed_area(ox, oy, on_n);
+            if ((a0 > 0.0) != (a1 > 0.0)) {
+                return; /* mirror-flip: counter collapsed past its center -> drop -> fills solid */
+            }
+            if (is_shrinker && ring_survival_depth(ox, oy, on_n, bx, by, bn) < NT_FONT_OFFSET_SURVIVAL_KAPPA * r_off) {
+                return; /* point-reflected phantom counter: drop -> fills solid */
+            }
+        }
+        convert_point_ring(ox, oy, oon, on_n, curves, total_curves, max_curves); /* simple ring or overflow: raw */
+        return;
+    }
+
+    // #region Build node ring with per-edge crossing splits
+    for (uint16_t i = 0; i < on_n; i++) {
+        s_offset_nodes[i] = (nt_offset_node_t){ox[i], oy[i], (i + 1) % on_n, oon[i], 0};
+    }
+    int nn = on_n;
+    for (int k = 0; k < nx; k++) { /* crossing k owns two coincident nodes, one per strand */
+        s_offset_nodes[nn] = (nt_offset_node_t){s_offset_xings[k].px, s_offset_xings[k].py, -1, 1, 0};
+        s_offset_nodes[nn + 1] = (nt_offset_node_t){s_offset_xings[k].px, s_offset_xings[k].py, -1, 1, 0};
+        nn += 2;
+    }
+    for (uint16_t e = 0; e < on_n; e++) { /* splice each edge's crossings in ascending-t order */
+        int list[8];
+        double lt[8];
+        int lc = 0;
+        for (int k = 0; k < nx; k++) {
+            if (s_offset_xings[k].ei == e || s_offset_xings[k].ej == e) {
+                if (lc >= 8) {
+                    convert_point_ring(ox, oy, oon, on_n, curves, total_curves, max_curves); /* >8 crossings on one edge: bail to raw */
+                    return;
+                }
+                list[lc] = (int)on_n + (2 * k) + (s_offset_xings[k].ej == e ? 1 : 0);
+                lt[lc] = (s_offset_xings[k].ej == e) ? s_offset_xings[k].tj : s_offset_xings[k].ti;
+                lc++;
+            }
+        }
+        if (lc == 0) {
+            continue;
+        }
+        for (int a = 1; a < lc; a++) { /* insertion sort by t */
+            int li = list[a];
+            double ta = lt[a];
+            int b = a - 1;
+            while (b >= 0 && lt[b] > ta) {
+                list[b + 1] = list[b];
+                lt[b + 1] = lt[b];
+                b--;
+            }
+            list[b + 1] = li;
+            lt[b + 1] = ta;
+        }
+        int tail = s_offset_nodes[e].next;
+        int prev = (int)e;
+        for (int a = 0; a < lc; a++) {
+            s_offset_nodes[prev].next = list[a];
+            prev = list[a];
+        }
+        s_offset_nodes[prev].next = tail;
+    }
+    for (int k = 0; k < nx; k++) { /* uncross: orientation-preserving smoothing (swap outgoing) */
+        int na = (int)on_n + (2 * k);
+        int nb = na + 1;
+        int tmp = s_offset_nodes[na].next;
+        s_offset_nodes[na].next = s_offset_nodes[nb].next;
+        s_offset_nodes[nb].next = tmp;
+    }
+    // #endregion
+
+    // #region Extract loops, filter by orientation sign + erosion survival
+    bool orig_pos = a0 > 0.0;
+    for (int s = 0; s < nn; s++) {
+        if (s_offset_nodes[s].used) {
+            continue;
+        }
+        int cnt = 0;
+        int cur = s;
+        do {
+            s_offset_nodes[cur].used = 1;
+            if (cnt == 0 || s_offset_lx[cnt - 1] != s_offset_nodes[cur].x || s_offset_ly[cnt - 1] != s_offset_nodes[cur].y) {
+                s_offset_lx[cnt] = s_offset_nodes[cur].x; /* dedupe consecutive coincident points */
+                s_offset_ly[cnt] = s_offset_nodes[cur].y;
+                s_offset_lon[cnt] = s_offset_nodes[cur].on;
+                cnt++;
+            }
+            cur = s_offset_nodes[cur].next;
+        } while (cur != s && cnt <= nn);
+        NT_ASSERT(cnt <= nn); /* next[] is a permutation — a longer walk means a corrupt chain */
+        while (cnt > 1 && s_offset_lx[cnt - 1] == s_offset_lx[0] && s_offset_ly[cnt - 1] == s_offset_ly[0]) {
+            cnt--; /* drop closing duplicate */
+        }
+        if (cnt < 3) {
+            continue;
+        }
+        double la = contour_signed_area(s_offset_lx, s_offset_ly, (uint16_t)cnt);
+        if (fabs(la) < 1.0 || (la > 0.0) != orig_pos) {
+            continue; /* sliver or inverted loop (D1 winding-cancellation) */
+        }
+        if (is_shrinker && ring_survival_depth(s_offset_lx, s_offset_ly, (uint16_t)cnt, bx, by, bn) < NT_FONT_OFFSET_SURVIVAL_KAPPA * r_off) {
+            continue; /* phantom remnant of a collapsed counter (D2) */
+        }
+        convert_point_ring(s_offset_lx, s_offset_ly, s_offset_lon, (uint16_t)cnt, curves, total_curves, max_curves);
+    }
+    // #endregion
 }
 
 /* Decode v4 point-based contour data into absolute float curves.
  * Handles implicit midpoints between consecutive off-curve points.
- * weight != 0 emboldens the point ring in place before conversion (DECO-01). */
+ * weight != 0 emboldens the point ring and resolves offset self-intersections
+ * (#253) before conversion; weight == 0 is byte-identical to a plain decode (DECO-01). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves, float weight) {
     const uint8_t *rp = contour_data;
@@ -733,95 +1060,19 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         }
         // #endregion
 
-        /* Embolden the point ring BEFORE conversion — offsetting nt_curve_t after
-         * conversion tears shared endpoints (RESEARCH Anti-Pattern). */
+        // #region Embolden + resolve self-intersections (#253), or plain convert
+        /* Offset+resolution runs on a SEPARATE ring so weight==0 is byte-identical to the
+         * plain decode; offsetting nt_curve_t after conversion tears shared endpoints. */
         if (weight != 0.0F) {
-            /* Only a HOLE shrinks under an outward offset; the OUTER grows. So gate the
-             * drop on shrink: a shrinking counter whose offset ring self-intersects (or
-             * inverts sign) cancels its winding → would hole → drop so it fills solid.
-             * The outer grows even when it self-intersects at a concave waist ('8'/'B'/'@')
-             * — its self-overlap adds winding, stays filled, must be KEPT. area_before~0
-             * makes the shrink test false → never dropped (safe). weight!=0 only keeps the
-             * regular path byte-identical. */
-            double area_before = contour_signed_area(pts_x, pts_y, point_count);
-            offset_points(pts_x, pts_y, pts_on, point_count, weight);
-            double area_after = contour_signed_area(pts_x, pts_y, point_count);
-            if (fabs(area_after) < fabs(area_before) && (contour_self_intersects(pts_x, pts_y, point_count) || (area_before > 0.0) != (area_after > 0.0))) {
-                continue; /* drop the collapsed hole — the outer grows, only shrinking holes trip this */
-            }
-        }
-
-        // #region Convert points to quadratic curves (TrueType rules)
-        /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
-        uint16_t n = point_count;
-        if (n == 0) {
-            continue;
-        }
-        uint16_t i = 0;
-
-        /* Find first on-curve point to start from */
-        uint16_t start = 0;
-        while (start < n && !pts_on[start]) {
-            start++;
-        }
-        if (start == n) {
-            /* All off-curve: start from implicit midpoint of first two */
-            start = 0;
-        }
-
-        /* Current on-curve position */
-        float cur_x;
-        float cur_y;
-        if (pts_on[start]) {
-            cur_x = (float)pts_x[start];
-            cur_y = (float)pts_y[start];
-            i = (uint16_t)((start + 1) % n);
+            double a0 = contour_signed_area(pts_x, pts_y, point_count);
+            uint16_t offn = offset_with_joins(pts_x, pts_y, pts_on, point_count, s_offset_x, s_offset_y, s_offset_on, weight, a0);
+            /* TT winding (builder/stbtt): outer negative area, hole positive. Bold (W>0)
+             * shrinks holes; thin (W<0) shrinks outers (symmetry, not raster-validated). */
+            bool is_shrinker = (weight > 0.0F) ? (a0 > 0.0) : (a0 < 0.0);
+            double r_off = 0.5 * (double)fabsf(weight);
+            resolve_and_emit(s_offset_x, s_offset_y, s_offset_on, offn, pts_x, pts_y, point_count, a0, is_shrinker, r_off, curves, &total_curves, max_curves);
         } else {
-            /* All off-curve: midpoint between point[0] and point[1] */
-            cur_x = (float)(pts_x[0] + pts_x[1]) * 0.5F;
-            cur_y = (float)(pts_y[0] + pts_y[1]) * 0.5F;
-            i = 0;
-        }
-
-        uint16_t steps = 0;
-        while (steps < n) {
-            uint16_t idx = i % n;
-
-            if (pts_on[idx]) {
-                /* On-curve → Line segment (degenerate quad) */
-                float ex = (float)pts_x[idx];
-                float ey = (float)pts_y[idx];
-                emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
-                cur_x = ex;
-                cur_y = ey;
-                i = (idx + 1) % n;
-                steps++;
-            } else {
-                /* Off-curve: control point for quadratic */
-                float cx = (float)pts_x[idx];
-                float cy = (float)pts_y[idx];
-                uint16_t next = (idx + 1) % n;
-
-                if (pts_on[next]) {
-                    /* off → on: standard quad */
-                    float ex = (float)pts_x[next];
-                    float ey = (float)pts_y[next];
-                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
-                    cur_x = ex;
-                    cur_y = ey;
-                    i = (next + 1) % n;
-                    steps += 2;
-                } else {
-                    /* off → off: implicit midpoint is the endpoint */
-                    float mx = (cx + (float)pts_x[next]) * 0.5F;
-                    float my = (cy + (float)pts_y[next]) * 0.5F;
-                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
-                    cur_x = mx;
-                    cur_y = my;
-                    i = next; /* don't skip next — it becomes the control for the next segment */
-                    steps++;
-                }
-            }
+            convert_point_ring(pts_x, pts_y, pts_on, point_count, curves, &total_curves, max_curves);
         }
         // #endregion
     }
@@ -2201,9 +2452,29 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
     slot->metrics_set = true;
 }
 
-void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight) { offset_points(x, y, on, n, weight); }
+uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, float weight, int32_t *dx, int32_t *dy, uint8_t *don) {
+    double a0 = contour_signed_area(sx, sy, n);
+    return offset_with_joins(sx, sy, son, n, dx, dy, don, weight, a0);
+}
 
-bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) { return contour_self_intersects(x, y, n); }
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 4) {
+        return false;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t i2 = (uint16_t)((i + 1) % n);
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            if (j == i2 || j2 == i) {
+                continue;
+            }
+            if (seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
     uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);

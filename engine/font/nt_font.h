@@ -166,9 +166,10 @@ void nt_font_test_reset_measure_counters(void);
  * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
 void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
 
-/* Embolden test hooks (DECO-01). offset_points mutates a point ring in place;
- * decode fills out_curves flat as [p0x,p0y,p1x,p1y,p2x,p2y] per curve, returns count. */
-void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight);
+/* Embolden + offset-resolution test hooks (DECO-01 / #253). offset_ring writes the offset
+ * point ring (with reflex joins) to a SEPARATE dst ring, returns dst point count; decode
+ * fills out_curves flat as [p0x,p0y,p1x,p1y,p2x,p2y] per curve (full resolve), returns count. */
+uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, float weight, int32_t *dx, int32_t *dy, uint8_t *don);
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
 bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n);
 #endif

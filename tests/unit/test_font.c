@@ -1561,6 +1561,59 @@ static float ring_area(const int32_t *x, const int32_t *y, uint16_t n) {
     return (float)(maxx - minx) * (float)(maxy - miny);
 }
 
+/* --- Emitted-curve raster helpers (#253): treat each quad's p0->p2 chord as a segment.
+ * Synthetic fixtures are all straight lines (p1 = midpoint), so chords are exact. --- */
+
+/* Nonzero-winding (rendered fill) at (px,py) via a +X ray over all curve chords. */
+static int curves_fill_nonzero(const float *cv, uint16_t n, float px, float py) {
+    int w = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        float ax = cv[(i * 6) + 0];
+        float ay = cv[(i * 6) + 1];
+        float bx = cv[(i * 6) + 4];
+        float by = cv[(i * 6) + 5];
+        if ((ay > py) == (by > py)) {
+            continue;
+        }
+        float t = (py - ay) / (by - ay);
+        float xi = ax + (t * (bx - ax));
+        if (xi > px) {
+            w += (by > ay) ? 1 : -1;
+        }
+    }
+    return w != 0;
+}
+
+/* Orient sign in float. Synthetic fixtures are integer-valued <= 1000, so products
+ * (<= 2^21) are exact in float — no precision loss, no double promotion. */
+static float f_orient(float ax, float ay, float bx, float by, float cx, float cy) { return ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax)); }
+
+/* True if any two curve chords PROPERLY cross (shared endpoints/touching excluded).
+ * After resolution the emitted loops are simple and only touch at split vertices, so
+ * this must be 0. */
+static int curves_have_crossing(const float *cv, uint16_t n) {
+    for (uint16_t i = 0; i < n; i++) {
+        float ax = cv[(i * 6) + 0];
+        float ay = cv[(i * 6) + 1];
+        float bx = cv[(i * 6) + 4];
+        float by = cv[(i * 6) + 5];
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            float cx = cv[(j * 6) + 0];
+            float cy = cv[(j * 6) + 1];
+            float dx = cv[(j * 6) + 4];
+            float dy = cv[(j * 6) + 5];
+            float o1 = f_orient(ax, ay, bx, by, cx, cy);
+            float o2 = f_orient(ax, ay, bx, by, dx, dy);
+            float o3 = f_orient(cx, cy, dx, dy, ax, ay);
+            float o4 = f_orient(cx, cy, dx, dy, bx, by);
+            if (o1 != 0.0F && o2 != 0.0F && o3 != 0.0F && o4 != 0.0F && ((o1 > 0.0F) != (o2 > 0.0F)) && ((o3 > 0.0F) != (o4 > 0.0F))) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* W=0 decode is byte-identical to the un-emboldened path: the gated offset never
  * runs, so curve endpoints equal the raw input points exactly. */
 void test_embolden_w0_identity(void) {
@@ -1614,7 +1667,8 @@ void test_embolden_monotonic_bbox(void) {
     TEST_ASSERT_TRUE(areas[5] > areas[0]);
 }
 
-/* Sign=-1: outer silhouette grows, inner counter shrinks (offset_points direct). */
+/* Sign=-1: outer silhouette grows, inner counter shrinks (offset ring, no reflex joins
+ * on convex squares so dst point count is unchanged). */
 void test_embolden_counter_shrinks(void) {
     /* Outer CW, inner counter CCW (opposite winding). */
     int32_t ox[4] = {0, 0, 800, 800};
@@ -1628,14 +1682,19 @@ void test_embolden_counter_shrinks(void) {
     float inner_before = ring_area(ix, iy, 4);
 
     const float W = 80.0F; /* 0.08em @ upem 1000 */
-    nt_font_test_offset_points(ox, oy, oon, 4, W);
-    nt_font_test_offset_points(ix, iy, ion, 4, W);
+    int32_t odx[8];
+    int32_t ody[8];
+    uint8_t odon[8];
+    int32_t idx[8];
+    int32_t idy[8];
+    uint8_t idon[8];
+    uint16_t on = nt_font_test_offset_ring(ox, oy, oon, 4, W, odx, ody, odon);
+    uint16_t inn = nt_font_test_offset_ring(ix, iy, ion, 4, W, idx, idy, idon);
+    TEST_ASSERT_EQUAL_UINT16(4, on); /* convex — no reflex joins */
+    TEST_ASSERT_EQUAL_UINT16(4, inn);
 
-    float outer_after = ring_area(ox, oy, 4);
-    float inner_after = ring_area(ix, iy, 4);
-
-    TEST_ASSERT_TRUE(outer_after > outer_before); /* outer grows */
-    TEST_ASSERT_TRUE(inner_after < inner_before); /* counter shrinks */
+    TEST_ASSERT_TRUE(ring_area(odx, ody, on) > outer_before);  /* outer grows */
+    TEST_ASSERT_TRUE(ring_area(idx, idy, inn) < inner_before); /* counter shrinks */
 }
 
 /* No aesthetic W clamp (locked decision): a large weight well past the 0.04em
@@ -1653,36 +1712,6 @@ void test_embolden_large_w_stays_finite(void) {
     TEST_ASSERT_TRUE(finite);
 }
 
-/* A counter (hole) whose offset polygon self-intersects would leave a
- * winding-cancellation gap; decode drops it so it fills solid = correct dilation.
- * The counter is an '8'-like notched body: at a moderate offset it stays a simple
- * ring (kept, traced); at a wide offset the thin notch pinches into a proper
- * self-crossing WITHOUT the body flipping winding, so ONLY the self-intersection
- * test drops it. The outer stays simple and grows — never dropped. */
-void test_embolden_drops_collapsed_counter(void) {
-    /* Outer CW box; inner CCW notched counter (opposite winding), 8 points. */
-    const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
-    const int16_t inner[8][2] = {{300, 300}, {900, 300}, {900, 900}, {300, 900}, {300, 650}, {500, 650}, {500, 550}, {300, 550}};
-    uint8_t blob[256];
-    build_contour_blob_2(blob, outer, 4, inner, 8);
-
-    /* Moderate offset: notch does NOT self-intersect -> both contours emitted
-     * (4 outer + 8 inner = 12 curves, counter still traced). */
-    float cv[12 * 6];
-    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 12);
-    TEST_ASSERT_EQUAL_UINT16(12, n_mod);
-
-    /* Wide offset: the notch self-intersects (winding stays positive, no sign
-     * flip) -> counter dropped; only the outer (4 curves) remains. */
-    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 12);
-    TEST_ASSERT_EQUAL_UINT16(4, n_wide);
-    TEST_ASSERT_TRUE(n_wide < n_mod);
-
-    /* W=0 keeps both contours verbatim (collapse logic gated off). */
-    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 12);
-    TEST_ASSERT_EQUAL_UINT16(12, n_zero);
-}
-
 /* Signed shoelace area of a closed int point ring (mirrors nt_font.c's internal). */
 static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     int64_t acc = 0;
@@ -1693,53 +1722,100 @@ static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     return 0.5 * (double)acc;
 }
 
-/* Regression (#253 '8'/'B'/'@' waist): the OUTER contour of a glyph whose control
- * polygon self-intersects at a concave waist under an outward offset, but whose
- * |area| GROWS, must be KEPT — its self-overlap adds winding, stays filled, no hole.
- * The discriminator is SHRINK, not self-intersection: only a shrinking hole is
- * dropped. Before the shrink-guard fix, self-intersection alone dropped the outer, so
- * the whole silhouette vanished (outline "breaks"). Fixture: a {5/2} pentagram ring —
- * self-crossing at every W. Its CW orientation (negative area) grows under the sign=-1
- * offset → KEPT; the same ring reversed (CCW, positive area) shrinks → DROPPED. Both
- * self-intersect, so this proves the guard keys on shrink, not the crossing test. */
-void test_embolden_keeps_self_intersecting_outer(void) {
-    /* Pentagram tips connected every-other; CW (grows), 5 all-on-curve points. */
+/* #253 counter behavior: a counter narrower than the outline TRACES at a moderate
+ * offset (interior stays a hole) and FILLS at a wide offset (collapses → dropped so it
+ * renders solid = correct Minkowski dilation). The D2 phantom/mirror-flip class: an
+ * over-shrunk counter must not leave a winding-0 hole. */
+void test_embolden_counter_traces_then_fills(void) {
+    /* Outer CW box; inner CCW counter square (half-width 100). */
+    const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
+    const int16_t inner[4][2] = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
+    uint8_t blob[256];
+    build_contour_blob_2(blob, outer, 4, inner, 4);
+    float cv[16 * 6];
+
+    /* Moderate (R=20 < 100): counter traced → 8 curves, interior (500,500) is a hole. */
+    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_mod);
+    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_mod));
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_mod, 500.0F, 500.0F)); /* counter open */
+
+    /* Wide (R=150 > 100): counter collapses → dropped, only outer (4) remains; the
+     * former counter interior is now SOLID (no residual hole). */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(4, n_wide);
+    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 500.0F)); /* filled */
+
+    /* W=0 keeps both contours verbatim (offset gated off). */
+    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_zero);
+}
+
+/* #253 '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
+ * is RESOLVED — the offset ring self-crosses, but the emitted curves are simple (no
+ * residual crossing) and the interior stays solid (the inverted loop is excised, no
+ * winding-cancellation notch). Fixture: a {5/2} pentagram (self-crossing at every W). */
+void test_embolden_resolves_self_intersecting_outer(void) {
+    /* Pentagram tips connected every-other; CW (grows under sign=-1), 5 on-curve points. */
     const int16_t star[5][2] = {{500, 950}, {802, 90}, {24, 620}, {976, 620}, {198, 90}};
     uint8_t blob[128];
     build_contour_blob_1(blob, star, 5);
+    float cv[64 * 6];
 
-    /* W=0: all 5 curves emitted verbatim (collapse logic gated off). */
-    float cv[5 * 6];
-    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 5);
+    /* W=0: raw star, 5 curves (self-crossing preserved — offset gated off). */
+    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 64);
     TEST_ASSERT_EQUAL_UINT16(5, n_zero);
 
-    /* Prove the premise at W=300: the offset ring still self-intersects AND its
-     * |area| grows (outer behavior, not a hole). */
+    /* Premise: the offset ring self-intersects at W=300 (grows, |area| up). */
     int32_t px[5];
     int32_t py[5];
     uint8_t pon[5];
+    int32_t dx[64];
+    int32_t dy[64];
+    uint8_t don[64];
     for (int i = 0; i < 5; i++) {
         px[i] = star[i][0];
         py[i] = star[i][1];
         pon[i] = 1;
     }
     double area_before = ring_signed_area(px, py, 5);
-    nt_font_test_offset_points(px, py, pon, 5, 300.0F);
-    double area_after = ring_signed_area(px, py, 5);
-    TEST_ASSERT_TRUE(nt_font_test_contour_self_intersects(px, py, 5)); /* waist crosses */
-    TEST_ASSERT_TRUE(fabs(area_after) > fabs(area_before));            /* outer grows */
+    uint16_t offn = nt_font_test_offset_ring(px, py, pon, 5, 300.0F, dx, dy, don);
+    TEST_ASSERT_TRUE(nt_font_test_contour_self_intersects(dx, dy, offn)); /* waist crosses */
+    TEST_ASSERT_TRUE(fabs(ring_signed_area(dx, dy, offn)) > fabs(area_before));
 
-    /* The fix: a growing self-intersecting outer is KEPT — all 5 curves still
-     * emitted. Pre-fix this returned 0 (silhouette vanished). */
-    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 5);
-    TEST_ASSERT_EQUAL_UINT16(5, n_wide);
+    /* Resolved: emitted curves are SIMPLE (no proper crossing) and the star interior
+     * (centroid) is solid — no enclosed winding-0 notch. */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 64);
+    TEST_ASSERT_TRUE(n_wide > 0);
+    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_wide));
+    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 474.0F)); /* centroid solid */
+}
 
-    /* Same ring reversed is CCW: it self-intersects too but SHRINKS under the
-     * offset (a hole) → dropped. Proves the discriminator is shrink, not crossing. */
-    const int16_t star_rev[5][2] = {{198, 90}, {976, 620}, {24, 620}, {802, 90}, {500, 950}};
-    build_contour_blob_1(blob, star_rev, 5);
-    uint16_t n_hole = nt_font_test_decode_contours(blob, 300.0F, cv, 5);
-    TEST_ASSERT_EQUAL_UINT16(0, n_hole);
+/* Convex glyph preservation (#253): a convex contour has no reflex corners and no
+ * self-crossings, so a wide offset leaves it a simple grown ring — same curve count,
+ * no crossing, bbox strictly larger. Guards against join/uncross touching convex data. */
+void test_embolden_convex_unchanged(void) {
+    const int16_t sq[4][2] = {{0, 0}, {0, 800}, {800, 800}, {800, 0}}; /* CW convex square */
+    uint8_t blob[128];
+    build_contour_blob_1(blob, sq, 4);
+
+    float cv0[4 * 6];
+    float cvw[4 * 6];
+    int finite = 0;
+    uint16_t n0 = nt_font_test_decode_contours(blob, 0.0F, cv0, 4);
+    uint16_t nw = nt_font_test_decode_contours(blob, 160.0F, cvw, 4); /* wide 0.16em */
+    TEST_ASSERT_EQUAL_UINT16(4, n0);
+    TEST_ASSERT_EQUAL_UINT16(4, nw); /* no joins, no splits on convex */
+    TEST_ASSERT_FALSE(curves_have_crossing(cvw, nw));
+
+    float bb0[4];
+    float bbw[4];
+    flat_curves_bbox(cv0, n0, bb0, &finite);
+    flat_curves_bbox(cvw, nw, bbw, &finite);
+    TEST_ASSERT_TRUE(finite);
+    float a0 = (bb0[2] - bb0[0]) * (bb0[3] - bb0[1]);
+    float aw = (bbw[2] - bbw[0]) * (bbw[3] - bbw[1]);
+    TEST_ASSERT_TRUE(aw > a0); /* grew */
 }
 
 /* Direct unit of the self-intersection primitive: a proper crossing (bowtie quad)
@@ -1989,8 +2065,9 @@ int main(void) {
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
-    RUN_TEST(test_embolden_drops_collapsed_counter);
-    RUN_TEST(test_embolden_keeps_self_intersecting_outer);
+    RUN_TEST(test_embolden_counter_traces_then_fills);
+    RUN_TEST(test_embolden_resolves_self_intersecting_outer);
+    RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);
     /* DECO-01/02: (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);
