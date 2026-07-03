@@ -509,7 +509,9 @@ static bool s_ids_ready;
  * create-context assert with headroom. */
 #define UI_MAX_ELEMENTS ((uint32_t)7168U)
 #define UI_ARENA_SIZE ((size_t)12U * 1024U * 1024U)
-#define SCRATCH_ARENA_SIZE ((size_t)512U * 1024U)
+/* Decoration tab issues ~22 rich_text calls, each reserving the full MAX_RUNS/MAX_TEXT_BYTES
+ * cap (~14 KB) plus decorated-label side tables; 512 KB overflowed the frame scratch. */
+#define SCRATCH_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
