@@ -1468,6 +1468,42 @@ static uint32_t build_contour_blob_1(uint8_t *buf, const int16_t (*pts)[2], uint
     return (uint32_t)(wp - buf);
 }
 
+/* Append ONE all-on-curve closed contour at *wp; advance *wp. */
+static void append_contour(uint8_t **wp, const int16_t (*pts)[2], uint16_t n) {
+    memcpy(*wp, &n, 2);
+    *wp += 2;
+    uint32_t flag_bytes = NT_FONT_BITMASK_BYTES(n);
+    for (uint32_t i = 0; i < flag_bytes; i++) {
+        (*wp)[i] = 0xFFU; /* all points on-curve */
+    }
+    *wp += flag_bytes;
+    int16_t fx = pts[0][0];
+    int16_t fy = pts[0][1];
+    memcpy(*wp, &fx, 2);
+    *wp += 2;
+    memcpy(*wp, &fy, 2);
+    *wp += 2;
+    int32_t px = fx;
+    int32_t py = fy;
+    for (uint16_t i = 1; i < n; i++) {
+        enc_delta(wp, (int32_t)pts[i][0] - px);
+        enc_delta(wp, (int32_t)pts[i][1] - py);
+        px = pts[i][0];
+        py = pts[i][1];
+    }
+}
+
+/* Build contour_data for TWO closed contours (outer + inner counter). */
+static uint32_t build_contour_blob_2(uint8_t *buf, const int16_t (*outer)[2], uint16_t no, const int16_t (*inner)[2], uint16_t ni) {
+    uint8_t *wp = buf;
+    wp[0] = 2; /* contour_count LE (decode reads native-endian on LE targets) */
+    wp[1] = 0;
+    wp += 2;
+    append_contour(&wp, outer, no);
+    append_contour(&wp, inner, ni);
+    return (uint32_t)(wp - buf);
+}
+
 /* bbox over flat [p0x,p0y,p1x,p1y,p2x,p2y] curves. */
 static void flat_curves_bbox(const float *cv, uint16_t n, float *out, int *finite) {
     float minx = 1e30F;
@@ -1615,6 +1651,33 @@ void test_embolden_large_w_stays_finite(void) {
     float bb[4];
     flat_curves_bbox(cv, n, bb, &finite);
     TEST_ASSERT_TRUE(finite);
+}
+
+/* A counter (hole) that shrinks past itself under a wide offset self-intersects
+ * and would leave a gap; decode drops it. So the wide-offset decode emits FEWER
+ * curves than a moderate offset (the counter's curves are gone), while a moderate
+ * offset keeps the counter. Outer grows and is never dropped. */
+void test_embolden_drops_collapsed_counter(void) {
+    /* Outer CW box, inner CCW counter (opposite winding), counter 200 units wide. */
+    const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
+    const int16_t inner[4][2] = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
+    uint8_t blob[256];
+    build_contour_blob_2(blob, outer, 4, inner, 4);
+
+    /* Moderate offset: counter shrinks (~160 wide) but survives -> both emitted. */
+    float cv[8 * 6];
+    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 8);
+    TEST_ASSERT_EQUAL_UINT16(8, n_mod);
+
+    /* Wide offset: 200-wide counter collapses to ~0 area at W=200 -> dropped,
+     * outer grows and stays. */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 200.0F, cv, 8);
+    TEST_ASSERT_EQUAL_UINT16(4, n_wide);
+    TEST_ASSERT_TRUE(n_wide < n_mod);
+
+    /* W=0 keeps both contours verbatim (collapse logic gated off). */
+    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 8);
+    TEST_ASSERT_EQUAL_UINT16(8, n_zero);
 }
 
 /* ================= DECO-01/02: (codepoint, key_offset) cache key ================= */
@@ -1844,6 +1907,7 @@ int main(void) {
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
+    RUN_TEST(test_embolden_drops_collapsed_counter);
     /* DECO-01/02: (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);
     RUN_TEST(test_cache_key_offset_zero_parity);

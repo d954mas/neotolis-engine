@@ -637,6 +637,20 @@ static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n,
     }
 }
 
+/* A hole shrunk below this fraction of its original area is treated as collapsed
+ * and dropped. Visual-QA-tuned on the 8-zoom row — keep it a single easy knob. */
+static const float NT_FONT_COLLAPSE_FRAC = 0.15F;
+
+/* Signed area of the closed point ring (shoelace); int64 accum avoids overflow. */
+static double contour_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
+    int64_t acc = 0;
+    for (uint16_t p = 0; p < n; p++) {
+        uint16_t q = (uint16_t)((p + 1) % n);
+        acc += ((int64_t)x[p] * y[q]) - ((int64_t)x[q] * y[p]);
+    }
+    return 0.5 * (double)acc;
+}
+
 /* Decode v4 point-based contour data into absolute float curves.
  * Handles implicit midpoints between consecutive off-curve points.
  * weight != 0 emboldens the point ring in place before conversion (DECO-01). */
@@ -693,7 +707,19 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         /* Embolden the point ring BEFORE conversion — offsetting nt_curve_t after
          * conversion tears shared endpoints (RESEARCH Anti-Pattern). */
         if (weight != 0.0F) {
+            /* A hole that shrank past itself under offset self-intersects (winding
+             * cancels -> gap); dropping it fills solid, matching a true dilation.
+             * weight!=0 only keeps the regular path byte-identical. */
+            double area_before = contour_signed_area(pts_x, pts_y, point_count);
             offset_points(pts_x, pts_y, pts_on, point_count, weight);
+            double area_after = contour_signed_area(pts_x, pts_y, point_count);
+            if (fabs(area_before) > 1e-6) {
+                int sign_flip = (area_before > 0.0) != (area_after > 0.0);
+                int shrank = fabs(area_after) < ((double)NT_FONT_COLLAPSE_FRAC * fabs(area_before));
+                if (sign_flip || shrank) {
+                    continue; /* drop the collapsed counter — the outer grows, only holes trip this */
+                }
+            }
         }
 
         // #region Convert points to quadratic curves (TrueType rules)
