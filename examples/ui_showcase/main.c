@@ -2713,10 +2713,10 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 // #endregion
 
-// #region Decoration tab (DECO-01..05 -- weight / outline / shadow / underline+strike, BOTH fronts)
-/* The sharp/counter set the embolden spike measured: A W @ , stress corner miters; e o 8 counters stress
- * pinch-shut. Shown across a weight + outline ramp so the user can judge final corner quality in real GL. */
-#define DECO_SET "A W @ , e o 8"
+// #region Decoration tab (DECO-01..05 -- type-specimen: styles / weight / outline / shadow / underline+strike)
+/* Same sentence per style row so faces compare directly; A W e o 8 is the sharp/counter set the embolden
+ * spike measured (A W miters, e o 8 counters) -- reused for the outline/combo ramps. */
+#define DECO_SENT "The quick brown fox jumps."
 
 /* Emit one plain-label line with decoration overlaid on the themed body style (dark/light parity follows
  * g_current->body). The local style outlives the synchronous nt_ui_label call, which copies the deco. */
@@ -2739,7 +2739,10 @@ static void deco_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_rich_styl
     nt_ui_rich_text_markup(ctx, id, NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, base, m, strlen(m), container_w, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear demo script: many independent blocks
+/* Short 1-2 word section header on the themed body style (dark/light parity via g_current). */
+static void deco_header(nt_ui_context_t *ctx, const char *h) { nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), h, g_current->body); }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear type-specimen script: many independent blocks
 static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
     rich_ensure_setup();
@@ -2747,112 +2750,90 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "rich-text font / material not ready", g_current->caption);
         return;
     }
-    const float container_w = 620.0F;
+    const float cw = 620.0F;
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
-                "Decoration (DECO-01..05): synthetic weight, outline, hard drop shadow, underline + strikethrough -- authored via BOTH the runtime <markup> parser AND plain nt_ui_label style fields. "
-                "Press T for the dark/light palette flip.",
-                g_current->caption);
-
-    /* Shadow offset is stored in font-design units (the renderer scales by size/units_per_em -> px), so
-     * convert a desired px offset per block size. upm from the rich regular face. */
+    /* Shadow dx/dy are font-design units (renderer scales by size/units_per_em -> px); convert a px offset. */
     const nt_font_metrics_t fm = nt_font_get_metrics(s_rich_font[0]);
     const float upm = (fm.units_per_em != 0U) ? (float)fm.units_per_em : 2048.0F;
 
     nt_ui_rich_style_t db = rich_base_style();
-    db.font_size = 26.0F; /* readable size for the markup blocks (defaults to 16) */
+    db.font_size = 26.0F;                       /* readable specimen size (defaults to 16) */
+    const float u2 = 2.0F * upm / db.font_size; /* ~2px shadow at the block size */
+    const float u3 = 3.0F * upm / db.font_size; /* ~3px */
 
-    // #region 1) weight ramp (synthetic; DECO-01)
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Weight -- thin / regular / bold. Labels synthesize weight (single font, no bold face); markup <b> selects the REAL bold face.", g_current->body);
-    deco_markup(ctx, nt_ui_id("showcase/deco_wt_mk"), &db, "markup real bold: regular <b>bold</b>  |  <b>" DECO_SET "</b>", container_w);
-    /* Rich SYNTH_BOLD path: a regular-only face -> <b> has no bold member -> synthesize weight (set_weight). */
-    {
-        nt_font_t reg_only[4] = {0};
-        reg_only[0] = s_rich_font[0];
-        nt_ui_rich_style_t sb = db;
-        nt_ui_rich_begin(ctx, &sb);
-        RICH_TEXT_LIT(ctx, "rich synthetic bold (no bold face): ");
-        nt_ui_rich_push_font(ctx, reg_only);
-        nt_ui_rich_push_bold(ctx);
-        RICH_TEXT_LIT(ctx, DECO_SET);
-        nt_ui_rich_pop(ctx); /* bold */
-        nt_ui_rich_pop(ctx); /* font */
-        nt_ui_rich_end(ctx);
-        nt_ui_rich_text(ctx, nt_ui_id("showcase/deco_synthbold"), NT_UI_DATA_LAYER(LAYER_TEXT), &sb, container_w, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
-    }
-    deco_label_emit(ctx, "label thin  " DECO_SET "   (weight -0.03 em)", 26.0F, 0U, -0.03F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label regular  " DECO_SET, 26.0F, 0U, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label bold  " DECO_SET "   (weight +0.05 em)", 26.0F, 0U, 0.05F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    /* Heavy weight on the counters: the KNOWN 73-04 band-bbox clip reuses the un-emboldened bbox, so a
-     * grown edge can clip -- shown large for the user to judge. */
-    deco_label_emit(ctx, "label HEAVY  e o 8   (weight +0.11 em -- watch counters for band-bbox edge clip)", 40.0F, 0U, 0.11F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    // #region 1) Styles -- same sentence, one real face per row (R / B / I / BI)
+    deco_header(ctx, "Styles");
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_r"), &db, DECO_SENT, cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_b"), &db, "<b>" DECO_SENT "</b>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_i"), &db, "<i>" DECO_SENT "</i>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_bi"), &db, "<b><i>" DECO_SENT "</i></b>", cw);
     // #endregion
 
-    // #region 2) outline width ramp (DECO-02)
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Outline width ramp on the sharp set -- look for clean corners (A W @ ,) and counters that do not pinch shut (e o 8).", g_current->body);
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol1"), &db, "<outline width=0.03 color=#4c8cf0>" DECO_SET "</outline>  (0.03 em)", container_w);
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol2"), &db, "<outline width=0.07 color=#4c8cf0>" DECO_SET "</outline>  (0.07 em)", container_w);
-    /* Wide outline on the counters: same known band-bbox item as heavy weight -- the grown outline edge is
-     * the widest span, most likely to reveal the clip. */
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &db, "<outline width=0.15 color=#f05a4c>e o 8</outline>  (0.15 em -- wide; watch edges)", container_w);
-    deco_label_emit(ctx, "label outline  " DECO_SET "   (0.06 em)", 26.0F, 0U, 0.0F, 0.06F, 0xFFf08c4cU /* #4c8cf0 */, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label wide outline  e o 8   (0.16 em -- band-bbox clip case)", 40.0F, 0U, 0.0F, 0.16F, 0xFF4c5af0U /* #f05a4c */, 0.0F, 0.0F, 0U);
+    // #region 2) Inline -- four faces on one line
+    deco_header(ctx, "Inline");
+    deco_markup(ctx, nt_ui_id("showcase/deco_inline"), &db, "regular <b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>", cw);
     // #endregion
 
-    // #region 3) hard drop shadow (DECO-03)
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "3) Hard drop shadow at a few (dx,dy)/colors -- the offset pass sits behind the fill. (dx/dy are font-design units; ~2-3px at these sizes.)",
-                g_current->body);
+    // #region 3) Weight -- synthetic-weight ramp (label weight, single face)
+    deco_header(ctx, "Weight");
+    deco_label_emit(ctx, "thin  A a g 8", 26.0F, 0U, -0.04F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "regular  A a g 8", 26.0F, 0U, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "semi  A a g 8", 26.0F, 0U, 0.03F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "bold  A a g 8", 26.0F, 0U, 0.06F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "heavy  A a g 8", 26.0F, 0U, 0.11F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    // #endregion
+
+    // #region 4) Outline -- width ramp on the sharp set (<outline width= color=#RRGGBB>)
+    deco_header(ctx, "Outline");
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol1"), &db, "<outline width=0.03 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol2"), &db, "<outline width=0.07 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &db, "<outline width=0.12 color=#f05a4c>A W e o 8</outline>", cw);
+    // #endregion
+
+    // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
+    deco_header(ctx, "Shadow");
     {
-        char mk[320];
-        const float u2 = 2.0F * upm / db.font_size; /* ~2px at the block size */
-        const float u3 = 3.0F * upm / db.font_size; /* ~3px */
-        int n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#000000>black shadow, down-right</shadow>", (double)u2, (double)u2);
+        char mk[256];
+        int n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#000000>black, down-right</shadow>", (double)u2, (double)u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh1"), &db, mk, container_w);
-        n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#ff8030>orange shadow (reads on dark), down-right</shadow>", (double)u3, (double)u3);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh1"), &db, mk, cw);
+        n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#ff8030>orange, down-right</shadow>", (double)u3, (double)u3);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh2"), &db, mk, container_w);
-        n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#2860ff>blue shadow, up-left</shadow>", (double)-u2, (double)-u2);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh2"), &db, mk, cw);
+        n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#2860ff>blue, up-left</shadow>", (double)-u2, (double)-u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh3"), &db, mk, container_w);
-        /* Label shadow: same font-unit convention, converted for the label size. */
-        const float ls = 2.0F * upm / 28.0F;
-        deco_label_emit(ctx, "label black shadow  " DECO_SET, 28.0F, 0U, 0.0F, 0.0F, 0U, ls, ls, 0xFF000000U);
-        deco_label_emit(ctx, "label orange shadow  " DECO_SET, 28.0F, 0U, 0.0F, 0.0F, 0U, ls, ls, 0xFF3080ffU /* #ff8030 */);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh3"), &db, mk, cw);
     }
     // #endregion
 
-    // #region 4) underline + strikethrough at multiple sizes (DECO-04)
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "4) Underline + strikethrough -- one continuous quad per segment at the font's scaled metric. Multiple sizes; check baseline offset + thickness.",
-                g_current->body);
-    deco_markup(ctx, nt_ui_id("showcase/deco_us1"), &db, "<u>underline</u> and <s>strikethrough</s>  |  <scale=1.6><u>bigger</u> <s>strike</s></scale>  |  <scale=0.7><u>small</u></scale>",
-                container_w);
-    deco_label_emit(ctx, "label underline (18px)", 18.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label underline (28px)", 28.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label strikethrough (28px)", 28.0F, NT_UI_LABEL_VARIANT_STRIKE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label underline + strike + bold (34px)", 34.0F, (uint8_t)(NT_UI_LABEL_VARIANT_UNDERLINE | NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F,
-                    0U);
+    // #region 6) Outline + Shadow on one string
+    deco_header(ctx, "Outline+Shadow");
+    {
+        char mk[256];
+        const int n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#000000><outline width=0.06 color=#4c8cf0>A W e o 8</outline></shadow>", (double)u2, (double)u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_os"), &db, mk, cw);
+    }
     // #endregion
 
-    // #region 5) combined code-first builder (push_outline + push_shadow + push_underline together)
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "5) Code-first builder composing outline + shadow + underline on one run (nt_ui_rich_push_outline / _shadow / _underline).", g_current->body);
+    // #region 7) Outline + Shadow + Bold on one string (real bold face)
+    deco_header(ctx, "Outline+Shadow+Bold");
     {
-        nt_ui_rich_style_t cb = db;
-        const float u2 = 2.0F * upm / cb.font_size;
-        nt_ui_rich_begin(ctx, &cb);
-        nt_ui_rich_push_shadow(ctx, u2, u2, 0xFF000000U);
-        nt_ui_rich_push_outline(ctx, 0.06F, 0xFF4cf0f0U); /* #f0f04c yellow outline */
-        nt_ui_rich_push_underline(ctx);
-        RICH_TEXT_LIT(ctx, "outline + shadow + underline  " DECO_SET);
-        nt_ui_rich_pop(ctx); /* underline */
-        nt_ui_rich_pop(ctx); /* outline */
-        nt_ui_rich_pop(ctx); /* shadow */
-        nt_ui_rich_end(ctx);
-        nt_ui_rich_text(ctx, nt_ui_id("showcase/deco_combo"), NT_UI_DATA_LAYER(LAYER_TEXT), &cb, container_w, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+        char mk[256];
+        const int n = snprintf(mk, sizeof mk, "<b><shadow dx=%.0f dy=%.0f color=#000000><outline width=0.06 color=#f0c84c>A W e o 8</outline></shadow></b>", (double)u2, (double)u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_osb"), &db, mk, cw);
     }
+    // #endregion
+
+    // #region 8) Underline / Strike (<u>/<s> markup + label variant bits)
+    deco_header(ctx, "Underline / Strike");
+    deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>underline</u> and <s>strikethrough</s> and <u><s>both</s></u>", cw);
+    deco_label_emit(ctx, "label underline", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "label strike + bold", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
     // #endregion
 }
-#undef DECO_SET
+#undef DECO_SENT
 // #endregion
 
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
