@@ -74,15 +74,26 @@ typedef struct {
 } nt_ui_rich_fx_params_t;
 _Static_assert(sizeof(nt_ui_rich_fx_params_t) == 8, "nt_ui_rich_fx_params_t stable size (2 float)");
 
-/* Variant bits select font_id[]: bit0=bold bit1=italic. */
+/* Variant bits. bit0/bit1 select font_id[] (bold/italic); bit2/bit3 are decoration toggles that do NOT
+ * change font selection (rich_resolve_font masks & 3U), so <u>/<s> compose without a family member. */
 #define NT_UI_RICH_VARIANT_BOLD (1U << 0)
 #define NT_UI_RICH_VARIANT_ITALIC (1U << 1)
+#define NT_UI_RICH_VARIANT_UNDERLINE (1U << 2)
+#define NT_UI_RICH_VARIANT_STRIKE (1U << 3)
 
-/* Run flag bits. */
+/* Run flag bits. SYNTH_* mean "requested but no family member -> synthesize"; underline/strike are plain
+ * decoration toggles the emit path feeds to the sticky renderer setters. */
 #define NT_UI_RICH_RUN_SYNTH_ITALIC (1U << 0) /* italic requested but no italic family member -> faux-italic lean */
+#define NT_UI_RICH_RUN_SYNTH_BOLD (1U << 1)   /* bold requested but no bold family member -> synthetic weight */
+#define NT_UI_RICH_RUN_UNDERLINE (1U << 2)
+#define NT_UI_RICH_RUN_STRIKE (1U << 3)
 
 /* Faux-italic lean fed to nt_text_renderer_set_oblique for a SYNTH_ITALIC run (text-local x += k*y). */
 #define NT_UI_RICH_SYNTH_ITALIC_SHEAR 0.2F
+
+/* Synthetic-bold em weight fed to nt_text_renderer_set_weight for a SYNTH_BOLD run. Em units: the
+ * renderer multiplies by units_per_em and quantizes into the (codepoint, weight) glyph-cache key. */
+#define NT_UI_RICH_SYNTH_BOLD_WEIGHT 0.04F
 
 /* Image vertical alignment against the line. */
 typedef enum {
@@ -113,10 +124,17 @@ typedef struct {
     uint8_t _pad;                        /* 43: alignment pad to the 4-byte material handle */
     nt_material_t image_material;        /* 44: inline-image material; .id==0 -> default from ctx->sprite_material */
     nt_material_t text_material;         /* 48: text material; .id==0 -> default from ctx->text_material */
+    /* Decoration (DECO-05): composed like <color>, fed to the sticky renderer setters at emit. Colors are
+     * packed AABBGGRR (nt_color convention). outline_w==0 -> no outline; shadow_color alpha 0 -> no shadow. */
+    float outline_w;             /* 52: em width beyond the fill weight */
+    uint32_t outline_color_abgr; /* 56 */
+    float shadow_dx;             /* 60: em offset (renderer scales by size/units_per_em) */
+    float shadow_dy;             /* 64 */
+    uint32_t shadow_color_abgr;  /* 68 */
 } nt_ui_rich_style_t;
 /* In-memory only (never serialized); the leading default_atlas uint64 forces 8-byte alignment so the
- * 52 data bytes round up to 56. */
-_Static_assert(sizeof(nt_ui_rich_style_t) == 56, "nt_ui_rich_style_t in-memory size (16 ref + 4 font + u32 + f32 + variant/effect/layer/pad + 2 material, 8-byte aligned)");
+ * 72 data bytes round up to 72. */
+_Static_assert(sizeof(nt_ui_rich_style_t) == 72, "nt_ui_rich_style_t in-memory size (56 base + outline w/color + shadow dx/dy/color, 8-byte aligned)");
 
 /* Layer (z-order band) sentinel + range. AUTO -> rich_build_atoms picks the per-kind default. */
 #define NT_UI_RICH_LAYER_AUTO 255U /* style.layer default; resolves to TEXT=0/IMAGE=1/OBJECT=2 at atom build */
@@ -151,6 +169,12 @@ void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult);
 void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]);
 void nt_ui_rich_push_bold(nt_ui_context_t *ctx);
 void nt_ui_rich_push_italic(nt_ui_context_t *ctx);
+/* Decoration pushes (DECO-05). Compose like <color>: scoped by the enclosing pop. width/offsets are em;
+ * colors are packed AABBGGRR. push_outline(0,...) / push_shadow with alpha 0 clears the axis. */
+void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_abgr);
+void nt_ui_rich_push_shadow(nt_ui_context_t *ctx, float dx, float dy, uint32_t color_abgr);
+void nt_ui_rich_push_underline(nt_ui_context_t *ctx);
+void nt_ui_rich_push_strikethrough(nt_ui_context_t *ctx);
 void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
 /* Push a z-order LAYER (0..254) for the enclosed atoms; the self-emit draws ascending by layer with a
  * flush between bands so a lower layer fully lands before a higher one. 255 == AUTO (per-kind default). */

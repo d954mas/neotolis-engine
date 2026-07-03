@@ -114,6 +114,13 @@ bool nt_text_renderer_test_underline(void);
 /* Largest oblique observed at a draw_n entry since the last reset_call_counters — pins the
  * SYNTH_ITALIC -> set_oblique wiring through the emit path (stub font emits no glyphs). */
 float nt_text_renderer_test_max_oblique(void);
+/* Largest weight/outline width and whether underline/strike were observed at a draw_n entry since the
+ * last reset_call_counters — pin the SYNTH_BOLD/outline/shadow/underline wiring through the emit path
+ * (the UI resets decoration right after the run, so a plain sticky read post-walk sees 0). */
+float nt_text_renderer_test_max_weight(void);
+float nt_text_renderer_test_max_outline_width(void);
+bool nt_text_renderer_test_saw_underline(void);
+bool nt_text_renderer_test_saw_strike(void);
 /* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
 uint32_t nt_text_renderer_test_material_id(void);
 #endif

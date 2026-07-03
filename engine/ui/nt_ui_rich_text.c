@@ -200,24 +200,28 @@ static void rich_push_copy(nt_ui_rich_state_t *st) {
     st->stack_depth++;
 }
 
-/* Select the family member for the composed variant; fall back BI->B->R. Returns
- * the resolved font and, via out_synth_italic, whether italic must be synthesized
- * (italic requested but the family has no italic member). */
-static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_italic) {
+/* Select the family member for the composed variant; fall back BI->B->R. Returns the resolved font and,
+ * via out_synth_italic/out_synth_bold, whether italic/bold must be synthesized (requested but the family
+ * has no matching member). D-04/D-15 cascade: a real bold/italic face wins, else the axis is synthesized. */
+static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_italic, bool *out_synth_bold) {
     *out_synth_italic = false;
+    *out_synth_bold = false;
     const uint8_t v = s->variant & 3U;
     if (v == 0U) {
         return s->font_id[0];
     }
     if (s->font_id[v].id != 0U) {
-        return s->font_id[v]; /* exact variant exists: no synth (italic member present when v has italic) */
+        return s->font_id[v]; /* exact variant exists: real bold/italic member, no synth */
     }
     /* Fallback chain BI(3) -> B(1) -> R(0). */
     if ((v & NT_UI_RICH_VARIANT_BOLD) != 0U && s->font_id[NT_UI_RICH_VARIANT_BOLD].id != 0U) {
         if ((v & NT_UI_RICH_VARIANT_ITALIC) != 0U) {
             *out_synth_italic = true; /* dropped the italic family member */
         }
-        return s->font_id[NT_UI_RICH_VARIANT_BOLD];
+        return s->font_id[NT_UI_RICH_VARIANT_BOLD]; /* real bold face used -> no synth bold */
+    }
+    if ((v & NT_UI_RICH_VARIANT_BOLD) != 0U) {
+        *out_synth_bold = true; /* bold requested but no bold face in the family -> synthesize weight */
     }
     if ((v & NT_UI_RICH_VARIANT_ITALIC) != 0U) {
         *out_synth_italic = true; /* only regular available; shear it */
@@ -229,6 +233,10 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
     if (a->color_abgr != b->color_abgr || a->font_size != b->font_size || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer ||
         a->image_material.id != b->image_material.id || a->text_material.id != b->text_material.id) {
+        return false;
+    }
+    if (a->outline_w != b->outline_w || a->outline_color_abgr != b->outline_color_abgr || a->shadow_dx != b->shadow_dx || a->shadow_dy != b->shadow_dy ||
+        a->shadow_color_abgr != b->shadow_color_abgr) {
         return false;
     }
     for (uint32_t i = 0; i < 4U; i++) {
@@ -345,6 +353,45 @@ void nt_ui_rich_push_italic(nt_ui_context_t *ctx) {
     rich_style_top(st)->variant |= NT_UI_RICH_VARIANT_ITALIC; /* additive */
 }
 
+void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_abgr) {
+    /* HARD clamp (survives NT_ASSERT OFF): a bad/negative/NaN width would poison the emit key_offset.
+     * Non-positive -> clear the outline (width 0), mirroring the img-scale degrade. */
+    if (!(width > 0.0F) || !isfinite(width)) {
+        width = 0.0F;
+    }
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_push_copy(st);
+    nt_ui_rich_style_t *s = rich_style_top(st);
+    s->outline_w = width;
+    s->outline_color_abgr = color_abgr;
+}
+
+void nt_ui_rich_push_shadow(nt_ui_context_t *ctx, float dx, float dy, uint32_t color_abgr) {
+    /* HARD guard (survives NT_ASSERT OFF): a NaN offset would poison the shadow-pass translate. */
+    if (!isfinite(dx) || !isfinite(dy)) {
+        dx = 0.0F;
+        dy = 0.0F;
+    }
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_push_copy(st);
+    nt_ui_rich_style_t *s = rich_style_top(st);
+    s->shadow_dx = dx;
+    s->shadow_dy = dy;
+    s->shadow_color_abgr = color_abgr;
+}
+
+void nt_ui_rich_push_underline(nt_ui_context_t *ctx) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_push_copy(st);
+    rich_style_top(st)->variant |= NT_UI_RICH_VARIANT_UNDERLINE; /* additive; decoration bit, not a font variant */
+}
+
+void nt_ui_rich_push_strikethrough(nt_ui_context_t *ctx) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_push_copy(st);
+    rich_style_top(st)->variant |= NT_UI_RICH_VARIANT_STRIKE; /* additive; decoration bit, not a font variant */
+}
+
 void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
@@ -442,9 +489,14 @@ static void rich_text_finalize_run(nt_ui_rich_state_t *st, uint32_t off, uint32_
         return;
     }
     bool synth_italic = false;
+    bool synth_bold = false;
     const nt_ui_rich_style_t *top = rich_style_top(st);
-    (void)rich_resolve_font(top, &synth_italic);
-    const uint8_t flags = synth_italic ? NT_UI_RICH_RUN_SYNTH_ITALIC : 0U;
+    (void)rich_resolve_font(top, &synth_italic, &synth_bold);
+    uint8_t flags = 0U;
+    flags |= synth_italic ? NT_UI_RICH_RUN_SYNTH_ITALIC : 0U;
+    flags |= synth_bold ? NT_UI_RICH_RUN_SYNTH_BOLD : 0U;
+    flags |= (top->variant & NT_UI_RICH_VARIANT_UNDERLINE) != 0U ? NT_UI_RICH_RUN_UNDERLINE : 0U;
+    flags |= (top->variant & NT_UI_RICH_VARIANT_STRIKE) != 0U ? NT_UI_RICH_RUN_STRIKE : 0U;
     const uint16_t style_idx = rich_intern_style(st, top);
 
     if (rich_run_extends_text(st, style_idx, flags, st->pending_link)) {
@@ -535,8 +587,12 @@ typedef enum {
     RICH_TAG_SCALE,
     RICH_TAG_FONT,
     RICH_TAG_LINK,
-    RICH_TAG_EFFECT, /* <fx=name> via the tagset; pushes effect_id */
-    RICH_TAG_LAYER,  /* <layer=N> intrinsic numeric; pushes the z-order band */
+    RICH_TAG_EFFECT,    /* <fx=name> via the tagset; pushes effect_id */
+    RICH_TAG_LAYER,     /* <layer=N> intrinsic numeric; pushes the z-order band */
+    RICH_TAG_OUTLINE,   /* <outline width= color=> inline key=value attrs */
+    RICH_TAG_SHADOW,    /* <shadow dx= dy= color=> inline key=value attrs */
+    RICH_TAG_UNDERLINE, /* <u> decoration toggle */
+    RICH_TAG_STRIKE,    /* <s> decoration toggle */
     RICH_TAG_NONE,
 } rich_tag_kind_t;
 
@@ -647,6 +703,18 @@ static rich_tag_kind_t rich_tag_kind(const char *name, uint32_t n) {
     if (rich_name_eq(name, n, "layer")) {
         return RICH_TAG_LAYER;
     }
+    if (rich_name_eq(name, n, "outline")) {
+        return RICH_TAG_OUTLINE;
+    }
+    if (rich_name_eq(name, n, "shadow")) {
+        return RICH_TAG_SHADOW;
+    }
+    if (rich_name_eq(name, n, "u")) {
+        return RICH_TAG_UNDERLINE;
+    }
+    if (rich_name_eq(name, n, "s")) {
+        return RICH_TAG_STRIKE;
+    }
     return RICH_TAG_NONE;
 }
 
@@ -756,6 +824,57 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
             }
         } else {
             NT_LOG_WARN_UNIQUE("rich markup: <img k=v> unknown attr key '%.*s' (use scale|oy|valign) -- skipped", (int)eq, key);
+        }
+    }
+}
+
+/* Parse the inline attr tail of `<outline width=2 color=#ff0000>` / `<shadow dx=1 dy=1 color=#000000>`
+ * ([s,s+n) = the bytes AFTER the tag name). A THIRD instance of the rich_parse_img_attrs space-separated
+ * `key=value` token scanner (NOT a new convention): bounded scan, `eq==0 || eq>=tlen` underflow guard,
+ * NT_LOG_WARN_UNIQUE + skip on malformed. Writes through the non-NULL out params for the keys it knows
+ * (width|w, dx, dy, color); unknown keys log once + skip. Colors are inline #RRGGBB only (named colors
+ * need the tagset that inline decoration attrs do not carry). Untrusted localization data: never asserts,
+ * never OOB, never loops. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key degrade (mirrors rich_parse_img_attrs)
+static void rich_parse_deco_attrs(const char *s, uint32_t n, float *width, float *dx, float *dy, uint32_t *color_abgr) {
+    uint32_t i = 0;
+    while (i < n) {
+        while (i < n && s[i] == ' ') { /* skip the separator run */
+            i++;
+        }
+        if (i >= n) {
+            break;
+        }
+        const uint32_t tok = i;
+        while (i < n && s[i] != ' ') { /* span one key=value token */
+            i++;
+        }
+        const uint32_t tlen = i - tok;
+        uint32_t eq = tlen;
+        for (uint32_t k = 0; k < tlen; k++) {
+            if (s[tok + k] == '=') {
+                eq = k;
+                break;
+            }
+        }
+        /* No '=' (eq==tlen) underflows vvlen to UINT_MAX; eq==0 is an empty key. Log once + skip. */
+        if (eq >= tlen || eq == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <outline/shadow k=v> attr needs key=value, got '%.*s' -- skipped", (int)tlen, s + tok);
+            continue;
+        }
+        const char *key = s + tok;
+        const char *vv = s + tok + eq + 1U;
+        const uint32_t vvlen = tlen - eq - 1U;
+        if (width != NULL && (rich_name_eq(key, eq, "width") || rich_name_eq(key, eq, "w"))) {
+            *width = rich_parse_float(vv, vvlen);
+        } else if (dx != NULL && rich_name_eq(key, eq, "dx")) {
+            *dx = rich_parse_float(vv, vvlen);
+        } else if (dy != NULL && rich_name_eq(key, eq, "dy")) {
+            *dy = rich_parse_float(vv, vvlen);
+        } else if (color_abgr != NULL && rich_name_eq(key, eq, "color")) {
+            *color_abgr = rich_parse_hex_color(vv, vvlen); /* #RRGGBB -> AABBGGRR; malformed -> opaque white (logged) */
+        } else {
+            NT_LOG_WARN_UNIQUE("rich markup: <outline/shadow k=v> unknown attr key '%.*s' -- skipped", (int)eq, key);
         }
     }
 }
@@ -1080,6 +1199,32 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         nt_ui_rich_push_layer(ctx, rich_parse_layer(val, vlen));
         pushed_style = true;
         break;
+    case RICH_TAG_OUTLINE: {
+        /* Defaults stand when a key is absent/malformed (untrusted markup degrades, never asserts). */
+        float ow = 0.0F;
+        uint32_t oc = 0xFFFFFFFFU; /* opaque white until <outline color=> overrides */
+        rich_parse_deco_attrs(val, vlen, &ow, NULL, NULL, &oc);
+        nt_ui_rich_push_outline(ctx, ow, oc);
+        pushed_style = true;
+        break;
+    }
+    case RICH_TAG_SHADOW: {
+        float sdx = 0.0F;
+        float sdy = 0.0F;
+        uint32_t sc = 0xFF000000U; /* opaque black until <shadow color=> overrides */
+        rich_parse_deco_attrs(val, vlen, NULL, &sdx, &sdy, &sc);
+        nt_ui_rich_push_shadow(ctx, sdx, sdy, sc);
+        pushed_style = true;
+        break;
+    }
+    case RICH_TAG_UNDERLINE:
+        nt_ui_rich_push_underline(ctx);
+        pushed_style = true;
+        break;
+    case RICH_TAG_STRIKE:
+        nt_ui_rich_push_strikethrough(ctx);
+        pushed_style = true;
+        break;
     case RICH_TAG_NONE:
     default:
         /* Unreachable: RICH_TAG_NONE is handled at the top. A genuine CODE invariant -> keep the assert. */
@@ -1270,18 +1415,20 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
         } else {
             /* Trim a trailing '/' for self-closing tags. */
             uint32_t eff = self_close ? (blen - 1U) : blen;
-            /* Split name=value. */
-            uint32_t eq = eff;
+            /* The name ends at the first '=' OR ' '. '=' -> a single value follows (<color=#fff>,
+             * <img=region ...>); a space -> an attribute tail follows (<outline width=2 color=#f00>).
+             * Backward-compatible: no existing tag has a space before its '=', so '='-form is unchanged. */
+            uint32_t nend = eff;
             for (uint32_t k = 0; k < eff; k++) {
-                if (body[k] == '=') {
-                    eq = k;
+                if (body[k] == '=' || body[k] == ' ') {
+                    nend = k;
                     break;
                 }
             }
             const char *name = body;
-            const uint32_t nlen = eq;
-            const char *val = (eq < eff) ? (body + eq + 1U) : body;
-            const uint32_t vlen = (eq < eff) ? (eff - eq - 1U) : 0U;
+            const uint32_t nlen = nend;
+            const char *val = (nend < eff) ? (body + nend + 1U) : body;
+            const uint32_t vlen = (nend < eff) ? (eff - nend - 1U) : 0U;
             if (self_close) {
                 if (rich_name_eq(name, nlen, "img")) {
                     rich_parse_img(ctx, tagset, base, val, vlen);
@@ -1467,7 +1614,8 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
 
         if (run->kind == NT_RICH_ATOM_TEXT) {
             bool synth = false;
-            const nt_font_t font = rich_resolve_font(style, &synth);
+            bool synth_bold = false;
+            const nt_font_t font = rich_resolve_font(style, &synth, &synth_bold);
             const uint8_t layer = rich_effective_layer(style, NT_RICH_ATOM_TEXT);
             float t_asc = 0.0F;
             float t_desc = 0.0F;
@@ -2005,6 +2153,35 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
+/* Push the run's full decoration state to the renderer before its draw (D-14: the UI sets state per draw,
+ * the renderer is transport). Every axis is set explicitly (0/off when absent) so nothing leaks between
+ * runs; the caller resets once after the whole band. weight is the SYNTH_BOLD cascade, outline/shadow come
+ * from the composed style (looked up via run_idx), underline/strike from the run flags. */
+static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *e, float opacity) {
+    nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
+    nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_UI_RICH_SYNTH_BOLD_WEIGHT : 0.0F);
+
+    const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
+    if (stl->outline_w > 0.0F) {
+        float oc[4];
+        rich_unpack_color(stl->outline_color_abgr, opacity, oc);
+        nt_text_renderer_set_outline(stl->outline_w, oc);
+    } else {
+        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        nt_text_renderer_set_outline(0.0F, zero);
+    }
+    if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
+        float sc[4];
+        rich_unpack_color(stl->shadow_color_abgr, opacity, sc);
+        nt_text_renderer_set_shadow(stl->shadow_dx, stl->shadow_dy, 0.0F, sc);
+    } else {
+        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);
+    }
+    nt_text_renderer_set_underline((e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U);
+    nt_text_renderer_set_strikethrough((e->flags & NT_UI_RICH_RUN_STRIKE) != 0U);
+}
+
 /* Group same-band TEXT by font.id so set_font fires once per distinct font, not per face transition
  * (the text renderer flushes on every set_font). No distinct-font cap -> a >4-family block never drops a face. */
 static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
@@ -2030,9 +2207,9 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
             if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
-            /* Faux-italic for a run whose family lacks an italic face: the renderer shears the model
-             * (per run, no flush). Non-italic runs set 0 so the lean never carries between runs. */
-            nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
+            /* Decoration for this run: faux-italic lean + synth-bold weight + outline/shadow/underline/
+             * strike, all set explicitly per run (no flush) so nothing carries between runs. */
+            rich_apply_run_decoration(st, e, frame->opacity);
             if (e->effect_id == 0U) {
                 rich_emit_text_plain(st, frame, e, box_x, box_y);
             } else {
@@ -2040,7 +2217,7 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
             }
         }
     }
-    nt_text_renderer_set_oblique(0.0F); /* leave upright: don't lean object-drawn text or the next walker element */
+    nt_text_renderer_reset_decoration(); /* leave clean: don't leak decoration onto object-drawn text or the next walker element */
 }
 
 /* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].
@@ -2318,7 +2495,8 @@ nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(run < st->run_count);
     bool synth = false;
-    return rich_resolve_font(&st->styles[st->runs[run].style_idx], &synth);
+    bool synth_bold = false;
+    return rich_resolve_font(&st->styles[st->runs[run].style_idx], &synth, &synth_bold);
 }
 
 nt_rich_atom_kind_t nt_ui_rich_test_run_kind(nt_ui_context_t *ctx, uint32_t run) {

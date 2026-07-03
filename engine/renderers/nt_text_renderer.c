@@ -78,6 +78,13 @@ static struct {
      * SYNTH_ITALIC -> set_oblique wiring end-to-end even with a glyph-less stub font (draw_n early-outs
      * before emitting, but the lean value is still observed here). */
     float test_max_oblique;
+    /* Same observe-at-draw_n-entry pattern for the decoration axes: emit tests (rich SYNTH_BOLD, label
+     * decoration) pin that the UI front fed the setter through the walk even though the state is reset
+     * right after the run (so a plain sticky-read post-walk would see 0). */
+    float test_max_weight;
+    float test_max_outline_w;
+    bool test_saw_underline;
+    bool test_saw_strike;
     /* Counts flushes that issued a draw; empty no-op flushes excluded. */
     uint32_t test_nonempty_flush_calls;
 #endif
@@ -529,6 +536,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (s_text.oblique > s_text.test_max_oblique) {
         s_text.test_max_oblique = s_text.oblique; /* observe the lean even when the stub font emits nothing */
     }
+    if (s_text.weight_em > s_text.test_max_weight) {
+        s_text.test_max_weight = s_text.weight_em;
+    }
+    if (s_text.outline_w > s_text.test_max_outline_w) {
+        s_text.test_max_outline_w = s_text.outline_w;
+    }
+    s_text.test_saw_underline = s_text.test_saw_underline || s_text.underline;
+    s_text.test_saw_strike = s_text.test_saw_strike || s_text.strikethrough;
 #endif
     if (len == 0U || utf8 == NULL) {
         return;
@@ -747,6 +762,10 @@ void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_set_font_calls = 0;
     s_text.test_draw_n_calls = 0;
     s_text.test_max_oblique = 0.0F;
+    s_text.test_max_weight = 0.0F;
+    s_text.test_max_outline_w = 0.0F;
+    s_text.test_saw_underline = false;
+    s_text.test_saw_strike = false;
     s_text.test_nonempty_flush_calls = 0;
 }
 uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_nonempty_flush_calls; }
@@ -759,6 +778,10 @@ float nt_text_renderer_test_outline_width(void) { return s_text.outline_w; }
 float nt_text_renderer_test_shadow_dx(void) { return s_text.shadow_dx; }
 bool nt_text_renderer_test_underline(void) { return s_text.underline; }
 float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
+float nt_text_renderer_test_max_weight(void) { return s_text.test_max_weight; }
+float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_outline_w; }
+bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underline; }
+bool nt_text_renderer_test_saw_strike(void) { return s_text.test_saw_strike; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif
 // #endregion
