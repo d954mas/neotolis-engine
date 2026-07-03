@@ -615,6 +615,10 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 // #region registry (one entry per widget category)
 static const showcase_entry_t g_tabs[] = {
     {"Labels", "h1 / body / caption label variants, themed via the palette.", "examples/ui_showcase/main.c:render_labels", render_labels, NULL},
+    {"Decoration",
+     "Type specimen: styles (R/B/I/BI), inline faces, synthetic-weight ramp, outline + shadow ramps, combined outline+shadow+bold, underline/strike -- via BOTH runtime <markup> AND nt_ui_label "
+     "style fields; dark/light parity.",
+     "examples/ui_showcase/main.c:render_deco", render_deco, NULL},
     {"Buttons", "Standard / scale / per-state ART SWAP / no-pad touch-target / icon / disabled.", "examples/ui_showcase/main.c:render_buttons", render_buttons, NULL},
     {"Buttons: Transform", "Rotated/scaled/offset button that STILL hit-tests (inverse-affine); driven by the panel.", "examples/ui_showcase/main.c:render_button_transform", render_button_transform,
      props_button_transform},
@@ -633,11 +637,6 @@ static const showcase_entry_t g_tabs[] = {
     {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
     {"Menu", "Two context menus (global + zone-bound) with nested submenus: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
     {"Tabs", "Tab-bar begin/end core: icon+text tabs with a distinct selected-tab icon; BOTTOM accent.", "examples/ui_showcase/main.c:render_tabs", render_tabs, NULL},
-    {"Decoration",
-     "Synthetic weight (thin/regular/bold), outline width ramp, hard drop shadow, underline + strikethrough on A W @ , e o 8 -- via BOTH runtime <markup> AND plain nt_ui_label style fields; "
-     "dark/light "
-     "parity.",
-     "examples/ui_showcase/main.c:render_deco", render_deco, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
@@ -2757,9 +2756,12 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     const float upm = (fm.units_per_em != 0U) ? (float)fm.units_per_em : 2048.0F;
 
     nt_ui_rich_style_t db = rich_base_style();
-    db.font_size = 26.0F;                       /* readable specimen size (defaults to 16) */
-    const float u2 = 2.0F * upm / db.font_size; /* ~2px shadow at the block size */
-    const float u3 = 3.0F * upm / db.font_size; /* ~3px */
+    db.font_size = 26.0F; /* readable specimen size (defaults to 16) */
+    /* 2x block for the outline/shadow ramps so corner quality + shadow offset/halo + any clipping read clearly. */
+    nt_ui_rich_style_t dbig = db;
+    dbig.font_size = 52.0F;
+    const float u2 = 2.0F * upm / db.font_size; /* design-units; renders ~2px at db, ~4px at dbig (offset scales with size) */
+    const float u3 = 3.0F * upm / db.font_size; /* ~3px at db, ~6px at dbig */
 
     // #region 1) Styles -- same sentence, one real face per row (R / B / I / BI)
     deco_header(ctx, "Styles");
@@ -2785,9 +2787,9 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
 
     // #region 4) Outline -- width ramp on the sharp set (<outline width= color=#RRGGBB>)
     deco_header(ctx, "Outline");
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol1"), &db, "<outline width=0.03 color=#4c8cf0>A W e o 8</outline>", cw);
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol2"), &db, "<outline width=0.07 color=#4c8cf0>A W e o 8</outline>", cw);
-    deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &db, "<outline width=0.12 color=#f05a4c>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol1"), &dbig, "<outline width=0.03 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol2"), &dbig, "<outline width=0.07 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &dbig, "<outline width=0.12 color=#f05a4c>A W e o 8</outline>", cw);
     // #endregion
 
     // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
@@ -2796,13 +2798,13 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
         char mk[256];
         int n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#000000>black, down-right</shadow>", (double)u2, (double)u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh1"), &db, mk, cw);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh1"), &dbig, mk, cw);
         n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#ff8030>orange, down-right</shadow>", (double)u3, (double)u3);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh2"), &db, mk, cw);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh2"), &dbig, mk, cw);
         n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#2860ff>blue, up-left</shadow>", (double)-u2, (double)-u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_sh3"), &db, mk, cw);
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh3"), &dbig, mk, cw);
     }
     // #endregion
 
@@ -2812,7 +2814,7 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
         char mk[256];
         const int n = snprintf(mk, sizeof mk, "<shadow dx=%.0f dy=%.0f color=#000000><outline width=0.06 color=#4c8cf0>A W e o 8</outline></shadow>", (double)u2, (double)u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_os"), &db, mk, cw);
+        deco_markup(ctx, nt_ui_id("showcase/deco_os"), &dbig, mk, cw);
     }
     // #endregion
 
@@ -2822,15 +2824,16 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
         char mk[256];
         const int n = snprintf(mk, sizeof mk, "<b><shadow dx=%.0f dy=%.0f color=#000000><outline width=0.06 color=#f0c84c>A W e o 8</outline></shadow></b>", (double)u2, (double)u2);
         NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
-        deco_markup(ctx, nt_ui_id("showcase/deco_osb"), &db, mk, cw);
+        deco_markup(ctx, nt_ui_id("showcase/deco_osb"), &dbig, mk, cw);
     }
     // #endregion
 
     // #region 8) Underline / Strike (<u>/<s> markup + label variant bits)
     deco_header(ctx, "Underline / Strike");
-    deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>underline</u> and <s>strikethrough</s> and <u><s>both</s></u>", cw);
-    deco_label_emit(ctx, "label underline", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label strike + bold", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    /* Descender-rich sample (y g p q j) so the underline/strike offset vs glyphs below the baseline is visible. */
+    deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>Typography jumps gpqy</u> and <s>lazy dog: jumping pg qy</s> and <u><s>gjpqy both</s></u>", cw);
+    deco_label_emit(ctx, "label underline Typography jumps gpqy", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "label strike + bold lazy dog jumping pg qy", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
     // #endregion
 }
 #undef DECO_SENT
