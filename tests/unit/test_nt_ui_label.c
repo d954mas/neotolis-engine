@@ -13,6 +13,8 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "font/nt_font.h"
+#include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -271,6 +273,55 @@ static void test_label_sized_overrides_font_size(void) {
     TEST_ASSERT_EQUAL_INT32(255, (int32_t)c->renderData.text.textColor.r);
 }
 
+/* DECO-05: a label whose style carries decoration sets the sticky renderer decoration state per draw
+ * (bold->synth weight, outline width, underline) through the walker, then resets after (no leak). Pinned
+ * via the renderer observe hooks (the stub font emits no glyphs, but draw_n observes the state at entry). */
+static void test_label_decoration_wires_and_resets_setters(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    nt_text_renderer_test_reset_call_counters();
+
+    static const nt_ui_label_style_t s = {
+        .font_id = 0,
+        .font_size = 16,
+        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .variant = NT_UI_LABEL_VARIANT_BOLD | NT_UI_LABEL_VARIANT_UNDERLINE,
+        .outline_w = 2.0F,
+        .outline_color = 0xFF0000FFU,
+        .shadow_dx = 1.0F,
+        .shadow_dy = 1.0F,
+        .shadow_color = 0xFF000000U,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    Clay_SetCullingEnabled(false); /* stub measure returns {0,0}; keep the TEXT cmd so it reaches emit */
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Deco", &s); }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() > 0.0F, "bold label feeds a synthetic weight to the renderer during emit");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_outline_width() > 0.0F, "label outline width reaches the renderer");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_saw_underline(), "label underline reaches the renderer");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "decoration reset after the label draw (no leak onto later text)");
+}
+
+/* NEGATIVE: a plain (undecorated) label records NO side-table entry and feeds NO decoration -- the
+ * walker's count==0 fast-out means the sticky decoration stays clean. */
+static void test_label_plain_no_decoration(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    nt_text_renderer_test_reset_call_counters();
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    Clay_SetCullingEnabled(false);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Plain", &s_style_body); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->label_deco_count, "undecorated label records no side-table entry");
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() == 0.0F, "plain label feeds no synthetic weight");
+    TEST_ASSERT_FALSE_MESSAGE(nt_text_renderer_test_saw_underline(), "plain label feeds no underline");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_label_emits_text_with_style_color);
@@ -287,5 +338,7 @@ int main(void) {
     RUN_TEST(test_label_element_data_passthrough);
     RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
+    RUN_TEST(test_label_decoration_wires_and_resets_setters);
+    RUN_TEST(test_label_plain_no_decoration);
     return UNITY_END();
 }

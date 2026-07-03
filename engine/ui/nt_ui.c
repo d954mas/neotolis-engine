@@ -502,6 +502,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->pending_rich = NULL;
     ctx->rich_session_open = false;
 
+    /* Label-decoration side table is frame-scratch: drop last frame's (now-freed) pointer + count so the
+     * walker's TEXT dispatch does not scan a dangling table, and a plain frame pays no lookup. */
+    ctx->label_deco = NULL;
+    ctx->label_deco_count = 0U;
+
     /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
      * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
     if (ctx->use_raycast_input) {
@@ -1722,7 +1727,16 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
+        /* Decorated-label state (DECO-05): set the sticky renderer decoration from the label's style, draw,
+         * then reset so it can't leak onto the next TEXT. Undecorated frames skip the lookup (count==0). */
+        const nt_ui_label_deco_t *deco = (ctx->label_deco_count > 0U) ? nt_ui_label_deco_lookup(ctx, local.renderData.text.stringContents.chars) : NULL;
+        if (deco != NULL) {
+            nt_ui_label_deco_apply(deco);
+        }
         emit_text(ctx, &local, text_scale, world_mat4);
+        if (deco != NULL) {
+            nt_text_renderer_reset_decoration();
+        }
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {

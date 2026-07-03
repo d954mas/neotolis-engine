@@ -333,6 +333,14 @@ struct nt_ui_context {
      * pending_rich so a completed session releases the lock while probes can still read the state. */
     bool rich_session_open;
 
+    /* Per-frame label-decoration side table (DECO-05). nt_ui_label appends one entry ONLY for a label
+     * whose style carries decoration; the walker's TEXT dispatch looks it up by the emitted text buffer
+     * pointer and sets the sticky renderer decoration state per draw, then resets. Frame-scratch (allocated
+     * lazily on the first decorated label, like pending_rich); the head+count re-zero each nt_ui_begin so a
+     * frame with zero decorated labels pays no lookup at all (count==0 fast-out in the walker). */
+    void *label_deco;          /* nt_ui_label_deco_t* array in frame scratch (void* keeps this header light) */
+    uint32_t label_deco_count; /* live entries this frame */
+
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
@@ -471,6 +479,29 @@ uint32_t nt_ui_internal_current_open_element_id(void);
 
 /* Call IMMEDIATELY after CLAY_TEXT — text leaf is appended but not pushed on the open stack. */
 uint32_t nt_ui_internal_last_emitted_element_id(void);
+
+/* ---- Label decoration (DECO-05) walker hooks (defined in nt_ui_label.c) ----
+ * One frame-scratch record per decorated label, keyed by the emitted text buffer pointer (unique per
+ * label). nt_ui_label appends; the walker's TEXT dispatch looks up by Clay_TextRenderData.stringContents
+ * and applies/resets the sticky renderer decoration around emit_text. */
+typedef struct {
+    const char *text; /* key: the label's scratch text pointer (== Clay stringContents.chars) */
+    uint8_t variant;  /* NT_UI_LABEL_VARIANT_* */
+    float weight;     /* em */
+    float outline_w;  /* em */
+    uint32_t outline_color;
+    float shadow_dx; /* em */
+    float shadow_dy; /* em */
+    uint32_t shadow_color;
+} nt_ui_label_deco_t;
+
+/* Look up the decoration for a TEXT command's string pointer (NULL when the label was undecorated or the
+ * command is not a label). Cheap linear scan; the walker guards it behind ctx->label_deco_count > 0. */
+const nt_ui_label_deco_t *nt_ui_label_deco_lookup(const nt_ui_context_t *ctx, const char *text);
+
+/* Push the decoration to the sticky renderer setters (real->synth bold cascade + outline/shadow/underline/
+ * strike). The caller resets via nt_text_renderer_reset_decoration after emit_text. */
+void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d);
 
 /* Flat row borrowing id_string from Clay (valid through next nt_ui_begin). */
 typedef struct nt_ui_inspector_tree_row {
