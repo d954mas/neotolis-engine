@@ -5,13 +5,13 @@
 
 /* Magic: ASCII "FONT" as uint32_t little-endian = 0x544E4F46 */
 #define NT_FONT_MAGIC 0x544E4F46
-#define NT_FONT_VERSION 4
+#define NT_FONT_VERSION 5
 
 /*
- * Font asset binary layout (v4 — point-based contours with implicit midpoints):
+ * Font asset binary layout (v5 — point-based contours with implicit midpoints):
  *
- *   Offset 0: NtFontAssetHeader (16 bytes)
- *   Offset 16: NtFontGlyphEntry[glyph_count] (24 bytes each)
+ *   Offset 0: NtFontAssetHeader (24 bytes)
+ *   Offset 24: NtFontGlyphEntry[glyph_count] (24 bytes each)
  *
  *   Per-glyph data blocks follow glyph entries. Each glyph's data_offset
  *   is relative to the start of NtFontAssetHeader. Data block order:
@@ -62,19 +62,24 @@
  * int8 value -128 (0x80) is reserved; real deltas of -128 use the 3-byte path. */
 #define NT_FONT_DELTA_SENTINEL ((uint8_t)0x80)
 
-/* NtFontAssetHeader — 16 bytes. Font-level metadata. */
+/* NtFontAssetHeader — 24 bytes. Font-level metadata.
+ * v5 appends four decoration metrics (font units) baked from post/OS-2 (DECO-04). */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;        /* 0:  NT_FONT_MAGIC ("FONT") */
-    uint16_t version;      /* 4:  NT_FONT_VERSION */
-    uint16_t glyph_count;  /* 6:  number of NtFontGlyphEntry records */
-    uint16_t units_per_em; /* 8:  font design units per em */
-    int16_t ascent;        /* 10: typographic ascent in font units */
-    int16_t descent;       /* 12: typographic descent in font units (negative) */
-    int16_t line_gap;      /* 14: typographic line gap in font units */
-} NtFontAssetHeader;       /* 16 bytes total */
+    uint32_t magic;              /* 0:  NT_FONT_MAGIC ("FONT") */
+    uint16_t version;            /* 4:  NT_FONT_VERSION */
+    uint16_t glyph_count;        /* 6:  number of NtFontGlyphEntry records */
+    uint16_t units_per_em;       /* 8:  font design units per em */
+    int16_t ascent;              /* 10: typographic ascent in font units */
+    int16_t descent;             /* 12: typographic descent in font units (negative) */
+    int16_t line_gap;            /* 14: typographic line gap in font units */
+    int16_t underline_position;  /* 16: post.underlinePosition (top of underline, below baseline) */
+    int16_t underline_thickness; /* 18: post.underlineThickness */
+    int16_t strikeout_position;  /* 20: OS/2.yStrikeoutPosition (above baseline) */
+    int16_t strikeout_size;      /* 22: OS/2.yStrikeoutSize (thickness) */
+} NtFontAssetHeader;             /* 24 bytes total */
 #pragma pack(pop)
-_Static_assert(sizeof(NtFontAssetHeader) == 16, "NtFontAssetHeader must be 16 bytes");
+_Static_assert(sizeof(NtFontAssetHeader) == 24, "NtFontAssetHeader must be 24 bytes");
 
 /* NtFontGlyphEntry — 24 bytes. Per-glyph metadata, sorted by codepoint for bsearch. */
 #pragma pack(push, 1)
