@@ -2792,6 +2792,20 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &dbig, "<outline width=0.12 color=#f05a4c>A W e o 8</outline>", cw);
     // #endregion
 
+    // #region 4b) Outline zoom -- BIG 8/counter glyphs across the same 0.03/0.07/0.12 ramp to hunt a counter fill-hole
+    deco_header(ctx, "8 zoom");
+    {
+        nt_ui_rich_style_t dz = db;
+        dz.font_size = 100.0F; /* very large so a missing-fill hole in a counter (esp. '8') is unmistakable */
+        deco_header(ctx, "0.03");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz1"), &dz, "<outline width=0.03 color=#ff9020>8 8 8 o e B @</outline>", cw);
+        deco_header(ctx, "0.07");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz2"), &dz, "<outline width=0.07 color=#ff9020>8 8 8 o e B @</outline>", cw);
+        deco_header(ctx, "0.12");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz3"), &dz, "<outline width=0.12 color=#ff9020>8 8 8 o e B @</outline>", cw);
+    }
+    // #endregion
+
     // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
     deco_header(ctx, "Shadow");
     {
