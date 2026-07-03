@@ -23,6 +23,7 @@ typedef struct {
 typedef struct {
     nt_glyph_cache_entry_t entry;
     uint32_t lru_frame;
+    int16_t key_offset; /* embolden weight bucket (font units); part of the cache key with entry.codepoint */
     uint8_t resource_index;
 } nt_font_cache_slot_t;
 

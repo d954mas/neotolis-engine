@@ -165,27 +165,39 @@ static uint16_t next_pot16(uint16_t v) {
     return (uint16_t)(v + 1);
 }
 
-/* Lookup: returns pointer to cache entry, or NULL on miss */
-static nt_font_cache_slot_t *hash_lookup(nt_font_slot_t *slot, uint32_t codepoint) {
+/* Cache-key home slot: fmix32(cp ^ off*golden) & mask. Mixing key_offset in
+ * spreads (codepoint, weight) variants across the table so a bold 'A' and a
+ * regular 'A' land in different homes. MUST be identical in lookup/insert/remove
+ * (incl. the backshift home recompute) or the probe chains corrupt on eviction. */
+static inline uint16_t key_home(uint16_t mask, uint32_t cp, int16_t off) {
+    uint32_t h = cp ^ ((uint32_t)(int32_t)off * 0x9E3779B1U);
+    h ^= h >> 16;
+    h *= 0x7FEB352DU;
+    h ^= h >> 15;
+    return (uint16_t)(h & mask);
+}
+
+/* Lookup: returns pointer to cache entry for (codepoint, key_offset), or NULL on miss */
+static nt_font_cache_slot_t *hash_lookup(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
     for (;;) {
         uint16_t val = slot->hash_table[pos];
         if (val == 0) {
             return NULL;
         }
         nt_font_cache_slot_t *cs = &slot->cache[val - 1];
-        if (cs->entry.codepoint == codepoint) {
+        if (cs->entry.codepoint == codepoint && cs->key_offset == key_offset) {
             return cs;
         }
         pos = (uint16_t)((pos + 1) & mask);
     }
 }
 
-/* Insert: slot_idx is index into cache[] */
-static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, uint16_t slot_idx) {
+/* Insert: slot_idx is index into cache[]; the slot's entry.codepoint + key_offset are already set */
+static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset, uint16_t slot_idx) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
     for (;;) {
         if (slot->hash_table[pos] == 0) {
             slot->hash_table[pos] = (uint16_t)(slot_idx + 1);
@@ -195,11 +207,11 @@ static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, uint16_t slot_
     }
 }
 
-/* Remove one entry by codepoint with backshift to keep probe chains intact.
+/* Remove one (codepoint, key_offset) entry with backshift to keep probe chains intact.
  * Called by evict_lru before clearing the cache slot — O(cluster) instead of O(N) rebuild. */
-static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
+static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
 
     /* Find the entry */
     for (;;) {
@@ -207,7 +219,7 @@ static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
             return; /* not found — nothing to remove */
         }
         uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
-        if (slot->cache[idx].entry.codepoint == codepoint) {
+        if (slot->cache[idx].entry.codepoint == codepoint && slot->cache[idx].key_offset == key_offset) {
             break;
         }
         pos = (uint16_t)((pos + 1) & mask);
@@ -221,7 +233,7 @@ static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
             break; /* end of cluster */
         }
         uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
-        uint16_t home = (uint16_t)(slot->cache[idx].entry.codepoint & mask);
+        uint16_t home = key_home(mask, slot->cache[idx].entry.codepoint, slot->cache[idx].key_offset);
         /* Check if this entry's home is at or before the empty slot (wrapping) */
         bool should_move = (empty <= pos) ? (home <= empty || home > pos) : (home <= empty && home > pos);
         if (should_move) {
@@ -356,7 +368,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
     NT_ASSERT(found); /* no evictable entry found */
 
     /* Remove from hash table before clearing slot */
-    hash_remove(slot, slot->cache[victim].entry.codepoint);
+    hash_remove(slot, slot->cache[victim].entry.codepoint, slot->cache[victim].key_offset);
 
     /* Clear victim */
     memset(&slot->cache[victim], 0, sizeof(nt_font_cache_slot_t));
@@ -539,12 +551,13 @@ static void generate_tofu(nt_font_slot_t *slot) {
     cs->entry.bbox_x1 = tofu_w;
     cs->entry.bbox_y1 = y1;
     cs->entry.is_tofu = true;
+    cs->key_offset = 0; /* tofu is weight-agnostic */
     cs->lru_frame = s_font.frame_counter;
 
     slot->curve_write_head += needed_texels;
     slot->glyphs_cached++;
     slot->tofu_generated = true;
-    hash_insert(slot, 0xFFFFFFFFU, cache_idx);
+    hash_insert(slot, 0xFFFFFFFFU, 0, cache_idx);
 }
 
 /* ---- Decode contours and upload glyph to GPU ---- */
@@ -764,7 +777,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
  * Allocates cache slot internally (after ensure_curve_space) to avoid
  * the flush-invalidates-slot bug. Returns allocated cache_idx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
+static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index, int16_t key_offset) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
     float bbox_x0 = (float)glyph->bbox_x0;
@@ -981,6 +994,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->entry.bbox_x1 = glyph->bbox_x1;
     cs->entry.bbox_y1 = glyph->bbox_y1;
     cs->entry.is_tofu = false;
+    cs->key_offset = key_offset;
     cs->lru_frame = s_font.frame_counter;
     cs->resource_index = resource_index;
     // #endregion
@@ -1439,11 +1453,11 @@ nt_font_slot_t *nt_font_get_slot(nt_font_t font) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint) {
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     NT_ASSERT(slot != NULL);
 
     // #region Cache hit check (hash table)
-    nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint);
+    nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint, key_offset);
     if (hit) {
         hit->lru_frame = s_font.frame_counter;
         return &hit->entry;
@@ -1457,7 +1471,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
 
     if (!found) {
         generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
+        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
         return tofu ? &tofu->entry : NULL;
     }
     // #endregion
@@ -1469,7 +1483,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
     if (!blob) {
         /* Provider vanished between find and decode — degrade to tofu, never deref NULL. */
         generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
+        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
         return tofu ? &tofu->entry : NULL;
     }
 
@@ -1480,16 +1494,37 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
     NT_ASSERT(glyph_entry->curve_count <= NT_FONT_MAX_CURVES_PER_GLYPH);
     uint16_t curve_count = 0;
     if (glyph_entry->curve_count > 0) {
-        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, 0.0F);
+        /* Decode weight = the SAME (already quantized+saturated) key_offset the slot is keyed
+         * by, so the cached geometry and the cache key can never disagree. */
+        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, (float)key_offset);
     }
     // #endregion
 
     // #region Upload, allocate slot, fill cache
-    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx);
-    hash_insert(slot, codepoint, cache_idx);
+    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx, key_offset);
+    hash_insert(slot, codepoint, key_offset, cache_idx);
     // #endregion
 
     return &slot->cache[cache_idx].entry;
+}
+
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint) { return nt_font_lookup_glyph_offset(slot, codepoint, 0); }
+
+int16_t nt_font_quantize_weight(float weight_units) {
+    if (!isfinite(weight_units)) {
+        return 0;
+    }
+    /* Round to the quant step (nearby weights share a slot), then saturate to int16
+     * so an absurd weight can never wrap to a colliding bucket. */
+    long steps = lrintf(weight_units / (float)NT_FONT_WEIGHT_QUANT_STEP);
+    long q = steps * NT_FONT_WEIGHT_QUANT_STEP;
+    if (q > 32767L) {
+        return 32767;
+    }
+    if (q < -32768L) {
+        return -32768;
+    }
+    return (int16_t)q;
 }
 
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint) {

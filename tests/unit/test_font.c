@@ -8,6 +8,7 @@
 /* clang-format off */
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "font/nt_font_hot.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "nt_font_format.h"
@@ -1616,6 +1617,115 @@ void test_embolden_large_w_stays_finite(void) {
     TEST_ASSERT_TRUE(finite);
 }
 
+/* ================= DECO-01/02: (codepoint, key_offset) cache key ================= */
+
+/* Two lookups of the same codepoint at different key_offset resolve to DISTINCT,
+ * non-tofu cache slots (no collision-overwrite) with distinct geometry. */
+void test_cache_variant_distinct_slots(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_variant", &blob);
+    nt_font_slot_t *slot = nt_font_get_slot(font);
+
+    const nt_glyph_cache_entry_t *reg = nt_font_lookup_glyph_offset(slot, 'A', 0);
+    const nt_glyph_cache_entry_t *bold = nt_font_lookup_glyph_offset(slot, 'A', 40);
+    TEST_ASSERT_NOT_NULL(reg);
+    TEST_ASSERT_NOT_NULL(bold);
+    TEST_ASSERT_FALSE(reg->is_tofu);
+    TEST_ASSERT_FALSE(bold->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('A', reg->codepoint);
+    TEST_ASSERT_EQUAL_UINT32('A', bold->codepoint);
+    /* Distinct slots — different curve offsets, not the same entry. */
+    TEST_ASSERT_TRUE(reg != bold);
+    TEST_ASSERT_TRUE(reg->curve_offset != bold->curve_offset);
+
+    /* Re-lookup returns the SAME cached slots (cache hit, no new alloc). */
+    TEST_ASSERT_EQUAL_PTR(reg, nt_font_lookup_glyph_offset(slot, 'A', 0));
+    TEST_ASSERT_EQUAL_PTR(bold, nt_font_lookup_glyph_offset(slot, 'A', 40));
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* key_offset 0 behaves exactly as the pre-change codepoint-only path: the
+ * public wrapper delegates to offset 0 and returns the same slot. */
+void test_cache_key_offset_zero_parity(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_parity", &blob);
+    nt_font_slot_t *slot = nt_font_get_slot(font);
+
+    const nt_glyph_cache_entry_t *via_wrapper = nt_font_lookup_glyph_in_slot(slot, 'B');
+    const nt_glyph_cache_entry_t *via_offset0 = nt_font_lookup_glyph_offset(slot, 'B', 0);
+    TEST_ASSERT_NOT_NULL(via_wrapper);
+    TEST_ASSERT_EQUAL_PTR(via_wrapper, via_offset0);
+    TEST_ASSERT_EQUAL_INT16(500, via_wrapper->advance);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* Insert many (cp, offset) variants to force eviction, then re-lookup every live
+ * entry: probe chains stay intact (identical fmix32 home in lookup/insert/remove
+ * incl. backshift) — no orphaned/duplicated slots, no infinite probe. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_cache_evict_chain_integrity(void) {
+    /* Small cache: 4 glyph slots. tofu takes one, leaving 3 evictable. */
+    nt_font_create_desc_t desc = {
+        .curve_texture_width = 256,
+        .curve_texture_height = 256,
+        .band_texture_height = 4,
+        .band_count = 4,
+    };
+    nt_font_t font = nt_font_create(&desc);
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size); /* glyphs A,B,C */
+    nt_resource_t res = register_font_resource("font_evict_chain", blob, blob_size);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+    nt_font_slot_t *slot = nt_font_get_slot(font);
+
+    /* Churn A/B/C across several weights — far more than 3 slots, forcing many
+     * evictions and backshifts. Every lookup must return a valid, correct entry. */
+    const uint32_t cps[3] = {'A', 'B', 'C'};
+    const int16_t offs[4] = {0, 16, 40, 80};
+    for (int pass = 0; pass < 6; pass++) {
+        for (int c = 0; c < 3; c++) {
+            for (int o = 0; o < 4; o++) {
+                const nt_glyph_cache_entry_t *e = nt_font_lookup_glyph_offset(slot, cps[c], offs[o]);
+                TEST_ASSERT_NOT_NULL(e);
+                TEST_ASSERT_EQUAL_UINT32(cps[c], e->codepoint);
+                TEST_ASSERT_FALSE(e->is_tofu);
+                TEST_ASSERT_EQUAL_INT16(500, e->advance);
+            }
+        }
+    }
+
+    /* A miss for an absent codepoint still resolves to the single tofu — proves
+     * the tofu probe chain survived all the churn. */
+    const nt_glyph_cache_entry_t *miss = nt_font_lookup_glyph_offset(slot, 'Z', 0);
+    TEST_ASSERT_NOT_NULL(miss);
+    TEST_ASSERT_TRUE(miss->is_tofu);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* nt_font_quantize_weight rounds to the step and saturates to int16 — an absurd
+ * weight can never wrap to a small/negative colliding bucket. */
+void test_quantize_weight_saturates(void) {
+    /* Rounds to NT_FONT_WEIGHT_QUANT_STEP. */
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(0.0F));
+    TEST_ASSERT_EQUAL_INT16(NT_FONT_WEIGHT_QUANT_STEP, nt_font_quantize_weight((float)NT_FONT_WEIGHT_QUANT_STEP + 1.0F));
+    TEST_ASSERT_EQUAL_INT16(-NT_FONT_WEIGHT_QUANT_STEP, nt_font_quantize_weight(-(float)NT_FONT_WEIGHT_QUANT_STEP - 1.0F));
+    /* Saturates instead of wrapping. */
+    TEST_ASSERT_EQUAL_INT16(32767, nt_font_quantize_weight(1.0e9F));
+    TEST_ASSERT_EQUAL_INT16(-32768, nt_font_quantize_weight(-1.0e9F));
+    /* Non-finite is safe (identity 0). */
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(INFINITY));
+}
+
+/* ================= DECO-04: underline/strike metrics from v5 header ================= */
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -1659,5 +1769,10 @@ int main(void) {
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
+    /* DECO-01/02: (codepoint, key_offset) cache key */
+    RUN_TEST(test_cache_variant_distinct_slots);
+    RUN_TEST(test_cache_key_offset_zero_parity);
+    RUN_TEST(test_cache_evict_chain_integrity);
+    RUN_TEST(test_quantize_weight_saturates);
     return UNITY_END();
 }
