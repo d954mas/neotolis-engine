@@ -637,10 +637,6 @@ static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n,
     }
 }
 
-/* A hole shrunk below this fraction of its original area is treated as collapsed
- * and dropped. Visual-QA-tuned on the 8-zoom row — keep it a single easy knob. */
-static const float NT_FONT_COLLAPSE_FRAC = 0.15F;
-
 /* Signed area of the closed point ring (shoelace); int64 accum avoids overflow. */
 static double contour_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     int64_t acc = 0;
@@ -649,6 +645,39 @@ static double contour_signed_area(const int32_t *x, const int32_t *y, uint16_t n
         acc += ((int64_t)x[p] * y[q]) - ((int64_t)x[q] * y[p]);
     }
     return 0.5 * (double)acc;
+}
+
+/* orient sign of (a,b,c): >0 CCW, <0 CW, 0 collinear. int64 avoids int32 overflow. */
+static int contour_orient(int32_t ax, int32_t ay, int32_t bx, int32_t by, int32_t cx, int32_t cy) {
+    int64_t cross = ((int64_t)(bx - ax) * (cy - ay)) - ((int64_t)(by - ay) * (cx - ax));
+    return (cross > 0) - (cross < 0);
+}
+
+/* True if the closed control polygon has a PROPER crossing between two non-adjacent
+ * edges — a local self-intersection the global area test misses. O(n²) on the decode
+ * miss path only. Shared vertices (collinear/touching) are NOT crossings. */
+static bool contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 4) {
+        return false; /* triangle or less cannot self-cross */
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t i2 = (uint16_t)((i + 1) % n);
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            if (j == i2 || j2 == i) {
+                continue; /* adjacent edges share an endpoint */
+            }
+            int o1 = contour_orient(x[i], y[i], x[i2], y[i2], x[j], y[j]);
+            int o2 = contour_orient(x[i], y[i], x[i2], y[i2], x[j2], y[j2]);
+            int o3 = contour_orient(x[j], y[j], x[j2], y[j2], x[i], y[i]);
+            int o4 = contour_orient(x[j], y[j], x[j2], y[j2], x[i2], y[i2]);
+            /* proper crossing: all four non-zero, opposite on each edge */
+            if (o1 != 0 && o2 != 0 && o3 != 0 && o4 != 0 && o1 != o2 && o3 != o4) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /* Decode v4 point-based contour data into absolute float curves.
@@ -707,18 +736,15 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         /* Embolden the point ring BEFORE conversion — offsetting nt_curve_t after
          * conversion tears shared endpoints (RESEARCH Anti-Pattern). */
         if (weight != 0.0F) {
-            /* A hole that shrank past itself under offset self-intersects (winding
-             * cancels -> gap); dropping it fills solid, matching a true dilation.
-             * weight!=0 only keeps the regular path byte-identical. */
+            /* Uniform outline: a counter whose offset polygon self-intersects would
+             * produce a winding-cancellation hole; drop it so it fills solid = correct
+             * dilation. Sign-flip catches a fully over-shot ring that inverted cleanly
+             * (no crossing). weight!=0 only keeps the regular path byte-identical. */
             double area_before = contour_signed_area(pts_x, pts_y, point_count);
             offset_points(pts_x, pts_y, pts_on, point_count, weight);
             double area_after = contour_signed_area(pts_x, pts_y, point_count);
-            if (fabs(area_before) > 1e-6) {
-                int sign_flip = (area_before > 0.0) != (area_after > 0.0);
-                int shrank = fabs(area_after) < ((double)NT_FONT_COLLAPSE_FRAC * fabs(area_before));
-                if (sign_flip || shrank) {
-                    continue; /* drop the collapsed counter — the outer grows, only holes trip this */
-                }
+            if (contour_self_intersects(pts_x, pts_y, point_count) || (area_before > 0.0) != (area_after > 0.0)) {
+                continue; /* drop the collapsed counter — the outer grows, only holes trip this */
             }
         }
 
@@ -2173,6 +2199,8 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
 }
 
 void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight) { offset_points(x, y, on, n, weight); }
+
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) { return contour_self_intersects(x, y, n); }
 
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
     uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);

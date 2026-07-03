@@ -1653,31 +1653,54 @@ void test_embolden_large_w_stays_finite(void) {
     TEST_ASSERT_TRUE(finite);
 }
 
-/* A counter (hole) that shrinks past itself under a wide offset self-intersects
- * and would leave a gap; decode drops it. So the wide-offset decode emits FEWER
- * curves than a moderate offset (the counter's curves are gone), while a moderate
- * offset keeps the counter. Outer grows and is never dropped. */
+/* A counter (hole) whose offset polygon self-intersects would leave a
+ * winding-cancellation gap; decode drops it so it fills solid = correct dilation.
+ * The counter is an '8'-like notched body: at a moderate offset it stays a simple
+ * ring (kept, traced); at a wide offset the thin notch pinches into a proper
+ * self-crossing WITHOUT the body flipping winding, so ONLY the self-intersection
+ * test drops it. The outer stays simple and grows — never dropped. */
 void test_embolden_drops_collapsed_counter(void) {
-    /* Outer CW box, inner CCW counter (opposite winding), counter 200 units wide. */
+    /* Outer CW box; inner CCW notched counter (opposite winding), 8 points. */
     const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
-    const int16_t inner[4][2] = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
+    const int16_t inner[8][2] = {{300, 300}, {900, 300}, {900, 900}, {300, 900}, {300, 650}, {500, 650}, {500, 550}, {300, 550}};
     uint8_t blob[256];
-    build_contour_blob_2(blob, outer, 4, inner, 4);
+    build_contour_blob_2(blob, outer, 4, inner, 8);
 
-    /* Moderate offset: counter shrinks (~160 wide) but survives -> both emitted. */
-    float cv[8 * 6];
-    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 8);
-    TEST_ASSERT_EQUAL_UINT16(8, n_mod);
+    /* Moderate offset: notch does NOT self-intersect -> both contours emitted
+     * (4 outer + 8 inner = 12 curves, counter still traced). */
+    float cv[12 * 6];
+    uint16_t n_mod = nt_font_test_decode_contours(blob, 40.0F, cv, 12);
+    TEST_ASSERT_EQUAL_UINT16(12, n_mod);
 
-    /* Wide offset: 200-wide counter collapses to ~0 area at W=200 -> dropped,
-     * outer grows and stays. */
-    uint16_t n_wide = nt_font_test_decode_contours(blob, 200.0F, cv, 8);
+    /* Wide offset: the notch self-intersects (winding stays positive, no sign
+     * flip) -> counter dropped; only the outer (4 curves) remains. */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 300.0F, cv, 12);
     TEST_ASSERT_EQUAL_UINT16(4, n_wide);
     TEST_ASSERT_TRUE(n_wide < n_mod);
 
     /* W=0 keeps both contours verbatim (collapse logic gated off). */
-    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 8);
-    TEST_ASSERT_EQUAL_UINT16(8, n_zero);
+    uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 12);
+    TEST_ASSERT_EQUAL_UINT16(12, n_zero);
+}
+
+/* Direct unit of the self-intersection primitive: a proper crossing (bowtie quad)
+ * is detected; a simple convex square and a triangle (n<4) are not; a shape that
+ * merely shares a vertex (touching, not crossing) is not flagged. */
+void test_contour_self_intersects_primitive(void) {
+    /* Bowtie: edges (0,0)->(100,100) and (100,0)->(0,100) cross at the center. */
+    const int32_t bx[4] = {0, 100, 100, 0};
+    const int32_t by[4] = {0, 100, 0, 100};
+    TEST_ASSERT_TRUE(nt_font_test_contour_self_intersects(bx, by, 4));
+
+    /* Simple convex square: no crossing. */
+    const int32_t sx[4] = {0, 100, 100, 0};
+    const int32_t sy[4] = {0, 0, 100, 100};
+    TEST_ASSERT_FALSE(nt_font_test_contour_self_intersects(sx, sy, 4));
+
+    /* Triangle (n < 4) cannot self-cross. */
+    const int32_t tx[3] = {0, 100, 50};
+    const int32_t ty[3] = {0, 0, 100};
+    TEST_ASSERT_FALSE(nt_font_test_contour_self_intersects(tx, ty, 3));
 }
 
 /* ================= DECO-01/02: (codepoint, key_offset) cache key ================= */
@@ -1908,6 +1931,7 @@ int main(void) {
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
     RUN_TEST(test_embolden_drops_collapsed_counter);
+    RUN_TEST(test_contour_self_intersects_primitive);
     /* DECO-01/02: (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);
     RUN_TEST(test_cache_key_offset_zero_parity);

@@ -170,6 +170,7 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
  * decode fills out_curves flat as [p0x,p0y,p1x,p1y,p2x,p2y] per curve, returns count. */
 void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight);
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n);
 #endif
 // #endregion
 
