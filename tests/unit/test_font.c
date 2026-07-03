@@ -1,4 +1,5 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1419,6 +1420,202 @@ void test_font_gpu_textures(void) {
     nt_font_destroy(font);
 }
 
+/* ================= DECO-01: embolden (offset_points) ================= */
+
+/* Encode a signed delta in the font varlen scheme (1-byte int8, or 0x80 + int16 LE). */
+static void enc_delta(uint8_t **wp, int32_t d) {
+    if (d >= -127 && d <= 127) {
+        **wp = (uint8_t)(int8_t)d;
+        (*wp)++;
+    } else {
+        **wp = NT_FONT_DELTA_SENTINEL;
+        (*wp)++;
+        int16_t v = (int16_t)d;
+        memcpy(*wp, &v, 2);
+        *wp += 2;
+    }
+}
+
+/* Build contour_data (what decode_contours consumes) for ONE closed contour of
+ * all-on-curve points. Returns bytes written. */
+static uint32_t build_contour_blob_1(uint8_t *buf, const int16_t (*pts)[2], uint16_t n) {
+    uint8_t *wp = buf;
+    uint16_t cc = 1;
+    memcpy(wp, &cc, 2);
+    wp += 2;
+    memcpy(wp, &n, 2);
+    wp += 2;
+    uint32_t flag_bytes = NT_FONT_BITMASK_BYTES(n);
+    for (uint32_t i = 0; i < flag_bytes; i++) {
+        wp[i] = 0xFFU; /* all points on-curve */
+    }
+    wp += flag_bytes;
+    int16_t fx = pts[0][0];
+    int16_t fy = pts[0][1];
+    memcpy(wp, &fx, 2);
+    wp += 2;
+    memcpy(wp, &fy, 2);
+    wp += 2;
+    int32_t px = fx;
+    int32_t py = fy;
+    for (uint16_t i = 1; i < n; i++) {
+        enc_delta(&wp, (int32_t)pts[i][0] - px);
+        enc_delta(&wp, (int32_t)pts[i][1] - py);
+        px = pts[i][0];
+        py = pts[i][1];
+    }
+    return (uint32_t)(wp - buf);
+}
+
+/* bbox over flat [p0x,p0y,p1x,p1y,p2x,p2y] curves. */
+static void flat_curves_bbox(const float *cv, uint16_t n, float *out, int *finite) {
+    float minx = 1e30F;
+    float miny = 1e30F;
+    float maxx = -1e30F;
+    float maxy = -1e30F;
+    *finite = 1;
+    for (uint16_t i = 0; i < n; i++) {
+        for (int k = 0; k < 3; k++) {
+            float x = cv[((size_t)i * 6) + ((size_t)k * 2)];
+            float y = cv[((size_t)i * 6) + ((size_t)k * 2) + 1];
+            if (!isfinite(x) || !isfinite(y)) {
+                *finite = 0;
+            }
+            if (x < minx) {
+                minx = x;
+            }
+            if (x > maxx) {
+                maxx = x;
+            }
+            if (y < miny) {
+                miny = y;
+            }
+            if (y > maxy) {
+                maxy = y;
+            }
+        }
+    }
+    out[0] = minx;
+    out[1] = miny;
+    out[2] = maxx;
+    out[3] = maxy;
+}
+
+/* point-ring bbox area (int coords). */
+static float ring_area(const int32_t *x, const int32_t *y, uint16_t n) {
+    int32_t minx = x[0];
+    int32_t maxx = x[0];
+    int32_t miny = y[0];
+    int32_t maxy = y[0];
+    for (uint16_t i = 1; i < n; i++) {
+        if (x[i] < minx) {
+            minx = x[i];
+        }
+        if (x[i] > maxx) {
+            maxx = x[i];
+        }
+        if (y[i] < miny) {
+            miny = y[i];
+        }
+        if (y[i] > maxy) {
+            maxy = y[i];
+        }
+    }
+    return (float)(maxx - minx) * (float)(maxy - miny);
+}
+
+/* W=0 decode is byte-identical to the un-emboldened path: the gated offset never
+ * runs, so curve endpoints equal the raw input points exactly. */
+void test_embolden_w0_identity(void) {
+    const int16_t sq[4][2] = {{0, 0}, {400, 0}, {400, 800}, {0, 800}};
+    uint8_t blob[128];
+    build_contour_blob_1(blob, sq, 4);
+
+    float cv[4 * 6];
+    uint16_t n = nt_font_test_decode_contours(blob, 0.0F, cv, 4);
+    TEST_ASSERT_EQUAL_UINT16(4, n);
+
+    /* Curve 0 runs (0,0)->(400,0): endpoints exactly the raw points. */
+    TEST_ASSERT_TRUE(cv[0] == 0.0F && cv[1] == 0.0F);   /* p0 */
+    TEST_ASSERT_TRUE(cv[4] == 400.0F && cv[5] == 0.0F); /* p2 */
+    /* Curve 1 runs (400,0)->(400,800). */
+    TEST_ASSERT_TRUE(cv[6] == 400.0F && cv[7] == 0.0F);
+    TEST_ASSERT_TRUE(cv[10] == 400.0F && cv[11] == 800.0F);
+
+    /* W>0 must MOVE those endpoints (proves the offset path actually ran). */
+    float cw[4 * 6];
+    nt_font_test_decode_contours(blob, 40.0F, cw, 4);
+    TEST_ASSERT_TRUE(cw[4] != 400.0F || cw[5] != 0.0F);
+}
+
+/* W>0: all curve points finite and bbox area changes monotonically (same
+ * direction every step) across the spike-tested weight ramp. */
+void test_embolden_monotonic_bbox(void) {
+    /* CW outer square (builder/stbtt winding): sign=-1 grows it. */
+    const int16_t sq[4][2] = {{0, 0}, {0, 800}, {400, 800}, {400, 0}};
+    uint8_t blob[128];
+    build_contour_blob_1(blob, sq, 4);
+
+    const float ramp[6] = {0.0F, 10.0F, 20.0F, 40.0F, 80.0F, 160.0F};
+    float areas[6];
+    for (int r = 0; r < 6; r++) {
+        float cv[4 * 6];
+        int finite = 0;
+        uint16_t n = nt_font_test_decode_contours(blob, ramp[r], cv, 4);
+        float bb[4];
+        flat_curves_bbox(cv, n, bb, &finite);
+        TEST_ASSERT_TRUE(finite);
+        areas[r] = (bb[2] - bb[0]) * (bb[3] - bb[1]);
+    }
+    float dir = areas[1] - areas[0];
+    TEST_ASSERT_TRUE(dir != 0.0F); /* offset changed geometry */
+    for (int r = 2; r < 6; r++) {
+        float step = areas[r] - areas[r - 1];
+        TEST_ASSERT_TRUE((dir > 0.0F) ? (step >= -1.0F) : (step <= 1.0F)); /* monotonic */
+    }
+    /* CW outer grows: end area strictly exceeds W=0. */
+    TEST_ASSERT_TRUE(areas[5] > areas[0]);
+}
+
+/* Sign=-1: outer silhouette grows, inner counter shrinks (offset_points direct). */
+void test_embolden_counter_shrinks(void) {
+    /* Outer CW, inner counter CCW (opposite winding). */
+    int32_t ox[4] = {0, 0, 800, 800};
+    int32_t oy[4] = {0, 1000, 1000, 0};
+    uint8_t oon[4] = {1, 1, 1, 1};
+    int32_t ix[4] = {200, 600, 600, 200};
+    int32_t iy[4] = {200, 200, 600, 600};
+    uint8_t ion[4] = {1, 1, 1, 1};
+
+    float outer_before = ring_area(ox, oy, 4);
+    float inner_before = ring_area(ix, iy, 4);
+
+    const float W = 80.0F; /* 0.08em @ upem 1000 */
+    nt_font_test_offset_points(ox, oy, oon, 4, W);
+    nt_font_test_offset_points(ix, iy, ion, 4, W);
+
+    float outer_after = ring_area(ox, oy, 4);
+    float inner_after = ring_area(ix, iy, 4);
+
+    TEST_ASSERT_TRUE(outer_after > outer_before); /* outer grows */
+    TEST_ASSERT_TRUE(inner_after < inner_before); /* counter shrinks */
+}
+
+/* No aesthetic W clamp (locked decision): a large weight well past the 0.04em
+ * recommendation stays FINITE (guards hold). Self-intersection is allowed. */
+void test_embolden_large_w_stays_finite(void) {
+    const int16_t sq[4][2] = {{0, 0}, {0, 800}, {400, 800}, {400, 0}};
+    uint8_t blob[128];
+    build_contour_blob_1(blob, sq, 4);
+
+    float cv[4 * 6];
+    int finite = 0;
+    uint16_t n = nt_font_test_decode_contours(blob, 200.0F, cv, 4); /* 0.2em, no clamp */
+    float bb[4];
+    flat_curves_bbox(cv, n, bb, &finite);
+    TEST_ASSERT_TRUE(finite);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -1457,5 +1654,10 @@ int main(void) {
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
     RUN_TEST(test_font_truncated_winner_swap_clears_provider);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
+    /* DECO-01: embolden (offset_points) */
+    RUN_TEST(test_embolden_w0_identity);
+    RUN_TEST(test_embolden_monotonic_bbox);
+    RUN_TEST(test_embolden_counter_shrinks);
+    RUN_TEST(test_embolden_large_w_stays_finite);
     return UNITY_END();
 }

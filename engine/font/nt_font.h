@@ -161,6 +161,11 @@ void nt_font_test_reset_measure_counters(void);
 /* Set metrics on a stub font so measure_n returns predictable tofu widths
  * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
 void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
+
+/* Embolden test hooks (DECO-01). offset_points mutates a point ring in place;
+ * decode fills out_curves flat as [p0x,p0y,p1x,p1y,p2x,p2y] per curve, returns count. */
+void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight);
+uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
 #endif
 // #endregion
 

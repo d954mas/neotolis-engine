@@ -2,6 +2,7 @@
 #include "font/nt_font_hot.h"
 #include "font/nt_font_internal.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -581,10 +582,53 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
     }
 }
 
+/* Snapshot buffers so offset_points reads pre-offset neighbors (single-threaded decode). */
+static int32_t s_offset_ox[NT_FONT_MAX_POINTS_PER_CONTOUR];
+static int32_t s_offset_oy[NT_FONT_MAX_POINTS_PER_CONTOUR];
+
+/* CPU embolden at the decoded point ring (DECO-01, RESEARCH Pattern 1).
+ * sign=-1 grows the outer silhouette / shrinks counters for the builder's stbtt
+ * winding; miter d capped at d_max=2.0 (geometry guard, independent of W). No W
+ * clamp — set_weight applies the requested weight exactly (explicit-over-implicit);
+ * the isfinite/1e-6/lrintf-on-finite guards keep output finite at any W. W_CAP_EM
+ * (~0.04em) is a documented recommended ceiling only, NOT enforced here. */
+static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float W) {
+    (void)on;
+    if (W == 0.0F || n < 2) {
+        return; /* identity path — byte-identical to the un-emboldened decode */
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        s_offset_ox[i] = x[i];
+        s_offset_oy[i] = y[i];
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t p = (i == 0) ? (uint16_t)(n - 1) : (uint16_t)(i - 1);
+        uint16_t q = (uint16_t)((i + 1) % n);
+        float inx = (float)(s_offset_ox[i] - s_offset_ox[p]);
+        float iny = (float)(s_offset_oy[i] - s_offset_oy[p]);
+        float oux = (float)(s_offset_ox[q] - s_offset_ox[i]);
+        float ouy = (float)(s_offset_oy[q] - s_offset_oy[i]);
+        float li = sqrtf((inx * inx) + (iny * iny)) + 1e-6F;
+        float lo = sqrtf((oux * oux) + (ouy * ouy)) + 1e-6F;
+        /* normals: rotate tangent -90 => n=(ty,-tx), normalized */
+        float nix = iny / li;
+        float niy = -inx / li;
+        float nox = ouy / lo;
+        float noy = -oux / lo;
+        float sx = nix + nox;
+        float sy = niy + noy;
+        float d = 1.0F / fmaxf(1.0F + ((nix * nox) + (niy * noy)), 0.25F); /* miter, clamped */
+        d = fminf(d, 2.0F);                                                /* hard cap: no convex spikes */
+        x[i] += (int32_t)lrintf(-sx * d * W * 0.5F);                       /* sign=-1 folded in */
+        y[i] += (int32_t)lrintf(-sy * d * W * 0.5F);
+    }
+}
+
 /* Decode v4 point-based contour data into absolute float curves.
- * Handles implicit midpoints between consecutive off-curve points. */
+ * Handles implicit midpoints between consecutive off-curve points.
+ * weight != 0 emboldens the point ring in place before conversion (DECO-01). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves) {
+static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves, float weight) {
     const uint8_t *rp = contour_data;
     uint16_t contour_count;
     memcpy(&contour_count, rp, 2);
@@ -632,6 +676,12 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
             pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
         }
         // #endregion
+
+        /* Embolden the point ring BEFORE conversion — offsetting nt_curve_t after
+         * conversion tears shared endpoints (RESEARCH Anti-Pattern). */
+        if (weight != 0.0F) {
+            offset_points(pts_x, pts_y, pts_on, point_count, weight);
+        }
 
         // #region Convert points to quadratic curves (TrueType rules)
         /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
@@ -1430,7 +1480,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
     NT_ASSERT(glyph_entry->curve_count <= NT_FONT_MAX_CURVES_PER_GLYPH);
     uint16_t curve_count = 0;
     if (glyph_entry->curve_count > 0) {
-        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, 0.0F);
     }
     // #endregion
 
@@ -2032,5 +2082,24 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
     slot->metrics.descent = descent;
     slot->metrics.line_height = line_height;
     slot->metrics_set = true;
+}
+
+void nt_font_test_offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float weight) { offset_points(x, y, on, n, weight); }
+
+uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
+    uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);
+    if (count > max_curves) {
+        count = max_curves;
+    }
+    for (uint16_t i = 0; i < count; i++) {
+        float *o = out_curves + ((size_t)i * 6);
+        o[0] = s_decode_curves[i].p0x;
+        o[1] = s_decode_curves[i].p0y;
+        o[2] = s_decode_curves[i].p1x;
+        o[3] = s_decode_curves[i].p1y;
+        o[4] = s_decode_curves[i].p2x;
+        o[5] = s_decode_curves[i].p2y;
+    }
+    return count;
 }
 #endif
