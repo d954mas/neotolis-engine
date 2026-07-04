@@ -1355,6 +1355,44 @@ void test_font_fallback_decoration_primary_owned(void) {
     free(fb);
 }
 
+/* P1 (async ordering): if a FALLBACK resolves before the PRIMARY (base loads late), decoration must still
+ * flip to the primary once it arrives. Decoration is first-active-provider owned and refreshed EVERY step,
+ * not "whoever set metrics first" — the vmetric-match early-continue used to freeze it at the fallback. */
+void test_font_fallback_first_primary_reclaims_decoration(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    const uint32_t base_cps[2] = {'A', 'M'};
+    const uint32_t fb_cps[2] = {'M', 'Z'};
+    uint32_t base_sz = 0;
+    uint32_t fb_sz = 0;
+    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 2, 500, &base_sz);
+    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 2, 700, &fb_sz);
+    ((NtFontAssetHeader *)base)->underline_position = 50; /* primary decoration */
+    ((NtFontAssetHeader *)fb)->underline_position = 90;   /* fallback decoration */
+
+    uint32_t tok_base = nt_font_test_register_data(base, base_sz);
+    uint32_t tok_fb = nt_font_test_register_data(fb, fb_sz);
+    nt_font_add(font, nt_font_test_resource(tok_base)); /* ri=0 = primary */
+    nt_font_add(font, nt_font_test_resource(tok_fb));   /* ri=1 = fallback */
+
+    /* Primary loads LATE: deactivate base so only the fallback resolves on the first step. */
+    nt_font_test_deactivate(tok_base);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(90, nt_font_get_metrics(font).underline_position, "fallback resolved first -> owns decoration for now");
+
+    /* Base arrives -> the late primary must reclaim decoration (pre-fix froze it at 90). */
+    nt_font_test_reregister(tok_base, base, base_sz);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(50, nt_font_get_metrics(font).underline_position, "late-loading primary reclaims decoration");
+
+    nt_font_destroy(font);
+    free(base);
+    free(fb);
+}
+
 /* ---- FONT-02: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
  *
  * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
@@ -2470,6 +2508,7 @@ int main(void) {
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
     RUN_TEST(test_font_fallback_order_first_wins);
     RUN_TEST(test_font_fallback_decoration_primary_owned);
+    RUN_TEST(test_font_fallback_first_primary_reclaims_decoration);
     RUN_TEST(test_font_cmap_bounded_no_parse);
     RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);

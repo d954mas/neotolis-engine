@@ -632,7 +632,7 @@ static uint8_t s_offset_on[NT_FONT_OFFSET_RING_MAX];
  * the 1e-6 length guard + lrintf keep output finite at any W.
  * At a cap-binding reflex corner of a GROWER ring, emit a Clipper-style retraction join (wall end
  * at exact R, original vertex, wall end) so the converging offset walls cross at the true trim
- * point; resolve_and_emit then excises the pocket (kills the 'W'-valley sealed-dent defect, D3).
+ * point; resolve_and_emit then excises the pocket (kills the 'W'-valley sealed-dent).
  * a0 = signed area of the source ring (winding reference). Thin (W<0) swaps grower/shrinker by
  * symmetry (NOT raster-validated). Returns dst point count. */
 static uint16_t offset_with_joins(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, int32_t *dx, int32_t *dy, uint8_t *don, float W, double a0) {
@@ -1747,6 +1747,7 @@ void nt_font_step(void) {
 
         // #region Re-validate shared metrics against the current winning blobs
         const bool had_metrics = slot->metrics_set;
+        bool deco_owned = false; /* decoration taken from the first active (lowest-index/primary) provider */
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             if (!res_now[ri]) {
                 continue;
@@ -1754,16 +1755,12 @@ void nt_font_step(void) {
             uint32_t bs = 0;
             const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
             const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-            /* Shared-metrics invariant covers VMETRICS only (the builder UPM-normalizes these across a
-             * fallback family). Decoration (underline/strike) is PRIMARY-owned: the first active provider
-             * sets it below and it is kept — a Latin+CJK family legitimately differs in post/OS-2, so
-             * decoration is NOT part of this invariant (including it would false-assert the family). */
-            const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
-                                       slot->metrics.line_gap == hdr->line_gap;
-            if (slot->metrics_set && metrics_match) {
-                continue;
-            }
-            if (slot->metrics_set && !metrics_match) {
+            /* VMETRICS are the shared-metrics invariant (builder UPM-normalizes them across a fallback
+             * family). Kept separate from decoration below — do NOT early-continue on a vmetric match, or a
+             * late-loading primary can't reclaim decoration from a fallback that resolved first. */
+            const bool vmetrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
+                                        slot->metrics.line_gap == hdr->line_gap;
+            if (slot->metrics_set && !vmetrics_match) {
                 /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
                  * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is
                  * a no-op in shipping, so gating the flush on it would keep caches baked against stale metrics. */
@@ -1771,17 +1768,24 @@ void nt_font_step(void) {
                 need_flush = true;
                 changed = true;
             }
-            slot->metrics.ascent = hdr->ascent;
-            slot->metrics.descent = hdr->descent;
-            slot->metrics.line_gap = hdr->line_gap;
-            slot->metrics.units_per_em = hdr->units_per_em;
-            slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
-            /* v5 decoration metrics — renderer scales by size/units_per_em to place quads. */
-            slot->metrics.underline_position = hdr->underline_position;
-            slot->metrics.underline_thickness = hdr->underline_thickness;
-            slot->metrics.strikeout_position = hdr->strikeout_position;
-            slot->metrics.strikeout_size = hdr->strikeout_size;
-            slot->metrics_set = true;
+            if (!slot->metrics_set || !vmetrics_match) {
+                slot->metrics.ascent = hdr->ascent;
+                slot->metrics.descent = hdr->descent;
+                slot->metrics.line_gap = hdr->line_gap;
+                slot->metrics.units_per_em = hdr->units_per_em;
+                slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
+                slot->metrics_set = true;
+            }
+            /* Decoration (underline/strike) is PRIMARY-owned: the first active provider (lowest slot index)
+             * wins, refreshed EVERY pass so a base that loads AFTER a fallback still reclaims it. Not part of
+             * the vmetric invariant — a fallback family legitimately differs in post/OS-2. */
+            if (!deco_owned) {
+                slot->metrics.underline_position = hdr->underline_position;
+                slot->metrics.underline_thickness = hdr->underline_thickness;
+                slot->metrics.strikeout_position = hdr->strikeout_position;
+                slot->metrics.strikeout_size = hdr->strikeout_size;
+                deco_owned = true;
+            }
         }
         if (!had_metrics && slot->metrics_set) {
             changed = true; /* first resolve -> ascii index needs building */
