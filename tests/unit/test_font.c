@@ -1722,43 +1722,57 @@ static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     return 0.5 * (double)acc;
 }
 
-/* #253 counter trace/fill boundary = the EXACT Minkowski erosion: a counter fills IFF its
- * inradius (largest inscribed circle) <= R = W/2. Pure geometry, no fudge constant — the
- * boundary is W = 2*inradius for ANY font (validated in bench_outline against fine-grid GT +
- * analytic shapes on LilitaOne + Roboto). A square counter of half-width H has inradius = H,
- * so it traces below W=2H and fills above; a wide RECTANGLE counter has inradius = the SMALLER
- * half-dimension (inscribed circle, not bbox), pinning that the criterion is min-width. */
-void test_embolden_counter_traces_then_fills(void) {
-    /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100 -> boundary W=200. */
+/* bbox min corner over emitted flat curves (for outer full-thickness check). */
+static void curves_min_corner(const float *cv, uint16_t n, float *out_minx, float *out_miny) {
+    float bb[4];
+    int finite = 0;
+    flat_curves_bbox(cv, n, bb, &finite);
+    *out_minx = bb[0];
+    *out_miny = bb[1];
+}
+
+/* #253 COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W (thick outline), but a
+ * COUNTER (hole) caps its inward offset so it keeps >= NT_FONT_COUNTER_KEEP (35%) of its own
+ * inradius — the counter NEVER closes, at ANY width, on ANY font. A uniform Minkowski offset
+ * would provably FILL a counter once R=W/2 >= inradius (a filled counter is illegible); this
+ * non-uniform model is the legible-outline default (validated multi-font in bench_outline). */
+void test_counter_preserving_outline(void) {
+    /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100. Uniform would FILL
+     * this counter at any W >= 200 (R >= 100); counter-preserve keeps it open at every width. */
     const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
     const int16_t inner[4][2] = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
     uint8_t blob[256];
     build_contour_blob_2(blob, outer, 4, inner, 4);
     float cv[16 * 6];
 
-    /* Just BELOW the boundary (W=180, R=90 < inradius 100): counter traced, interior a hole. */
-    uint16_t n_below = nt_font_test_decode_contours(blob, 180.0F, cv, 16);
-    TEST_ASSERT_EQUAL_UINT16(8, n_below);
-    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_below));
-    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_below, 500.0F, 500.0F)); /* counter open */
+    /* WIDE (W=400, R=200 >> inradius 100): uniform would fill; counter-preserve keeps it OPEN. */
+    uint16_t n_wide = nt_font_test_decode_contours(blob, 400.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_wide);                                /* both contours emitted */
+    TEST_ASSERT_FALSE(curves_have_crossing(cv, n_wide));                /* clean, no self-intersection */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wide, 500.0F, 500.0F)); /* counter still OPEN */
+    /* OUTER is full-thickness: box grows outward by the full R=200 (min corner ~ -200 << 0). */
+    float mnx, mny;
+    curves_min_corner(cv, n_wide, &mnx, &mny);
+    TEST_ASSERT_TRUE(mnx < -100.0F);
+    TEST_ASSERT_TRUE(mny < -100.0F);
 
-    /* Just ABOVE the boundary (W=220, R=110 > inradius 100): counter fills solid, no hole. */
-    uint16_t n_above = nt_font_test_decode_contours(blob, 220.0F, cv, 16);
-    TEST_ASSERT_EQUAL_UINT16(4, n_above);
-    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_above, 500.0F, 500.0F)); /* filled */
+    /* EXTREME (W=2000, R=1000): the counter STILL stays open — the cap is a fraction of the
+     * counter's own inradius, so it never closes regardless of how thick the outline gets. */
+    uint16_t n_huge = nt_font_test_decode_contours(blob, 2000.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_huge);
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_huge, 500.0F, 500.0F)); /* counter STILL open */
 
-    /* W=0 keeps both contours verbatim (offset gated off). */
+    /* W=0 keeps both contours verbatim (offset gated off) — byte-identical to plain decode. */
     uint16_t n_zero = nt_font_test_decode_contours(blob, 0.0F, cv, 16);
     TEST_ASSERT_EQUAL_UINT16(8, n_zero);
 
-    /* Min-width pin: a 600(wide) x 200(tall) counter has inradius = 100 (the SMALLER half-dim),
-     * so its boundary is STILL W=200 (not the 300 the width would imply). Traces at 180, fills at 220. */
+    /* Min-width pin: a 600(wide) x 200(tall) counter has inradius = 100 (SMALLER half-dim), so it
+     * also stays open at wide W (the cap keys on the inscribed circle, not the bbox). */
     const int16_t wide_inner[4][2] = {{200, 400}, {800, 400}, {800, 600}, {200, 600}};
     build_contour_blob_2(blob, outer, 4, wide_inner, 4);
-    TEST_ASSERT_EQUAL_UINT16(8, nt_font_test_decode_contours(blob, 180.0F, cv, 16)); /* R=90 < 100 -> open */
-    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nt_font_test_decode_contours(blob, 180.0F, cv, 16), 500.0F, 500.0F));
-    TEST_ASSERT_EQUAL_UINT16(4, nt_font_test_decode_contours(blob, 220.0F, cv, 16)); /* R=110 > 100 -> fills */
-    TEST_ASSERT_TRUE(curves_fill_nonzero(cv, nt_font_test_decode_contours(blob, 220.0F, cv, 16), 500.0F, 500.0F));
+    uint16_t n_wr = nt_font_test_decode_contours(blob, 400.0F, cv, 16);
+    TEST_ASSERT_EQUAL_UINT16(8, n_wr);
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wr, 500.0F, 500.0F)); /* wide-rect counter open */
 }
 
 /* #253 '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
@@ -2075,7 +2089,7 @@ int main(void) {
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
-    RUN_TEST(test_embolden_counter_traces_then_fills);
+    RUN_TEST(test_counter_preserving_outline);
     RUN_TEST(test_embolden_resolves_self_intersecting_outer);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);

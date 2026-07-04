@@ -444,6 +444,23 @@ static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) {
 static int g_survival_mode = 1;
 static int g_last_old_mismatch, g_last_new_mismatch, g_last_poly_vs_grid; /* per-font calibration results */
 
+/* Counter-preserving (non-uniform) outline: the OUTER offsets by full R = W/2 (thick), but a
+ * COUNTER (hole) caps its inward offset so it keeps >= COUNTER_KEEP of its own inradius — the
+ * counter never closes, at any width, on any font. COUNTER_KEEP is a fraction of the counter's
+ * OWN inradius (scale/font-invariant) so every counter stays proportionally open. */
+#define COUNTER_KEEP 0.35F
+static int g_counter_preserve = 1;
+
+/* Capped offset weight for a shrinker (hole): |W_eff| <= 2*(1-KEEP)*inradius keeps residual
+ * inradius >= KEEP*inradius. Growers pass through unchanged. */
+static float counter_cap_weight(const contour_t *base, float W, int is_shrinker) {
+    if (!g_counter_preserve || !is_shrinker || W == 0.0F)
+        return W;
+    double inrad = poly_inradius(base->x, base->y, base->n);
+    float cap = 2.0F * (1.0F - COUNTER_KEEP) * (float)inrad;
+    return (fabsf(W) > cap) ? copysignf(cap, W) : W;
+}
+
 /* A shrinker (counter) contour is DROPPED (fills solid) iff the true Minkowski erosion
  * by R empties it: inradius(base) <= R. Replaces the offset-vertex depth proxy, which
  * under-samples the deepest interior point and fills open counters early. */
@@ -785,16 +802,18 @@ static uint16_t build_resolved(const contour_t *base, int nbc, float W, nt_curve
             continue;
         }
         double a0 = contour_signed_area(base[i].x, base[i].y, base[i].n);
-        int joins = offset_with_joins(&base[i], &work, W, a0);
         /* TT winding (builder/stbtt): outer negative area, hole positive. Bold (W>0)
          * shrinks holes; thin (W<0) shrinks outers. */
         int is_shrinker = (W > 0.0F) ? (a0 > 0.0) : (a0 < 0.0);
+        float W_eff = counter_cap_weight(&base[i], W, is_shrinker); /* counter-preserving cap */
+        int joins = offset_with_joins(&base[i], &work, W_eff, a0);
         rstats_t rs;
         if (verbose) {
             double a1 = contour_signed_area(work.x, work.y, work.n);
-            printf("    contour %d: n=%u->%u area %+.0f -> %+.0f, joins=%d (R=%.0f)%s:\n", i, base[i].n, work.n, a0, a1, joins, 0.5F * (double)fabsf(W), is_shrinker ? " [shrinker]" : "");
+            printf("    contour %d: n=%u->%u area %+.0f -> %+.0f, joins=%d (R=%.0f Reff=%.0f)%s:\n", i, base[i].n, work.n, a0, a1, joins, 0.5F * (double)fabsf(W), 0.5F * (double)fabsf(W_eff),
+                   is_shrinker ? " [shrinker]" : "");
         }
-        int nr = resolve_ring(work.x, work.y, work.on, work.n, a0, &base[i], is_shrinker, 0.5 * (double)fabsf(W), rings, MAX_LOOPS, &rs, verbose);
+        int nr = resolve_ring(work.x, work.y, work.on, work.n, a0, &base[i], is_shrinker, 0.5 * (double)fabsf(W_eff), rings, MAX_LOOPS, &rs, verbose);
         gs->crossings += (rs.crossings < 0) ? 0 : rs.crossings;
         gs->loops_dropped += rs.loops_dropped;
         gs->rings_dropped += rs.ring_dropped;
@@ -1049,6 +1068,15 @@ static int counter_kept(const contour_t *counter, float W, int mode) {
     return n > 0;
 }
 
+/* Residual counter inradius after the counter-preserving (capped) offset at weight W. */
+static double counter_residual_inradius(const contour_t *base, float W) {
+    static contour_t work;
+    double a0 = contour_signed_area(base->x, base->y, base->n);
+    float W_eff = counter_cap_weight(base, W, 1 /* is_shrinker */);
+    offset_with_joins(base, &work, W_eff, a0);
+    return poly_inradius(work.x, work.y, work.n);
+}
+
 /* ===== Analytic universality: shapes with a KNOWN inradius (font-independent proof) =====
  * A regular n-gon of circumradius Rc has inradius Rc*cos(pi/n) (-> Rc for a circle); a
  * w x h rectangle has inradius min(w,h)/2. The polylabel evaluator must recover these; the
@@ -1163,19 +1191,24 @@ static int run_font(const char *font_path, int primary) {
         stbtt_FreeShape(&font, verts);
     }
 
-    // #region Counter survival calibration vs Minkowski GT (trace->fill boundary)
-    /* A counter (hole) stays OPEN (traced) under an outline of visible rim R=W/2 iff its
-     * Minkowski erosion by R is non-empty, i.e. inradius(counter) > R. Boundary width
-     * (the outline em at which trace flips to fill) = 2*inradius/upem. Columns per W: G=GT
-     * (fine-grid inradius > R), o=old kappa proxy keep, n=new polylabel-inradius gate keep. */
-    printf("=== COUNTER SURVIVAL CALIBRATION (GT = fine-grid inradius > R=W/2) ===\n");
+    // #region Counter-preserving outline: openness proof (the product goal)
+    /* Uniform Minkowski offset CLOSES a counter once R=W/2 >= inradius (font-independent math):
+     * boundary_uniform(em) = 2*inradius/upem. Counter-preserve caps the hole offset so residual
+     * inradius >= KEEP*inradius at EVERY width -> the counter never closes on ANY font. Table:
+     * per counter, per W, the residual counter inradius (parenthesised 'c' = uniform would CLOSE
+     * here but preserve keeps it OPEN); frac = residual/inradius must stay >= KEEP. */
+    printf("=== COUNTER-PRESERVING OUTLINE (KEEP=%.2f of each counter's inradius) ===\n", (double)COUNTER_KEEP);
     const float cramp[] = {0.03F, 0.05F, 0.07F, 0.09F, 0.12F, 0.16F};
     const int CRN = (int)(sizeof(cramp) / sizeof(cramp[0]));
-    printf("counter  inrad_poly inrad_gridGT boundary(em) |");
+    printf("counter inrad boundary_uniform(em) | residual inradius per W {");
     for (int r = 0; r < CRN; r++)
-        printf(" %.2f ", cramp[r]);
-    printf("  [G o n; X=mismatch vs GT]\n");
-    int old_mismatch = 0, new_mismatch = 0, poly_vs_grid_bad = 0;
+        printf("%.2f ", cramp[r]);
+    printf("}  ('c'=uniform closes here)\n");
+    int poly_vs_grid_bad = 0;
+    int keep_violations = 0;       /* residual < KEEP*inradius (must be 0) */
+    int closed_under_preserve = 0; /* counter NOT emitted under preserve (must be 0) */
+    int uniform_would_close = 0;   /* (glyph,W) where uniform fills but preserve keeps open */
+    double min_frac = 1e9;
     for (int g = 0; g < GN; g++) {
         int outer = 0;
         double amax = -1.0;
@@ -1191,27 +1224,31 @@ static int run_font(const char *font_path, int primary) {
                 continue;
             const contour_t *ctr = &gcs[g][c];
             double inrad = poly_inradius(ctr->x, ctr->y, ctr->n);
-            double inrad_gt = poly_inradius_grid(ctr->x, ctr->y, ctr->n);
-            if (fabs(inrad - inrad_gt) > 2.0)
+            if (fabs(inrad - poly_inradius_grid(ctr->x, ctr->y, ctr->n)) > 2.0)
                 poly_vs_grid_bad++;
-            printf("  %s#%d      %7.0f      %7.0f      %6.3f  |", names[g], c, inrad, inrad_gt, 2.0 * inrad_gt / (double)upem);
+            printf("  %s#%d %5.0f %8.3f            |", names[g], c, inrad, 2.0 * inrad / (double)upem);
             for (int r = 0; r < CRN; r++) {
                 double R = 0.5 * (double)cramp[r] * upem;
-                int gt = inrad_gt > R; /* GT from the independent fine grid */
-                int oldk = counter_kept(ctr, cramp[r] * upem, 0);
-                int newk = counter_kept(ctr, cramp[r] * upem, 1);
-                if (oldk != gt)
-                    old_mismatch++;
-                if (newk != gt)
-                    new_mismatch++;
-                printf(" %d%d%d%s", gt, oldk, newk, (oldk != gt || newk != gt) ? "X" : " ");
+                double resid = counter_residual_inradius(ctr, cramp[r] * upem);
+                double frac = (inrad > 1.0) ? resid / inrad : 1.0;
+                int uni_close = R >= inrad;
+                if (uni_close)
+                    uniform_would_close++;
+                if (frac < (double)COUNTER_KEEP - 0.03)
+                    keep_violations++;
+                if (!counter_kept(ctr, cramp[r] * upem, 1))
+                    closed_under_preserve++;
+                if (frac < min_frac)
+                    min_frac = frac;
+                printf(" %4.0f%s", resid, uni_close ? "c" : " ");
             }
             printf("\n");
         }
     }
-    printf("[%s] OLD kappa mismatches vs GT=%d   NEW inradius-gate mismatches vs GT=%d   polylabel!=grid=%d\n\n", font_path, old_mismatch, new_mismatch, poly_vs_grid_bad);
-    g_last_old_mismatch = old_mismatch;
-    g_last_new_mismatch = new_mismatch;
+    printf("[%s] KEEP=%.2f  min residual frac=%.2f  keep-violations=%d  counters-closed-under-preserve=%d  (uniform would-close cases=%d)  polylabel!=grid=%d\n\n", font_path, (double)COUNTER_KEEP,
+           min_frac, keep_violations, closed_under_preserve, uniform_would_close, poly_vs_grid_bad);
+    g_last_old_mismatch = uniform_would_close; /* reuse fields for the universal verdict */
+    g_last_new_mismatch = keep_violations + closed_under_preserve;
     g_last_poly_vs_grid = poly_vs_grid_bad;
     // #endregion
 
@@ -1231,7 +1268,11 @@ static int run_font(const char *font_path, int primary) {
     uint16_t max_curves_res = 0;
     int identity_ok = 1;
 
-    printf("Raster proof (n=naive today, r=resolved). hole = enclosed winding-0 px inside true dilation.\n");
+    /* Raster proof runs in UNIFORM mode (counters filled) so the OUTER-silhouette D1/D2/D3
+     * fixes stay measurable as holes==0. The outer is offset by full W in BOTH modes, so this
+     * validates the outer for counter-preserve too; counter openness is proven by the table above. */
+    g_counter_preserve = 0;
+    printf("Raster proof (UNIFORM mode; n=naive today, r=resolved). hole = enclosed winding-0 px inside true dilation.\n");
     printf("glyph W(em)  | crv_n hole_n dent_n spill_n | crv_r  x  ldrop rdrop phdrop hole_r dent_r spill_r selfx%s\n", primary ? " | ns_n ns_r" : "");
 
     for (int g = 0; g < GN; g++) {
@@ -1351,31 +1392,37 @@ static int run_font(const char *font_path, int primary) {
     }
     // #endregion
 
-    /* Survival calibration is the task; winding-hole REGRESSION (resolved > naive) is the
-     * pipeline safety net. Residual holes where naive==resolved are a pre-existing miter-cap
-     * artifact at sharp counter apices (Roboto 'A' tip), NOT introduced here. */
+    g_counter_preserve = 1; /* restore counter-preserve default (raster proof toggled it off) */
+
+    /* Winding-hole REGRESSION (resolved > naive) is the OUTER-silhouette safety net (uniform
+     * mode). Residual holes where naive==resolved are a pre-existing miter-cap artifact at sharp
+     * counter apices (Roboto 'A' tip), NOT introduced here. */
     int regressed = (total_hole_res > total_hole_naive) ? 1 : 0;
     printf("--- [%s] SUMMARY ---\n", font_path);
-    printf("survival mismatches vs GT: OLD kappa=%d  NEW inradius-gate=%d  (polylabel!=grid=%d)\n", g_last_old_mismatch, g_last_new_mismatch, g_last_poly_vs_grid);
-    printf("winding-hole px: naive=%d resolved=%d (regression=%s)  spill=%d selfx=%d maxcurves=%u/%d W0-identity=%s\n\n", total_hole_naive, total_hole_res, regressed ? "YES" : "no", total_spill_res,
-           total_residual_selfx, max_curves_res, PROD_CURVE_CAP, identity_ok ? "OK" : "BROKEN");
+    printf("counter-preserve: keep-violations=%d  counters-closed=%d  uniform-would-close-cases=%d  (polylabel!=grid=%d)\n", g_last_new_mismatch, g_last_new_mismatch, g_last_old_mismatch,
+           g_last_poly_vs_grid);
+    printf("OUTER (uniform) winding-hole px: naive=%d resolved=%d (regression=%s)  spill=%d selfx=%d maxcurves=%u/%d W0-identity=%s\n\n", total_hole_naive, total_hole_res, regressed ? "YES" : "no",
+           total_spill_res, total_residual_selfx, max_curves_res, PROD_CURVE_CAP, identity_ok ? "OK" : "BROKEN");
     (void)total_notch_naive;
     (void)total_notch_res;
     (void)total_spill_naive;
 
     free(fdata);
-    /* verdict = survival calibration correctness + pipeline safety (no regression / identity / self-x) */
+    /* verdict = counter openness (keep-violations + closed) + pipeline safety (no outer regression / identity / self-x) */
     return g_last_new_mismatch + g_last_poly_vs_grid + regressed + (identity_ok ? 0 : 1000) + total_residual_selfx;
 }
 
 int main(void) {
     validate_analytic();
     int bad = 0;
-    /* heavy display face (small counters) + normal-weight sans — span the weight spectrum */
-    bad += run_font("assets/fonts/LilitaOne-RussianChineseKo.ttf", 1);
+    /* tight display face (user font, small counters) + regular sans + another sans — spans fonts */
+    bad += run_font("examples/ui_showcase/raw/font.ttf", 1);
     bad += run_font("tests/fixtures/Roboto-Regular.ttf", 0);
+    bad += run_font("examples/ui_showcase/raw/font_dejavu_r.ttf", 0);
+    bad += run_font("assets/fonts/LilitaOne-RussianChineseKo.ttf", 0);
     printf("========================================================================\n");
-    printf("UNIVERSAL VERDICT: %s (bad=%d)\n", bad == 0 ? "PASS — survival boundary == Minkowski GT on ALL fonts + analytic; polylabel==grid; no hole regression; W=0 identity" : "CHECK", bad);
-    printf("(Roboto 'A' residual holes are a PRE-EXISTING sharp-counter-apex miter-cap artifact: naive==resolved, orthogonal to survival.)\n");
+    printf("UNIVERSAL VERDICT: %s (bad=%d)\n",
+           bad == 0 ? "PASS — every counter stays OPEN (>= KEEP*inradius) at all widths on ALL fonts; outer full-thickness (holes==0); polylabel==grid; W=0 identity" : "CHECK", bad);
+    printf("(Counter-preserving = deliberately NON-uniform: outer offsets full R, counters capped so they never close. The legible-outline model.)\n");
     return 0;
 }

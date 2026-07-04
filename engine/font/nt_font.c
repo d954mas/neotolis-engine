@@ -603,6 +603,10 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
 #define NT_FONT_OFFSET_MAX_XINGS 64 /* proper self-crossings/ring; overflow -> keep raw ring (= today) */
 #define NT_FONT_OFFSET_RING_MAX (NT_FONT_MAX_POINTS_PER_CONTOUR + (2 * NT_FONT_OFFSET_MAX_JOINS))
 #define NT_FONT_OFFSET_NODE_MAX (NT_FONT_OFFSET_RING_MAX + (2 * NT_FONT_OFFSET_MAX_XINGS))
+/* Counter-preserving outline: a counter (hole) keeps >= this fraction of its OWN inradius under
+ * any offset, so it never closes on any font. Fraction-of-inradius (not em) => scale/font-
+ * invariant, proportionally-consistent openness. Documented default; tune per taste. */
+#define NT_FONT_COUNTER_KEEP 0.35F
 
 /* Offset+joins destination ring: offset_with_joins reads the base s_decode_pts_*, writes here,
  * so vertex adjacency reads pristine source coords (no in-place snapshot needed). */
@@ -947,17 +951,20 @@ static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8
 }
 
 /* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
- * Calibrated Minkowski gate (#253): a shrinker (counter) whose erosion by R empties —
- * inradius(base) <= R — is dropped so it fills solid; this is the exact geometric
- * trace/fill boundary (no fudge constant), superseding the vertex-depth proxy that filled
- * early/late. Then uncross (split crossings, rewire orientation-preserving) → signed-loop
- * filter (drop loops opposing the original winding = D1 notches). base = pre-offset ring.
- * Winding elsewhere is preserved; positive overlaps stay filled (shader CalcCoverage clamps). */
+ * SAFETY gate (#253): a shrinker whose erosion by r_off empties (inradius <= r_off) fills
+ * solid. With counter-preservation the caller caps r_off < inradius, so this never fires for
+ * a real counter — it is the fallback for a degenerate/uncapped path. Then uncross (split
+ * crossings, rewire orientation-preserving) → signed-loop filter (drop loops opposing the
+ * original winding = D1 notches). base_inradius = poly_inradius(base) computed once by the
+ * caller (0 for growers). Winding elsewhere preserved; positive overlaps stay filled. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker, double r_off,
-                             nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
-    if (is_shrinker && poly_inradius(bx, by, bn) <= r_off) {
-        return; /* counter's Minkowski erosion by R is empty -> fills solid (D2 phantom + collapse) */
+static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker,
+                             double base_inradius, double r_off, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    (void)bx;
+    (void)by;
+    (void)bn;
+    if (is_shrinker && r_off > 0.0 && base_inradius <= r_off) {
+        return; /* erosion empty -> fills solid (safety; counter-preserve caps below inradius) */
     }
     int nx = find_offset_crossings(ox, oy, on_n);
     if (nx <= 0) {
@@ -1110,17 +1117,31 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         }
         // #endregion
 
-        // #region Embolden + resolve self-intersections (#253), or plain convert
+        // #region Embolden + counter-preserving resolve (#253), or plain convert
         /* Offset+resolution runs on a SEPARATE ring so weight==0 is byte-identical to the
-         * plain decode; offsetting nt_curve_t after conversion tears shared endpoints. */
+         * plain decode; offsetting nt_curve_t after conversion tears shared endpoints.
+         * Counter-preserving (non-uniform): the OUTER (grower) offsets by full W (thick
+         * outline); a COUNTER (hole/shrinker) caps its inward offset so it keeps
+         * >= NT_FONT_COUNTER_KEEP of its own inradius — the counter never closes, at any
+         * width, on any font (a uniform offset provably fills a counter once R >= inradius).
+         * Legible outlined/bold text needs this; a filled counter is unusable. */
         if (weight != 0.0F) {
             double a0 = contour_signed_area(pts_x, pts_y, point_count);
-            uint16_t offn = offset_with_joins(pts_x, pts_y, pts_on, point_count, s_offset_x, s_offset_y, s_offset_on, weight, a0);
             /* TT winding (builder/stbtt): outer negative area, hole positive. Bold (W>0)
              * shrinks holes; thin (W<0) shrinks outers (symmetry, not raster-validated). */
             bool is_shrinker = (weight > 0.0F) ? (a0 > 0.0) : (a0 < 0.0);
-            double r_off = 0.5 * (double)fabsf(weight);
-            resolve_and_emit(s_offset_x, s_offset_y, s_offset_on, offn, pts_x, pts_y, point_count, a0, is_shrinker, r_off, curves, &total_curves, max_curves);
+            float w_eff = weight;
+            double base_inrad = 0.0;
+            if (is_shrinker) {
+                base_inrad = poly_inradius(pts_x, pts_y, point_count);
+                float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)base_inrad; /* |W| that leaves >= KEEP*inradius */
+                if (fabsf(weight) > cap) {
+                    w_eff = copysignf(cap, weight);
+                }
+            }
+            uint16_t offn = offset_with_joins(pts_x, pts_y, pts_on, point_count, s_offset_x, s_offset_y, s_offset_on, w_eff, a0);
+            double r_off = 0.5 * (double)fabsf(w_eff);
+            resolve_and_emit(s_offset_x, s_offset_y, s_offset_on, offn, pts_x, pts_y, point_count, a0, is_shrinker, base_inrad, r_off, curves, &total_curves, max_curves);
         } else {
             convert_point_ring(pts_x, pts_y, pts_on, point_count, curves, &total_curves, max_curves);
         }
