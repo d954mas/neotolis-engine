@@ -87,8 +87,9 @@ float CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
 
 // Main coverage: Y-band horizontal ray + X-band vertical ray
 float SlugRender(vec2 coord) {
-    // band_count==0 is the decoration sentinel (underline/strike/solid quad): render solid.
-    // CalcCoverage(0,0,0,0) returns 0 today, so this explicit branch is required.
+    // Decoration sentinel: underline/strike/solid quads ride the text batch with band_count==0 AND
+    // zeroed glyph_bounds. The glyph path would divide by bbox_height==0 (-> NaN) and clamp with hi<lo
+    // (band_count-1 == -1, UB), so this branch both forces solid coverage and skips that garbage.
     if (v_glyph.w == 0u)
         return 1.0;
 

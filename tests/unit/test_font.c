@@ -1751,7 +1751,8 @@ void test_counter_preserving_outline(void) {
     TEST_ASSERT_FALSE(curves_have_crossing(cv, n_wide));                /* clean, no self-intersection */
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wide, 500.0F, 500.0F)); /* counter still OPEN */
     /* OUTER is full-thickness: box grows outward by the full R=200 (min corner ~ -200 << 0). */
-    float mnx, mny;
+    float mnx;
+    float mny;
     curves_min_corner(cv, n_wide, &mnx, &mny);
     TEST_ASSERT_TRUE(mnx < -100.0F);
     TEST_ASSERT_TRUE(mny < -100.0F);
@@ -1781,6 +1782,7 @@ void test_counter_preserving_outline(void) {
  * beyond the seal fills. The seal-radius cap keeps the offset below the seal onset, so the waist
  * NEVER touches: the counter stays a single CONNECTED open region at any width. Fixture: an
  * hourglass counter (two wide lobes + a ~60u waist, inradius ~125). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_counter_preserving_neck(void) {
     const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
     /* CCW hourglass hole: wide bottom lobe, ~60u waist at y=450, wide top lobe. */
@@ -1804,7 +1806,8 @@ void test_counter_preserving_neck(void) {
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nw, 400.0F, 450.0F)); /* WAIST still open (not sealed) */
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nw, 400.0F, 600.0F)); /* top lobe still open */
     /* Outer full-thickness: box grows outward by the full R=200. */
-    float mnx, mny;
+    float mnx;
+    float mny;
     curves_min_corner(cv, nw, &mnx, &mny);
     TEST_ASSERT_TRUE(mnx < -100.0F);
     TEST_ASSERT_TRUE(mny < -100.0F);
@@ -1976,6 +1979,7 @@ void test_cache_key_offset_zero_parity(void) {
 /* DECO-06: offset variants grow the stored quad bbox past the packed bbox so the
  * emboldened edge is not clipped; the regular (key_offset=0) entry stays exactly
  * the raw glyph bbox (byte-identity guard). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_embolden_entry_bbox_grows(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_bbox_grow", &blob);
