@@ -547,7 +547,7 @@ void test_oblique_resets_on_reinit(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
 }
 
-/* ---- sticky decoration state lifetime (D-12/D-13) ---- */
+/* ---- sticky decoration state lifetime ---- */
 
 /* Decoration state is renderer state like oblique: survives a GPU context-loss restore. */
 void test_decoration_persists_across_restore(void) {
@@ -596,7 +596,7 @@ void test_decoration_resets_on_reinit(void) {
     TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
 }
 
-/* ---- three-pass painter-order emit + sentinel decoration quad (DECO-01/02/03/04, DECO-06 pins) ---- */
+/* ---- three-pass painter-order emit + sentinel decoration quad ---- */
 
 static const float s_black[4] = {0.0F, 0.0F, 0.0F, 1.0F};
 

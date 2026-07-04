@@ -3338,7 +3338,12 @@ subsystem — decoration reuses the text pipeline and the `slug_text` shader.
 - **Painter order & batching.** Per run: **shadow → outline → fill → underline/strike**. Underline and
   strike are one continuous solid quad per line, emitted as a **sentinel** vertex (`band_count == 0`,
   which the shader reads as full coverage) in the same vertex buffer / material — no separate draw
-  call, no flush, so decoration never breaks the batch.
+  call, no flush, so decoration never breaks the batch. This per-run order + continuous underline
+  describes the **plain (non-`<fx>`) path**. An `<fx>` run emits **per glyph** (each glyph phase-shifts
+  independently), so its decoration is per-glyph **by design**: outline/shadow ride each transformed
+  glyph (a per-run pass would detach from the moving glyphs) and underline/strike follow the effect;
+  the cross-glyph painter order is only approximate where glyphs overlap. This is a deliberate deviation,
+  not a bug — a straight underline under moving text would be a separate feature.
 - **Reset & leak-safety.** Decoration state is sticky (survives `restore_gpu`, cleared on cold
   init/shutdown). Because it persists, the UI calls `nt_text_renderer_reset_decoration()` after each
   decorated run so nothing leaks onto the next. Every float setter is hard-guarded with a real
