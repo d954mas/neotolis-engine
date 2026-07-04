@@ -2020,8 +2020,9 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * Per-glyph pen uses cumulative-prefix measures so sum(advances)==measure(whole) (keeps kerning;
  * stays in the reserved box). O(N^2) but N is one word/line-chunk, so tiny.
  * Decoration is per-glyph here BY DESIGN: outline/shadow must ride each transformed glyph (a per-run pass
- * would detach from the moving glyphs), and underline/strike follow the effect. So an fx run deviates from
- * §32.2b's per-run/continuous-underline contract, which describes the plain path. */
+ * would detach from the moving glyphs), and underline/strike follow the effect. Rich decoration is per-atom
+ * in general (plain runs are word atoms; see §32.2b) — the per-run/continuous-underline contract is the
+ * label path, not rich. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);

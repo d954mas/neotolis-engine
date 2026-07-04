@@ -3334,16 +3334,23 @@ subsystem — decoration reuses the text pipeline and the `slug_text` shader.
   key — a separate entry from the natural glyph, sharing the same curve/band textures so an emboldened
   or outlined run still batches into ONE draw. This geometry runs only on the glyph-cache **miss path**
   (not per frame); the outline pass grows the fill weight by `outline_w`, the shadow pass reuses the
-  outermost visible variant (no new key).
+  outermost visible variant (no new key). This CPU offset/self-intersection resolution is a **deliberate,
+  bounded exception** to "builder does the heavy work; runtime stays simple": it is amortized (once per
+  `(codepoint, weight)` variant, then cached), uses only static scratch (no heap), degrades gracefully at
+  fixed caps, and is guarded by a worst-case decode-miss budget test. Prebaking a fixed set of weight
+  variants in the builder remains an option if a workload ever thrashes the variant cache.
 - **Painter order & batching.** Per run: **shadow → outline → fill → underline/strike**. Underline and
   strike are one continuous solid quad per line, emitted as a **sentinel** vertex (`band_count == 0`,
   which the shader reads as full coverage) in the same vertex buffer / material — no separate draw
-  call, no flush, so decoration never breaks the batch. This per-run order + continuous underline
-  describes the **plain (non-`<fx>`) path**. An `<fx>` run emits **per glyph** (each glyph phase-shifts
-  independently), so its decoration is per-glyph **by design**: outline/shadow ride each transformed
-  glyph (a per-run pass would detach from the moving glyphs) and underline/strike follow the effect;
-  the cross-glyph painter order is only approximate where glyphs overlap. This is a deliberate deviation,
-  not a bug — a straight underline under moving text would be a separate feature.
+  call, no flush, so decoration never breaks the batch. This per-run order + continuous-per-line underline
+  is the **label path**: `nt_ui_label` draws the whole label in one `draw_n`, so the passes group over it
+  and the underline is one quad. **Rich text is different**: it atomizes each run into **word atoms** (and
+  an `<fx>` run further into **per-glyph** draws), and each atom is its own `draw_n`, so rich decoration is
+  **per-atom** — outline/shadow ride each atom (necessary for `<fx>`, where a per-run pass would detach
+  from the moving glyphs) and underline/strike are per-atom (per word, or per glyph under `<fx>`), NOT one
+  continuous per-line quad (so a multi-word underline is segmented at word gaps, and cross-atom painter
+  order is only approximate where atoms overlap). Known limitation; a continuous per-line rich underline
+  would need a per-line decoration emit (renderer span API), tracked separately.
 - **Reset & leak-safety.** Decoration state is sticky (survives `restore_gpu`, cleared on cold
   init/shutdown). Because it persists, the UI calls `nt_text_renderer_reset_decoration()` after each
   decorated run so nothing leaks onto the next. Every float setter is hard-guarded with a real
