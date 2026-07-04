@@ -1,4 +1,4 @@
-/* bench_embolden — Wave-0 spike for Phase 73 CPU embolden (D-01, RESEARCH Pattern 1).
+/* bench_embolden — CPU embolden benchmark.
  * Builds the decoded point ring (pts_x/pts_y/pts_on) exactly as nt_font.c:604-633 does,
  * ports offset_points (FT_Outline_EmboldenXY-style) BEFORE the point->quadratic conversion,
  * and sweeps a W ramp over A W e o 8 , @ to find:
@@ -82,8 +82,8 @@ static int stbtt_to_contours(const stbtt_vertex *v, int nv, contour_t *cs, int m
     return nc + 1;
 }
 
-/* FT_Outline_EmboldenXY-style point-ring offset (RESEARCH Pattern 1).
- * A3 resolved in-spike: with stbtt/TrueType winding, +1 pushed the outer silhouette
+/* FT_Outline_EmboldenXY-style point-ring offset.
+ * Resolved: with stbtt/TrueType winding, +1 pushed the outer silhouette
  * INWARD (counters grew) — -1 is the correct outward embolden. */
 static int g_normal_sign = -1;
 static void offset_points(int32_t *x, int32_t *y, const uint8_t *on, uint16_t n, float W) {
@@ -180,7 +180,7 @@ static void convert_contour(const contour_t *c, nt_curve_t *curves, uint16_t *to
 }
 // #endregion
 
-// #region Big-endian sfnt table reader (RESEARCH Pattern 4 — TTF is big-endian)
+// #region Big-endian sfnt table reader (TTF is big-endian)
 static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
 static int16_t rd_s16(const uint8_t *p) { return (int16_t)rd_u16(p); }
 static uint32_t rd_u32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
@@ -333,7 +333,7 @@ int main(void) {
         printf("\n");
     }
 
-    /* ===== Isolated offset_points-only cost (A6/D-05): the true ADDED per-miss cost.
+    /* ===== Isolated offset_points-only cost: the true ADDED per-miss cost.
      * The point->curve convert already runs today; only offset_points is new work. ===== */
     printf("=== offset_points-only cost @ W=0.03em (added work per glyph miss) ===\n");
     printf("glyph   points  ns/glyph(offset-only)\n");
@@ -374,7 +374,7 @@ int main(void) {
         printf("OS/2 table ABSENT -> heuristic fallback path\n");
     }
     printf("(fonttools 'ttx' unavailable in this environment -> A1 offsets remain the\n"
-           " RESEARCH Pattern-4 ASSUMED spec offsets, cross-check DEFERRED; see findings.)\n\n");
+           " ASSUMED spec offsets, cross-check pending.)\n\n");
 
     printf("=== A3: counter (inner contour) bbox at W=0.08em, sign=%+d ===\n", g_normal_sign);
     /* TrueType outer contour first, counter(s) after. Offset the ring, then compare each

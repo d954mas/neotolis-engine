@@ -3314,7 +3314,42 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `glyph_depth_bias`; survives `restore_gpu`, cleared on cold init) folded into the model on the CPU
   per draw — no flush, mixes within one batch — and the pass resets it to 0 so the lean never leaks
   onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
-  synthetic bold is deferred to #253.
+  synthetic bold instead emits an emboldened glyph variant — see the decoration contract in §32.2b.
+
+## 32.2b Text decoration (weight / outline / shadow / underline / strike)
+
+Five decoration axes are **renderer-level sticky state** on `nt_text_renderer`, set via
+`set_weight` / `set_outline` / `set_shadow` / `set_underline` / `set_strikethrough`. Both authoring
+fronts feed the SAME setters at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich text
+from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
+subsystem — decoration reuses the text pipeline and the `slug_text` shader.
+
+- **Units.** Text `font_size` is **px**. Everything decorative is **em** (a fraction of the text
+  height, so it scales with size): `weight`, `outline` width, and `shadow` (dx,dy) offset are all em,
+  converted `px = value × font_size` at emit (the shadow multiplies by `size`; weight/outline multiply
+  by `units_per_em` into the glyph-cache key). Underline/strike position + thickness come from the v5
+  font-header metrics (font units) scaled by `size`. One consistent rule: *size in px, decoration in em*.
+- **Glyph variants.** Synthetic weight and outline offset the glyph contour (Minkowski-style point-ring
+  offset + self-intersection resolution) and cache the result under a `(codepoint, quantized weight)`
+  key — a separate entry from the natural glyph, sharing the same curve/band textures so an emboldened
+  or outlined run still batches into ONE draw. This geometry runs only on the glyph-cache **miss path**
+  (not per frame); the outline pass grows the fill weight by `outline_w`, the shadow pass reuses the
+  outermost visible variant (no new key).
+- **Painter order & batching.** Per run: **shadow → outline → fill → underline/strike**. Underline and
+  strike are one continuous solid quad per line, emitted as a **sentinel** vertex (`band_count == 0`,
+  which the shader reads as full coverage) in the same vertex buffer / material — no separate draw
+  call, no flush, so decoration never breaks the batch.
+- **Reset & leak-safety.** Decoration state is sticky (survives `restore_gpu`, cleared on cold
+  init/shutdown). Because it persists, the UI calls `nt_text_renderer_reset_decoration()` after each
+  decorated run so nothing leaks onto the next. Every float setter is hard-guarded with a real
+  `if (!isfinite)` (NOT an assert — `NT_ASSERT` is a no-op in shipping, and a NaN would poison the
+  offset/quantize math).
+- **Parent opacity** folds into the fill AND the outline/shadow alpha (the walker pre-multiplies only
+  the fill's `textColor.a`, so `nt_ui_label_deco_apply` / the rich emit multiply the decoration colors
+  by the accumulated opacity too — a faded panel fades its outline/shadow consistently).
+- **Fallback (explicit).** Bold with no bold family member → synthetic weight; italic with no italic
+  member → faux-italic oblique (§32.2); underline/strike are decoration toggles needing no family
+  member. A label has a single `font_id`, so its bold always degenerates to the synthetic weight.
 
 ## 32.3 Inline images ride the standard u8 sprite path
 

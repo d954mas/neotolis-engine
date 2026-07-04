@@ -1,4 +1,4 @@
-/* bench_outline — Phase 73 spike (73-06): offset self-intersection resolution.
+/* bench_outline — offset self-intersection resolution benchmark.
  * bench_embolden proved offset_points corner quality but left the WIDE-outline defects:
  * enclosed winding-0 holes inside the true dilation. Three defect mechanisms found
  * (on the PRODUCTION-faithful sparse ring — builder strips stbtt implicit midpoints):
@@ -243,7 +243,7 @@ static int ring_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) 
 }
 // #endregion
 
-// #region Uncross + signed-loop filter (THE spike algorithm)
+// #region Uncross + signed-loop filter (the resolution algorithm)
 typedef struct {
     uint16_t ei, ej; /* crossing edges (i,i+1) x (j,j+1) */
     double ti, tj;   /* params along each edge */
@@ -830,7 +830,7 @@ static void convert_contour(const contour_t *c, nt_curve_t *curves, uint16_t *to
 }
 // #endregion
 
-// #region Glyph build pipelines: NAIVE (today's production) vs RESOLVED (spike)
+// #region Glyph build pipelines: NAIVE (today's production) vs RESOLVED
 typedef struct {
     int crossings;
     int loops_dropped;
