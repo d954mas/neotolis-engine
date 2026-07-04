@@ -1754,10 +1754,12 @@ void nt_font_step(void) {
             uint32_t bs = 0;
             const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
             const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
+            /* Shared-metrics invariant covers VMETRICS only (the builder UPM-normalizes these across a
+             * fallback family). Decoration (underline/strike) is PRIMARY-owned: the first active provider
+             * sets it below and it is kept — a Latin+CJK family legitimately differs in post/OS-2, so
+             * decoration is NOT part of this invariant (including it would false-assert the family). */
             const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
-                                       slot->metrics.line_gap == hdr->line_gap && slot->metrics.underline_position == hdr->underline_position &&
-                                       slot->metrics.underline_thickness == hdr->underline_thickness && slot->metrics.strikeout_position == hdr->strikeout_position &&
-                                       slot->metrics.strikeout_size == hdr->strikeout_size;
+                                       slot->metrics.line_gap == hdr->line_gap;
             if (slot->metrics_set && metrics_match) {
                 continue;
             }

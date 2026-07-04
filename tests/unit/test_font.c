@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* clang-format off */
 #include "core/nt_assert.h"
@@ -1310,6 +1311,50 @@ void test_font_fallback_order_first_wins(void) {
     free(fb);
 }
 
+/* P1 regression: a fallback family (identical vmetrics, DIFFERENT post/OS-2 decoration) must NOT trip the
+ * shared-metrics mismatch assert — decoration is PRIMARY-owned. Folding decoration into the metrics-match
+ * predicate false-asserted a Latin+CJK family in debug (and last-writer-overwrote in assert-off release). */
+void test_font_fallback_decoration_primary_owned(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    const uint32_t base_cps[2] = {'A', 'M'};
+    const uint32_t fb_cps[2] = {'M', 'Z'};
+    uint32_t base_sz = 0;
+    uint32_t fb_sz = 0;
+    /* Identical vmetrics -> a valid shared-metrics family; only decoration differs (the real Latin/CJK case). */
+    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 2, 500, &base_sz);
+    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 2, 700, &fb_sz);
+    NtFontAssetHeader *bh = (NtFontAssetHeader *)base;
+    bh->underline_position = 50;
+    bh->underline_thickness = 10;
+    bh->strikeout_position = 300;
+    bh->strikeout_size = 12;
+    NtFontAssetHeader *fh = (NtFontAssetHeader *)fb;
+    fh->underline_position = 90;
+    fh->underline_thickness = 20;
+    fh->strikeout_position = 500;
+    fh->strikeout_size = 24;
+
+    nt_resource_t base_res = register_font_resource("dec_base", base, base_sz);
+    nt_resource_t fb_res = register_font_resource("dec_fb", fb, fb_sz);
+    nt_font_add(font, base_res); /* base FIRST = primary */
+    nt_font_add(font, fb_res);
+    nt_resource_step();
+    nt_font_step(); /* must NOT assert on the decoration mismatch */
+
+    /* Primary (base) owns decoration; the fallback's differing values are ignored. */
+    nt_font_metrics_t m = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(50, m.underline_position, "fallback family: decoration is primary-owned (base wins)");
+    TEST_ASSERT_EQUAL_INT16(10, m.underline_thickness);
+    TEST_ASSERT_EQUAL_INT16(300, m.strikeout_position);
+    TEST_ASSERT_EQUAL_INT16(12, m.strikeout_size);
+
+    nt_font_destroy(font);
+    free(base);
+    free(fb);
+}
+
 /* ---- FONT-02: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
  *
  * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
@@ -1422,7 +1467,7 @@ void test_font_gpu_textures(void) {
     nt_font_destroy(font);
 }
 
-/* ================= DECO-01: embolden (offset_points) ================= */
+/* ================= embolden (offset_points) ================= */
 
 /* Encode a signed delta in the font varlen scheme (1-byte int8, or 0x80 + int16 LE). */
 static void enc_delta(uint8_t **wp, int32_t d) {
@@ -1562,7 +1607,7 @@ static float ring_area(const int32_t *x, const int32_t *y, uint16_t n) {
     return (float)(maxx - minx) * (float)(maxy - miny);
 }
 
-/* --- Emitted-curve raster helpers (#253): treat each quad's p0->p2 chord as a segment.
+/* --- Emitted-curve raster helpers: treat each quad's p0->p2 chord as a segment.
  * Synthetic fixtures are all straight lines (p1 = midpoint), so chords are exact. --- */
 
 /* Nonzero-winding (rendered fill) at (px,py) via a +X ray over all curve chords. */
@@ -1732,11 +1777,11 @@ static void curves_min_corner(const float *cv, uint16_t n, float *out_minx, floa
     *out_miny = bb[1];
 }
 
-/* #253 COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W (thick outline), but a
+/* COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W (thick outline), but a
  * COUNTER (hole) caps its inward offset so it keeps >= NT_FONT_COUNTER_KEEP (35%) of its own
  * inradius — the counter NEVER closes, at ANY width, on ANY font. A uniform Minkowski offset
  * would provably FILL a counter once R=W/2 >= inradius (a filled counter is illegible); this
- * non-uniform model is the legible-outline default (validated multi-font in bench_outline). */
+ * non-uniform model is the legible-outline default. */
 void test_counter_preserving_outline(void) {
     /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100. Uniform would FILL
      * this counter at any W >= 200 (R >= 100); counter-preserve keeps it open at every width. */
@@ -1777,7 +1822,7 @@ void test_counter_preserving_outline(void) {
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wr, 500.0F, 500.0F)); /* wide-rect counter open */
 }
 
-/* #253 NECK/CHANNEL preservation (the '@'/'e'/'a' seal-fill fix): a counter with a narrow WAIST
+/* NECK/CHANNEL preservation (the '@'/'e'/'a' seal-fill fix): a counter with a narrow WAIST
  * (much thinner than its widest inscribed circle) SEALS at that waist under a uniform inward
  * offset once 2R >= waist — the walls touch, the offset ring self-intersects, and the region
  * beyond the seal fills. The seal-radius cap keeps the offset below the seal onset, so the waist
@@ -1814,7 +1859,7 @@ void test_counter_preserving_neck(void) {
     TEST_ASSERT_TRUE(mny < -100.0F);
 }
 
-/* #253 '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
+/* '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
  * is RESOLVED — the offset ring self-crosses, but the emitted curves are simple (no
  * residual crossing) and the interior stays solid (the inverted loop is excised, no
  * winding-cancellation notch). Fixture: a {5/2} pentagram (self-crossing at every W). */
@@ -1857,7 +1902,7 @@ void test_embolden_resolves_self_intersecting_outer(void) {
 /* The '@' seal-fill fix's core discriminator (whole-glyph dilation membership). The pentagram test above
  * covers same-sign loops; the opposite-wound KEEP path fires only on real curved keyhole geometry ('@',
  * '&'), which simple integer polygons don't reproduce (their offset+uncross yields only same-sign loops)
- * — validated on real fonts via examples/at_probe. This unit-tests the decision itself: a grower's
+ * This unit-tests the decision itself: a grower's
  * opposite loop is KEPT iff its pole lies OUTSIDE the true dilation of the ORIGINAL glyph. A regression
  * that inverts the fill test, breaks the distance test, or drops the r_off gate is caught here. */
 void test_grower_loop_membership(void) {
@@ -1884,7 +1929,7 @@ void test_grower_loop_membership(void) {
     TEST_ASSERT_FALSE(nt_font_test_grower_loop_kept(orig, on, cx, cy, 4, 80.0));
 }
 
-/* Convex glyph preservation (#253): a convex contour has no reflex corners and no
+/* Convex glyph preservation: a convex contour has no reflex corners and no
  * self-crossings, so a wide offset leaves it a simple grown ring — same curve count,
  * no crossing, bbox strictly larger. Guards against join/uncross touching convex data. */
 void test_embolden_convex_unchanged(void) {
@@ -1931,7 +1976,7 @@ void test_contour_self_intersects_primitive(void) {
     TEST_ASSERT_FALSE(nt_font_test_contour_self_intersects(tx, ty, 3));
 }
 
-/* ================= DECO-01/02: (codepoint, key_offset) cache key ================= */
+/* ================= (codepoint, key_offset) cache key ================= */
 
 /* Two lookups of the same codepoint at different key_offset resolve to DISTINCT,
  * non-tofu cache slots (no collision-overwrite) with distinct geometry. */
@@ -1977,7 +2022,7 @@ void test_cache_key_offset_zero_parity(void) {
     free(blob);
 }
 
-/* DECO-06: offset variants grow the stored quad bbox past the packed bbox so the
+/* offset variants grow the stored quad bbox past the packed bbox so the
  * emboldened edge is not clipped; the regular (key_offset=0) entry stays exactly
  * the raw glyph bbox (byte-identity guard). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2079,7 +2124,7 @@ void test_quantize_weight_saturates(void) {
     TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(INFINITY));
 }
 
-/* ================= DECO-04: underline/strike metrics from v5 header ================= */
+/* ================= underline/strike metrics from v5 header ================= */
 
 /* nt_font_get_metrics surfaces the v5 header's underline/strike decoration fields;
  * a font with no resolved resource returns zeros (no UB). */
@@ -2328,7 +2373,7 @@ static int at_counter_pole(const float *cv, uint16_t n, int x0, int y0, int x1, 
 static void test_at_counter_open_real_font(void) {
     /* LilitaOne is a heavy display font: its '@' counter is small, so a wide synthetic outline drives the
      * opposite-wound grower loop the seal-fill fix handles. Weight 60 (font units) is inside the window
-     * where the fix keeps the counter open but the pre-fix drop seals it (a lighter font's counter is too
+     * where the fix keeps the counter open but a naive drop seals it (a lighter font's counter is too
      * robust to seal, and >100 the counter closes legitimately). */
     const char *paths[] = {NT_LILITA_TTF, "assets/fonts/LilitaOne-RussianChineseKo.ttf", "../assets/fonts/LilitaOne-RussianChineseKo.ttf", NULL};
     unsigned char *ttf = at_load_path(paths);
@@ -2370,6 +2415,48 @@ static void test_at_counter_open_real_font(void) {
     TEST_ASSERT_FALSE_MESSAGE(curves_fill_nonzero(cvw, nw, pole_x, pole_y), "'@' counter center must stay open under a wide outline (seal-fill regression)");
 }
 
+/* Worst-case glyph-miss budget: decode a DENSE CJK ideograph at a heavy outline weight — the most
+ * expensive runtime cache-miss path (many contours -> offset_with_joins + O(n^2) self-crossing resolve +
+ * counter seal-radius). CATASTROPHIC-regression guard, not a micro-benchmark: measured ~0.8 ms/decode in
+ * native-debug, ceiling is 50 ms (~60x headroom) so CI machine/load variance never flakes; it only trips
+ * if someone turns an O(n^2) pass into O(n^3), adds an unbounded loop, or drops the graceful-degradation cap. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_font_worstcase_glyph_miss_budget(void) {
+    const char *paths[] = {NT_LILITA_TTF, "assets/fonts/LilitaOne-RussianChineseKo.ttf", "../assets/fonts/LilitaOne-RussianChineseKo.ttf", NULL};
+    unsigned char *ttf = at_load_path(paths);
+    if (ttf == NULL) {
+        TEST_IGNORE_MESSAGE("LilitaOne fixture not found");
+        return;
+    }
+    stbtt_fontinfo font;
+    TEST_ASSERT_TRUE_MESSAGE(stbtt_InitFont(&font, ttf, stbtt_GetFontOffsetForIndex(ttf, 0)), "InitFont");
+    int gi = stbtt_FindGlyphIndex(&font, 0x9F52); /* 齒 — dense CJK ideograph (many strokes/contours) */
+    if (gi <= 0) {
+        gi = stbtt_FindGlyphIndex(&font, 0x4E2D); /* 中 — fallback */
+    }
+    TEST_ASSERT_TRUE_MESSAGE(gi > 0, "font must contain a dense CJK glyph");
+    stbtt_vertex *verts = NULL;
+    int nv = stbtt_GetGlyphShape(&font, gi, &verts);
+    static at_contour_t cs[16];
+    int nc = at_parse_contours(verts, nv, cs, 16);
+    stbtt_FreeShape(&font, verts);
+    free(ttf);
+    TEST_ASSERT_TRUE_MESSAGE(nc >= 1, "dense CJK glyph has contours");
+    static uint8_t blob[32768];
+    at_encode_blob(cs, nc, blob);
+
+    static float cv[256 * 6];
+    const int iters = 200;
+    clock_t t0 = clock();
+    volatile uint32_t sink = 0;
+    for (int i = 0; i < iters; i++) {
+        sink += nt_font_test_decode_contours(blob, 120.0F, cv, 256); /* heavy outline weight */
+    }
+    (void)sink;
+    const double us_per = (double)(clock() - t0) / (double)CLOCKS_PER_SEC * 1.0e6 / (double)iters;
+    TEST_ASSERT_TRUE_MESSAGE(us_per < 50000.0, "worst-case glyph decode-miss within budget (catastrophic-regression guard)");
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -2382,6 +2469,7 @@ int main(void) {
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
     RUN_TEST(test_font_fallback_order_first_wins);
+    RUN_TEST(test_font_fallback_decoration_primary_owned);
     RUN_TEST(test_font_cmap_bounded_no_parse);
     RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);
@@ -2408,7 +2496,7 @@ int main(void) {
     RUN_TEST(test_font_file_pack_unmount_cleans_state);
     RUN_TEST(test_font_truncated_winner_swap_clears_provider);
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
-    /* DECO-01: embolden (offset_points) */
+    /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
@@ -2418,15 +2506,16 @@ int main(void) {
     RUN_TEST(test_embolden_resolves_self_intersecting_outer);
     RUN_TEST(test_grower_loop_membership);
     RUN_TEST(test_at_counter_open_real_font);
+    RUN_TEST(test_font_worstcase_glyph_miss_budget);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);
-    /* DECO-01/02: (codepoint, key_offset) cache key */
+    /* (codepoint, key_offset) cache key */
     RUN_TEST(test_cache_variant_distinct_slots);
     RUN_TEST(test_cache_key_offset_zero_parity);
     RUN_TEST(test_embolden_entry_bbox_grows);
     RUN_TEST(test_cache_evict_chain_integrity);
     RUN_TEST(test_quantize_weight_saturates);
-    /* DECO-04: underline/strike metrics from v5 header */
+    /* underline/strike metrics from v5 header */
     RUN_TEST(test_font_decoration_metrics_from_header);
     return UNITY_END();
 }
