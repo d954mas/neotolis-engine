@@ -18,8 +18,11 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
 
 /* Quantize a font-unit embolden weight to the int16 cache key_offset: rounds to
  * NT_FONT_WEIGHT_QUANT_STEP so nearby weights share a slot, then saturates
- * to int16 so an absurd weight can't wrap to a colliding bucket. */
+ * to int16 so an absurd weight can't wrap to a colliding bucket. Override at build
+ * time (-D) to trade cache slots for finer weight steps on huge animated text. */
+#ifndef NT_FONT_WEIGHT_QUANT_STEP
 #define NT_FONT_WEIGHT_QUANT_STEP 8
+#endif
 int16_t nt_font_quantize_weight(float weight_units);
 
 int16_t nt_font_get_kern_in_slot(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
