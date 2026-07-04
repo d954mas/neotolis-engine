@@ -594,7 +594,9 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
     float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
 
-    /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. */
+    /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. A staging
+     * self-flush mid-pass does NOT reorder: passes emit in global order and flush draws the FIFO prefix,
+     * so no shadow/outline quad is ever drawn after a later pass's quad. */
     if (shadow_active) {
         const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
         emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.shadow_color, s_text.shadow_dx * size, s_text.shadow_dy * size, &glyph_bias);
@@ -623,7 +625,7 @@ void nt_text_renderer_set_oblique(float shear) {
 }
 
 /* HARD isfinite guards (real if, not NT_ASSERT) — NT_ASSERT is a no-op in shipping and a NaN would
- * poison offset_points / quantize where NaN != 0.0F (feedback_nt_assert_off_hard_guards). */
+ * poison offset_points / quantize where NaN != 0.0F. */
 void nt_text_renderer_set_weight(float weight_em) {
     NT_ASSERT(s_text.initialized);
     if (!isfinite(weight_em)) {
