@@ -10,7 +10,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "memory/nt_mem_scratch.h"
-#include "renderers/nt_text_renderer.h" /* sticky decoration setters (D-14 transport) */
+#include "renderers/nt_text_renderer.h" /* sticky decoration setters */
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_rich_text.h" /* NT_UI_RICH_SYNTH_BOLD_WEIGHT: shared synth-bold weight */
@@ -36,7 +36,10 @@ static void label_record_deco(nt_ui_context_t *ctx, const char *text, const nt_u
         ctx->label_deco_count = 0U;
     }
     if (ctx->label_deco == NULL || ctx->label_deco_count >= NT_UI_LABEL_MAX_DECO) {
-        return; /* scratch exhausted / cap reached: drop decoration, never write past the table */
+        /* Fail early in debug so a too-small cap surfaces; release stays a safety net (drop decoration,
+         * text still renders) rather than writing past the table. Raise NT_UI_LABEL_MAX_DECO if hit. */
+        NT_ASSERT(0 && "nt_ui_label: decorated-label cap (NT_UI_LABEL_MAX_DECO) reached or scratch exhausted");
+        return;
     }
     nt_ui_label_deco_t *d = &((nt_ui_label_deco_t *)ctx->label_deco)[ctx->label_deco_count++];
     d->text = text;
@@ -62,18 +65,21 @@ const nt_ui_label_deco_t *nt_ui_label_deco_lookup(const nt_ui_context_t *ctx, co
     return NULL;
 }
 
-void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d) {
+void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity) {
     const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-    /* A label has one font_id (no B/I family), so bold is always synthesized to weight (D-04 cascade
+    /* A label has one font_id (no B/I family), so bold is always synthesized to weight (cascade
      * degenerates to synth). Explicit weight overrides; else the BOLD bit picks the shared synth weight. */
     float weight = d->weight;
     if (weight == 0.0F && (d->variant & NT_UI_LABEL_VARIANT_BOLD) != 0U) {
         weight = NT_UI_RICH_SYNTH_BOLD_WEIGHT;
     }
     nt_text_renderer_set_weight(weight);
+    /* Fold parent opacity into outline/shadow alpha to match the walker's fill fade (the walker
+     * pre-multiplies only textColor.a) — else a fading panel keeps opaque outline/shadow. */
     if (d->outline_w > 0.0F) {
         float c[4];
         nt_color_unpack(d->outline_color, c);
+        c[3] *= opacity;
         nt_text_renderer_set_outline(d->outline_w, c);
     } else {
         nt_text_renderer_set_outline(0.0F, zero);
@@ -81,6 +87,7 @@ void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d) {
     if ((d->shadow_color >> 24) != 0U) { /* alpha > 0 -> active */
         float c[4];
         nt_color_unpack(d->shadow_color, c);
+        c[3] *= opacity;
         nt_text_renderer_set_shadow(d->shadow_dx, d->shadow_dy, 0.0F, c);
     } else {
         nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);

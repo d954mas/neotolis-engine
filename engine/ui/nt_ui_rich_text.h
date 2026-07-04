@@ -124,11 +124,11 @@ typedef struct {
     uint8_t _pad;                        /* 43: alignment pad to the 4-byte material handle */
     nt_material_t image_material;        /* 44: inline-image material; .id==0 -> default from ctx->sprite_material */
     nt_material_t text_material;         /* 48: text material; .id==0 -> default from ctx->text_material */
-    /* Decoration (DECO-05): composed like <color>, fed to the sticky renderer setters at emit. Colors are
+    /* Decoration: composed like <color>, fed to the sticky renderer setters at emit. Colors are
      * packed AABBGGRR (nt_color convention). outline_w==0 -> no outline; shadow_color alpha 0 -> no shadow. */
     float outline_w;             /* 52: em width beyond the fill weight */
     uint32_t outline_color_abgr; /* 56 */
-    float shadow_dx;             /* 60: em offset (renderer scales by size/units_per_em) */
+    float shadow_dx;             /* 60: em offset (px = dx * font_size), like outline_w */
     float shadow_dy;             /* 64 */
     uint32_t shadow_color_abgr;  /* 68 */
 } nt_ui_rich_style_t;
@@ -169,7 +169,7 @@ void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult);
 void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]);
 void nt_ui_rich_push_bold(nt_ui_context_t *ctx);
 void nt_ui_rich_push_italic(nt_ui_context_t *ctx);
-/* Decoration pushes (DECO-05). Compose like <color>: scoped by the enclosing pop. width/offsets are em;
+/* Decoration pushes. Compose like <color>: scoped by the enclosing pop. width/offsets are em;
  * colors are packed AABBGGRR. push_outline(0,...) / push_shadow with alpha 0 clears the axis. */
 void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_abgr);
 void nt_ui_rich_push_shadow(nt_ui_context_t *ctx, float dx, float dy, uint32_t color_abgr);

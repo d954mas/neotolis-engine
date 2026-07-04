@@ -1727,11 +1727,11 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        /* Decorated-label state (DECO-05): set the sticky renderer decoration from the label's style, draw,
+        /* Decorated-label state: set the sticky renderer decoration from the label's style, draw,
          * then reset so it can't leak onto the next TEXT. Undecorated frames skip the lookup (count==0). */
         const nt_ui_label_deco_t *deco = (ctx->label_deco_count > 0U) ? nt_ui_label_deco_lookup(ctx, local.renderData.text.stringContents.chars) : NULL;
         if (deco != NULL) {
-            nt_ui_label_deco_apply(deco);
+            nt_ui_label_deco_apply(deco, ws->accum_opacity);
         }
         emit_text(ctx, &local, text_scale, world_mat4);
         if (deco != NULL) {

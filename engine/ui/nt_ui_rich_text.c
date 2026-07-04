@@ -202,7 +202,7 @@ static void rich_push_copy(nt_ui_rich_state_t *st) {
 
 /* Select the family member for the composed variant; fall back BI->B->R. Returns the resolved font and,
  * via out_synth_italic/out_synth_bold, whether italic/bold must be synthesized (requested but the family
- * has no matching member). D-04/D-15 cascade: a real bold/italic face wins, else the axis is synthesized. */
+ * has no matching member). Cascade: a real bold/italic face wins, else the axis is synthesized. */
 static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_italic, bool *out_synth_bold) {
     *out_synth_italic = false;
     *out_synth_bold = false;
@@ -2153,7 +2153,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* Push the run's full decoration state to the renderer before its draw (D-14: the UI sets state per draw,
+/* Push the run's full decoration state to the renderer before its draw (the UI sets state per draw,
  * the renderer is transport). Every axis is set explicitly (0/off when absent) so nothing leaks between
  * runs; the caller resets once after the whole band. weight is the SYNTH_BOLD cascade, outline/shadow come
  * from the composed style (looked up via run_idx), underline/strike from the run flags. */

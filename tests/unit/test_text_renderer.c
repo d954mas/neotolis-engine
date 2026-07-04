@@ -628,9 +628,10 @@ void test_shadow_emits_extra_span(void) {
 
 /* Shadow pass reuses the fill variant translated by (dx,dy)*scale — no new cache key, exact offset. */
 void test_shadow_pass_offset(void) {
-    /* size == units_per_em → scale 1.0, so a (5,-3) offset lands exactly 5/-3 world units. */
-    nt_text_renderer_set_shadow(5.0F, -3.0F, 0.0F, s_black);
-    nt_text_renderer_draw("A", s_identity, 1000.0F, s_white, 0.0F, 0.0F);
+    /* Shadow offset is em: px = d * size. Use size != units_per_em so the em contract is unambiguous
+     * (the old design-unit *scale would give a different number) — (0.1,-0.05)em at size 200 = (+20,-10). */
+    nt_text_renderer_set_shadow(0.1F, -0.05F, 0.0F, s_black);
+    nt_text_renderer_draw("A", s_identity, 200.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_glyph_count()); /* shadow (quad0) + fill (quad1) */
     const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
     float shadow_x = 0.0F;
@@ -641,17 +642,17 @@ void test_shadow_pass_offset(void) {
     memcpy(&shadow_y, v + sizeof(float), sizeof(float));
     memcpy(&fill_x, v + ((size_t)4U * 72U), sizeof(float)); /* quad1 v0 = fill */
     memcpy(&fill_y, v + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
-    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(shadow_x - fill_x));
-    TEST_ASSERT_EQUAL_INT32(-3, (int32_t)(shadow_y - fill_y));
+    TEST_ASSERT_EQUAL_INT32(20, (int32_t)(shadow_x - fill_x));
+    TEST_ASSERT_EQUAL_INT32(-10, (int32_t)(shadow_y - fill_y));
     nt_text_renderer_reset_decoration();
 }
 
 /* Passes emit GROUPED (all shadows, then all fills) — never interleaved per glyph. With "AB" the order
- * must be [shadow_A, shadow_B, fill_A, fill_B]: both shadow quads sit +5 from their fills. If interleaved
- * ([shadow_A, fill_A, shadow_B, fill_B]) quad1 would be fill_A and the +5 check on quad1 vs quad3 fails. */
+ * must be [shadow_A, shadow_B, fill_A, fill_B]: both shadow quads sit +20 from their fills. If interleaved
+ * ([shadow_A, fill_A, shadow_B, fill_B]) quad1 would be fill_A and the +20 check on quad1 vs quad3 fails. */
 void test_passes_grouped_not_interleaved(void) {
-    nt_text_renderer_set_shadow(5.0F, 0.0F, 0.0F, s_black);
-    nt_text_renderer_draw("AB", s_identity, 1000.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_set_shadow(0.1F, 0.0F, 0.0F, s_black); /* em -> +20px at size 200 */
+    nt_text_renderer_draw("AB", s_identity, 200.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_glyph_count()); /* 2 shadow + 2 fill */
     const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
     float sh_a = 0.0F;
@@ -662,8 +663,8 @@ void test_passes_grouped_not_interleaved(void) {
     memcpy(&sh_b, v + ((size_t)1U * 4U * 72U), sizeof(float)); /* quad1 = shadow_B */
     memcpy(&fl_a, v + ((size_t)2U * 4U * 72U), sizeof(float)); /* quad2 = fill_A */
     memcpy(&fl_b, v + ((size_t)3U * 4U * 72U), sizeof(float)); /* quad3 = fill_B */
-    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(sh_a - fl_a));
-    TEST_ASSERT_EQUAL_INT32(5, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
+    TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_a - fl_a));
+    TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
     nt_text_renderer_reset_decoration();
 }
 

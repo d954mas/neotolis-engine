@@ -305,6 +305,28 @@ static void test_label_decoration_wires_and_resets_setters(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "decoration reset after the label draw (no leak onto later text)");
 }
 
+/* Parent opacity must fold into outline/shadow alpha (not just the fill): the walker pre-multiplies
+ * only textColor.a, so nt_ui_label_deco_apply folds accum_opacity into the decoration colors — else a
+ * faded panel keeps opaque outline/shadow. */
+static void test_label_deco_folds_parent_opacity(void) {
+    nt_ui_label_deco_t d = {0};
+    d.outline_w = 0.06F;
+    d.outline_color = 0xFFFFFFFFU; /* opaque white (AABBGGRR): alpha 1.0 */
+    d.shadow_dx = 0.1F;
+    d.shadow_dy = 0.1F;
+    d.shadow_color = 0xFFFFFFFFU; /* alpha > 0 -> shadow active */
+
+    /* Float asserts are excluded in this suite; compare alpha*100 as int (0.5 -> 50, 1.0 -> 100). */
+    nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
+    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+
+    nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
+    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+    nt_text_renderer_reset_decoration();
+}
+
 /* NEGATIVE: a plain (undecorated) label records NO side-table entry and feeds NO decoration -- the
  * walker's count==0 fast-out means the sticky decoration stays clean. */
 static void test_label_plain_no_decoration(void) {
@@ -339,6 +361,7 @@ int main(void) {
     RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
     RUN_TEST(test_label_decoration_wires_and_resets_setters);
+    RUN_TEST(test_label_deco_folds_parent_opacity);
     RUN_TEST(test_label_plain_no_decoration);
     return UNITY_END();
 }
