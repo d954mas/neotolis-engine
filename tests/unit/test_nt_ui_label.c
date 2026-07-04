@@ -327,6 +327,40 @@ static void test_label_deco_folds_parent_opacity(void) {
     nt_text_renderer_reset_decoration();
 }
 
+/* A decorated label that breaks into multiple lines (embedded '\n') must decorate EVERY emitted line.
+ * Clay slices wrapped lines to chars=base+offset but keeps the base in baseChars; keying the deco lookup
+ * on baseChars is what lets lines 2+ match. Pre-fix (.chars keying) only line 1 matched -> count==1. */
+static void test_label_decoration_applies_to_wrapped_lines(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    nt_ui_test_reset_deco_applied_count();
+
+    static const nt_ui_label_style_t s = {
+        .font_id = 0,
+        .font_size = 16,
+        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .variant = NT_UI_LABEL_VARIANT_BOLD | NT_UI_LABEL_VARIANT_UNDERLINE,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    Clay_SetCullingEnabled(false);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "AAA\nBBB", &s); }
+    nt_ui_end(s_fx.ctx);
+
+    /* Confirm the newline actually produced >=2 TEXT commands, else the repro is void. */
+    int32_t text_cmds = 0;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        if (s_fx.ctx->frozen_cmds.internalArray[i].commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            text_cmds++;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(text_cmds >= 2, "embedded newline must emit >=2 TEXT commands (multi-line repro)");
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, nt_ui_test_deco_applied_count(), "decoration must apply to EVERY line (baseChars keying), not just the first");
+    nt_text_renderer_reset_decoration();
+}
+
 /* NEGATIVE: a plain (undecorated) label records NO side-table entry and feeds NO decoration -- the
  * walker's count==0 fast-out means the sticky decoration stays clean. */
 static void test_label_plain_no_decoration(void) {
@@ -361,6 +395,7 @@ int main(void) {
     RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
     RUN_TEST(test_label_decoration_wires_and_resets_setters);
+    RUN_TEST(test_label_decoration_applies_to_wrapped_lines);
     RUN_TEST(test_label_deco_folds_parent_opacity);
     RUN_TEST(test_label_plain_no_decoration);
     return UNITY_END();

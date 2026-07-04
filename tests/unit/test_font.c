@@ -14,6 +14,7 @@
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
+#include "stb_truetype.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -2119,6 +2120,256 @@ void test_font_decoration_metrics_from_header(void) {
     free(blob);
 }
 
+/* ---- Real-font '@' counter regression ----
+ * Drives decode_contours end-to-end on a real curved keyhole glyph (Roboto '@'): the opposite-wound
+ * grower KEEP wiring in resolve_and_emit + the r_off = 0.5*|w_eff| derivation that simple integer
+ * polygons can't reproduce (they never self-intersect into an opposite loop). Asserts the '@' inner
+ * counter stays OPEN under a wide synthetic outline -- the exact seal-fill bug this branch fixes. */
+
+typedef struct {
+    int16_t x[600];
+    int16_t y[600];
+    uint8_t on[600];
+    int n;
+} at_contour_t;
+
+/* stbtt glyph shape -> per-contour point rings, stripping stbtt's implicit on-curve midpoints so the
+ * ring matches the builder's SPARSE production ring (the offset self-intersection geometry differs on
+ * the dense ring). Mirrors tools/research/bench_outline.c:stbtt_to_contours. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int at_parse_contours(const stbtt_vertex *v, int nv, at_contour_t *cs, int maxc) {
+    int nc = -1;
+    for (int i = 0; i < nv; i++) {
+        if (v[i].type == STBTT_vmove) {
+            if (nc + 1 >= maxc) {
+                break;
+            }
+            nc++;
+            cs[nc].x[0] = v[i].x;
+            cs[nc].y[0] = v[i].y;
+            cs[nc].on[0] = 1;
+            cs[nc].n = 1;
+        } else if (nc >= 0 && v[i].type == STBTT_vline) {
+            at_contour_t *c = &cs[nc];
+            if (c->n >= 600) {
+                continue;
+            }
+            c->x[c->n] = v[i].x;
+            c->y[c->n] = v[i].y;
+            c->on[c->n] = 1;
+            c->n++;
+        } else if (nc >= 0 && v[i].type == STBTT_vcurve) {
+            at_contour_t *c = &cs[nc];
+            if (c->n + 2 > 600) {
+                continue;
+            }
+            c->x[c->n] = v[i].cx;
+            c->y[c->n] = v[i].cy;
+            c->on[c->n] = 0;
+            c->n++;
+            int implicit = 0;
+            if (i + 1 < nv && v[i + 1].type == STBTT_vcurve) {
+                int mx = (v[i].cx + v[i + 1].cx) >> 1;
+                int my = (v[i].cy + v[i + 1].cy) >> 1;
+                if (v[i].x == mx && v[i].y == my) {
+                    implicit = 1;
+                }
+            }
+            if (!implicit) {
+                c->x[c->n] = v[i].x;
+                c->y[c->n] = v[i].y;
+                c->on[c->n] = 1;
+                c->n++;
+            }
+        }
+    }
+    for (int c = 0; c <= nc; c++) {
+        at_contour_t *cc = &cs[c];
+        while (cc->n > 1 && cc->on[cc->n - 1] && cc->x[cc->n - 1] == cc->x[0] && cc->y[cc->n - 1] == cc->y[0]) {
+            cc->n--;
+        }
+    }
+    return nc + 1;
+}
+
+/* Encode parsed contours into the v5 contour blob decode_contours expects. */
+static uint32_t at_encode_blob(const at_contour_t *cs, int nc, uint8_t *buf) {
+    uint8_t *wp = buf;
+    uint16_t cc = (uint16_t)nc;
+    memcpy(wp, &cc, 2);
+    wp += 2;
+    for (int c = 0; c < nc; c++) {
+        uint16_t n = (uint16_t)cs[c].n;
+        memcpy(wp, &n, 2);
+        wp += 2;
+        uint32_t fb = NT_FONT_BITMASK_BYTES(n);
+        for (uint32_t b = 0; b < fb; b++) {
+            wp[b] = 0;
+        }
+        for (int i = 0; i < cs[c].n; i++) {
+            if (cs[c].on[i]) {
+                wp[i >> 3] |= (uint8_t)(1U << (i & 7));
+            }
+        }
+        wp += fb;
+        int16_t fx = cs[c].x[0];
+        int16_t fy = cs[c].y[0];
+        memcpy(wp, &fx, 2);
+        wp += 2;
+        memcpy(wp, &fy, 2);
+        wp += 2;
+        int32_t px = fx;
+        int32_t py = fy;
+        for (int i = 1; i < cs[c].n; i++) {
+            enc_delta(&wp, (int32_t)cs[c].x[i] - px);
+            enc_delta(&wp, (int32_t)cs[c].y[i] - py);
+            px = cs[c].x[i];
+            py = cs[c].y[i];
+        }
+    }
+    return (uint32_t)(wp - buf);
+}
+
+static unsigned char *at_load_path(const char *const *paths) {
+    for (int i = 0; paths[i] != NULL; i++) {
+        FILE *f = fopen(paths[i], "rb");
+        if (f == NULL) {
+            continue;
+        }
+        (void)fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        (void)fseek(f, 0, SEEK_SET);
+        unsigned char *buf = (sz > 0) ? (unsigned char *)malloc((size_t)sz) : NULL;
+        if (buf != NULL && fread(buf, 1, (size_t)sz, f) == (size_t)sz) {
+            (void)fclose(f);
+            return buf;
+        }
+        free(buf);
+        (void)fclose(f);
+    }
+    return NULL;
+}
+
+/* Find the counter POLE: the grid cell that is OPEN (not filled) AND interior (a filled cell exists on
+ * all 4 axis rays within the box, so it's inside a counter, not the exterior) AND deepest (max distance
+ * to the nearest filled cell). Returns the interior-open cell count; writes the pole's world coords.
+ * The pole is the LAST point a legitimate offset would fill, so it's the sharpest seal-fill probe. */
+#define AT_GRID 44
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int at_counter_pole(const float *cv, uint16_t n, int x0, int y0, int x1, int y1, float *out_px, float *out_py) {
+    const float sx = (float)(x1 - x0) / (float)AT_GRID;
+    const float sy = (float)(y1 - y0) / (float)AT_GRID;
+    static uint8_t filled[AT_GRID][AT_GRID];
+    for (int gy = 0; gy < AT_GRID; gy++) {
+        for (int gx = 0; gx < AT_GRID; gx++) {
+            float px = (float)x0 + (((float)gx + 0.5F) * sx);
+            float py = (float)y0 + (((float)gy + 0.5F) * sy);
+            filled[gy][gx] = curves_fill_nonzero(cv, n, px, py) ? 1U : 0U;
+        }
+    }
+    int cnt = 0;
+    double best = -1.0;
+    int bgx = -1;
+    int bgy = -1;
+    for (int gy = 0; gy < AT_GRID; gy++) {
+        for (int gx = 0; gx < AT_GRID; gx++) {
+            if (filled[gy][gx]) {
+                continue;
+            }
+            int l = 0;
+            int r = 0;
+            int u = 0;
+            int d = 0;
+            for (int k = 0; k < gx; k++) {
+                l |= filled[gy][k];
+            }
+            for (int k = gx + 1; k < AT_GRID; k++) {
+                r |= filled[gy][k];
+            }
+            for (int k = 0; k < gy; k++) {
+                u |= filled[k][gx];
+            }
+            for (int k = gy + 1; k < AT_GRID; k++) {
+                d |= filled[k][gx];
+            }
+            if (!(l && r && u && d)) {
+                continue; /* exterior open cell, not a counter */
+            }
+            cnt++;
+            double near = 1e18;
+            for (int fy = 0; fy < AT_GRID; fy++) {
+                for (int fx = 0; fx < AT_GRID; fx++) {
+                    if (!filled[fy][fx]) {
+                        continue;
+                    }
+                    double dx = gx - fx;
+                    double dy = gy - fy;
+                    double dd = (dx * dx) + (dy * dy);
+                    if (dd < near) {
+                        near = dd;
+                    }
+                }
+            }
+            if (near > best) {
+                best = near;
+                bgx = gx;
+                bgy = gy;
+            }
+        }
+    }
+    if (bgx >= 0) {
+        *out_px = (float)x0 + (((float)bgx + 0.5F) * sx);
+        *out_py = (float)y0 + (((float)bgy + 0.5F) * sy);
+    }
+    return cnt;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_at_counter_open_real_font(void) {
+    /* LilitaOne is a heavy display font: its '@' counter is small, so a wide synthetic outline drives the
+     * opposite-wound grower loop the seal-fill fix handles. Weight 60 (font units) is inside the window
+     * where the fix keeps the counter open but the pre-fix drop seals it (a lighter font's counter is too
+     * robust to seal, and >100 the counter closes legitimately). */
+    const char *paths[] = {NT_LILITA_TTF, "assets/fonts/LilitaOne-RussianChineseKo.ttf", "../assets/fonts/LilitaOne-RussianChineseKo.ttf", NULL};
+    unsigned char *ttf = at_load_path(paths);
+    if (ttf == NULL) {
+        TEST_IGNORE_MESSAGE("LilitaOne fixture not found");
+        return;
+    }
+    stbtt_fontinfo font;
+    TEST_ASSERT_TRUE_MESSAGE(stbtt_InitFont(&font, ttf, stbtt_GetFontOffsetForIndex(ttf, 0)), "InitFont");
+    int gi = stbtt_FindGlyphIndex(&font, '@');
+    TEST_ASSERT_TRUE_MESSAGE(gi > 0, "font must contain '@'");
+    stbtt_vertex *verts = NULL;
+    int nv = stbtt_GetGlyphShape(&font, gi, &verts);
+    static at_contour_t cs[8];
+    int nc = at_parse_contours(verts, nv, cs, 8);
+    stbtt_FreeShape(&font, verts);
+    TEST_ASSERT_TRUE_MESSAGE(nc >= 2, "'@' must have an outer contour + counter");
+    static uint8_t blob[16384];
+    at_encode_blob(cs, nc, blob);
+    int bx0 = 0;
+    int by0 = 0;
+    int bx1 = 0;
+    int by1 = 0;
+    stbtt_GetGlyphBox(&font, gi, &bx0, &by0, &bx1, &by1);
+    free(ttf);
+
+    static float cv0[256 * 6];
+    static float cvw[256 * 6];
+    uint16_t n0 = nt_font_test_decode_contours(blob, 0.0F, cv0, 256);
+    uint16_t nw = nt_font_test_decode_contours(blob, 60.0F, cvw, 256);
+    TEST_ASSERT_TRUE(n0 > 0 && nw > 0);
+
+    float pole_x = 0.0F;
+    float pole_y = 0.0F;
+    int base_open = at_counter_pole(cv0, n0, bx0, by0, bx1, by1, &pole_x, &pole_y);
+    TEST_ASSERT_TRUE_MESSAGE(base_open > 0, "'@' has an interior counter at weight 0");
+    /* The counter pole is open at weight 0 by construction; under the wide outline the seal-fill bug fills
+     * the whole counter (pole closes), while the fix keeps it open. */
+    TEST_ASSERT_FALSE_MESSAGE(curves_fill_nonzero(cvw, nw, pole_x, pole_y), "'@' counter center must stay open under a wide outline (seal-fill regression)");
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -2166,6 +2417,7 @@ int main(void) {
     RUN_TEST(test_counter_preserving_neck);
     RUN_TEST(test_embolden_resolves_self_intersecting_outer);
     RUN_TEST(test_grower_loop_membership);
+    RUN_TEST(test_at_counter_open_real_font);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);
     /* DECO-01/02: (codepoint, key_offset) cache key */
