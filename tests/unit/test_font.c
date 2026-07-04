@@ -1393,6 +1393,46 @@ void test_font_fallback_first_primary_reclaims_decoration(void) {
     free(fb);
 }
 
+/* Late-primary must reclaim already-CACHED glyphs, not just metrics: a glyph cached from the fallback (base
+ * loaded late) keys only on (codepoint, weight), so a provider GAIN must flush the glyph cache — else the
+ * stale fallback glyph survives even after the primary wins the codepoint by first-active order. */
+void test_font_late_primary_reclaims_cached_glyph(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    const uint32_t base_cps[2] = {'A', 'M'};
+    const uint32_t fb_cps[2] = {'M', 'Z'};
+    uint32_t base_sz = 0;
+    uint32_t fb_sz = 0;
+    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 2, 500, &base_sz); /* 'M' advance 500 */
+    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 2, 700, &fb_sz);       /* 'M' advance 700 */
+
+    uint32_t tok_base = nt_font_test_register_data(base, base_sz);
+    uint32_t tok_fb = nt_font_test_register_data(fb, fb_sz);
+    nt_font_add(font, nt_font_test_resource(tok_base)); /* ri=0 = primary */
+    nt_font_add(font, nt_font_test_resource(tok_fb));   /* ri=1 = fallback */
+
+    /* Primary loads late: the fallback resolves first, so 'M' caches from the fallback (advance 700). */
+    nt_font_test_deactivate(tok_base);
+    nt_resource_step();
+    nt_font_step();
+    const nt_glyph_cache_entry_t *m1 = nt_font_lookup_glyph(font, 'M');
+    TEST_ASSERT_NOT_NULL(m1);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(700, m1->advance, "fallback resolved first -> 'M' cached from fallback");
+
+    /* Base arrives -> the provider gain must flush the glyph cache so 'M' re-resolves to the primary (500). */
+    nt_font_test_reregister(tok_base, base, base_sz);
+    nt_resource_step();
+    nt_font_step();
+    const nt_glyph_cache_entry_t *m2 = nt_font_lookup_glyph(font, 'M');
+    TEST_ASSERT_NOT_NULL(m2);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(500, m2->advance, "late-loading primary reclaims the cached glyph");
+
+    nt_font_destroy(font);
+    free(base);
+    free(fb);
+}
+
 /* ---- FONT-02: prebaked-cmap lookup is bounded + no-parse (bsearch) ----
  *
  * The glyph table is prebaked SORTED by codepoint and resolved via bsearch
@@ -2509,6 +2549,7 @@ int main(void) {
     RUN_TEST(test_font_fallback_order_first_wins);
     RUN_TEST(test_font_fallback_decoration_primary_owned);
     RUN_TEST(test_font_fallback_first_primary_reclaims_decoration);
+    RUN_TEST(test_font_late_primary_reclaims_cached_glyph);
     RUN_TEST(test_font_cmap_bounded_no_parse);
     RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);

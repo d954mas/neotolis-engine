@@ -1730,15 +1730,11 @@ void nt_font_step(void) {
         // #region Detect provider gain/loss/identity-swap vs the cached winner handles
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             bool was = (slot->resource_handles[ri] != 0);
-            if (was != res_now[ri]) {
-                changed = true;
-                if (was) {
-                    need_flush = true; /* lost a provider -> cached glyphs decoded from it are stale */
-                }
-            } else if (res_now[ri] && slot->resource_handles[ri] != handle_now[ri]) {
-                /* Same presence, different activation (same-metrics override/patch pack or hot-reload of a
-                 * repacked font): provider now views a different blob -> glyph/measure caches + ASCII index
-                 * are decoded from the OLD blob and must be flushed even though metrics match. */
+            /* Any provider gain/loss or identity-swap (override/patch pack, hot-reload) flushes glyph +
+             * measure caches: cached glyphs were decoded from the old winner — or from a lower-priority
+             * provider that a late-loading primary now outranks. Glyphs resolve by first-active order but
+             * the cache keys only on (codepoint, weight), so a winner change is invisible without a flush. */
+            if ((was != res_now[ri]) || (res_now[ri] && slot->resource_handles[ri] != handle_now[ri])) {
                 changed = true;
                 need_flush = true;
             }
