@@ -662,6 +662,11 @@ bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py
 /* Count of segmentable cmds with NULL userData (= implicit layer-0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
 
+/* Number of TEXT commands that matched a decorated label this walk (wrapped lines count each) —
+ * proves the baseChars keying decorates every line, not just the first. Process-global; reset per test. */
+uint32_t nt_ui_test_deco_applied_count(void);
+void nt_ui_test_reset_deco_applied_count(void);
+
 int32_t nt_ui_test_clay_default_max_element_count(void);
 int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif

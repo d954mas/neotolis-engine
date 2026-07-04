@@ -587,6 +587,18 @@ static inline int16_t read_varlen_delta(const uint8_t **rp) {
     return val;
 }
 
+/* Saturating float->int16 for the widened emboldened bbox: an absurd (unclamped) weight can push the
+ * extent past INT16, and a bare cast would be C UB. Mirrors nt_font_quantize_weight's clamp. */
+static inline int16_t clamp_i16(float v) {
+    if (v > 32767.0F) {
+        return 32767;
+    }
+    if (v < -32768.0F) {
+        return -32768;
+    }
+    return (int16_t)v;
+}
+
 /* Emit one quadratic curve to the output buffer */
 static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_c, float p0x, float p0y, float p1x, float p1y, float p2x, float p2y) {
     if (*total < max_c) {
@@ -1558,10 +1570,10 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->entry.band_row = cache_idx;
     cs->entry.advance = glyph->advance;
     if (key_offset != 0) {
-        cs->entry.bbox_x0 = (int16_t)bbox_x0;
-        cs->entry.bbox_y0 = (int16_t)bbox_y0;
-        cs->entry.bbox_x1 = (int16_t)bbox_x1;
-        cs->entry.bbox_y1 = (int16_t)bbox_y1;
+        cs->entry.bbox_x0 = clamp_i16(bbox_x0);
+        cs->entry.bbox_y0 = clamp_i16(bbox_y0);
+        cs->entry.bbox_x1 = clamp_i16(bbox_x1);
+        cs->entry.bbox_y1 = clamp_i16(bbox_y1);
     } else {
         cs->entry.bbox_x0 = glyph->bbox_x0;
         cs->entry.bbox_y0 = glyph->bbox_y0;
@@ -1743,7 +1755,9 @@ void nt_font_step(void) {
             const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
             const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
             const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
-                                       slot->metrics.line_gap == hdr->line_gap;
+                                       slot->metrics.line_gap == hdr->line_gap && slot->metrics.underline_position == hdr->underline_position &&
+                                       slot->metrics.underline_thickness == hdr->underline_thickness && slot->metrics.strikeout_position == hdr->strikeout_position &&
+                                       slot->metrics.strikeout_size == hdr->strikeout_size;
             if (slot->metrics_set && metrics_match) {
                 continue;
             }

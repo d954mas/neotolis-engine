@@ -41,6 +41,10 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
+
+#ifdef NT_TEST_ACCESS
+static uint32_t s_test_deco_applied_count; /* walker deco-apply count; reset per test to verify wrapped-line coverage */
+#endif
 static bool s_nt_ui_module_initialized = false;
 
 /* Pre-built element_data for each layer (user_data=NULL) — avoids scratch alloc. */
@@ -1729,9 +1733,15 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
         /* Decorated-label state: set the sticky renderer decoration from the label's style, draw,
          * then reset so it can't leak onto the next TEXT. Undecorated frames skip the lookup (count==0). */
-        const nt_ui_label_deco_t *deco = (ctx->label_deco_count > 0U) ? nt_ui_label_deco_lookup(ctx, local.renderData.text.stringContents.chars) : NULL;
+        /* Key on baseChars: Clay slices wrapped lines to chars=base+lineOffset but keeps the base
+         * buffer in baseChars, so matching on .chars would decorate only the first line. */
+        const char *deco_key = local.renderData.text.stringContents.baseChars ? local.renderData.text.stringContents.baseChars : local.renderData.text.stringContents.chars;
+        const nt_ui_label_deco_t *deco = (ctx->label_deco_count > 0U) ? nt_ui_label_deco_lookup(ctx, deco_key) : NULL;
         if (deco != NULL) {
             nt_ui_label_deco_apply(deco, ws->accum_opacity);
+#ifdef NT_TEST_ACCESS
+            s_test_deco_applied_count++; /* per TEXT command that matched decoration (wrapped lines count each) */
+#endif
         }
         emit_text(ctx, &local, text_scale, world_mat4);
         if (deco != NULL) {
@@ -3238,6 +3248,9 @@ uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     return ctx->test_last_walk_unlayered_count;
 }
+
+uint32_t nt_ui_test_deco_applied_count(void) { return s_test_deco_applied_count; }
+void nt_ui_test_reset_deco_applied_count(void) { s_test_deco_applied_count = 0; }
 
 /* These expose Clay's RAW device-space pointer — NOT the layout-converted one the hit-test uses.
    Under a scaled viewport device != layout, so a hit-decision reader must convert via the viewport
