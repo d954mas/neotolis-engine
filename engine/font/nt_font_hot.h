@@ -23,6 +23,8 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
 #ifndef NT_FONT_WEIGHT_QUANT_STEP
 #define NT_FONT_WEIGHT_QUANT_STEP 8
 #endif
+/* Used as the round-to divisor in nt_font_quantize_weight: 0 divides-by-zero, negative makes bad buckets. */
+_Static_assert(NT_FONT_WEIGHT_QUANT_STEP > 0 && NT_FONT_WEIGHT_QUANT_STEP <= 32767, "NT_FONT_WEIGHT_QUANT_STEP must be in [1, 32767]");
 int16_t nt_font_quantize_weight(float weight_units);
 
 int16_t nt_font_get_kern_in_slot(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
