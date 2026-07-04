@@ -1850,6 +1850,36 @@ void test_embolden_resolves_self_intersecting_outer(void) {
     TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 474.0F)); /* centroid solid */
 }
 
+/* The '@' seal-fill fix's core discriminator (whole-glyph dilation membership). The pentagram test above
+ * covers same-sign loops; the opposite-wound KEEP path fires only on real curved keyhole geometry ('@',
+ * '&'), which simple integer polygons don't reproduce (their offset+uncross yields only same-sign loops)
+ * — validated on real fonts via examples/at_probe. This unit-tests the decision itself: a grower's
+ * opposite loop is KEPT iff its pole lies OUTSIDE the true dilation of the ORIGINAL glyph. A regression
+ * that inverts the fill test, breaks the distance test, or drops the r_off gate is caught here. */
+void test_grower_loop_membership(void) {
+    /* Original glyph = solid square [0..600] as flat curves (weight-0 raw outline). */
+    const int16_t sq[4][2] = {{0, 0}, {600, 0}, {600, 600}, {0, 600}};
+    uint8_t blob[128];
+    build_contour_blob_1(blob, sq, 4);
+    float orig[16 * 6];
+    uint16_t on = nt_font_test_decode_contours(blob, 0.0F, orig, 16);
+
+    /* A: loop whose pole (~300,300) is INSIDE the fill -> DROP (like the pentagram center). */
+    const int32_t ax[4] = {250, 350, 350, 250};
+    const int32_t ay[4] = {250, 250, 350, 350};
+    TEST_ASSERT_FALSE(nt_font_test_grower_loop_kept(orig, on, ax, ay, 4, 80.0));
+
+    /* B: loop far OUTSIDE, pole >> r_off from every edge -> KEEP (a real counter, like '@'s channel). */
+    const int32_t bx[4] = {1000, 1200, 1200, 1000};
+    const int32_t by[4] = {1000, 1000, 1200, 1200};
+    TEST_ASSERT_TRUE(nt_font_test_grower_loop_kept(orig, on, bx, by, 4, 80.0));
+
+    /* C: loop just outside the right edge, pole ~60 units away (< r_off 80) -> DROP (dilation consumes it). */
+    const int32_t cx[4] = {620, 700, 700, 620};
+    const int32_t cy[4] = {280, 280, 320, 320};
+    TEST_ASSERT_FALSE(nt_font_test_grower_loop_kept(orig, on, cx, cy, 4, 80.0));
+}
+
 /* Convex glyph preservation (#253): a convex contour has no reflex corners and no
  * self-crossings, so a wide offset leaves it a simple grown ring — same curve count,
  * no crossing, bbox strictly larger. Guards against join/uncross touching convex data. */
@@ -2036,6 +2066,10 @@ void test_quantize_weight_saturates(void) {
     /* Saturates instead of wrapping. */
     TEST_ASSERT_EQUAL_INT16(32767, nt_font_quantize_weight(1.0e9F));
     TEST_ASSERT_EQUAL_INT16(-32768, nt_font_quantize_weight(-1.0e9F));
+    /* Past 32-bit LONG_MAX (weight_em*upm can far exceed it): clamp-before-lrintf saturates, no UB. */
+    TEST_ASSERT_EQUAL_INT16(32767, nt_font_quantize_weight(3.0e9F));
+    TEST_ASSERT_EQUAL_INT16(32767, nt_font_quantize_weight(1.0e12F));
+    TEST_ASSERT_EQUAL_INT16(-32768, nt_font_quantize_weight(-1.0e12F));
     /* Non-finite is safe (identity 0). */
     TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(INFINITY));
 }
@@ -2127,6 +2161,7 @@ int main(void) {
     RUN_TEST(test_counter_preserving_outline);
     RUN_TEST(test_counter_preserving_neck);
     RUN_TEST(test_embolden_resolves_self_intersecting_outer);
+    RUN_TEST(test_grower_loop_membership);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);
     /* DECO-01/02: (codepoint, key_offset) cache key */
