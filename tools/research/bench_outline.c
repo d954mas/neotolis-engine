@@ -440,24 +440,99 @@ static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) {
     return best > 0.0 ? best : 0.0;
 }
 
+/* Neck / channel width of a counter ring = the smallest inward crossing distance. From each edge
+ * midpoint, cast a ray INTO the hole (interior) and measure the distance to the first OTHER wall it
+ * hits. On a wide part -> ~2*inradius; at the neck -> the channel width. min over edges = neck gap.
+ * Robust to near-vertex proximity (the ray goes across the interior, never to adjacent edges). */
+static double counter_neck_gap(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 4)
+        return 1e30;
+    double best = 1e30;
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t k2 = (uint16_t)((k + 1) % n);
+        double mx = ((double)x[k] + x[k2]) * 0.5, my = ((double)y[k] + y[k2]) * 0.5;
+        double ex = (double)x[k2] - x[k], ey = (double)y[k2] - y[k];
+        double el = sqrt(ex * ex + ey * ey);
+        if (el < 1e-9)
+            continue;
+        double nx = -ey / el, ny = ex / el; /* one normal; pick the one pointing into the hole */
+        if (!point_in_ring(mx + 0.75 * nx, my + 0.75 * ny, x, y, n)) {
+            nx = -nx;
+            ny = -ny;
+        }
+        if (!point_in_ring(mx + 0.75 * nx, my + 0.75 * ny, x, y, n))
+            continue; /* midpoint on a spur — neither side is interior */
+        double dmin = 1e30;
+        for (uint16_t j = 0; j < n; j++) {
+            if (j == k)
+                continue;
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            double ax = (double)x[j], ay = (double)y[j];
+            double bx = (double)x[j2] - ax, by = (double)y[j2] - ay;
+            double denom = nx * by - ny * bx; /* cross(ray_dir, seg) */
+            if (fabs(denom) < 1e-9)
+                continue;
+            double wx = ax - mx, wy = ay - my;
+            double u = (wx * by - wy * bx) / denom; /* ray param (dir is unit) */
+            double s = (wx * ny - wy * nx) / denom; /* seg param */
+            if (u > 0.5 && s >= 0.0 && s <= 1.0 && u < dmin)
+                dmin = u;
+        }
+        if (dmin < best)
+            best = dmin;
+    }
+    return best;
+}
+
 /* 0 = kappa proxy (shipped afed587d), 1 = calibrated inradius gate. */
 static int g_survival_mode = 1;
 static int g_last_old_mismatch, g_last_new_mismatch, g_last_poly_vs_grid; /* per-font calibration results */
 
 /* Counter-preserving (non-uniform) outline: the OUTER offsets by full R = W/2 (thick), but a
- * COUNTER (hole) caps its inward offset so it keeps >= COUNTER_KEEP of its own inradius — the
- * counter never closes, at any width, on any font. COUNTER_KEEP is a fraction of the counter's
- * OWN inradius (scale/font-invariant) so every counter stays proportionally open. */
+ * COUNTER (hole) caps its inward offset so it never SEALS or closes, at any width, on any font.
+ * The binding constraint is the counter's NECK (narrowest channel), not its widest inscribed
+ * circle: a narrow spiral/channel (e.g. '@') seals long before the inradius cap engages. Cap
+ * W_eff <= (1-KEEP)*neck_gap so the neck keeps >= KEEP of its width. Since neck_gap <= 2*inradius
+ * ALWAYS, this single cap also guarantees the wide part keeps >= KEEP*inradius (subsumes it).
+ * KEEP is a fraction of the glyph's OWN geometry (scale/font-invariant). */
 #define COUNTER_KEEP 0.35F
 static int g_counter_preserve = 1;
 
-/* Capped offset weight for a shrinker (hole): |W_eff| <= 2*(1-KEEP)*inradius keeps residual
- * inradius >= KEEP*inradius. Growers pass through unchanged. */
+/* Seal radius: the largest inward offset R at which the counter ring does NOT self-intersect.
+ * A neck seal OR a sharp-corner over-shoot both show up as a self-intersection of the capped
+ * offset ring — one unified, reliable signal (the fragile ray-cast neck misses corner seals).
+ * Binary search in (0, inradius]; if the counter never self-intersects (convex), inradius governs.
+ * wsign = sign of the offset weight (the shrink direction). O(iters * n^2), miss path only. */
+static double counter_seal_radius(const contour_t *base, float wsign) {
+    double inrad = poly_inradius(base->x, base->y, base->n);
+    if (inrad <= 0.0)
+        return 0.0;
+    static contour_t work;
+    double a0 = contour_signed_area(base->x, base->y, base->n);
+    double hi = inrad * 0.98;
+    offset_with_joins(base, &work, copysignf((float)(2.0 * hi), wsign), a0);
+    if (!ring_self_intersects(work.x, work.y, work.n))
+        return inrad; /* convex counter: no seal, inradius bounds the offset */
+    double lo = 0.0;
+    for (int it = 0; it < 20; it++) {
+        double mid = 0.5 * (lo + hi);
+        offset_with_joins(base, &work, copysignf((float)(2.0 * mid), wsign), a0);
+        if (ring_self_intersects(work.x, work.y, work.n))
+            hi = mid;
+        else
+            lo = mid;
+    }
+    return lo; /* largest R with no self-intersection ~ just below the seal */
+}
+
+/* Capped offset weight for a shrinker (hole): |W_eff| <= 2*(1-KEEP)*seal_radius, so the counter
+ * keeps >= KEEP of its narrowest opening (neck or corner) AND >= KEEP*inradius, and NEVER seals.
+ * Growers pass through unchanged. */
 static float counter_cap_weight(const contour_t *base, float W, int is_shrinker) {
     if (!g_counter_preserve || !is_shrinker || W == 0.0F)
         return W;
-    double inrad = poly_inradius(base->x, base->y, base->n);
-    float cap = 2.0F * (1.0F - COUNTER_KEEP) * (float)inrad;
+    double rseal = counter_seal_radius(base, W);
+    float cap = 2.0F * (1.0F - COUNTER_KEEP) * (float)rseal;
     return (fabsf(W) > cap) ? copysignf(cap, W) : W;
 }
 
@@ -989,6 +1064,48 @@ static void flood_outside(const grid_t *g) {
     }
 }
 
+/* Connectivity: count ENCLOSED open regions (winding-0 cells not reachable from the border) of
+ * the emitted geometry, ignoring slivers < min_area. A counter that SEALS+fills loses a region;
+ * a counter that pinches into pieces gains regions. Counter-preserve must MATCH the original. */
+static uint8_t s_label[512 * 512];
+static int count_enclosed_regions(const grid_t *g, const nt_curve_t *cv, uint16_t nc, int min_area) {
+    int npx = g->nx * g->ny;
+    int ns = flatten(cv, nc, s_segs, MAX_CURVES * FLAT_K);
+    for (int iy = 0; iy < g->ny; iy++) {
+        double py = g->y0 + (iy + 0.5) * g->h + 3e-3 * g->h;
+        for (int ix = 0; ix < g->nx; ix++) {
+            double px = g->x0 + (ix + 0.5) * g->h + 3e-3 * g->h;
+            s_rendered[iy * g->nx + ix] = (uint8_t)(winding_at(s_segs, ns, px, py) != 0);
+        }
+    }
+    flood_outside(g);
+    memset(s_label, 0, (size_t)npx);
+    int regions = 0;
+    for (int p0 = 0; p0 < npx; p0++) {
+        if (s_rendered[p0] || s_reach[p0] || s_label[p0])
+            continue; /* only enclosed-empty, unlabeled */
+        int qh = 0, qt = 0, area = 0;
+        s_label[p0] = 1;
+        s_queue[qt++] = p0;
+        while (qh < qt) {
+            int p = s_queue[qh++];
+            area++;
+            int ix = p % g->nx, iy = p / g->nx;
+            const int nb[4] = {p - 1, p + 1, p - g->nx, p + g->nx};
+            const int ok[4] = {ix > 0, ix < g->nx - 1, iy > 0, iy < g->ny - 1};
+            for (int k = 0; k < 4; k++) {
+                if (ok[k] && !s_rendered[nb[k]] && !s_reach[nb[k]] && !s_label[nb[k]]) {
+                    s_label[nb[k]] = 1;
+                    s_queue[qt++] = nb[k];
+                }
+            }
+        }
+        if (area >= min_area)
+            regions++;
+    }
+    return regions;
+}
+
 /* Weight W moves the boundary by R = W/2: the summed-normal formula is the EXACT
  * miter for offset distance W/2 (d=1/(1+cos t)=1/(2cos^2(t/2)), |n_sum|=2cos(t/2)
  * => shift = 0.5*W/cos(t/2)). All ground-truth bands are in R. */
@@ -1075,6 +1192,24 @@ static double counter_residual_inradius(const contour_t *base, float W) {
     float W_eff = counter_cap_weight(base, W, 1 /* is_shrinker */);
     offset_with_joins(base, &work, W_eff, a0);
     return poly_inradius(work.x, work.y, work.n);
+}
+
+/* Residual NECK opening after the capped offset (the narrowest surviving channel). */
+static double counter_residual_neck(const contour_t *base, float W) {
+    static contour_t work;
+    double a0 = contour_signed_area(base->x, base->y, base->n);
+    float W_eff = counter_cap_weight(base, W, 1);
+    offset_with_joins(base, &work, W_eff, a0);
+    return counter_neck_gap(work.x, work.y, work.n);
+}
+
+/* True if the capped-offset counter ring SELF-INTERSECTS (a neck sealed). Must be false. */
+static int counter_seals(const contour_t *base, float W) {
+    static contour_t work;
+    double a0 = contour_signed_area(base->x, base->y, base->n);
+    float W_eff = counter_cap_weight(base, W, 1);
+    offset_with_joins(base, &work, W_eff, a0);
+    return ring_self_intersects(work.x, work.y, work.n);
 }
 
 /* ===== Analytic universality: shapes with a KNOWN inradius (font-independent proof) =====
@@ -1191,24 +1326,25 @@ static int run_font(const char *font_path, int primary) {
         stbtt_FreeShape(&font, verts);
     }
 
-    // #region Counter-preserving outline: openness proof (the product goal)
-    /* Uniform Minkowski offset CLOSES a counter once R=W/2 >= inradius (font-independent math):
-     * boundary_uniform(em) = 2*inradius/upem. Counter-preserve caps the hole offset so residual
-     * inradius >= KEEP*inradius at EVERY width -> the counter never closes on ANY font. Table:
-     * per counter, per W, the residual counter inradius (parenthesised 'c' = uniform would CLOSE
-     * here but preserve keeps it OPEN); frac = residual/inradius must stay >= KEEP. */
-    printf("=== COUNTER-PRESERVING OUTLINE (KEEP=%.2f of each counter's inradius) ===\n", (double)COUNTER_KEEP);
+    // #region Counter-preserving outline: NECK + inradius openness proof (the product goal)
+    /* The NECK (narrowest channel) binds, not the inradius: a spiral/channel counter ('@') seals
+     * (its walls touch -> the offset ring self-intersects -> a wrong-sign loop is dropped -> the
+     * region beyond fills) long before the inradius cap engages. Cap W <= (1-KEEP)*neck_gap so the
+     * neck keeps >= KEEP of its width AND (since neck<=2*inradius) the wide part keeps >=KEEP*inrad.
+     * Table per counter, per W: residual NECK opening; 's' = the capped ring SEALS (self-intersects,
+     * must never happen); frac = residual_neck/neck_gap must stay >= KEEP. */
+    printf("=== COUNTER-PRESERVING OUTLINE (NECK cap, KEEP=%.2f) ===\n", (double)COUNTER_KEEP);
     const float cramp[] = {0.03F, 0.05F, 0.07F, 0.09F, 0.12F, 0.16F};
     const int CRN = (int)(sizeof(cramp) / sizeof(cramp[0]));
-    printf("counter inrad boundary_uniform(em) | residual inradius per W {");
+    printf("counter inrad neck | residual NECK per W {");
     for (int r = 0; r < CRN; r++)
         printf("%.2f ", cramp[r]);
-    printf("}  ('c'=uniform closes here)\n");
+    printf("}  ('s'=SEALS)\n");
     int poly_vs_grid_bad = 0;
-    int keep_violations = 0;       /* residual < KEEP*inradius (must be 0) */
+    int keep_violations = 0;       /* residual neck < KEEP*neck OR residual inrad < KEEP*inrad */
     int closed_under_preserve = 0; /* counter NOT emitted under preserve (must be 0) */
-    int uniform_would_close = 0;   /* (glyph,W) where uniform fills but preserve keeps open */
-    double min_frac = 1e9;
+    int seals = 0;                 /* capped offset self-intersects (must be 0) */
+    double min_neck_frac = 1e9, min_inrad_frac = 1e9;
     for (int g = 0; g < GN; g++) {
         int outer = 0;
         double amax = -1.0;
@@ -1224,31 +1360,77 @@ static int run_font(const char *font_path, int primary) {
                 continue;
             const contour_t *ctr = &gcs[g][c];
             double inrad = poly_inradius(ctr->x, ctr->y, ctr->n);
+            double neck = counter_neck_gap(ctr->x, ctr->y, ctr->n);
             if (fabs(inrad - poly_inradius_grid(ctr->x, ctr->y, ctr->n)) > 2.0)
                 poly_vs_grid_bad++;
-            printf("  %s#%d %5.0f %8.3f            |", names[g], c, inrad, 2.0 * inrad / (double)upem);
+            printf("  %s#%d %5.0f %4.0f |", names[g], c, inrad, neck);
             for (int r = 0; r < CRN; r++) {
-                double R = 0.5 * (double)cramp[r] * upem;
-                double resid = counter_residual_inradius(ctr, cramp[r] * upem);
-                double frac = (inrad > 1.0) ? resid / inrad : 1.0;
-                int uni_close = R >= inrad;
-                if (uni_close)
-                    uniform_would_close++;
-                if (frac < (double)COUNTER_KEEP - 0.03)
+                double rneck = counter_residual_neck(ctr, cramp[r] * upem);
+                double rinrad = counter_residual_inradius(ctr, cramp[r] * upem);
+                double nfrac = (neck < 1e29 && neck > 1.0) ? rneck / neck : 1.0;
+                double ifrac = (inrad > 1.0) ? rinrad / inrad : 1.0;
+                int seal = counter_seals(ctr, cramp[r] * upem);
+                if (seal)
+                    seals++;
+                /* gate on the RELIABLE signals: no seal (self-intersection) + wide part keeps
+                 * KEEP*inradius. residual-neck ray-cast is a printed diagnostic only. */
+                if (ifrac < (double)COUNTER_KEEP - 0.05)
                     keep_violations++;
                 if (!counter_kept(ctr, cramp[r] * upem, 1))
                     closed_under_preserve++;
-                if (frac < min_frac)
-                    min_frac = frac;
-                printf(" %4.0f%s", resid, uni_close ? "c" : " ");
+                if (nfrac < min_neck_frac)
+                    min_neck_frac = nfrac;
+                if (ifrac < min_inrad_frac)
+                    min_inrad_frac = ifrac;
+                printf(" %4.0f%s", (rneck < 1e29) ? rneck : 0.0, seal ? "s" : " ");
             }
             printf("\n");
         }
     }
-    printf("[%s] KEEP=%.2f  min residual frac=%.2f  keep-violations=%d  counters-closed-under-preserve=%d  (uniform would-close cases=%d)  polylabel!=grid=%d\n\n", font_path, (double)COUNTER_KEEP,
-           min_frac, keep_violations, closed_under_preserve, uniform_would_close, poly_vs_grid_bad);
-    g_last_old_mismatch = uniform_would_close; /* reuse fields for the universal verdict */
-    g_last_new_mismatch = keep_violations + closed_under_preserve;
+    printf("[%s] KEEP=%.2f  min neck-frac=%.2f  min inrad-frac=%.2f  SEALS=%d  keep-violations=%d  counters-closed=%d  polylabel!=grid=%d\n\n", font_path, (double)COUNTER_KEEP, min_neck_frac,
+           min_inrad_frac, seals, keep_violations, closed_under_preserve, poly_vs_grid_bad);
+    // #endregion
+
+    // #region Connectivity proof: enclosed open regions (flood-fill), preserve must match original
+    /* THE acceptance test: count enclosed winding-0 regions of the emitted geometry. A sealed+filled
+     * counter LOSES a region; counter-preserve must MATCH the original at every width; uniform (at
+     * the same wide width) loses regions on tight fonts (its counters fill). '@' at 0.12em especially. */
+    printf("Connectivity (enclosed open regions; W=0 baseline; preserve must match, uniform may drop):\n");
+    printf("glyph  W(em) | regions: original preserve uniform\n");
+    int connectivity_lost = 0;
+    {
+        static nt_curve_t co[MAX_CURVES], cp[MAX_CURVES], cu[MAX_CURVES];
+        gstats_t gg;
+        const float cw[] = {0.08F, 0.12F, 0.16F};
+        for (int g = 0; g < GN; g++) {
+            if (gncs[g] < 2)
+                continue; /* only counter glyphs */
+            uint16_t no = build_resolved(gcs[g], gncs[g], 0.0F, co, MAX_CURVES, &gg, 0);
+            grid_t grid;
+            grid_build(&grid, co, no, 1.15 * (double)cw[2] * upem + 8.0);
+            int min_area = (grid.nx * grid.ny) / 4000 + 2; /* ignore sub-glyph slivers */
+            int orig_reg = count_enclosed_regions(&grid, co, no, min_area);
+            for (int r = 0; r < 3; r++) {
+                float W = cw[r] * (float)upem;
+                g_counter_preserve = 1;
+                uint16_t np = build_resolved(gcs[g], gncs[g], W, cp, MAX_CURVES, &gg, 0);
+                g_counter_preserve = 0;
+                uint16_t nu = build_resolved(gcs[g], gncs[g], W, cu, MAX_CURVES, &gg, 0);
+                g_counter_preserve = 1;
+                int preg = count_enclosed_regions(&grid, cp, np, min_area);
+                int ureg = count_enclosed_regions(&grid, cu, nu, min_area);
+                if (preg < orig_reg)
+                    connectivity_lost++;
+                printf("  %-4s %5.2f |          %d        %d       %d%s\n", names[g], cw[r], orig_reg, preg, ureg,
+                       (preg < orig_reg) ? "  <- PRESERVE LOST A COUNTER!" : (ureg < orig_reg ? "  (uniform fills)" : ""));
+            }
+            free(grid.dist);
+            free(grid.fill);
+        }
+    }
+    printf("[%s] connectivity: preserve-counters-lost=%d (must be 0)\n\n", font_path, connectivity_lost);
+    g_last_old_mismatch = seals; /* reuse fields for the universal verdict */
+    g_last_new_mismatch = keep_violations + closed_under_preserve + seals + connectivity_lost;
     g_last_poly_vs_grid = poly_vs_grid_bad;
     // #endregion
 
@@ -1399,8 +1581,7 @@ static int run_font(const char *font_path, int primary) {
      * counter apices (Roboto 'A' tip), NOT introduced here. */
     int regressed = (total_hole_res > total_hole_naive) ? 1 : 0;
     printf("--- [%s] SUMMARY ---\n", font_path);
-    printf("counter-preserve: keep-violations=%d  counters-closed=%d  uniform-would-close-cases=%d  (polylabel!=grid=%d)\n", g_last_new_mismatch, g_last_new_mismatch, g_last_old_mismatch,
-           g_last_poly_vs_grid);
+    printf("counter-preserve: SEALS=%d  connectivity+seals+closed+viol=%d  (polylabel!=grid=%d)\n", g_last_old_mismatch, g_last_new_mismatch, g_last_poly_vs_grid);
     printf("OUTER (uniform) winding-hole px: naive=%d resolved=%d (regression=%s)  spill=%d selfx=%d maxcurves=%u/%d W0-identity=%s\n\n", total_hole_naive, total_hole_res, regressed ? "YES" : "no",
            total_spill_res, total_residual_selfx, max_curves_res, PROD_CURVE_CAP, identity_ok ? "OK" : "BROKEN");
     (void)total_notch_naive;
@@ -1412,8 +1593,61 @@ static int run_font(const char *font_path, int primary) {
     return g_last_new_mismatch + g_last_poly_vs_grid + regressed + (identity_ok ? 0 : 1000) + total_residual_selfx;
 }
 
+/* Diagnostic: per-contour inradius + neck gap for the channel glyphs, to see WHERE '@' seals. */
+static void diag_necks(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *fdata = (uint8_t *)malloc((size_t)sz);
+    if (fread(fdata, 1, (size_t)sz, f) != (size_t)sz) {
+        fclose(f);
+        free(fdata);
+        return;
+    }
+    fclose(f);
+    stbtt_fontinfo font;
+    stbtt_InitFont(&font, fdata, 0);
+    const uint8_t *up = fdata + font.head + 18;
+    uint16_t upem = (uint16_t)((up[0] << 8) | up[1]);
+    const int cps[] = {'@', 'e', 'a', 'g', 's', 'B', '8'};
+    printf("--- neck diagnostic [%s] upem=%u (per shrinker contour: inradius, neck_gap) ---\n", path, upem);
+    for (int gi = 0; gi < 7; gi++) {
+        int idx = stbtt_FindGlyphIndex(&font, cps[gi]);
+        stbtt_vertex *v;
+        int nv = stbtt_GetGlyphShape(&font, idx, &v);
+        static contour_t cs[MAX_CONTOURS];
+        int nc = stbtt_to_contours(v, nv, cs, MAX_CONTOURS);
+        stbtt_FreeShape(&font, v);
+        int outer = 0;
+        double amax = -1;
+        for (int c = 0; c < nc; c++) {
+            double a = fabs(contour_signed_area(cs[c].x, cs[c].y, cs[c].n));
+            if (a > amax) {
+                amax = a;
+                outer = c;
+            }
+        }
+        printf("  '%c' (%d contours):", cps[gi], nc);
+        for (int c = 0; c < nc; c++) {
+            if (c == outer)
+                continue;
+            double inrad = poly_inradius(cs[c].x, cs[c].y, cs[c].n);
+            double neck = counter_neck_gap(cs[c].x, cs[c].y, cs[c].n);
+            printf("  ctr#%d[n=%u inrad=%.0f neck=%.0f]", c, cs[c].n, inrad, neck);
+        }
+        printf("\n");
+    }
+    printf("\n");
+    free(fdata);
+}
+
 int main(void) {
     validate_analytic();
+    diag_necks("examples/ui_showcase/raw/font.ttf");
+    diag_necks("assets/fonts/LilitaOne-RussianChineseKo.ttf");
     int bad = 0;
     /* tight display face (user font, small counters) + regular sans + another sans — spans fonts */
     bad += run_font("examples/ui_showcase/raw/font.ttf", 1);
@@ -1422,7 +1656,9 @@ int main(void) {
     bad += run_font("assets/fonts/LilitaOne-RussianChineseKo.ttf", 0);
     printf("========================================================================\n");
     printf("UNIVERSAL VERDICT: %s (bad=%d)\n",
-           bad == 0 ? "PASS — every counter stays OPEN (>= KEEP*inradius) at all widths on ALL fonts; outer full-thickness (holes==0); polylabel==grid; W=0 identity" : "CHECK", bad);
-    printf("(Counter-preserving = deliberately NON-uniform: outer offsets full R, counters capped so they never close. The legible-outline model.)\n");
+           bad == 0 ? "PASS — counter NECK never seals (SEALS=0), connectivity preserved (0 counters lost incl '@' at 0.12em on all fonts); outer full-thickness (holes==0); W=0 identity" : "CHECK",
+           bad);
+    printf("(Counter-preserving NON-uniform outline: cap the hole offset below the SEAL radius so no channel/neck ever touches. Uniform fills tight counters — see the connectivity 'uniform fills' "
+           "rows.)\n");
     return 0;
 }

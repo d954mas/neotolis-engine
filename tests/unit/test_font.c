@@ -1775,6 +1775,41 @@ void test_counter_preserving_outline(void) {
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wr, 500.0F, 500.0F)); /* wide-rect counter open */
 }
 
+/* #253 NECK/CHANNEL preservation (the '@'/'e'/'a' seal-fill fix): a counter with a narrow WAIST
+ * (much thinner than its widest inscribed circle) SEALS at that waist under a uniform inward
+ * offset once 2R >= waist — the walls touch, the offset ring self-intersects, and the region
+ * beyond the seal fills. The seal-radius cap keeps the offset below the seal onset, so the waist
+ * NEVER touches: the counter stays a single CONNECTED open region at any width. Fixture: an
+ * hourglass counter (two wide lobes + a ~60u waist, inradius ~125). */
+void test_counter_preserving_neck(void) {
+    const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
+    /* CCW hourglass hole: wide bottom lobe, ~60u waist at y=450, wide top lobe. */
+    const int16_t hourglass[6][2] = {{200, 200}, {600, 200}, {430, 450}, {600, 700}, {200, 700}, {370, 450}};
+    uint8_t blob[256];
+    build_contour_blob_2(blob, outer, 4, hourglass, 6);
+    float cv[32 * 6];
+
+    /* W=0: hole open — bottom lobe, waist, and top lobe centers are all empty (winding-0). */
+    uint16_t n0 = nt_font_test_decode_contours(blob, 0.0F, cv, 32);
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n0, 400.0F, 300.0F)); /* bottom lobe */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n0, 400.0F, 450.0F)); /* waist */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n0, 400.0F, 600.0F)); /* top lobe */
+
+    /* WIDE W=400 (R=200 >> waist/2=30, so a UNIFORM offset would SEAL the waist and fill a lobe):
+     * counter-preserve caps below the seal radius -> the waist stays OPEN and the whole hourglass
+     * stays a single connected empty region. All three centers remain empty, geometry stays simple. */
+    uint16_t nw = nt_font_test_decode_contours(blob, 400.0F, cv, 32);
+    TEST_ASSERT_FALSE(curves_have_crossing(cv, nw));                /* no seal (simple) */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nw, 400.0F, 300.0F)); /* bottom lobe still open */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nw, 400.0F, 450.0F)); /* WAIST still open (not sealed) */
+    TEST_ASSERT_FALSE(curves_fill_nonzero(cv, nw, 400.0F, 600.0F)); /* top lobe still open */
+    /* Outer full-thickness: box grows outward by the full R=200. */
+    float mnx, mny;
+    curves_min_corner(cv, nw, &mnx, &mny);
+    TEST_ASSERT_TRUE(mnx < -100.0F);
+    TEST_ASSERT_TRUE(mny < -100.0F);
+}
+
 /* #253 '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
  * is RESOLVED — the offset ring self-crosses, but the emitted curves are simple (no
  * residual crossing) and the interior stays solid (the inverted loop is excised, no
@@ -2090,6 +2125,7 @@ int main(void) {
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
     RUN_TEST(test_counter_preserving_outline);
+    RUN_TEST(test_counter_preserving_neck);
     RUN_TEST(test_embolden_resolves_self_intersecting_outer);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);

@@ -707,6 +707,27 @@ static bool seg_proper_cross(int32_t ax, int32_t ay, int32_t bx, int32_t by, int
     return o1 != 0 && o2 != 0 && o3 != 0 && o4 != 0 && o1 != o2 && o3 != o4;
 }
 
+/* Does the closed ring have any proper self-crossing? Used by the seal-radius search (and the
+ * test hook). O(n²), decode miss path only; returns on the first crossing. */
+static bool ring_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 4) {
+        return false;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t i2 = (uint16_t)((i + 1) % n);
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            if (j == i2 || j2 == i) {
+                continue;
+            }
+            if (seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // #region Offset self-intersection resolution (#253) — uncross + signed-loop filter + survival
 /* One recorded self-crossing: the two crossing edges (i,i+1)x(j,j+1) and the rounded
  * intersection point (grid-snapped like the int point ring). */
@@ -873,6 +894,38 @@ static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) {
         }
     }
     return best > 0.0 ? best : 0.0;
+}
+
+/* Scratch ring for the seal-radius search (trial offsets; separate from the emit ring). */
+static int32_t s_seal_x[NT_FONT_OFFSET_RING_MAX];
+static int32_t s_seal_y[NT_FONT_OFFSET_RING_MAX];
+static uint8_t s_seal_on[NT_FONT_OFFSET_RING_MAX];
+
+/* Seal radius: the largest inward offset R at which the counter ring does NOT self-intersect.
+ * A narrow neck/channel sealing OR a sharp-corner over-shoot both surface as a self-intersection
+ * of the offset ring (which the resolver would split into a wrong-sign loop that drops -> fills).
+ * Binary search in (0, inradius]; convex counters never self-intersect -> inradius bounds it.
+ * wsign = the offset's shrink direction. O(iters*n²) per shrinker, decode miss path only. */
+static double counter_seal_radius(const int32_t *bx, const int32_t *by, const uint8_t *bon, uint16_t bn, double a0, float wsign, double inradius) {
+    if (inradius <= 0.0) {
+        return 0.0;
+    }
+    double hi = inradius * 0.98;
+    uint16_t m = offset_with_joins(bx, by, bon, bn, s_seal_x, s_seal_y, s_seal_on, copysignf((float)(2.0 * hi), wsign), a0);
+    if (!ring_self_intersects(s_seal_x, s_seal_y, m)) {
+        return inradius; /* convex counter: no seal, inradius bounds the offset */
+    }
+    double lo = 0.0;
+    for (int it = 0; it < 20; it++) {
+        double mid = 0.5 * (lo + hi);
+        m = offset_with_joins(bx, by, bon, bn, s_seal_x, s_seal_y, s_seal_on, copysignf((float)(2.0 * mid), wsign), a0);
+        if (ring_self_intersects(s_seal_x, s_seal_y, m)) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    return lo; /* largest R with no self-intersection ~ just below the seal onset */
 }
 
 /* Doubly-implicit node ring for uncrossing: next[] stays a permutation, so loops are
@@ -1121,10 +1174,11 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         /* Offset+resolution runs on a SEPARATE ring so weight==0 is byte-identical to the
          * plain decode; offsetting nt_curve_t after conversion tears shared endpoints.
          * Counter-preserving (non-uniform): the OUTER (grower) offsets by full W (thick
-         * outline); a COUNTER (hole/shrinker) caps its inward offset so it keeps
-         * >= NT_FONT_COUNTER_KEEP of its own inradius — the counter never closes, at any
-         * width, on any font (a uniform offset provably fills a counter once R >= inradius).
-         * Legible outlined/bold text needs this; a filled counter is unusable. */
+         * outline); a COUNTER (hole/shrinker) caps its inward offset below the SEAL radius so
+         * its narrowest channel/neck NEVER touches — it stays open and connected, at any width,
+         * on any font. The neck (not the widest inscribed circle) binds: '@'/'e'/'a' have a thin
+         * channel that seals long before the inradius cap engages; a sealed channel disconnects
+         * a region that then fills. Legible outlined/bold text needs this; a filled '@' is unusable. */
         if (weight != 0.0F) {
             double a0 = contour_signed_area(pts_x, pts_y, point_count);
             /* TT winding (builder/stbtt): outer negative area, hole positive. Bold (W>0)
@@ -1134,7 +1188,8 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
             double base_inrad = 0.0;
             if (is_shrinker) {
                 base_inrad = poly_inradius(pts_x, pts_y, point_count);
-                float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)base_inrad; /* |W| that leaves >= KEEP*inradius */
+                double rseal = counter_seal_radius(pts_x, pts_y, pts_on, point_count, a0, weight, base_inrad);
+                float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)rseal; /* keep >= KEEP of the narrowest opening; never seal */
                 if (fabsf(weight) > cap) {
                     w_eff = copysignf(cap, weight);
                 }
@@ -2528,24 +2583,7 @@ uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const ui
     return offset_with_joins(sx, sy, son, n, dx, dy, don, weight, a0);
 }
 
-bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
-    if (n < 4) {
-        return false;
-    }
-    for (uint16_t i = 0; i < n; i++) {
-        uint16_t i2 = (uint16_t)((i + 1) % n);
-        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
-            uint16_t j2 = (uint16_t)((j + 1) % n);
-            if (j == i2 || j2 == i) {
-                continue;
-            }
-            if (seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) { return ring_self_intersects(x, y, n); }
 
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
     uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);
