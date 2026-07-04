@@ -185,16 +185,31 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) {
  *   CLAY({ .userData = NT_UI_DATA_FULL(LAYER_HUD, &my_button), ... })
  *   CLAY({ .userData = NT_UI_DATA_XFORM(LAYER_HUD, &t, 0.8F), ... }) */
 typedef uint8_t nt_ui_layer_t;
+
+/* Optional per-element "special data", tagged by special_kind. The union holds a POINTER into frame
+ * scratch, so element_data grows by exactly one pointer no matter how many kinds are added, and this
+ * header stays light (forward decls, not full definitions). Text decoration is the first kind; inline
+ * images will add their own. NONE (0) = a plain element with no special data (shares the layer singleton). */
+typedef struct nt_ui_label_deco nt_ui_label_deco_t; /* full definition in nt_ui_internal.h */
+typedef enum {
+    NT_UI_SPECIAL_NONE = 0,
+    NT_UI_SPECIAL_TEXT_DECO, /* special.text_deco valid */
+} nt_ui_special_kind_t;
+
 typedef struct {
     void *user_data;
-    nt_ui_layer_t layer; /* 0..255; lower draws first */
-    uint8_t flags;       /* NT_UI_ELEM_FLAG_HAS_TRANSFORM | _HAS_OPACITY */
-    uint8_t _reserved[2];
+    nt_ui_layer_t layer;  /* 0..255; lower draws first */
+    uint8_t flags;        /* NT_UI_ELEM_FLAG_HAS_TRANSFORM | _HAS_OPACITY */
+    uint8_t special_kind; /* nt_ui_special_kind_t; NONE unless this element carries special data */
+    uint8_t _reserved;
     nt_ui_transform_t transform; /* identity when !HAS_TRANSFORM */
     float opacity;               /* 1.0F when !HAS_OPACITY */
+    union {
+        const nt_ui_label_deco_t *text_deco; /* NT_UI_SPECIAL_TEXT_DECO */
+    } special;
 } nt_ui_element_data_t;
-/* 56B on 64-bit (alignof(void*)=8 → trailing pad), 48B on 32-bit/WASM. */
-_Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 56 : 48), "nt_ui_element_data_t stable ABI");
+/* 64B on 64-bit, 52B on 32-bit/WASM (+8 vs the pre-special ABI for the special union pointer). */
+_Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 64 : 52), "nt_ui_element_data_t stable ABI");
 _Static_assert(sizeof(nt_ui_transform_t) == 36, "nt_ui_transform_t — fail loudly if extended");
 
 #if NT_UI_DEBUG_TOOLS
@@ -663,7 +678,7 @@ bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
 
 /* Number of TEXT commands that matched a decorated label this walk (wrapped lines count each) —
- * proves the baseChars keying decorates every line, not just the first. Process-global; reset per test. */
+ * proves decoration reaches every wrapped line (uniform element_data), not just the first. Process-global; reset per test. */
 uint32_t nt_ui_test_deco_applied_count(void);
 void nt_ui_test_reset_deco_applied_count(void);
 

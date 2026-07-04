@@ -506,11 +506,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->pending_rich = NULL;
     ctx->rich_session_open = false;
 
-    /* Label-decoration side table is frame-scratch: drop last frame's (now-freed) pointer + count so the
-     * walker's TEXT dispatch does not scan a dangling table, and a plain frame pays no lookup. */
-    ctx->label_deco = NULL;
-    ctx->label_deco_count = 0U;
-
     /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
      * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
     if (ctx->use_raycast_input) {
@@ -1731,20 +1726,19 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        /* Decorated-label state: set the sticky renderer decoration from the label's style, draw,
-         * then reset so it can't leak onto the next TEXT. Undecorated frames skip the lookup (count==0). */
-        /* Key on baseChars: Clay slices wrapped lines to chars=base+lineOffset but keeps the base
-         * buffer in baseChars, so matching on .chars would decorate only the first line. */
-        const char *deco_key = local.renderData.text.stringContents.baseChars ? local.renderData.text.stringContents.baseChars : local.renderData.text.stringContents.chars;
-        const nt_ui_label_deco_t *deco = (ctx->label_deco_count > 0U) ? nt_ui_label_deco_lookup(ctx, deco_key) : NULL;
-        if (deco != NULL) {
-            nt_ui_label_deco_apply(deco, ws->accum_opacity);
+        /* Decorated labels ride a private element_data carrying decoration in .special — Clay puts the same
+         * userData on every wrapped-line TEXT command, so this decorates each line. Set the sticky renderer
+         * state, draw, then reset so it can't leak onto the next TEXT. */
+        const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
+        const bool decorated = (ed != NULL && ed->special_kind == NT_UI_SPECIAL_TEXT_DECO);
+        if (decorated) {
+            nt_ui_label_deco_apply(ed->special.text_deco, ws->accum_opacity);
 #ifdef NT_TEST_ACCESS
-            s_test_deco_applied_count++; /* per TEXT command that matched decoration (wrapped lines count each) */
+            s_test_deco_applied_count++; /* per decorated TEXT command (wrapped lines count each) */
 #endif
         }
         emit_text(ctx, &local, text_scale, world_mat4);
-        if (deco != NULL) {
+        if (decorated) {
             nt_text_renderer_reset_decoration();
         }
         return;

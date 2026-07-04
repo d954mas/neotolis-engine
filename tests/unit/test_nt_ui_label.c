@@ -273,7 +273,7 @@ static void test_label_sized_overrides_font_size(void) {
     TEST_ASSERT_EQUAL_INT32(255, (int32_t)c->renderData.text.textColor.r);
 }
 
-/* DECO-05: a label whose style carries decoration sets the sticky renderer decoration state per draw
+/* a label whose style carries decoration sets the sticky renderer decoration state per draw
  * (bold->synth weight, outline width, underline) through the walker, then resets after (no leak). Pinned
  * via the renderer observe hooks (the stub font emits no glyphs, but draw_n observes the state at entry). */
 static void test_label_decoration_wires_and_resets_setters(void) {
@@ -328,8 +328,8 @@ static void test_label_deco_folds_parent_opacity(void) {
 }
 
 /* A decorated label that breaks into multiple lines (embedded '\n') must decorate EVERY emitted line.
- * Clay slices wrapped lines to chars=base+offset but keeps the base in baseChars; keying the deco lookup
- * on baseChars is what lets lines 2+ match. Pre-fix (.chars keying) only line 1 matched -> count==1. */
+ * Decoration rides the label's private element_data, which Clay carries identically on every wrapped-line
+ * TEXT command (userData is uniform per element), so all lines match -> deco applied == text-command count. */
 static void test_label_decoration_applies_to_wrapped_lines(void) {
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
     nt_ui_test_reset_deco_applied_count();
@@ -357,23 +357,50 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, nt_ui_test_deco_applied_count(), "decoration must apply to EVERY line (baseChars keying), not just the first");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, nt_ui_test_deco_applied_count(), "decoration must apply to EVERY line (uniform element_data), not just the first");
     nt_text_renderer_reset_decoration();
 }
 
-/* NEGATIVE: a plain (undecorated) label records NO side-table entry and feeds NO decoration -- the
- * walker's count==0 fast-out means the sticky decoration stays clean. */
+/* Headline property of the special-data design: a decorated label built WITH game data keeps the caller's
+ * user_data + layer (its private element_data is a COPY of the caller's) AND carries the decoration in
+ * .special — decoration and the game pointer coexist. Guards the base-copy in label_attach_decoration. */
+static void test_label_decoration_preserves_element_data(void) {
+    int marker = 0;
+    static const nt_ui_label_style_t s = {
+        .font_id = 0,
+        .font_size = 14,
+        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .variant = NT_UI_LABEL_VARIANT_BOLD,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    Clay_SetCullingEnabled(false);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), "Deco+data", &s); }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
+    TEST_ASSERT_NOT_NULL(ed);
+    TEST_ASSERT_EQUAL_INT_MESSAGE((int)NT_UI_SPECIAL_TEXT_DECO, (int)ed->special_kind, "decorated label carries text-deco special data");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(5U, ed->layer, "private element_data keeps the caller's layer");
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&marker, ed->user_data, "decorated label keeps the caller's game user_data (coexists with decoration)");
+}
+
+/* NEGATIVE: a plain (undecorated) label passes the caller's element_data through unchanged (special_kind
+ * NONE), so the walker applies no decoration and the sticky renderer state stays clean. */
 static void test_label_plain_no_decoration(void) {
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
     nt_text_renderer_test_reset_call_counters();
+    nt_ui_test_reset_deco_applied_count();
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Plain", &s_style_body); }
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->label_deco_count, "undecorated label records no side-table entry");
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_deco_applied_count(), "plain label triggers no decoration apply in the walker");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() == 0.0F, "plain label feeds no synthetic weight");
     TEST_ASSERT_FALSE_MESSAGE(nt_text_renderer_test_saw_underline(), "plain label feeds no underline");
 }
@@ -396,6 +423,7 @@ int main(void) {
     RUN_TEST(test_label_sized_overrides_font_size);
     RUN_TEST(test_label_decoration_wires_and_resets_setters);
     RUN_TEST(test_label_decoration_applies_to_wrapped_lines);
+    RUN_TEST(test_label_decoration_preserves_element_data);
     RUN_TEST(test_label_deco_folds_parent_opacity);
     RUN_TEST(test_label_plain_no_decoration);
     return UNITY_END();
