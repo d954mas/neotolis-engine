@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 714537c
+# Commit: 8761819
 
 ## WASM Section Sizes
 
@@ -95,7 +95,7 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_debug_overlay.a       2212 B
-libnt_font.a              197262 B
+libnt_font.a              415268 B
 libnt_fs_stub.a             2706 B
 libnt_gfx_stub.a           31960 B
 libnt_input_stub.a         23432 B
@@ -110,8 +110,8 @@ libnt_shape_renderer.a   1140976 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
 libnt_sprite_renderer.a    48294 B
-libnt_text_renderer.a    1237154 B
-libnt_ui.a                607842 B
+libnt_text_renderer.a    1240540 B
+libnt_ui.a                613792 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window_stub.a         2476 B
