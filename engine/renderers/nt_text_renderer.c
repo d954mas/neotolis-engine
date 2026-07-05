@@ -478,7 +478,7 @@ static void emit_line_deco_quads(const float model[16], float scale, float x1, f
 
 /* Walk the run once (advance only) to find each line's pixel extent, then emit its decoration quads. */
 static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, nt_font_metrics_t metrics,
-                                  const float color[4], float *glyph_bias) {
+                                  int16_t key_offset, const float color[4], float *glyph_bias) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -514,7 +514,8 @@ static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const fl
             pen_x += (float)nt_font_get_kern_in_slot(slot, prev_cp, codepoint) * scale;
         }
 
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_offset(slot, codepoint, 0); /* advance is weight-independent */
+        /* advance is weight-independent; reuse the fill variant (resident from the fill pass) so no extra variant is warmed */
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_offset(slot, codepoint, key_offset);
         if (!g) {
             prev_cp = codepoint;
             continue;
@@ -611,7 +612,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
     if (s_text.deco.underline || s_text.deco.strikethrough) {
-        emit_line_decorations(p, end, m, scale, letter_tracking, line_advance, slot, metrics, color, &glyph_bias);
+        emit_line_decorations(p, end, m, scale, letter_tracking, line_advance, slot, metrics, fill_key, color, &glyph_bias);
     }
 }
 

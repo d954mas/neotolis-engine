@@ -2151,14 +2151,15 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* Set every decoration axis explicitly (0/off when absent) so nothing leaks between runs; the caller
- * resets once after the whole band. */
+/* Set every decoration axis explicitly (0/off when absent) so nothing leaks between runs; caller resets
+ * once after the band. Non-finite outline_w/shadow offsets normalize to off here -- the base style bypasses
+ * the push_* clamps, and a raw NaN/Inf would make the setter early-return and leak the prior run's axis. */
 static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *e, float opacity) {
     nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
     nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_UI_RICH_SYNTH_BOLD_WEIGHT : 0.0F);
 
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
-    if (stl->outline_w > 0.0F) {
+    if (stl->outline_w > 0.0F && isfinite(stl->outline_w)) {
         float oc[4];
         rich_unpack_color(stl->outline_color_abgr, opacity, oc);
         nt_text_renderer_set_outline(stl->outline_w, oc);
@@ -2169,7 +2170,9 @@ static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_s
     if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
         float sc[4];
         rich_unpack_color(stl->shadow_color_abgr, opacity, sc);
-        nt_text_renderer_set_shadow(stl->shadow_dx, stl->shadow_dy, 0.0F, sc);
+        const float sdx = isfinite(stl->shadow_dx) ? stl->shadow_dx : 0.0F;
+        const float sdy = isfinite(stl->shadow_dy) ? stl->shadow_dy : 0.0F;
+        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, sc);
     } else {
         const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
         nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);
