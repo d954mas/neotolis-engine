@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 8761819
+# Commit: 0a98c49
 
 ## WASM Section Sizes
 

@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 8761819
+# Commit: 0a98c49
 
 ## WASM Section Sizes
 
@@ -111,7 +111,7 @@ libnt_sprite_comp.a        10010 B
 libnt_sprite_renderer.a    48294 B
 libnt_text_renderer.a    1240540 B
 libnt_time.a                 900 B
-libnt_ui.a                613792 B
+libnt_ui.a                614048 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window_stub.a         2476 B
