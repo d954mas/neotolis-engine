@@ -1615,14 +1615,18 @@ Additional types (material, audio) will be added as needed.
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
 ```
-NtFontAssetHeader (16 bytes)
-  magic:        u32   (0x544E4F46 "FONT")
-  version:      u16   (2)
-  glyph_count:  u16
-  units_per_em: u16
-  ascent:       i16
-  descent:      i16   (negative)
-  line_gap:     i16
+NtFontAssetHeader (24 bytes)
+  magic:               u32   (0x544E4F46 "FONT")
+  version:             u16   (5)
+  glyph_count:         u16
+  units_per_em:        u16
+  ascent:              i16
+  descent:             i16   (negative)
+  line_gap:            i16
+  underline_position:  i16   (post.underlinePosition, font units)
+  underline_thickness: i16   (post.underlineThickness, font units)
+  strikeout_position:  i16   (OS/2.yStrikeoutPosition, font units)
+  strikeout_size:      i16   (OS/2.yStrikeoutSize, font units)
 
 NtFontGlyphEntry[glyph_count] (24 bytes each, sorted by codepoint for bsearch)
   codepoint:    u32
@@ -1641,6 +1645,8 @@ Per-glyph data (at data_offset):
 ```
 
 Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
+
+**v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. The runtime version guard rejects stale v4 packs to tofu, so all font `.ntpack` assets must be rebuilt.
 
 ### NT_ASSET_ATLAS binary format
 
@@ -3308,7 +3314,54 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `glyph_depth_bias`; survives `restore_gpu`, cleared on cold init) folded into the model on the CPU
   per draw — no flush, mixes within one batch — and the pass resets it to 0 so the lean never leaks
   onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
-  synthetic bold is deferred to #253.
+  synthetic bold instead emits an emboldened glyph variant — see the decoration contract in §32.2b.
+
+## 32.2b Text decoration (weight / outline / shadow / underline / strike)
+
+Five decoration axes are **renderer-level sticky state** on `nt_text_renderer`, set via
+`set_weight` / `set_outline` / `set_shadow` / `set_underline` / `set_strikethrough`. Both authoring
+fronts feed the SAME setters at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich text
+from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
+subsystem — decoration reuses the text pipeline and the `slug_text` shader.
+
+- **Units.** Text `font_size` is **px**. Everything decorative is **em** (a fraction of the text
+  height, so it scales with size): `weight`, `outline` width, and `shadow` (dx,dy) offset are all em,
+  converted `px = value × font_size` at emit (the shadow multiplies by `size`; weight/outline multiply
+  by `units_per_em` into the glyph-cache key). Underline/strike position + thickness come from the v5
+  font-header metrics (font units) scaled by `size`. One consistent rule: *size in px, decoration in em*.
+- **Glyph variants.** Synthetic weight and outline offset the glyph contour (Minkowski-style point-ring
+  offset + self-intersection resolution) and cache the result under a `(codepoint, quantized weight)`
+  key — a separate entry from the natural glyph, sharing the same curve/band textures so an emboldened
+  or outlined run still batches into ONE draw. This geometry runs only on the glyph-cache **miss path**
+  (not per frame); the outline pass grows the fill weight by `outline_w`, the shadow pass reuses the
+  outermost visible variant (no new key). This CPU offset/self-intersection resolution is a **deliberate,
+  bounded exception** to "builder does the heavy work; runtime stays simple": it is amortized (once per
+  `(codepoint, weight)` variant, then cached), uses only static scratch (no heap), degrades gracefully at
+  fixed caps, and is guarded by a worst-case decode-miss budget test. Prebaking a fixed set of weight
+  variants in the builder remains an option if a workload ever thrashes the variant cache.
+- **Painter order & batching.** Per run: **shadow → outline → fill → underline/strike**. Underline and
+  strike are one continuous solid quad per line, emitted as a **sentinel** vertex (`band_count == 0`,
+  which the shader reads as full coverage) in the same vertex buffer / material — no separate draw
+  call, no flush, so decoration never breaks the batch. This per-run order + continuous-per-line underline
+  is the **label path**: `nt_ui_label` draws the whole label in one `draw_n`, so the passes group over it
+  and the underline is one quad. **Rich text is different**: it atomizes each run into **word atoms** (and
+  an `<fx>` run further into **per-glyph** draws), and each atom is its own `draw_n`, so rich decoration is
+  **per-atom** — outline/shadow ride each atom (necessary for `<fx>`, where a per-run pass would detach
+  from the moving glyphs) and underline/strike are per-atom (per word, or per glyph under `<fx>`), NOT one
+  continuous per-line quad (so a multi-word underline is segmented at word gaps, and cross-atom painter
+  order is only approximate where atoms overlap). Known limitation; a continuous per-line rich underline
+  would need a per-line decoration emit (renderer span API), tracked separately.
+- **Reset & leak-safety.** Decoration state is sticky (survives `restore_gpu`, cleared on cold
+  init/shutdown). Because it persists, the UI calls `nt_text_renderer_reset_decoration()` after each
+  decorated run so nothing leaks onto the next. Every float setter is hard-guarded with a real
+  `if (!isfinite)` (NOT an assert — `NT_ASSERT` is a no-op in shipping, and a NaN would poison the
+  offset/quantize math).
+- **Parent opacity** folds into the fill AND the outline/shadow alpha (the walker pre-multiplies only
+  the fill's `textColor.a`, so `nt_ui_label_deco_apply` / the rich emit multiply the decoration colors
+  by the accumulated opacity too — a faded panel fades its outline/shadow consistently).
+- **Fallback (explicit).** Bold with no bold family member → synthetic weight; italic with no italic
+  member → faux-italic oblique (§32.2); underline/strike are decoration toggles needing no family
+  member. A label has a single `font_id`, so its bold always degenerates to the synthetic weight.
 
 ## 32.3 Inline images ride the standard u8 sprite path
 

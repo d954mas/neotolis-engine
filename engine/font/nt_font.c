@@ -2,6 +2,7 @@
 #include "font/nt_font_hot.h"
 #include "font/nt_font_internal.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -164,27 +165,37 @@ static uint16_t next_pot16(uint16_t v) {
     return (uint16_t)(v + 1);
 }
 
-/* Lookup: returns pointer to cache entry, or NULL on miss */
-static nt_font_cache_slot_t *hash_lookup(nt_font_slot_t *slot, uint32_t codepoint) {
+/* fmix32(cp ^ off*golden) & mask. MUST be identical in lookup/insert/remove
+ * (incl. the backshift home recompute) or probe chains corrupt on eviction. */
+static inline uint16_t key_home(uint16_t mask, uint32_t cp, int16_t off) {
+    uint32_t h = cp ^ ((uint32_t)(int32_t)off * 0x9E3779B1U);
+    h ^= h >> 16;
+    h *= 0x7FEB352DU;
+    h ^= h >> 15;
+    return (uint16_t)(h & mask);
+}
+
+/* Lookup: returns pointer to cache entry for (codepoint, key_offset), or NULL on miss */
+static nt_font_cache_slot_t *hash_lookup(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
     for (;;) {
         uint16_t val = slot->hash_table[pos];
         if (val == 0) {
             return NULL;
         }
         nt_font_cache_slot_t *cs = &slot->cache[val - 1];
-        if (cs->entry.codepoint == codepoint) {
+        if (cs->entry.codepoint == codepoint && cs->key_offset == key_offset) {
             return cs;
         }
         pos = (uint16_t)((pos + 1) & mask);
     }
 }
 
-/* Insert: slot_idx is index into cache[] */
-static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, uint16_t slot_idx) {
+/* Insert: slot_idx is index into cache[]; the slot's entry.codepoint + key_offset are already set */
+static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset, uint16_t slot_idx) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
     for (;;) {
         if (slot->hash_table[pos] == 0) {
             slot->hash_table[pos] = (uint16_t)(slot_idx + 1);
@@ -194,11 +205,11 @@ static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, uint16_t slot_
     }
 }
 
-/* Remove one entry by codepoint with backshift to keep probe chains intact.
+/* Remove one (codepoint, key_offset) entry with backshift to keep probe chains intact.
  * Called by evict_lru before clearing the cache slot — O(cluster) instead of O(N) rebuild. */
-static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
+static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
-    uint16_t pos = (uint16_t)(codepoint & mask);
+    uint16_t pos = key_home(mask, codepoint, key_offset);
 
     /* Find the entry */
     for (;;) {
@@ -206,7 +217,7 @@ static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
             return; /* not found — nothing to remove */
         }
         uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
-        if (slot->cache[idx].entry.codepoint == codepoint) {
+        if (slot->cache[idx].entry.codepoint == codepoint && slot->cache[idx].key_offset == key_offset) {
             break;
         }
         pos = (uint16_t)((pos + 1) & mask);
@@ -220,7 +231,7 @@ static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
             break; /* end of cluster */
         }
         uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
-        uint16_t home = (uint16_t)(slot->cache[idx].entry.codepoint & mask);
+        uint16_t home = key_home(mask, slot->cache[idx].entry.codepoint, slot->cache[idx].key_offset);
         /* Check if this entry's home is at or before the empty slot (wrapping) */
         bool should_move = (empty <= pos) ? (home <= empty || home > pos) : (home <= empty && home > pos);
         if (should_move) {
@@ -355,7 +366,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
     NT_ASSERT(found); /* no evictable entry found */
 
     /* Remove from hash table before clearing slot */
-    hash_remove(slot, slot->cache[victim].entry.codepoint);
+    hash_remove(slot, slot->cache[victim].entry.codepoint, slot->cache[victim].key_offset);
 
     /* Clear victim */
     memset(&slot->cache[victim], 0, sizeof(nt_font_cache_slot_t));
@@ -538,12 +549,13 @@ static void generate_tofu(nt_font_slot_t *slot) {
     cs->entry.bbox_x1 = tofu_w;
     cs->entry.bbox_y1 = y1;
     cs->entry.is_tofu = true;
+    cs->key_offset = 0; /* tofu is weight-agnostic */
     cs->lru_frame = s_font.frame_counter;
 
     slot->curve_write_head += needed_texels;
     slot->glyphs_cached++;
     slot->tofu_generated = true;
-    hash_insert(slot, 0xFFFFFFFFU, cache_idx);
+    hash_insert(slot, 0xFFFFFFFFU, 0, cache_idx);
 }
 
 /* ---- Decode contours and upload glyph to GPU ---- */
@@ -573,6 +585,18 @@ static inline int16_t read_varlen_delta(const uint8_t **rp) {
     return val;
 }
 
+/* Saturating float->int16 for the widened emboldened bbox: an absurd (unclamped) weight can push the
+ * extent past INT16, and a bare cast would be C UB. Mirrors nt_font_quantize_weight's clamp. */
+static inline int16_t clamp_i16(float v) {
+    if (v > 32767.0F) {
+        return 32767;
+    }
+    if (v < -32768.0F) {
+        return -32768;
+    }
+    return (int16_t)v;
+}
+
 /* Emit one quadratic curve to the output buffer */
 static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_c, float p0x, float p0y, float p1x, float p1y, float p2x, float p2y) {
     if (*total < max_c) {
@@ -581,131 +605,705 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
     }
 }
 
-/* Decode v4 point-based contour data into absolute float curves.
- * Handles implicit midpoints between consecutive off-curve points. */
+/* CPU embolden + offset self-intersection resolution; scratch is static preallocated
+ * (no heap on the decode miss path). Overflow degrades to the raw offset ring, never crashes. */
+#define NT_FONT_OFFSET_MAX_JOINS 64 /* reflex retraction joins/contour; beyond -> plain miter (>= today) */
+#define NT_FONT_OFFSET_MAX_XINGS 64 /* proper self-crossings/ring; overflow -> keep raw ring (= today) */
+#define NT_FONT_OFFSET_RING_MAX (NT_FONT_MAX_POINTS_PER_CONTOUR + (2 * NT_FONT_OFFSET_MAX_JOINS))
+#define NT_FONT_OFFSET_NODE_MAX (NT_FONT_OFFSET_RING_MAX + (2 * NT_FONT_OFFSET_MAX_XINGS))
+/* A counter (hole) keeps >= this fraction of its OWN inradius under any offset, so it never
+ * closes on any font. Fraction-of-inradius (not em) => scale/font-invariant openness. */
+#define NT_FONT_COUNTER_KEEP 0.35F
+
+/* Offset+joins destination ring: offset_with_joins reads the base s_decode_pts_*, writes here,
+ * so vertex adjacency reads pristine source coords (no in-place snapshot needed). */
+static int32_t s_offset_x[NT_FONT_OFFSET_RING_MAX];
+static int32_t s_offset_y[NT_FONT_OFFSET_RING_MAX];
+static uint8_t s_offset_on[NT_FONT_OFFSET_RING_MAX];
+
+/* Offset a point ring by W (embolden) into a SEPARATE dst ring. sign=-1 grows the outer /
+ * shrinks counters for the builder's stbtt winding; miter d capped at 2.0. No W clamp —
+ * set_weight applies W exactly (explicit-over-implicit); 1e-6 length guard + lrintf stay finite.
+ * At a cap-binding reflex GROWER corner, a retraction join (wall, vertex, wall) makes the
+ * converging walls cross at the true trim point; resolve_and_emit excises the pocket. a0 =
+ * source signed area (winding ref); thin (W<0) swaps grower/shrinker (NOT raster-validated). */
+static uint16_t offset_with_joins(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, int32_t *dx, int32_t *dy, uint8_t *don, float W, double a0) {
+    if (W == 0.0F || n < 2) {
+        for (uint16_t i = 0; i < n; i++) {
+            dx[i] = sx[i];
+            dy[i] = sy[i];
+            don[i] = son[i];
+        }
+        return n;
+    }
+    bool grower = (W > 0.0F) ? (a0 < 0.0) : (a0 > 0.0);
+    uint16_t joins = 0;
+    uint16_t m = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t p = (i == 0) ? (uint16_t)(n - 1) : (uint16_t)(i - 1);
+        uint16_t q = (uint16_t)((i + 1) % n);
+        float inx = (float)(sx[i] - sx[p]);
+        float iny = (float)(sy[i] - sy[p]);
+        float oux = (float)(sx[q] - sx[i]);
+        float ouy = (float)(sy[q] - sy[i]);
+        float li = sqrtf((inx * inx) + (iny * iny)) + 1e-6F;
+        float lo = sqrtf((oux * oux) + (ouy * ouy)) + 1e-6F;
+        /* normals: rotate tangent -90 => n=(ty,-tx), normalized */
+        float nix = iny / li;
+        float niy = -inx / li;
+        float nox = ouy / lo;
+        float noy = -oux / lo;
+        float dot = (nix * nox) + (niy * noy);
+        float turn = (inx * ouy) - (iny * oux);
+        bool reflex = (turn != 0.0F) && ((turn > 0.0F) != (a0 > 0.0));
+        if (grower && son[i] && reflex && dot <= -0.5F && joins < NT_FONT_OFFSET_MAX_JOINS && (uint32_t)m + 3 <= NT_FONT_OFFSET_RING_MAX) {
+            /* wall endpoints at exact R = W/2 along each edge normal (sign -1 folded in) */
+            dx[m] = sx[i] + (int32_t)lrintf(-nix * W * 0.5F);
+            dy[m] = sy[i] + (int32_t)lrintf(-niy * W * 0.5F);
+            don[m] = 1;
+            m++;
+            dx[m] = sx[i]; /* original vertex = retraction anchor */
+            dy[m] = sy[i];
+            don[m] = 1;
+            m++;
+            dx[m] = sx[i] + (int32_t)lrintf(-nox * W * 0.5F);
+            dy[m] = sy[i] + (int32_t)lrintf(-noy * W * 0.5F);
+            don[m] = 1;
+            m++;
+            joins++;
+            continue;
+        }
+        float ssx = nix + nox;
+        float ssy = niy + noy;
+        float d = 1.0F / fmaxf(1.0F + dot, 0.25F); /* miter, clamped */
+        d = fminf(d, 2.0F);                        /* hard cap: no convex spikes */
+        dx[m] = sx[i] + (int32_t)lrintf(-ssx * d * W * 0.5F);
+        dy[m] = sy[i] + (int32_t)lrintf(-ssy * d * W * 0.5F);
+        don[m] = son[i];
+        m++;
+    }
+    return m;
+}
+
+/* Signed area of the closed point ring (shoelace); int64 accum avoids overflow. */
+static double contour_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
+    int64_t acc = 0;
+    for (uint16_t p = 0; p < n; p++) {
+        uint16_t q = (uint16_t)((p + 1) % n);
+        acc += ((int64_t)x[p] * y[q]) - ((int64_t)x[q] * y[p]);
+    }
+    return 0.5 * (double)acc;
+}
+
+/* orient sign of (a,b,c): >0 CCW, <0 CW, 0 collinear. int64 avoids int32 overflow. */
+static int contour_orient(int32_t ax, int32_t ay, int32_t bx, int32_t by, int32_t cx, int32_t cy) {
+    int64_t cross = ((int64_t)(bx - ax) * (cy - ay)) - ((int64_t)(by - ay) * (cx - ax));
+    return (cross > 0) - (cross < 0);
+}
+
+/* PROPER crossing between segments (a,b) and (c,d): all four orients non-zero and
+ * opposite on each edge. Shared vertices (collinear/touching) are NOT crossings. */
+static bool seg_proper_cross(int32_t ax, int32_t ay, int32_t bx, int32_t by, int32_t cx, int32_t cy, int32_t dx, int32_t dy) {
+    int o1 = contour_orient(ax, ay, bx, by, cx, cy);
+    int o2 = contour_orient(ax, ay, bx, by, dx, dy);
+    int o3 = contour_orient(cx, cy, dx, dy, ax, ay);
+    int o4 = contour_orient(cx, cy, dx, dy, bx, by);
+    return o1 != 0 && o2 != 0 && o3 != 0 && o4 != 0 && o1 != o2 && o3 != o4;
+}
+
+/* Does the closed ring have any proper self-crossing? Used by the seal-radius search (and the
+ * test hook). O(n²), decode miss path only; returns on the first crossing. */
+static bool ring_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) {
+    if (n < 4) {
+        return false;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t i2 = (uint16_t)((i + 1) % n);
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            if (j == i2 || j2 == i) {
+                continue;
+            }
+            if (seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// #region Offset self-intersection resolution — uncross + signed-loop filter + survival
+/* One recorded self-crossing: the two crossing edges (i,i+1)x(j,j+1) and the rounded
+ * intersection point (grid-snapped like the int point ring). */
+typedef struct {
+    uint16_t ei, ej;
+    int32_t px, py;
+    double ti, tj;
+} nt_offset_xing_t;
+static nt_offset_xing_t s_offset_xings[NT_FONT_OFFSET_MAX_XINGS];
+
+/* Record all proper self-crossings of the ring (O(n²), decode miss path only). Returns
+ * count, or -1 on overflow (caller keeps the raw ring = today's rendering, never crashes). */
+static int find_offset_crossings(const int32_t *x, const int32_t *y, uint16_t n) {
+    int cnt = 0;
+    if (n < 4) {
+        return 0;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t i2 = (uint16_t)((i + 1) % n);
+        for (uint16_t j = (uint16_t)(i + 1); j < n; j++) {
+            uint16_t j2 = (uint16_t)((j + 1) % n);
+            if (j == i2 || j2 == i) {
+                continue; /* adjacent edges share an endpoint */
+            }
+            if (!seg_proper_cross(x[i], y[i], x[i2], y[i2], x[j], y[j], x[j2], y[j2])) {
+                continue;
+            }
+            if (cnt >= NT_FONT_OFFSET_MAX_XINGS) {
+                return -1;
+            }
+            double rx = (double)(x[i2] - x[i]);
+            double ry = (double)(y[i2] - y[i]);
+            double sxx = (double)(x[j2] - x[j]);
+            double syy = (double)(y[j2] - y[j]);
+            double den = (rx * syy) - (ry * sxx); /* != 0 for a proper crossing */
+            double qx = (double)(x[j] - x[i]);
+            double qy = (double)(y[j] - y[i]);
+            double t = ((qx * syy) - (qy * sxx)) / den;
+            double u = ((qx * ry) - (qy * rx)) / den;
+            s_offset_xings[cnt].ei = i;
+            s_offset_xings[cnt].ej = j;
+            s_offset_xings[cnt].ti = t;
+            s_offset_xings[cnt].tj = u;
+            s_offset_xings[cnt].px = (int32_t)lrint((double)x[i] + (t * rx));
+            s_offset_xings[cnt].py = (int32_t)lrint((double)y[i] + (t * ry));
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+/* Distance from (px,py) to the closed ring's boundary (min over edges). */
+static double ring_point_dist(double px, double py, const int32_t *x, const int32_t *y, uint16_t n) {
+    double best = 1e30;
+    for (uint16_t j = 0; j < n; j++) {
+        uint16_t j2 = (uint16_t)((j + 1) % n);
+        double ax = (double)x[j];
+        double ay = (double)y[j];
+        double vx = (double)x[j2] - ax;
+        double vy = (double)y[j2] - ay;
+        double wx = px - ax;
+        double wy = py - ay;
+        double vv = (vx * vx) + (vy * vy);
+        double tt = (vv > 1e-12) ? ((wx * vx) + (wy * vy)) / vv : 0.0;
+        if (tt < 0.0) {
+            tt = 0.0;
+        } else if (tt > 1.0) {
+            tt = 1.0;
+        }
+        double ddx = wx - (tt * vx);
+        double ddy = wy - (tt * vy);
+        double d2 = (ddx * ddx) + (ddy * ddy);
+        if (d2 < best) {
+            best = d2;
+        }
+    }
+    return sqrt(best);
+}
+
+/* Even-odd containment of (px,py) in the closed ring. */
+static bool ring_point_inside(double px, double py, const int32_t *x, const int32_t *y, uint16_t n) {
+    bool inside = false;
+    for (uint16_t j = 0; j < n; j++) {
+        uint16_t j2 = (uint16_t)((j + 1) % n);
+        double ay = (double)y[j];
+        double cy = (double)y[j2];
+        if ((ay > py) == (cy > py)) {
+            continue;
+        }
+        double tt = (py - ay) / (cy - ay);
+        double xi = (double)x[j] + (tt * ((double)x[j2] - (double)x[j]));
+        if (xi > px) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+/* Inradius = radius of the largest inscribed disk (pole of inaccessibility), via Polylabel-style
+ * bounded quadtree refinement to PREC. A counter's Minkowski erosion by R is non-empty IFF
+ * inradius > R — the exact fill/trim boundary, no fudge constant. */
+typedef struct {
+    double cx, cy, h;
+} nt_pa_cell_t;
+#define NT_FONT_INRADIUS_STACK 512
+#define NT_FONT_INRADIUS_PREC 0.25 /* sub-unit convergence; well below the weight-quantization step */
+static nt_pa_cell_t s_pa_stack[NT_FONT_INRADIUS_STACK];
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves) {
-    const uint8_t *rp = contour_data;
-    uint16_t contour_count;
-    memcpy(&contour_count, rp, 2);
-    rp += 2;
+static double poly_inradius_pole(const int32_t *x, const int32_t *y, uint16_t n, double *out_cx, double *out_cy) {
+    if (n < 3) {
+        return 0.0;
+    }
+    double minx = 1e30;
+    double miny = 1e30;
+    double maxx = -1e30;
+    double maxy = -1e30;
+    for (uint16_t i = 0; i < n; i++) {
+        double px = (double)x[i];
+        double py = (double)y[i];
+        minx = px < minx ? px : minx;
+        maxx = px > maxx ? px : maxx;
+        miny = py < miny ? py : miny;
+        maxy = py > maxy ? py : maxy;
+    }
+    double w = maxx - minx;
+    double ht = maxy - miny;
+    double cell = w < ht ? w : ht;
+    if (cell <= 0.0) {
+        return 0.0;
+    }
+    double half = cell * 0.5;
+    int nxc = (int)(w / cell) + 1; /* seed a cell grid over the bbox (integer induction) */
+    int nyc = (int)(ht / cell) + 1;
+    int sp = 0;
+    for (int iy = 0; iy < nyc && sp < NT_FONT_INRADIUS_STACK; iy++) {
+        for (int ix = 0; ix < nxc && sp < NT_FONT_INRADIUS_STACK; ix++) {
+            s_pa_stack[sp++] = (nt_pa_cell_t){minx + half + ((double)ix * cell), miny + half + ((double)iy * cell), half};
+        }
+    }
+    double bcx = minx + (w * 0.5);
+    double bcy = miny + (ht * 0.5);
+    double best = ring_point_inside(bcx, bcy, x, y, n) ? ring_point_dist(bcx, bcy, x, y, n) : -1.0;
+    double best_cx = bcx;
+    double best_cy = bcy;
+    int guard = 0;
+    while (sp > 0 && guard++ < 200000) {
+        nt_pa_cell_t c = s_pa_stack[--sp];
+        double d = ring_point_inside(c.cx, c.cy, x, y, n) ? ring_point_dist(c.cx, c.cy, x, y, n) : -ring_point_dist(c.cx, c.cy, x, y, n);
+        if (d > best) {
+            best = d;
+            best_cx = c.cx;
+            best_cy = c.cy;
+        }
+        if (c.h < NT_FONT_INRADIUS_PREC) {
+            continue;
+        }
+        if (d + (c.h * 1.4142135623730951) <= best) {
+            continue; /* prune: this cell cannot contain a deeper interior point */
+        }
+        double hh = c.h * 0.5;
+        if (sp + 4 <= NT_FONT_INRADIUS_STACK) {
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx - hh, c.cy - hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx + hh, c.cy - hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx - hh, c.cy + hh, hh};
+            s_pa_stack[sp++] = (nt_pa_cell_t){c.cx + hh, c.cy + hh, hh};
+        }
+    }
+    if (out_cx != NULL) {
+        *out_cx = best_cx;
+    }
+    if (out_cy != NULL) {
+        *out_cy = best_cy;
+    }
+    return best > 0.0 ? best : 0.0;
+}
 
-    uint16_t total_curves = 0;
+/* Largest inscribed-disk radius (pole of inaccessibility); pole center discarded. */
+static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) { return poly_inradius_pole(x, y, n, NULL, NULL); }
 
-    for (uint16_t ci = 0; ci < contour_count; ci++) {
-        uint16_t point_count;
-        memcpy(&point_count, rp, 2);
-        rp += 2;
+/* Whole-glyph ORIGINAL outline (weight-0 curves) + its flat winding/distance tests: the reference
+ * for the grower dilation-membership filter in resolve_and_emit. Built once per offset decode. */
+static nt_curve_t s_orig_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
+static uint16_t s_orig_count;
+#define NT_FONT_ORIG_FLAT_K 6 /* sub-segments per quad for the coarse inside/dist membership probe */
 
-        uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(point_count);
-        const uint8_t *flags = rp;
-        rp += flags_bytes;
+/* Nonzero-winding containment of (px,py) in the whole original glyph (all contours, flattened). */
+static bool orig_glyph_inside(double px, double py, const nt_curve_t *cv, uint16_t nc) {
+    int wind = 0;
+    for (uint16_t i = 0; i < nc; i++) {
+        double ax = (double)cv[i].p0x;
+        double ay = (double)cv[i].p0y;
+        for (int k = 1; k <= NT_FONT_ORIG_FLAT_K; k++) {
+            double t = (double)k / (double)NT_FONT_ORIG_FLAT_K;
+            double u = 1.0 - t;
+            double bx = (u * u * (double)cv[i].p0x) + (2.0 * u * t * (double)cv[i].p1x) + (t * t * (double)cv[i].p2x);
+            double by = (u * u * (double)cv[i].p0y) + (2.0 * u * t * (double)cv[i].p1y) + (t * t * (double)cv[i].p2y);
+            if ((ay > py) != (by > py)) {
+                double xint = ax + (((py - ay) / (by - ay)) * (bx - ax));
+                if (xint > px) {
+                    wind += (by > ay) ? 1 : -1;
+                }
+            }
+            ax = bx;
+            ay = by;
+        }
+    }
+    return wind != 0;
+}
 
-        // #region Read all points (absolute coordinates)
-        /* First point is absolute int16 */
-        int16_t first_x;
-        int16_t first_y;
-        memcpy(&first_x, rp, 2);
-        rp += 2;
-        memcpy(&first_y, rp, 2);
-        rp += 2;
+/* Min distance from (px,py) to the whole original glyph boundary (all contours, flattened). */
+static double orig_glyph_dist(double px, double py, const nt_curve_t *cv, uint16_t nc) {
+    double best = 1e30;
+    for (uint16_t i = 0; i < nc; i++) {
+        double ax = (double)cv[i].p0x;
+        double ay = (double)cv[i].p0y;
+        for (int k = 1; k <= NT_FONT_ORIG_FLAT_K; k++) {
+            double t = (double)k / (double)NT_FONT_ORIG_FLAT_K;
+            double u = 1.0 - t;
+            double bx = (u * u * (double)cv[i].p0x) + (2.0 * u * t * (double)cv[i].p1x) + (t * t * (double)cv[i].p2x);
+            double by = (u * u * (double)cv[i].p0y) + (2.0 * u * t * (double)cv[i].p1y) + (t * t * (double)cv[i].p2y);
+            double vx = bx - ax;
+            double vy = by - ay;
+            double wx = px - ax;
+            double wy = py - ay;
+            double vv = (vx * vx) + (vy * vy);
+            double tt = (vv > 1e-12) ? (((wx * vx) + (wy * vy)) / vv) : 0.0;
+            if (tt < 0.0) {
+                tt = 0.0;
+            } else if (tt > 1.0) {
+                tt = 1.0;
+            }
+            double ddx = wx - (tt * vx);
+            double ddy = wy - (tt * vy);
+            double d2 = (ddx * ddx) + (ddy * ddy);
+            if (d2 < best) {
+                best = d2;
+            }
+            ax = bx;
+            ay = by;
+        }
+    }
+    return sqrt(best);
+}
 
-        /* Decode all points into static buffers (avoids ~72 KB on stack) */
-        int32_t *pts_x = s_decode_pts_x;
-        int32_t *pts_y = s_decode_pts_y;
-        uint8_t *pts_on = s_decode_pts_on;
-        NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
+/* Scratch ring for the seal-radius search (trial offsets; separate from the emit ring). */
+static int32_t s_seal_x[NT_FONT_OFFSET_RING_MAX];
+static int32_t s_seal_y[NT_FONT_OFFSET_RING_MAX];
+static uint8_t s_seal_on[NT_FONT_OFFSET_RING_MAX];
 
-        pts_x[0] = first_x;
-        pts_y[0] = first_y;
-        pts_on[0] = (flags[0] & 1U) != 0;
+/* Seal radius: the largest inward offset R at which the counter ring does NOT self-intersect
+ * (a sealing neck/channel surfaces as a self-intersection). Binary search in (0, inradius];
+ * convex counters never self-intersect -> inradius bounds it. Decode miss path only. */
+static double counter_seal_radius(const int32_t *bx, const int32_t *by, const uint8_t *bon, uint16_t bn, double a0, float wsign, double inradius) {
+    if (inradius <= 0.0) {
+        return 0.0;
+    }
+    double hi = inradius * 0.98;
+    uint16_t m = offset_with_joins(bx, by, bon, bn, s_seal_x, s_seal_y, s_seal_on, copysignf((float)(2.0 * hi), wsign), a0);
+    if (!ring_self_intersects(s_seal_x, s_seal_y, m)) {
+        return inradius; /* convex counter: no seal, inradius bounds the offset */
+    }
+    double lo = 0.0;
+    for (int it = 0; it < 20; it++) {
+        double mid = 0.5 * (lo + hi);
+        m = offset_with_joins(bx, by, bon, bn, s_seal_x, s_seal_y, s_seal_on, copysignf((float)(2.0 * mid), wsign), a0);
+        if (ring_self_intersects(s_seal_x, s_seal_y, m)) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    return lo; /* largest R with no self-intersection ~ just below the seal onset */
+}
 
-        int32_t px = first_x;
-        int32_t py = first_y;
-        for (uint16_t p = 1; p < point_count; p++) {
-            int16_t dx = read_varlen_delta(&rp);
-            int16_t dy = read_varlen_delta(&rp);
-            px += dx;
-            py += dy;
+/* Doubly-implicit node ring for uncrossing: next[] stays a permutation, so loops are
+ * clean cycles. Sized for the offset ring + two split nodes per crossing. */
+typedef struct {
+    int32_t x, y;
+    int next;
+    uint8_t on;
+    uint8_t used;
+} nt_offset_node_t;
+static nt_offset_node_t s_offset_nodes[NT_FONT_OFFSET_NODE_MAX];
+static int32_t s_offset_lx[NT_FONT_OFFSET_NODE_MAX];
+static int32_t s_offset_ly[NT_FONT_OFFSET_NODE_MAX];
+static uint8_t s_offset_lon[NT_FONT_OFFSET_NODE_MAX];
+// #endregion
+
+/* Walk a closed point ring into quadratic curves (TrueType rules; on-curve = degenerate
+ * line quad, off→off = implicit midpoint). Shared by the plain and resolved paths. */
+static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8_t *pon, uint16_t n, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    if (n == 0) {
+        return;
+    }
+    uint16_t i = 0;
+    uint16_t start = 0;
+    while (start < n && !pon[start]) {
+        start++;
+    }
+    if (start == n) {
+        start = 0; /* all off-curve: start from implicit midpoint of first two */
+    }
+    float cur_x;
+    float cur_y;
+    if (pon[start]) {
+        cur_x = (float)px[start];
+        cur_y = (float)py[start];
+        i = (uint16_t)((start + 1) % n);
+    } else {
+        cur_x = (float)(px[0] + px[1]) * 0.5F;
+        cur_y = (float)(py[0] + py[1]) * 0.5F;
+        i = 0;
+    }
+    uint16_t steps = 0;
+    while (steps < n) {
+        uint16_t idx = i % n;
+        if (pon[idx]) {
+            float ex = (float)px[idx];
+            float ey = (float)py[idx];
+            emit_curve(curves, total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
+            cur_x = ex;
+            cur_y = ey;
+            i = (idx + 1) % n;
+            steps++;
+        } else {
+            float cx = (float)px[idx];
+            float cy = (float)py[idx];
+            uint16_t next = (idx + 1) % n;
+            if (pon[next]) {
+                float ex = (float)px[next];
+                float ey = (float)py[next];
+                emit_curve(curves, total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
+                cur_x = ex;
+                cur_y = ey;
+                i = (next + 1) % n;
+                steps += 2;
+            } else {
+                float mx = (cx + (float)px[next]) * 0.5F;
+                float my = (cy + (float)py[next]) * 0.5F;
+                emit_curve(curves, total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
+                cur_x = mx;
+                cur_y = my;
+                i = next; /* don't skip next — it becomes the control for the next segment */
+                steps++;
+            }
+        }
+    }
+}
+
+/* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
+ * SAFETY gate: a shrinker whose erosion by r_off empties (inradius <= r_off) fills solid;
+ * counter-preservation caps r_off < inradius so this never fires for a real counter — it is
+ * the fallback for a degenerate/uncapped path. Loops opposing the original winding are dropped. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker,
+                             double base_inradius, double r_off, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
+    (void)bx;
+    (void)by;
+    (void)bn;
+    if (is_shrinker && r_off > 0.0 && base_inradius <= r_off) {
+        return; /* erosion empty -> fills solid (safety; counter-preserve caps below inradius) */
+    }
+    int nx = find_offset_crossings(ox, oy, on_n);
+    if (nx <= 0) {
+        convert_point_ring(ox, oy, oon, on_n, curves, total_curves, max_curves); /* simple ring or overflow: raw */
+        return;
+    }
+
+    // #region Build node ring with per-edge crossing splits
+    for (uint16_t i = 0; i < on_n; i++) {
+        s_offset_nodes[i] = (nt_offset_node_t){ox[i], oy[i], (i + 1) % on_n, oon[i], 0};
+    }
+    int nn = on_n;
+    for (int k = 0; k < nx; k++) { /* crossing k owns two coincident nodes, one per strand */
+        s_offset_nodes[nn] = (nt_offset_node_t){s_offset_xings[k].px, s_offset_xings[k].py, -1, 1, 0};
+        s_offset_nodes[nn + 1] = (nt_offset_node_t){s_offset_xings[k].px, s_offset_xings[k].py, -1, 1, 0};
+        nn += 2;
+    }
+    for (uint16_t e = 0; e < on_n; e++) { /* splice each edge's crossings in ascending-t order */
+        int list[8];
+        double lt[8];
+        int lc = 0;
+        for (int k = 0; k < nx; k++) {
+            if (s_offset_xings[k].ei == e || s_offset_xings[k].ej == e) {
+                if (lc >= 8) {
+                    convert_point_ring(ox, oy, oon, on_n, curves, total_curves, max_curves); /* >8 crossings on one edge: bail to raw */
+                    return;
+                }
+                list[lc] = (int)on_n + (2 * k) + (s_offset_xings[k].ej == e ? 1 : 0);
+                lt[lc] = (s_offset_xings[k].ej == e) ? s_offset_xings[k].tj : s_offset_xings[k].ti;
+                lc++;
+            }
+        }
+        if (lc == 0) {
+            continue;
+        }
+        for (int a = 1; a < lc; a++) { /* insertion sort by t */
+            int li = list[a];
+            double ta = lt[a];
+            int b = a - 1;
+            while (b >= 0 && lt[b] > ta) {
+                list[b + 1] = list[b];
+                lt[b + 1] = lt[b];
+                b--;
+            }
+            list[b + 1] = li;
+            lt[b + 1] = ta;
+        }
+        int tail = s_offset_nodes[e].next;
+        int prev = (int)e;
+        for (int a = 0; a < lc; a++) {
+            s_offset_nodes[prev].next = list[a];
+            prev = list[a];
+        }
+        s_offset_nodes[prev].next = tail;
+    }
+    for (int k = 0; k < nx; k++) { /* uncross: orientation-preserving smoothing (swap outgoing) */
+        int na = (int)on_n + (2 * k);
+        int nb = na + 1;
+        int tmp = s_offset_nodes[na].next;
+        s_offset_nodes[na].next = s_offset_nodes[nb].next;
+        s_offset_nodes[nb].next = tmp;
+    }
+    // #endregion
+
+    // #region Extract loops, filter by orientation sign + erosion survival
+    bool orig_pos = a0 > 0.0;
+    for (int s = 0; s < nn; s++) {
+        if (s_offset_nodes[s].used) {
+            continue;
+        }
+        int cnt = 0;
+        int cur = s;
+        do {
+            s_offset_nodes[cur].used = 1;
+            if (cnt == 0 || s_offset_lx[cnt - 1] != s_offset_nodes[cur].x || s_offset_ly[cnt - 1] != s_offset_nodes[cur].y) {
+                s_offset_lx[cnt] = s_offset_nodes[cur].x; /* dedupe consecutive coincident points */
+                s_offset_ly[cnt] = s_offset_nodes[cur].y;
+                s_offset_lon[cnt] = s_offset_nodes[cur].on;
+                cnt++;
+            }
+            cur = s_offset_nodes[cur].next;
+        } while (cur != s && cnt <= nn);
+        NT_ASSERT(cnt <= nn); /* next[] is a permutation — a longer walk means a corrupt chain */
+        while (cnt > 1 && s_offset_lx[cnt - 1] == s_offset_lx[0] && s_offset_ly[cnt - 1] == s_offset_ly[0]) {
+            cnt--; /* drop closing duplicate */
+        }
+        if (cnt < 3) {
+            continue;
+        }
+        double la = contour_signed_area(s_offset_lx, s_offset_ly, (uint16_t)cnt);
+        if (fabs(la) < 1.0) {
+            continue; /* sliver */
+        }
+        if ((la > 0.0) != orig_pos) {
+            /* Opposite-wound loop → would carve a hole. A SHRINKER drops it (D1 winding-
+             * cancellation notch). A GROWER keeps it ONLY if its deepest interior point lies
+             * OUTSIDE the whole original glyph's dilation — not inside the original fill AND
+             * farther than r_off from any original edge (real re-entrant counter, not a notch). */
+            if (is_shrinker) {
+                continue;
+            }
+            double cx = 0.0;
+            double cy = 0.0;
+            double pole = poly_inradius_pole(s_offset_lx, s_offset_ly, (uint16_t)cnt, &cx, &cy);
+            /* No interior pole (degenerate thin loop): cx/cy would fall OUTSIDE the loop, so the
+             * membership probe is meaningless — drop it (a sub-pixel sliver either way). */
+            if (pole <= 0.0) {
+                continue;
+            }
+            bool in_dilation = orig_glyph_inside(cx, cy, s_orig_curves, s_orig_count) || (orig_glyph_dist(cx, cy, s_orig_curves, s_orig_count) <= r_off);
+            if (in_dilation) {
+                continue;
+            }
+        }
+        convert_point_ring(s_offset_lx, s_offset_ly, s_offset_lon, (uint16_t)cnt, curves, total_curves, max_curves);
+    }
+    // #endregion
+}
+
+/* Parse one v4 contour's absolute points, advancing *rp; fills pts_x/y/on, returns point_count.
+ * Shared by the plain (pass 0) and the two offset passes so re-walking the blob stays consistent. */
+static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t *pts_y, uint8_t *pts_on) {
+    uint16_t point_count;
+    memcpy(&point_count, *rp, 2);
+    *rp += 2;
+    uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(point_count);
+    const uint8_t *flags = *rp;
+    *rp += flags_bytes;
+    int16_t first_x;
+    int16_t first_y;
+    memcpy(&first_x, *rp, 2);
+    *rp += 2;
+    memcpy(&first_y, *rp, 2);
+    *rp += 2;
+    NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
+    /* Hard cap (OFF-safe, where NT_ASSERT is a no-op): a corrupt pack could record point_count past
+     * the static buffer; clamp WRITES to the buffer while still advancing rp over every delta so the
+     * later passes/contours stay byte-aligned. Builder guarantees the cap; this is the safety net. */
+    uint16_t cap = (point_count < NT_FONT_MAX_POINTS_PER_CONTOUR) ? point_count : NT_FONT_MAX_POINTS_PER_CONTOUR;
+    pts_x[0] = first_x;
+    pts_y[0] = first_y;
+    pts_on[0] = (flags[0] & 1U) != 0;
+    int32_t px = first_x;
+    int32_t py = first_y;
+    for (uint16_t p = 1; p < point_count; p++) {
+        int16_t dx = read_varlen_delta(rp);
+        int16_t dy = read_varlen_delta(rp);
+        px += dx;
+        py += dy;
+        if (p < cap) {
             pts_x[p] = px;
             pts_y[p] = py;
             pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
         }
-        // #endregion
+    }
+    return cap;
+}
 
-        // #region Convert points to quadratic curves (TrueType rules)
-        /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
-        uint16_t n = point_count;
-        if (n == 0) {
-            continue;
+/* Decode v4 point-based contour data into absolute float curves (implicit midpoints between
+ * consecutive off-curve points). weight == 0 is byte-identical to a plain decode; weight != 0
+ * emboldens each ring and resolves offset self-intersections on a SEPARATE ring (pass A + B). */
+static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves, float weight) {
+    uint16_t contour_count;
+    memcpy(&contour_count, contour_data, 2);
+    const uint8_t *body = contour_data + 2;
+    uint16_t total_curves = 0;
+
+    if (weight == 0.0F) {
+        const uint8_t *rp = body;
+        for (uint16_t ci = 0; ci < contour_count; ci++) {
+            uint16_t point_count = parse_contour_points(&rp, s_decode_pts_x, s_decode_pts_y, s_decode_pts_on);
+            convert_point_ring(s_decode_pts_x, s_decode_pts_y, s_decode_pts_on, point_count, curves, &total_curves, max_curves);
         }
-        uint16_t i = 0;
+        return total_curves;
+    }
 
-        /* Find first on-curve point to start from */
-        uint16_t start = 0;
-        while (start < n && !pts_on[start]) {
-            start++;
-        }
-        if (start == n) {
-            /* All off-curve: start from implicit midpoint of first two */
-            start = 0;
-        }
+    /* Pass A: whole-glyph ORIGINAL outline (weight-0 curves) for the grower dilation-membership
+     * filter — needs ALL contours (a keyhole counter is bounded by a different contour's hole).
+     * Read only when a grower's offset ring self-intersects into an opposite-wound loop. */
+    s_orig_count = 0;
+    const uint8_t *rp_a = body;
+    for (uint16_t ci = 0; ci < contour_count; ci++) {
+        uint16_t point_count = parse_contour_points(&rp_a, s_decode_pts_x, s_decode_pts_y, s_decode_pts_on);
+        convert_point_ring(s_decode_pts_x, s_decode_pts_y, s_decode_pts_on, point_count, s_orig_curves, &s_orig_count, NT_FONT_MAX_CURVES_PER_GLYPH);
+    }
 
-        /* Current on-curve position */
-        float cur_x;
-        float cur_y;
-        if (pts_on[start]) {
-            cur_x = (float)pts_x[start];
-            cur_y = (float)pts_y[start];
-            i = (uint16_t)((start + 1) % n);
-        } else {
-            /* All off-curve: midpoint between point[0] and point[1] */
-            cur_x = (float)(pts_x[0] + pts_x[1]) * 0.5F;
-            cur_y = (float)(pts_y[0] + pts_y[1]) * 0.5F;
-            i = 0;
-        }
+    /* Pass B: embolden + counter-preserving resolve per contour. */
+    const uint8_t *rp = body;
+    for (uint16_t ci = 0; ci < contour_count; ci++) {
+        int32_t *pts_x = s_decode_pts_x;
+        int32_t *pts_y = s_decode_pts_y;
+        uint8_t *pts_on = s_decode_pts_on;
+        uint16_t point_count = parse_contour_points(&rp, pts_x, pts_y, pts_on);
 
-        uint16_t steps = 0;
-        while (steps < n) {
-            uint16_t idx = i % n;
-
-            if (pts_on[idx]) {
-                /* On-curve → Line segment (degenerate quad) */
-                float ex = (float)pts_x[idx];
-                float ey = (float)pts_y[idx];
-                emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
-                cur_x = ex;
-                cur_y = ey;
-                i = (idx + 1) % n;
-                steps++;
-            } else {
-                /* Off-curve: control point for quadratic */
-                float cx = (float)pts_x[idx];
-                float cy = (float)pts_y[idx];
-                uint16_t next = (idx + 1) % n;
-
-                if (pts_on[next]) {
-                    /* off → on: standard quad */
-                    float ex = (float)pts_x[next];
-                    float ey = (float)pts_y[next];
-                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
-                    cur_x = ex;
-                    cur_y = ey;
-                    i = (next + 1) % n;
-                    steps += 2;
-                } else {
-                    /* off → off: implicit midpoint is the endpoint */
-                    float mx = (cx + (float)pts_x[next]) * 0.5F;
-                    float my = (cy + (float)pts_y[next]) * 0.5F;
-                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
-                    cur_x = mx;
-                    cur_y = my;
-                    i = next; /* don't skip next — it becomes the control for the next segment */
-                    steps++;
-                }
+        double a0 = contour_signed_area(pts_x, pts_y, point_count);
+        /* TT winding (builder/stbtt): outer negative area, hole positive. Bold (W>0) shrinks holes;
+         * thin (W<0) shrinks outers (symmetry, not raster-validated). */
+        bool is_shrinker = (weight > 0.0F) ? (a0 > 0.0) : (a0 < 0.0);
+        float w_eff = weight;
+        double base_inrad = 0.0;
+        if (is_shrinker) {
+            base_inrad = poly_inradius(pts_x, pts_y, point_count);
+            double rseal = counter_seal_radius(pts_x, pts_y, pts_on, point_count, a0, weight, base_inrad);
+            float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)rseal; /* keep >= KEEP of the narrowest opening; never seal */
+            if (fabsf(weight) > cap) {
+                w_eff = copysignf(cap, weight);
             }
         }
-        // #endregion
+        uint16_t offn = offset_with_joins(pts_x, pts_y, pts_on, point_count, s_offset_x, s_offset_y, s_offset_on, w_eff, a0);
+        double r_off = 0.5 * (double)fabsf(w_eff);
+        resolve_and_emit(s_offset_x, s_offset_y, s_offset_on, offn, pts_x, pts_y, point_count, a0, is_shrinker, base_inrad, r_off, curves, &total_curves, max_curves);
     }
     return total_curves;
 }
@@ -714,13 +1312,11 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
  * Allocates cache slot internally (after ensure_curve_space) to avoid
  * the flush-invalidates-slot bug. Returns allocated cache_idx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
+static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index, int16_t key_offset) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
     float bbox_x0 = (float)glyph->bbox_x0;
     float bbox_x1 = (float)glyph->bbox_x1;
-    float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
-    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
     NT_ASSERT(slot->band_count <= NT_FONT_MAX_BANDS);
 
     // #region Precompute per-curve Y and X bounds
@@ -728,6 +1324,10 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float ext_x_min = bbox_x0;
+    float ext_x_max = bbox_x1;
+    float ext_y_min = bbox_y0;
+    float ext_y_max = bbox_y1;
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         float ay = curves[ci].p0y;
         float by = curves[ci].p1y;
@@ -744,8 +1344,23 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         float hix = ax > bx ? ax : bx;
         curve_x_min[ci] = lox < cx ? lox : cx;
         curve_x_max[ci] = hix > cx ? hix : cx;
+
+        ext_y_min = fminf(ext_y_min, curve_y_min[ci]);
+        ext_y_max = fmaxf(ext_y_max, curve_y_max[ci]);
+        ext_x_min = fminf(ext_x_min, curve_x_min[ci]);
+        ext_x_max = fmaxf(ext_x_max, curve_x_max[ci]);
     }
     // #endregion
+
+    // Offset variants grow past the packed bbox; widen bbox+bands so the emboldened edge isn't clipped (key_offset!=0 only keeps regular byte-identical).
+    if (key_offset != 0) {
+        bbox_x0 = floorf(ext_x_min);
+        bbox_y0 = floorf(ext_y_min);
+        bbox_x1 = ceilf(ext_x_max);
+        bbox_y1 = ceilf(ext_y_max);
+    }
+    float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
+    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
 
     // #region Count Y-band and X-band curve pairs
     /* Epsilon margin on band boundaries to avoid edge-case misses where
@@ -926,11 +1541,19 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->entry.curve_count = (uint16_t)(y_total + x_total);
     cs->entry.band_row = cache_idx;
     cs->entry.advance = glyph->advance;
-    cs->entry.bbox_x0 = glyph->bbox_x0;
-    cs->entry.bbox_y0 = glyph->bbox_y0;
-    cs->entry.bbox_x1 = glyph->bbox_x1;
-    cs->entry.bbox_y1 = glyph->bbox_y1;
+    if (key_offset != 0) {
+        cs->entry.bbox_x0 = clamp_i16(bbox_x0);
+        cs->entry.bbox_y0 = clamp_i16(bbox_y0);
+        cs->entry.bbox_x1 = clamp_i16(bbox_x1);
+        cs->entry.bbox_y1 = clamp_i16(bbox_y1);
+    } else {
+        cs->entry.bbox_x0 = glyph->bbox_x0;
+        cs->entry.bbox_y0 = glyph->bbox_y0;
+        cs->entry.bbox_x1 = glyph->bbox_x1;
+        cs->entry.bbox_y1 = glyph->bbox_y1;
+    }
     cs->entry.is_tofu = false;
+    cs->key_offset = key_offset;
     cs->lru_frame = s_font.frame_counter;
     cs->resource_index = resource_index;
     // #endregion
@@ -1079,15 +1702,10 @@ void nt_font_step(void) {
         // #region Detect provider gain/loss/identity-swap vs the cached winner handles
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             bool was = (slot->resource_handles[ri] != 0);
-            if (was != res_now[ri]) {
-                changed = true;
-                if (was) {
-                    need_flush = true; /* lost a provider -> cached glyphs decoded from it are stale */
-                }
-            } else if (res_now[ri] && slot->resource_handles[ri] != handle_now[ri]) {
-                /* Same presence, different activation (same-metrics override/patch pack or hot-reload of a
-                 * repacked font): provider now views a different blob -> glyph/measure caches + ASCII index
-                 * are decoded from the OLD blob and must be flushed even though metrics match. */
+            /* Any provider gain/loss or identity-swap (override/patch pack, hot-reload) flushes glyph +
+             * measure caches: the cache keys only on (codepoint, weight), so a winner change (incl. a
+             * late-loading primary outranking a fallback) is invisible without a flush. */
+            if ((was != res_now[ri]) || (res_now[ri] && slot->resource_handles[ri] != handle_now[ri])) {
                 changed = true;
                 need_flush = true;
             }
@@ -1096,6 +1714,7 @@ void nt_font_step(void) {
 
         // #region Re-validate shared metrics against the current winning blobs
         const bool had_metrics = slot->metrics_set;
+        bool deco_owned = false; /* decoration taken from the first active (lowest-index/primary) provider */
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             if (!res_now[ri]) {
                 continue;
@@ -1103,12 +1722,12 @@ void nt_font_step(void) {
             uint32_t bs = 0;
             const uint8_t *blob = font_provider_blob(slot->resources[ri], &bs);
             const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-            const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
-                                       slot->metrics.line_gap == hdr->line_gap;
-            if (slot->metrics_set && metrics_match) {
-                continue;
-            }
-            if (slot->metrics_set && !metrics_match) {
+            /* VMETRICS are the shared-metrics invariant (builder UPM-normalizes them across a fallback
+             * family). Kept separate from decoration below — do NOT early-continue on a vmetric match, or a
+             * late-loading primary can't reclaim decoration from a fallback that resolved first. */
+            const bool vmetrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
+                                        slot->metrics.line_gap == hdr->line_gap;
+            if (slot->metrics_set && !vmetrics_match) {
                 /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
                  * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is
                  * a no-op in shipping, so gating the flush on it would keep caches baked against stale metrics. */
@@ -1116,12 +1735,24 @@ void nt_font_step(void) {
                 need_flush = true;
                 changed = true;
             }
-            slot->metrics.ascent = hdr->ascent;
-            slot->metrics.descent = hdr->descent;
-            slot->metrics.line_gap = hdr->line_gap;
-            slot->metrics.units_per_em = hdr->units_per_em;
-            slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
-            slot->metrics_set = true;
+            if (!slot->metrics_set || !vmetrics_match) {
+                slot->metrics.ascent = hdr->ascent;
+                slot->metrics.descent = hdr->descent;
+                slot->metrics.line_gap = hdr->line_gap;
+                slot->metrics.units_per_em = hdr->units_per_em;
+                slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
+                slot->metrics_set = true;
+            }
+            /* Decoration (underline/strike) is PRIMARY-owned: the first active provider (lowest slot index)
+             * wins, refreshed EVERY pass so a base that loads AFTER a fallback still reclaims it. Not part of
+             * the vmetric invariant — a fallback family legitimately differs in post/OS-2. */
+            if (!deco_owned) {
+                slot->metrics.underline_position = hdr->underline_position;
+                slot->metrics.underline_thickness = hdr->underline_thickness;
+                slot->metrics.strikeout_position = hdr->strikeout_position;
+                slot->metrics.strikeout_size = hdr->strikeout_size;
+                deco_owned = true;
+            }
         }
         if (!had_metrics && slot->metrics_set) {
             changed = true; /* first resolve -> ascii index needs building */
@@ -1389,11 +2020,11 @@ nt_font_slot_t *nt_font_get_slot(nt_font_t font) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint) {
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     NT_ASSERT(slot != NULL);
 
     // #region Cache hit check (hash table)
-    nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint);
+    nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint, key_offset);
     if (hit) {
         hit->lru_frame = s_font.frame_counter;
         return &hit->entry;
@@ -1407,7 +2038,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
 
     if (!found) {
         generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
+        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
         return tofu ? &tofu->entry : NULL;
     }
     // #endregion
@@ -1419,7 +2050,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
     if (!blob) {
         /* Provider vanished between find and decode — degrade to tofu, never deref NULL. */
         generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
+        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
         return tofu ? &tofu->entry : NULL;
     }
 
@@ -1430,16 +2061,44 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot,
     NT_ASSERT(glyph_entry->curve_count <= NT_FONT_MAX_CURVES_PER_GLYPH);
     uint16_t curve_count = 0;
     if (glyph_entry->curve_count > 0) {
-        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+        /* Decode weight = the SAME (already quantized+saturated) key_offset the slot is keyed
+         * by, so the cached geometry and the cache key can never disagree. */
+        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, (float)key_offset);
     }
     // #endregion
 
     // #region Upload, allocate slot, fill cache
-    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx);
-    hash_insert(slot, codepoint, cache_idx);
+    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx, key_offset);
+    hash_insert(slot, codepoint, key_offset, cache_idx);
     // #endregion
 
     return &slot->cache[cache_idx].entry;
+}
+
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint) { return nt_font_lookup_glyph_offset(slot, codepoint, 0); }
+
+int16_t nt_font_quantize_weight(float weight_units) {
+    if (!isfinite(weight_units)) {
+        return 0;
+    }
+    /* Clamp to the int16 range BEFORE lrintf: on 32-bit long (wasm/Win32) lrintf of a value past
+     * LONG_MAX is UB, and set_weight is unclamped, so an absurd weight could reach it pre-saturation. */
+    if (weight_units > 32767.0F) {
+        weight_units = 32767.0F;
+    } else if (weight_units < -32768.0F) {
+        weight_units = -32768.0F;
+    }
+    /* Round to the quant step (nearby weights share a slot), then saturate to int16
+     * so an absurd weight can never wrap to a colliding bucket. */
+    long steps = lrintf(weight_units / (float)NT_FONT_WEIGHT_QUANT_STEP);
+    long q = steps * NT_FONT_WEIGHT_QUANT_STEP;
+    if (q > 32767L) {
+        return 32767;
+    }
+    if (q < -32768L) {
+        return -32768;
+    }
+    return (int16_t)q;
 }
 
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint) {
@@ -2032,5 +2691,40 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
     slot->metrics.descent = descent;
     slot->metrics.line_height = line_height;
     slot->metrics_set = true;
+}
+
+uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, float weight, int32_t *dx, int32_t *dy, uint8_t *don) {
+    double a0 = contour_signed_area(sx, sy, n);
+    return offset_with_joins(sx, sy, son, n, dx, dy, don, weight, a0);
+}
+
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n) { return ring_self_intersects(x, y, n); }
+
+bool nt_font_test_grower_loop_kept(const float *orig_curves, uint16_t orig_n, const int32_t *loop_x, const int32_t *loop_y, uint16_t loop_n, double r_off) {
+    double cx = 0.0;
+    double cy = 0.0;
+    if (poly_inradius_pole(loop_x, loop_y, loop_n, &cx, &cy) <= 0.0) {
+        return false; /* no interior pole → dropped (mirrors resolve_and_emit) */
+    }
+    const nt_curve_t *cv = (const nt_curve_t *)orig_curves; /* [p0x..p2y] == nt_curve_t layout */
+    bool in_dilation = orig_glyph_inside(cx, cy, cv, orig_n) || (orig_glyph_dist(cx, cy, cv, orig_n) <= r_off);
+    return !in_dilation;
+}
+
+uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
+    uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);
+    if (count > max_curves) {
+        count = max_curves;
+    }
+    for (uint16_t i = 0; i < count; i++) {
+        float *o = out_curves + ((size_t)i * 6);
+        o[0] = s_decode_curves[i].p0x;
+        o[1] = s_decode_curves[i].p0y;
+        o[2] = s_decode_curves[i].p1x;
+        o[3] = s_decode_curves[i].p1y;
+        o[4] = s_decode_curves[i].p2x;
+        o[5] = s_decode_curves[i].p2y;
+    }
+    return count;
 }
 #endif

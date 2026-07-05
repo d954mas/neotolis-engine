@@ -87,6 +87,12 @@ float CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
 
 // Main coverage: Y-band horizontal ray + X-band vertical ray
 float SlugRender(vec2 coord) {
+    // Decoration sentinel: underline/strike/solid quads ride the text batch with band_count==0 AND
+    // zeroed glyph_bounds. The glyph path would divide by bbox_height==0 (-> NaN) and clamp with hi<lo
+    // (band_count-1 == -1, UB), so this branch both forces solid coverage and skips that garbage.
+    if (v_glyph.w == 0u)
+        return 1.0;
+
     uint curve_offset_y = v_glyph.x;
     uint band_row = v_glyph.y;
     uint curve_offset_x = v_glyph.z;

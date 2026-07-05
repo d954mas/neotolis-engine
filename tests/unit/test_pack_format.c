@@ -311,7 +311,7 @@ void test_blob_magic_value(void) {
 
 /* --- Font format tests --- */
 
-void test_font_asset_header_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtFontAssetHeader)); }
+void test_font_asset_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontAssetHeader)); }
 
 void test_font_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x544E4F46, NT_FONT_MAGIC);
@@ -323,7 +323,7 @@ void test_font_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('T', b[3]);
 }
 
-void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(4, NT_FONT_VERSION); }
+void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(5, NT_FONT_VERSION); }
 
 void test_font_asset_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontAssetHeader, magic));
@@ -333,6 +333,10 @@ void test_font_asset_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(10, offsetof(NtFontAssetHeader, ascent));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtFontAssetHeader, descent));
     TEST_ASSERT_EQUAL_UINT(14, offsetof(NtFontAssetHeader, line_gap));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtFontAssetHeader, underline_position));
+    TEST_ASSERT_EQUAL_UINT(18, offsetof(NtFontAssetHeader, underline_thickness));
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtFontAssetHeader, strikeout_position));
+    TEST_ASSERT_EQUAL_UINT(22, offsetof(NtFontAssetHeader, strikeout_size));
 }
 
 void test_font_glyph_entry_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontGlyphEntry)); }
@@ -363,8 +367,8 @@ void test_font_curve_field_offsets(void) { TEST_PASS(); }
 
 void test_font_glyph_array_offset(void) {
     /* Glyph entries start immediately after header */
-    TEST_ASSERT_EQUAL_UINT(16, sizeof(NtFontAssetHeader));
-    /* 16 is 4-byte aligned, safe for NtFontGlyphEntry array access */
+    TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontAssetHeader));
+    /* 24 is 4-byte aligned, safe for NtFontGlyphEntry array access */
     TEST_ASSERT_EQUAL_UINT(0, sizeof(NtFontAssetHeader) % 4);
 }
 

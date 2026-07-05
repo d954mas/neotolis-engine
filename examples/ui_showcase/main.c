@@ -509,7 +509,9 @@ static bool s_ids_ready;
  * create-context assert with headroom. */
 #define UI_MAX_ELEMENTS ((uint32_t)7168U)
 #define UI_ARENA_SIZE ((size_t)12U * 1024U * 1024U)
-#define SCRATCH_ARENA_SIZE ((size_t)512U * 1024U)
+/* Decoration tab issues ~22 rich_text calls, each reserving the full MAX_RUNS/MAX_TEXT_BYTES
+ * cap (~14 KB) plus decorated-label side tables; 512 KB overflowed the frame scratch. */
+#define SCRATCH_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
@@ -599,6 +601,7 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_deco(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
@@ -614,6 +617,10 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 // #region registry (one entry per widget category)
 static const showcase_entry_t g_tabs[] = {
     {"Labels", "h1 / body / caption label variants, themed via the palette.", "examples/ui_showcase/main.c:render_labels", render_labels, NULL},
+    {"Decoration",
+     "Type specimen: styles (R/B/I/BI), inline faces, synthetic-weight ramp, outline + shadow ramps, combined outline+shadow+bold, underline/strike -- via BOTH runtime <markup> AND nt_ui_label "
+     "style fields; dark/light parity.",
+     "examples/ui_showcase/main.c:render_deco", render_deco, NULL},
     {"Buttons", "Standard / scale / per-state ART SWAP / no-pad touch-target / icon / disabled.", "examples/ui_showcase/main.c:render_buttons", render_buttons, NULL},
     {"Buttons: Transform", "Rotated/scaled/offset button that STILL hit-tests (inverse-affine); driven by the panel.", "examples/ui_showcase/main.c:render_button_transform", render_button_transform,
      props_button_transform},
@@ -2682,6 +2689,47 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+    /* #region outline / shadow / underline / strike (decoration tags inside flowing rich text) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "6) Outline / shadow / underline / strike: a stroked run (counter-preserving -- '@ e a 8' stay legible at any width), a hard offset shadow, and <u>/<s> line decorations; all nest and "
+                "combine with bold, authored via markup AND the builder.",
+                g_current->body);
+    {
+        /* Outline width + shadow offset are BOTH em (fraction of the text height) -> scale with size. */
+        nt_ui_rich_style_t od_base = rich_base_style();
+        od_base.font_size = 30.0F; /* readable specimen (rich default is 16) */
+
+        /* Runtime markup front. */
+        const char *od_mk = "Outline <outline width=0.06 color=#4c8cf0>quest reward</outline>  "
+                            "thick <outline width=0.12 color=#f05a4c>@ 100 gold @</outline>.  "
+                            "Shadow <shadow dx=0.1 dy=0.1 color=#000000>the drake stirs</shadow>.  "
+                            "Lines <u>underline</u> <s>strike</s>.  "
+                            "Combined <b><u><shadow dx=0.1 dy=0.1 color=#000000><outline width=0.08 color=#f0c84c>DRAKE @quest</outline></shadow></u></b>.";
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_outline_shadow"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &od_base, od_mk, strlen(od_mk), container_w, NT_RICH_ALIGN_LEFT,
+                               st->rich.time, NULL);
+
+        /* Code-first builder front: same decorations as the markup above, via the builder API. */
+        nt_ui_rich_style_t ob_base = od_base;
+        nt_ui_rich_begin(ctx, &ob_base);
+        RICH_TEXT_LIT(ctx, "Builder: ");
+        nt_ui_rich_push_outline(ctx, 0.09F, 0xFFF0C84BU); /* amber stroke (0xAABBGGRR) */
+        nt_ui_rich_push_shadow(ctx, 0.1F, 0.1F, 0xC0000000U);
+        nt_ui_rich_push_bold(ctx);
+        nt_ui_rich_push_underline(ctx);
+        RICH_TEXT_LIT(ctx, "@ 100 gold");
+        nt_ui_rich_pop(ctx); /* underline */
+        nt_ui_rich_pop(ctx); /* bold */
+        nt_ui_rich_pop(ctx); /* shadow */
+        nt_ui_rich_pop(ctx); /* outline */
+        RICH_TEXT_LIT(ctx, "  ");
+        nt_ui_rich_push_strikethrough(ctx);
+        RICH_TEXT_LIT(ctx, "sold out");
+        nt_ui_rich_pop(ctx); /* strike */
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_outline_shadow_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &ob_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    // #endregion
+
     /* Two-pass, PER FRONT: each link's own prev-frame hover styles its own next frame, so the two
      * on-screen links react INDEPENDENTLY (hovering one no longer lights the other). */
     st->rich.hover_a = res_a.hovered_link;
@@ -2705,6 +2753,144 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                 "Hover a link -- it brightens + pulses (no layout shift); click it -- green [OK Accepted] ~1s + the counter ticks. The two links react independently. Press T for palette.",
                 g_current->caption);
 }
+// #endregion
+
+// #region Decoration tab (type-specimen: styles / weight / outline / shadow / underline+strike)
+/* Same sentence per row so faces compare directly; A W e o 8 stresses miters (A W) and counters (e o 8),
+ * reused for the outline/combo ramps. */
+#define DECO_SENT "The quick brown fox jumps."
+
+/* Emit one plain-label line with decoration overlaid on the themed body style (dark/light parity follows
+ * g_current->body). The local style outlives the synchronous nt_ui_label call, which copies the deco. */
+static void deco_label_emit(nt_ui_context_t *ctx, const char *text, float size, uint8_t variant, float weight, float outline_w, uint32_t outline_abgr, float shadow_dx, float shadow_dy,
+                            uint32_t shadow_abgr) {
+    nt_ui_label_style_t s = *g_current->body;
+    s.font_size = size;
+    s.variant = variant;
+    s.weight = weight;
+    s.outline_w = outline_w;
+    s.outline_color = outline_abgr;
+    s.shadow_dx = shadow_dx;
+    s.shadow_dy = shadow_dy;
+    s.shadow_color = shadow_abgr;
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &s);
+}
+
+/* Markup block: static tagset, LEFT-aligned, no clock (decoration is static). Each call needs a unique id. */
+static void deco_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_rich_style_t *base, const char *m, float container_w) {
+    nt_ui_rich_text_markup(ctx, id, NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, base, m, strlen(m), container_w, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+}
+
+/* Short 1-2 word section header on the themed body style (dark/light parity via g_current). */
+static void deco_header(nt_ui_context_t *ctx, const char *h) { nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), h, g_current->body); }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear type-specimen script: many independent blocks
+static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
+    (void)st;
+    rich_ensure_setup();
+    if (!s_rich_ready) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "rich-text font / material not ready", g_current->caption);
+        return;
+    }
+    const float cw = 620.0F;
+
+    nt_ui_rich_style_t db = rich_base_style();
+    db.font_size = 26.0F; /* readable specimen size (defaults to 16) */
+    /* 2x block for the outline/shadow ramps so corner quality + shadow offset/halo + any clipping read clearly. */
+    nt_ui_rich_style_t dbig = db;
+    dbig.font_size = 52.0F;
+    /* Shadow dx/dy are em (fraction of the text height), like outline_w -> scale with size automatically. */
+    const float u2 = 0.08F; /* em drop-shadow (~2px at db, ~4px at dbig) */
+    const float u3 = 0.12F; /* em (~3px at db, ~6px at dbig) */
+
+    // #region 1) Styles -- same sentence, one real face per row (R / B / I / BI)
+    deco_header(ctx, "Styles");
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_r"), &db, DECO_SENT, cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_b"), &db, "<b>" DECO_SENT "</b>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_i"), &db, "<i>" DECO_SENT "</i>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_style_bi"), &db, "<b><i>" DECO_SENT "</i></b>", cw);
+    // #endregion
+
+    // #region 2) Inline -- four faces on one line
+    deco_header(ctx, "Inline");
+    deco_markup(ctx, nt_ui_id("showcase/deco_inline"), &db, "regular <b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>", cw);
+    // #endregion
+
+    // #region 3) Weight -- synthetic-weight ramp (label weight, single face)
+    deco_header(ctx, "Weight");
+    deco_label_emit(ctx, "thin  A a g 8", 26.0F, 0U, -0.04F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "regular  A a g 8", 26.0F, 0U, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "semi  A a g 8", 26.0F, 0U, 0.03F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "bold  A a g 8", 26.0F, 0U, 0.06F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "heavy  A a g 8", 26.0F, 0U, 0.11F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    // #endregion
+
+    // #region 4) Outline -- width ramp on the sharp set (<outline width= color=#RRGGBB>)
+    deco_header(ctx, "Outline");
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol1"), &dbig, "<outline width=0.03 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol2"), &dbig, "<outline width=0.07 color=#4c8cf0>A W e o 8</outline>", cw);
+    deco_markup(ctx, nt_ui_id("showcase/deco_ol3"), &dbig, "<outline width=0.12 color=#f05a4c>A W e o 8</outline>", cw);
+    // #endregion
+
+    // #region 4b) Outline zoom -- BIG 8/counter glyphs across the same 0.03/0.07/0.12 ramp to hunt a counter fill-hole
+    deco_header(ctx, "8 zoom");
+    {
+        nt_ui_rich_style_t dz = db;
+        dz.font_size = 100.0F; /* very large so a missing-fill hole in a counter (esp. '8') is unmistakable */
+        deco_header(ctx, "0.03");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz1"), &dz, "<outline width=0.03 color=#ff9020>8 8 8 o e B @</outline>", cw);
+        deco_header(ctx, "0.07");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz2"), &dz, "<outline width=0.07 color=#ff9020>8 8 8 o e B @</outline>", cw);
+        deco_header(ctx, "0.12");
+        deco_markup(ctx, nt_ui_id("showcase/deco_olz3"), &dz, "<outline width=0.12 color=#ff9020>8 8 8 o e B @</outline>", cw);
+    }
+    // #endregion
+
+    // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
+    deco_header(ctx, "Shadow");
+    {
+        char mk[256];
+        int n = snprintf(mk, sizeof mk, "<shadow dx=%.2f dy=%.2f color=#000000>black, down-right</shadow>", (double)u2, (double)u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh1"), &dbig, mk, cw);
+        n = snprintf(mk, sizeof mk, "<shadow dx=%.2f dy=%.2f color=#ff8030>orange, down-right</shadow>", (double)u3, (double)u3);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh2"), &dbig, mk, cw);
+        n = snprintf(mk, sizeof mk, "<shadow dx=%.2f dy=%.2f color=#2860ff>blue, up-left</shadow>", (double)-u2, (double)-u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco shadow markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_sh3"), &dbig, mk, cw);
+    }
+    // #endregion
+
+    // #region 6) Outline + Shadow on one string
+    deco_header(ctx, "Outline+Shadow");
+    {
+        char mk[256];
+        const int n = snprintf(mk, sizeof mk, "<shadow dx=%.2f dy=%.2f color=#000000><outline width=0.06 color=#4c8cf0>A W e o 8</outline></shadow>", (double)u2, (double)u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_os"), &dbig, mk, cw);
+    }
+    // #endregion
+
+    // #region 7) Outline + Shadow + Bold on one string (real bold face)
+    deco_header(ctx, "Outline+Shadow+Bold");
+    {
+        char mk[256];
+        const int n = snprintf(mk, sizeof mk, "<b><shadow dx=%.2f dy=%.2f color=#000000><outline width=0.06 color=#f0c84c>A W e o 8</outline></shadow></b>", (double)u2, (double)u2);
+        NT_ASSERT(n > 0 && (size_t)n < sizeof mk && "deco combo markup truncated");
+        deco_markup(ctx, nt_ui_id("showcase/deco_osb"), &dbig, mk, cw);
+    }
+    // #endregion
+
+    // #region 8) Underline / Strike (<u>/<s> markup + label variant bits)
+    deco_header(ctx, "Underline / Strike");
+    /* Descender-rich sample (y g p q j) so the underline/strike offset vs glyphs below the baseline is visible. */
+    deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>Typography jumps gpqy</u> and <s>lazy dog: jumping pg qy</s> and <u><s>gjpqy both</s></u>", cw);
+    deco_label_emit(ctx, "label underline Typography jumps gpqy", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_label_emit(ctx, "label strike + bold lazy dog jumping pg qy", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    // #endregion
+}
+#undef DECO_SENT
 // #endregion
 
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to

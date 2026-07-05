@@ -49,7 +49,11 @@ typedef struct {
     int16_t descent;
     int16_t line_gap;
     uint16_t units_per_em;
-    int16_t line_height; /* ascent - descent + line_gap */
+    int16_t line_height;         /* ascent - descent + line_gap */
+    int16_t underline_position;  /* v5: top of underline, below baseline (font units) */
+    int16_t underline_thickness; /* v5: underline thickness (font units) */
+    int16_t strikeout_position;  /* v5: above baseline (font units) */
+    int16_t strikeout_size;      /* v5: strikeout thickness */
 } nt_font_metrics_t;
 
 typedef struct {
@@ -161,6 +165,17 @@ void nt_font_test_reset_measure_counters(void);
 /* Set metrics on a stub font so measure_n returns predictable tofu widths
  * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
 void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
+
+/* Embolden + offset-resolution test hooks. offset_ring writes the offset
+ * point ring (with reflex joins) to a SEPARATE dst ring, returns dst point count; decode
+ * fills out_curves flat as [p0x,p0y,p1x,p1y,p2x,p2y] per curve (full resolve), returns count. */
+uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, float weight, int32_t *dx, int32_t *dy, uint8_t *don);
+uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves);
+bool nt_font_test_contour_self_intersects(const int32_t *x, const int32_t *y, uint16_t n);
+/* The grower opposite-loop dilation-membership decision (the '@' seal-fill fix core): true if the loop
+ * (int point ring) is KEPT as a real counter — its pole lies OUTSIDE the true dilation of the ORIGINAL
+ * glyph (flat [p0x..p2y] curves) by r_off. false = dropped (fills solid). */
+bool nt_font_test_grower_loop_kept(const float *orig_curves, uint16_t orig_n, const int32_t *loop_x, const int32_t *loop_y, uint16_t loop_n, double r_off);
 #endif
 // #endregion
 

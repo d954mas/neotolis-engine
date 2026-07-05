@@ -178,7 +178,10 @@ typedef struct {
 #define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
 #endif
 
-/* Lives at arena head; hot fields first. Per-ctx — no module globals. */
+/* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
+ * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
+ * padding is irrelevant — suppress the analyzer's reorder suggestion. */
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds;
@@ -471,6 +474,22 @@ uint32_t nt_ui_internal_current_open_element_id(void);
 
 /* Call IMMEDIATELY after CLAY_TEXT — text leaf is appended but not pushed on the open stack. */
 uint32_t nt_ui_internal_last_emitted_element_id(void);
+
+/* Label decoration payload hung off element_data.special. Named struct so nt_ui.h can forward-declare it
+ * inside the special union. */
+struct nt_ui_label_deco {
+    uint8_t variant; /* NT_UI_LABEL_VARIANT_* */
+    float weight;    /* em */
+    float outline_w; /* em */
+    uint32_t outline_color;
+    float shadow_dx; /* em */
+    float shadow_dy; /* em */
+    uint32_t shadow_color;
+};
+
+/* Push the decoration to the sticky renderer setters (real->synth bold cascade + outline/shadow/underline/
+ * strike). The caller resets via nt_text_renderer_reset_decoration after emit_text. */
+void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity);
 
 /* Flat row borrowing id_string from Clay (valid through next nt_ui_begin). */
 typedef struct nt_ui_inspector_tree_row {

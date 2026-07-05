@@ -282,6 +282,80 @@ static void test_parse_bad_hex_graceful(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFFFFFFFFU, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "bad hex degrades to opaque white");
 }
 
+/* Reset the per-call rich scratch (mirrors the other parse tests' arrange block). */
+static void parse_reset(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+}
+
+/* <outline width=2 color=#ff0000> parses width + color into the composed run style
+ * (inline key=value attr tail via the rich_parse_deco_attrs scanner). */
+static void test_parse_outline_wellformed(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_reset();
+    const char *m = "<outline width=2 color=#ff0000>x</outline>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "outline tag -> one text run for x");
+    const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "outline width parsed");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF0000FFU, s.outline_color_abgr, "outline color #ff0000 -> AABBGGRR red");
+}
+
+/* <shadow dx=1 dy=1 color=#000000> parses dx/dy + color into the composed run style. */
+static void test_parse_shadow_wellformed(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_reset();
+    const char *m = "<shadow dx=1 dy=1 color=#000000>x</shadow>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "shadow tag -> one text run for x");
+    const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(1, (int32_t)s.shadow_dx, "shadow dx parsed");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(1, (int32_t)s.shadow_dy, "shadow dy parsed");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF000000U, s.shadow_color_abgr, "shadow color #000000 -> opaque black");
+}
+
+/* malformed attr (empty value / bare '=') degrades to the safe default with a single warn,
+ * no OOB/crash: <outline width= =2 color=#00ff00> -> width stays 0 (no outline), color still parses. */
+static void test_parse_outline_malformed_degrades(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_reset();
+    sink_attach();
+    const char *m = "<outline width= =2 color=#00ff00>x</outline>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+    TEST_ASSERT_TRUE_MESSAGE(s_sink.warn_count >= 1U, "malformed outline attr logs at least once (never asserts)");
+    sink_detach();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "degraded outline -> still one text run for x");
+    const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(0, (int32_t)s.outline_w, "empty width degrades to 0 (no outline)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF00FF00U, s.outline_color_abgr, "the well-formed color token still parses after the bad ones");
+}
+
+/* an unknown attr key inside the tag is skipped, not fatal: the recognised key still applies. */
+static void test_parse_outline_unknown_key_skips(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_reset();
+    sink_attach();
+    const char *m = "<outline foo=3 width=2>x</outline>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+    TEST_ASSERT_TRUE_MESSAGE(s_sink.warn_count >= 1U, "unknown attr key logs once");
+    sink_detach();
+    const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "unknown key skipped; width=2 still applies");
+}
+
+/* <u>/<s> raise the underline/strike RUN flags (decoration toggles, not font variants). */
+static void test_parse_underline_strike_flags(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_reset();
+    const char *m = "<u>a</u><s>b</s>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, runs, "<u>a</u><s>b</s> -> two runs");
+    TEST_ASSERT_TRUE_MESSAGE((nt_ui_rich_test_run_flags(s_fx.ctx, 0) & NT_UI_RICH_RUN_UNDERLINE) != 0U, "run 0 carries the underline flag");
+    TEST_ASSERT_TRUE_MESSAGE((nt_ui_rich_test_run_flags(s_fx.ctx, 1) & NT_UI_RICH_RUN_STRIKE) != 0U, "run 1 carries the strike flag");
+}
+
 /* (9) a close tag with no matching open (HP</b>) -> graceful: log + no-op, HP is the only run. */
 static void test_parse_orphan_close_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -1256,6 +1330,11 @@ int main(void) {
     RUN_TEST(test_parse_mismatched_close_graceful);
     RUN_TEST(test_parse_unknown_tag_graceful);
     RUN_TEST(test_parse_bad_hex_graceful);
+    RUN_TEST(test_parse_outline_wellformed);
+    RUN_TEST(test_parse_shadow_wellformed);
+    RUN_TEST(test_parse_outline_malformed_degrades);
+    RUN_TEST(test_parse_outline_unknown_key_skips);
+    RUN_TEST(test_parse_underline_strike_flags);
     RUN_TEST(test_parse_orphan_close_graceful);
     RUN_TEST(test_parse_mismatched_link_close_graceful);
     RUN_TEST(test_parse_empty_scale_value_graceful);

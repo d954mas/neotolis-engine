@@ -65,7 +65,7 @@ typedef struct {
 /* scale_label occupies one of label_side's former tail padding bytes -> size unchanged.
  * Layers are NOT in the style (mirrors button/label): the indicator layer comes from
  * data->layer, the label layer from the label_layer function arg. */
-_Static_assert(sizeof(nt_ui_checkbox_style_t) == 840, "nt_ui_checkbox_style_t stable ABI (+mixed[4] = +4*64)");
+_Static_assert(sizeof(nt_ui_checkbox_style_t) == 864, "nt_ui_checkbox_style_t stable ABI");
 
 /* All three are LEAF widgets (no begin/end). Returns `changed` = the frame the value
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).
