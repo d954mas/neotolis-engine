@@ -16,6 +16,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_state.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -50,6 +51,8 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
     p.buttons[NT_BUTTON_LEFT].is_released = is_released;
     return p;
 }
+
+static void popup_frame(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, bool open, nt_ui_popup_result_t *out);
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_popup_abi_sizes(void) {
@@ -338,6 +341,19 @@ static void test_popup_no_dismiss_declares_no_catcher(void) {
     TEST_ASSERT_FALSE(nt_ui_popup_test_last_catcher_present());
 }
 
+static void test_popup_clear_state_releases_retained_tween_cell(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
+
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+    popup_frame(POP_A, &st, &anc, true, &(nt_ui_popup_result_t){0});
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_state_used_slots(s_fx.ctx));
+
+    nt_ui_popup_clear_state(s_fx.ctx, POP_A);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+}
+
 /* ---- Open/close tween clamp: t in [0,1], rises while open, decays after close; visible == (t>eps). ---- */
 static void popup_frame(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, bool open, nt_ui_popup_result_t *out) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
@@ -391,6 +407,7 @@ int main(void) {
     RUN_TEST(test_popup_outside_click_dismiss);
     RUN_TEST(test_popup_wrapper_clears_open);
     RUN_TEST(test_popup_no_dismiss_declares_no_catcher);
+    RUN_TEST(test_popup_clear_state_releases_retained_tween_cell);
     RUN_TEST(test_popup_tween_clamp);
     return UNITY_END();
 }

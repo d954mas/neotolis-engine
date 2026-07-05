@@ -86,6 +86,11 @@ void nt_ui_popup_end(nt_ui_context_t *ctx);
  *   } */
 bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *p_open);
 
+/* Drop popup-owned retained view state for `id` after the game has closed a transient popup/sheet.
+ * This clears only popup-core state, not game-owned data or child widget state such as scroll/input
+ * cells inside the popup body. */
+void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id);
+
 #ifdef NT_TEST_ACCESS
 uint16_t nt_ui_popup_test_last_zband(void);                            /* panel z of the last begin */
 uint16_t nt_ui_popup_test_last_catcher_zband(void);                    /* catcher z of the last begin */
