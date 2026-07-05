@@ -588,7 +588,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * it adds NO new cache entry. */
     const float upm = (float)metrics.units_per_em;
     const int16_t fill_key = nt_font_quantize_weight(s_text.weight_em * upm);
-    const bool outline_active = (s_text.outline_w > 0.0F);
+    /* alpha 0 -> invisible: no outline pass, no extra cache variant, and the shadow tracks the fill silhouette (not the dilated outline). */
+    const bool outline_active = (s_text.outline_w > 0.0F && s_text.outline_color[3] > 0.0F);
     const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.weight_em + s_text.outline_w) * upm) : fill_key);
     const bool shadow_active = (s_text.shadow_color[3] > 0.0F);
 

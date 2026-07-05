@@ -51,16 +51,18 @@ static const nt_ui_element_data_t *label_attach_decoration(const nt_ui_element_d
 
 void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity) {
     const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    /* Normalize non-finite caller fields to off here (mirrors rich push clamp): a raw NaN/Inf reaches the
+     * renderer setter, which guards by returning early -> the previous label's sticky value LEAKS. */
     /* A label has one font_id (no B/I family), so bold is always synthesized to weight (cascade
      * degenerates to synth). Explicit weight overrides; else the BOLD bit picks the shared synth weight. */
-    float weight = d->weight;
+    float weight = isfinite(d->weight) ? d->weight : 0.0F;
     if (weight == 0.0F && (d->variant & NT_UI_LABEL_VARIANT_BOLD) != 0U) {
         weight = NT_UI_RICH_SYNTH_BOLD_WEIGHT;
     }
     nt_text_renderer_set_weight(weight);
     /* Fold parent opacity into outline/shadow alpha to match the walker's fill fade (the walker
      * pre-multiplies only textColor.a) — else a fading panel keeps opaque outline/shadow. */
-    if (d->outline_w > 0.0F) {
+    if (d->outline_w > 0.0F && isfinite(d->outline_w)) {
         float c[4];
         nt_color_unpack(d->outline_color, c);
         c[3] *= opacity;
@@ -72,7 +74,9 @@ void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity) {
         float c[4];
         nt_color_unpack(d->shadow_color, c);
         c[3] *= opacity;
-        nt_text_renderer_set_shadow(d->shadow_dx, d->shadow_dy, 0.0F, c);
+        const float sdx = isfinite(d->shadow_dx) ? d->shadow_dx : 0.0F;
+        const float sdy = isfinite(d->shadow_dy) ? d->shadow_dy : 0.0F;
+        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, c);
     } else {
         nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);
     }
