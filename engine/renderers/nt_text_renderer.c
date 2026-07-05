@@ -26,6 +26,22 @@ _Static_assert(sizeof(nt_text_vertex_t) == 72, "text vertex stride must be 72 by
 // #endregion
 
 // #region Module state
+/* Per-run sticky decoration axes bundled so reset/restore is one struct op and a newly-added axis can't
+ * be forgotten in reset. Every axis's off-state is 0, so (nt_text_deco_t){0} is the correct clear.
+ * Logical-state lifetime: preserved by restore_gpu, cleared by cold init/shutdown and reset_decoration. */
+typedef struct {
+    float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
+    float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
+    float outline_color[4]; /* outline pass RGBA */
+    float shadow_dx;        /* hard-shadow offset em (px = dx * size), like weight/outline */
+    float shadow_dy;        /* hard-shadow offset em */
+    float shadow_blur;      /* stored, UNUSED (reserved for a future soft-shadow mode) */
+    float shadow_color[4];  /* shadow pass RGBA; alpha 0 = no shadow */
+    bool underline;         /* emit an underline sentinel quad per line */
+    bool strikethrough;     /* emit a strike sentinel quad per line */
+    float oblique;          /* synthetic-oblique shear folded into the model in draw_n (faux-italic lean); 0 = upright */
+} nt_text_deco_t;
+
 static struct {
     /* GPU resources */
     nt_pipeline_t pipeline;
@@ -43,21 +59,8 @@ static struct {
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
     float glyph_depth_bias;
-    /* Synthetic-oblique shear folded into the model in draw_n (faux-italic lean: x += oblique*y about the
-     * baseline). 0 = upright. Same logical-state lifetime as glyph_depth_bias. */
-    float oblique;
-
-    /* Sticky decoration state: same logical-state lifetime as oblique — preserved by restore_gpu,
-     * cleared by cold init/shutdown and reset_decoration. */
-    float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
-    float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
-    float outline_color[4]; /* outline pass RGBA */
-    float shadow_dx;        /* hard-shadow offset em (px = dx * size), like weight/outline */
-    float shadow_dy;        /* hard-shadow offset em */
-    float shadow_blur;      /* stored, UNUSED (reserved for a future soft-shadow mode) */
-    float shadow_color[4];  /* shadow pass RGBA; alpha 0 = no shadow */
-    bool underline;         /* emit an underline sentinel quad per line */
-    bool strikethrough;     /* emit a strike sentinel quad per line */
+    /* Per-run decoration axes (weight/outline/shadow/underline/strike/oblique); reset as one unit. */
+    nt_text_deco_t deco;
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
@@ -459,13 +462,13 @@ static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float mo
  * draw_n the whole run is one style, so the segment boundary is the newline). Y and thickness come from
  * the scaled v5 metrics. Exact vertical sign is a visual-QA concern. */
 static void emit_line_deco_quads(const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, const float color[4], float *glyph_bias) {
-    if (s_text.underline) {
+    if (s_text.deco.underline) {
         float top = pen_y + ((float)metrics.underline_position * scale); /* underline_position = top edge, below baseline */
         float bot = pen_y + ((float)(metrics.underline_position - metrics.underline_thickness) * scale);
         emit_decoration_quad(model, 0.0F, bot, x1, top, color, *glyph_bias);
         *glyph_bias += s_text.glyph_depth_bias;
     }
-    if (s_text.strikethrough) {
+    if (s_text.deco.strikethrough) {
         float bot = pen_y + ((float)metrics.strikeout_position * scale); /* strikeout_position = above baseline */
         float top = pen_y + ((float)(metrics.strikeout_position + metrics.strikeout_size) * scale);
         emit_decoration_quad(model, 0.0F, bot, x1, top, color, *glyph_bias);
@@ -531,17 +534,17 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 #ifdef NT_TEST_ACCESS
     memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
     s_text.test_draw_n_calls++;
-    if (s_text.oblique > s_text.test_max_oblique) {
-        s_text.test_max_oblique = s_text.oblique; /* observe the lean even when the stub font emits nothing */
+    if (s_text.deco.oblique > s_text.test_max_oblique) {
+        s_text.test_max_oblique = s_text.deco.oblique; /* observe the lean even when the stub font emits nothing */
     }
-    if (s_text.weight_em > s_text.test_max_weight) {
-        s_text.test_max_weight = s_text.weight_em;
+    if (s_text.deco.weight_em > s_text.test_max_weight) {
+        s_text.test_max_weight = s_text.deco.weight_em;
     }
-    if (s_text.outline_w > s_text.test_max_outline_w) {
-        s_text.test_max_outline_w = s_text.outline_w;
+    if (s_text.deco.outline_w > s_text.test_max_outline_w) {
+        s_text.test_max_outline_w = s_text.deco.outline_w;
     }
-    s_text.test_saw_underline = s_text.test_saw_underline || s_text.underline;
-    s_text.test_saw_strike = s_text.test_saw_strike || s_text.strikethrough;
+    s_text.test_saw_underline = s_text.test_saw_underline || s_text.deco.underline;
+    s_text.test_saw_strike = s_text.test_saw_strike || s_text.deco.strikethrough;
 #endif
     if (len == 0U || utf8 == NULL) {
         return;
@@ -566,10 +569,10 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * baseline — reproduces a caller-baked lean for ANY caller's matrix. */
     const float *m = model;
     float oblique_model[16];
-    if (s_text.oblique != 0.0F) {
+    if (s_text.deco.oblique != 0.0F) {
         memcpy(oblique_model, model, sizeof oblique_model);
         for (int r = 0; r < 4; ++r) {
-            oblique_model[4 + r] += s_text.oblique * model[r];
+            oblique_model[4 + r] += s_text.deco.oblique * model[r];
         }
         m = oblique_model;
     }
@@ -585,11 +588,11 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * grows by outline_w; shadow reuses the outermost visible variant (outline if active, else fill) so
      * it adds NO new cache entry. */
     const float upm = (float)metrics.units_per_em;
-    const int16_t fill_key = nt_font_quantize_weight(s_text.weight_em * upm);
+    const int16_t fill_key = nt_font_quantize_weight(s_text.deco.weight_em * upm);
     /* alpha 0 -> invisible: no outline pass, no extra cache variant, and the shadow tracks the fill silhouette (not the dilated outline). */
-    const bool outline_active = (s_text.outline_w > 0.0F && s_text.outline_color[3] > 0.0F);
-    const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.weight_em + s_text.outline_w) * upm) : fill_key);
-    const bool shadow_active = (s_text.shadow_color[3] > 0.0F);
+    const bool outline_active = (s_text.deco.outline_w > 0.0F && s_text.deco.outline_color[3] > 0.0F);
+    const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
+    const bool shadow_active = (s_text.deco.shadow_color[3] > 0.0F);
 
     float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
 
@@ -598,15 +601,16 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * so no shadow/outline quad is ever drawn after a later pass's quad. */
     if (shadow_active) {
         const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.shadow_color, s_text.shadow_dx * size, s_text.shadow_dy * size, &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size,
+                        &glyph_bias);
     }
     if (outline_active) {
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.outline_color, 0.0F, 0.0F, &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
     }
     emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
-    if (s_text.underline || s_text.strikethrough) {
+    if (s_text.deco.underline || s_text.deco.strikethrough) {
         emit_line_decorations(p, end, m, scale, letter_tracking, line_advance, slot, metrics, color, &glyph_bias);
     }
 }
@@ -620,7 +624,7 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
 void nt_text_renderer_set_oblique(float shear) {
     NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(shear) && "nt_text_renderer_set_oblique: shear must be finite");
-    s_text.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
+    s_text.deco.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
 }
 
 /* HARD isfinite guards (real if, not NT_ASSERT) — NT_ASSERT is a no-op in shipping and a NaN would
@@ -631,7 +635,7 @@ void nt_text_renderer_set_weight(float weight_em) {
         NT_ASSERT(0 && "nt_text_renderer_set_weight: weight must be finite");
         return;
     }
-    s_text.weight_em = weight_em; /* no clamp (locked decision); folded into the fill key_offset */
+    s_text.deco.weight_em = weight_em; /* no clamp (locked decision); folded into the fill key_offset */
 }
 
 void nt_text_renderer_set_outline(float width, const float color[4]) {
@@ -641,8 +645,8 @@ void nt_text_renderer_set_outline(float width, const float color[4]) {
         NT_ASSERT(0 && "nt_text_renderer_set_outline: width/color must be finite");
         return;
     }
-    s_text.outline_w = width;
-    memcpy(s_text.outline_color, color, sizeof s_text.outline_color);
+    s_text.deco.outline_w = width;
+    memcpy(s_text.deco.outline_color, color, sizeof s_text.deco.outline_color);
 }
 
 void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float color[4]) {
@@ -652,35 +656,25 @@ void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float col
         NT_ASSERT(0 && "nt_text_renderer_set_shadow: offset/blur/color must be finite");
         return;
     }
-    s_text.shadow_dx = dx;
-    s_text.shadow_dy = dy;
-    s_text.shadow_blur = blur; /* stored, UNUSED (reserved for a future soft-shadow mode) */
-    memcpy(s_text.shadow_color, color, sizeof s_text.shadow_color);
+    s_text.deco.shadow_dx = dx;
+    s_text.deco.shadow_dy = dy;
+    s_text.deco.shadow_blur = blur; /* stored, UNUSED (reserved for a future soft-shadow mode) */
+    memcpy(s_text.deco.shadow_color, color, sizeof s_text.deco.shadow_color);
 }
 
 void nt_text_renderer_set_underline(bool enabled) {
     NT_ASSERT(s_text.initialized);
-    s_text.underline = enabled;
+    s_text.deco.underline = enabled;
 }
 
 void nt_text_renderer_set_strikethrough(bool enabled) {
     NT_ASSERT(s_text.initialized);
-    s_text.strikethrough = enabled;
+    s_text.deco.strikethrough = enabled;
 }
 
 void nt_text_renderer_reset_decoration(void) {
     NT_ASSERT(s_text.initialized);
-    /* One-shot clear of every decoration axis + oblique so nothing leaks onto the next run. */
-    s_text.weight_em = 0.0F;
-    s_text.outline_w = 0.0F;
-    memset(s_text.outline_color, 0, sizeof s_text.outline_color);
-    s_text.shadow_dx = 0.0F;
-    s_text.shadow_dy = 0.0F;
-    s_text.shadow_blur = 0.0F;
-    memset(s_text.shadow_color, 0, sizeof s_text.shadow_color);
-    s_text.underline = false;
-    s_text.strikethrough = false;
-    s_text.oblique = 0.0F;
+    s_text.deco = (nt_text_deco_t){0}; /* one struct clear — every axis's off-state is 0, so a newly-added axis can't leak */
 }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
@@ -773,13 +767,13 @@ uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_n
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
-float nt_text_renderer_test_oblique(void) { return s_text.oblique; }
-float nt_text_renderer_test_weight(void) { return s_text.weight_em; }
-float nt_text_renderer_test_outline_width(void) { return s_text.outline_w; }
-float nt_text_renderer_test_outline_color_a(void) { return s_text.outline_color[3]; }
-float nt_text_renderer_test_shadow_color_a(void) { return s_text.shadow_color[3]; }
-float nt_text_renderer_test_shadow_dx(void) { return s_text.shadow_dx; }
-bool nt_text_renderer_test_underline(void) { return s_text.underline; }
+float nt_text_renderer_test_oblique(void) { return s_text.deco.oblique; }
+float nt_text_renderer_test_weight(void) { return s_text.deco.weight_em; }
+float nt_text_renderer_test_outline_width(void) { return s_text.deco.outline_w; }
+float nt_text_renderer_test_outline_color_a(void) { return s_text.deco.outline_color[3]; }
+float nt_text_renderer_test_shadow_color_a(void) { return s_text.deco.shadow_color[3]; }
+float nt_text_renderer_test_shadow_dx(void) { return s_text.deco.shadow_dx; }
+bool nt_text_renderer_test_underline(void) { return s_text.deco.underline; }
 float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
 float nt_text_renderer_test_max_weight(void) { return s_text.test_max_weight; }
 float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_outline_w; }
