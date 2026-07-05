@@ -23,11 +23,8 @@ const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
 
 static bool label_style_has_decoration(const nt_ui_label_style_t *s) { return s->variant != 0U || s->weight != 0.0F || s->outline_w > 0.0F || (s->shadow_color >> 24) != 0U; }
 
-/* Attach decoration as element_data.special. Copies the caller's element_data (or a plain layer-0 default
- * when NULL) into a private frame-scratch copy so the shared per-layer singleton is never mutated, then
- * points it at a scratch decoration blob. Returns the private element_data — or `base` unchanged if scratch
- * is exhausted (text still renders, just undecorated). Keyed on element_data, which Clay carries identically
- * on every wrapped-line TEXT command, so decoration reaches every line, not only the first. */
+/* Copy into private frame scratch so the shared per-layer element_data singleton is never mutated;
+ * on scratch exhaustion return `base` unchanged (text still renders, undecorated). */
 static const nt_ui_element_data_t *label_attach_decoration(const nt_ui_element_data_t *base, const nt_ui_label_style_t *s) {
     nt_ui_label_deco_t *d = (nt_ui_label_deco_t *)nt_mem_scratch_alloc(sizeof *d, alignof(nt_ui_label_deco_t));
     nt_ui_element_data_t *ed = (nt_ui_element_data_t *)nt_mem_scratch_alloc(sizeof *ed, alignof(nt_ui_element_data_t));

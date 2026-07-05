@@ -132,8 +132,8 @@ typedef struct {
     float shadow_dy;             /* 64 */
     uint32_t shadow_color_abgr;  /* 68 */
 } nt_ui_rich_style_t;
-/* In-memory only (never serialized); the leading default_atlas uint64 forces 8-byte alignment so the
- * 72 data bytes round up to 72. */
+/* In-memory only (never serialized); the leading default_atlas uint64 forces 8-byte alignment; the
+ * 72 used bytes are already 8-aligned, so there is no tail padding. */
 _Static_assert(sizeof(nt_ui_rich_style_t) == 72, "nt_ui_rich_style_t in-memory size (56 base + outline w/color + shadow dx/dy/color, 8-byte aligned)");
 
 /* Layer (z-order band) sentinel + range. AUTO -> rich_build_atoms picks the per-kind default. */

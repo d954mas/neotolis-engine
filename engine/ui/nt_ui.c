@@ -1726,9 +1726,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        /* Decorated labels ride a private element_data carrying decoration in .special — Clay puts the same
-         * userData on every wrapped-line TEXT command, so this decorates each line. Set the sticky renderer
-         * state, draw, then reset so it can't leak onto the next TEXT. */
+        /* Same userData rides every wrapped-line TEXT command, so apply the sticky deco per line and reset
+         * after emit so it can't leak onto the next TEXT. */
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
         const bool decorated = (ed != NULL && ed->special_kind == NT_UI_SPECIAL_TEXT_DECO);
         if (decorated) {

@@ -48,7 +48,7 @@ static struct {
     float oblique;
 
     /* Sticky decoration state: same logical-state lifetime as oblique — preserved by restore_gpu,
-     * cleared by cold init/shutdown and reset_decoration. blur is stored for a future soft-shadow mode, UNUSED. */
+     * cleared by cold init/shutdown and reset_decoration. */
     float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
     float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
     float outline_color[4]; /* outline pass RGBA */
@@ -357,10 +357,9 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 // #endregion
 
 // #region Decoration sentinel quad
-/* Solid decoration rect emitted as a sentinel "glyph" with band_count=0; the shader early-returns
- * coverage=1 for band_count==0 (slug_text.frag), so this fills solid for underline/strike. Pixel-space
- * corners (already includes pen/scale), so it flows through the same transform_point path as glyphs —
- * correct under any model matrix (world / 3D), no scissor/viewport hijack. */
+/* Sentinel "glyph" with band_count=0: slug_text.frag early-returns coverage=1, so it fills solid for
+ * underline/strike. Pixel-space corners (already include pen/scale) flow through the same transform_point
+ * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
@@ -403,10 +402,9 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
 // #endregion
 
 // #region Draw
-/* One painter-order glyph pass over the run: looks up each glyph at `key_offset`, emits at
- * (pen + off) in `color`. Pen advance (kern, tracking, newline) is identical every pass so passes
- * register exactly; the run is walked once per active pass (shadow, outline, fill) — grouped, never
- * interleaved (premultiplied-alpha compositing breaks on per-glyph interleave when glyphs overlap). */
+/* Pen advance (kern, tracking, newline) is identical every pass, so passes register exactly. Walked
+ * once per active pass (shadow, outline, fill), grouped and never interleaved: per-glyph interleave
+ * breaks premultiplied-alpha compositing when glyphs overlap. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, uint8_t band_count, nt_font_slot_t *slot,
                             int16_t key_offset, const float color[4], float off_x, float off_y, float *glyph_bias) {

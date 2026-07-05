@@ -12,9 +12,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_LABEL_DEF;
 
-/* Decoration variant bits. A label has a SINGLE font_id (no B/I family), so bold is always
- * synthesized to weight -- there is no real-bold-member to select -- while underline/strike are plain
- * decoration toggles. All flow to the sticky renderer setters per draw. */
+/* Single font_id (no B/I family), so BOLD synthesizes weight; underline/strike are plain toggles. */
 #define NT_UI_LABEL_VARIANT_BOLD (1U << 0)
 #define NT_UI_LABEL_VARIANT_UNDERLINE (1U << 1)
 #define NT_UI_LABEL_VARIANT_STRIKE (1U << 2)
@@ -38,9 +36,8 @@ typedef struct {
     float shadow_dy;        /* em */
     uint32_t shadow_color;  /* AABBGGRR; alpha 0 = no shadow */
 } nt_ui_label_style_t;
-/* Bound RAISED from 32 to 64 deliberately for the decoration fields (variant + weight + outline
- * w/color + shadow dx/dy/color). Labels are immediate-mode (style passed by pointer, usually static-const),
- * NOT a dense array, so the larger struct is not a density concern. */
+/* 64 B bound: labels are immediate-mode (style passed by pointer, usually static-const), NOT a dense
+ * array, so the larger struct is not a density concern. */
 _Static_assert(sizeof(nt_ui_label_style_t) <= 64, "nt_ui_label_style_t fits in 64 B (raised for decoration fields)");
 
 /* data may be NULL (= no layer, no user_data); built with NT_UI_DATA_LAYER / _FULL. */

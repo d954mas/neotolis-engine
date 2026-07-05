@@ -51,7 +51,7 @@ typedef struct {
     uint16_t units_per_em;
     int16_t line_height;         /* ascent - descent + line_gap */
     int16_t underline_position;  /* v5: top of underline, below baseline (font units) */
-    int16_t underline_thickness; /* v5 */
+    int16_t underline_thickness; /* v5: underline thickness (font units) */
     int16_t strikeout_position;  /* v5: above baseline (font units) */
     int16_t strikeout_size;      /* v5: strikeout thickness */
 } nt_font_metrics_t;

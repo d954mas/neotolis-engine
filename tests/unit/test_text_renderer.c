@@ -629,7 +629,7 @@ void test_shadow_emits_extra_span(void) {
 /* Shadow pass reuses the fill variant translated by (dx,dy)*scale — no new cache key, exact offset. */
 void test_shadow_pass_offset(void) {
     /* Shadow offset is em: px = d * size. Use size != units_per_em so the em contract is unambiguous
-     * (the old design-unit *scale would give a different number) — (0.1,-0.05)em at size 200 = (+20,-10). */
+     * (a design-unit *scale would give a different number) — (0.1,-0.05)em at size 200 = (+20,-10). */
     nt_text_renderer_set_shadow(0.1F, -0.05F, 0.0F, s_black);
     nt_text_renderer_draw("A", s_identity, 200.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_glyph_count()); /* shadow (quad0) + fill (quad1) */

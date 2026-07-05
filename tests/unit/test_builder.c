@@ -3568,7 +3568,6 @@ static char *bake_font_pack(const char *ttf_path, const char *pack_path, const N
     return data;
 }
 
-/* The v5 header is 24 bytes (compile-time contract + runtime confirmation). */
 void test_font_v5_header_size(void) {
     TEST_ASSERT_EQUAL_UINT(24, sizeof(NtFontAssetHeader));
     TEST_ASSERT_EQUAL_UINT(5, NT_FONT_VERSION);

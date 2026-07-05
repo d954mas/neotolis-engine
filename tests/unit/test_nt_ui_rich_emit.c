@@ -351,7 +351,7 @@ static void frame_synth_bold(void) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (1h) WIRING + LEAK-GUARD: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD,
+/* WIRING + LEAK-GUARD: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD,
  * which the emit pass feeds to nt_text_renderer_set_weight as NT_UI_RICH_SYNTH_BOLD_WEIGHT, then resets to
  * 0 after the pass. Mirrors the SYNTH_ITALIC wire-and-reset. */
 static void test_emit_synth_bold_wires_and_resets_weight(void) {
@@ -361,7 +361,7 @@ static void test_emit_synth_bold_wires_and_resets_weight(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "emit resets weight to 0 after the pass (no synth-bold leak onto the next caller)");
 }
 
-/* (1i) NEGATIVE: a family WITH a real bold face selects it -> no synthetic weight ever reaches the renderer.
+/* NEGATIVE: a family WITH a real bold face selects it -> no synthetic weight ever reaches the renderer.
  * frame_multi_face pushes <b> against a family whose font_id[1] IS a distinct bold face. */
 static void test_emit_real_bold_face_no_weight(void) {
     nt_font_t fam[4];

@@ -63,7 +63,7 @@
 #define NT_FONT_DELTA_SENTINEL ((uint8_t)0x80)
 
 /* NtFontAssetHeader — 24 bytes. Font-level metadata.
- * v5 appends four decoration metrics (font units) baked from post/OS-2. */
+ * Decoration metrics are in font units, baked from the post/OS-2 tables. */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;              /* 0:  NT_FONT_MAGIC ("FONT") */

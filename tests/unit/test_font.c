@@ -1311,9 +1311,8 @@ void test_font_fallback_order_first_wins(void) {
     free(fb);
 }
 
-/* P1 regression: a fallback family (identical vmetrics, DIFFERENT post/OS-2 decoration) must NOT trip the
- * shared-metrics mismatch assert — decoration is PRIMARY-owned. Folding decoration into the metrics-match
- * predicate false-asserted a Latin+CJK family in debug (and last-writer-overwrote in assert-off release). */
+/* A fallback family with identical vmetrics but DIFFERENT post/OS-2 decoration must NOT trip the
+ * shared-metrics mismatch assert — decoration is PRIMARY-owned, not part of the metrics invariant. */
 void test_font_fallback_decoration_primary_owned(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1355,9 +1354,8 @@ void test_font_fallback_decoration_primary_owned(void) {
     free(fb);
 }
 
-/* P1 (async ordering): if a FALLBACK resolves before the PRIMARY (base loads late), decoration must still
- * flip to the primary once it arrives. Decoration is first-active-provider owned and refreshed EVERY step,
- * not "whoever set metrics first" — the vmetric-match early-continue used to freeze it at the fallback. */
+/* If a FALLBACK resolves before the PRIMARY (base loads late), decoration must still flip to the
+ * primary once it arrives: it is first-active-provider owned and refreshed EVERY step. */
 void test_font_fallback_first_primary_reclaims_decoration(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1382,7 +1380,7 @@ void test_font_fallback_first_primary_reclaims_decoration(void) {
     nt_font_step();
     TEST_ASSERT_EQUAL_INT16_MESSAGE(90, nt_font_get_metrics(font).underline_position, "fallback resolved first -> owns decoration for now");
 
-    /* Base arrives -> the late primary must reclaim decoration (pre-fix froze it at 90). */
+    /* Base arrives -> the late primary must reclaim decoration. */
     nt_font_test_reregister(tok_base, base, base_sz);
     nt_resource_step();
     nt_font_step();
@@ -1855,11 +1853,9 @@ static void curves_min_corner(const float *cv, uint16_t n, float *out_minx, floa
     *out_miny = bb[1];
 }
 
-/* COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W (thick outline), but a
- * COUNTER (hole) caps its inward offset so it keeps >= NT_FONT_COUNTER_KEEP (35%) of its own
- * inradius — the counter NEVER closes, at ANY width, on ANY font. A uniform Minkowski offset
- * would provably FILL a counter once R=W/2 >= inradius (a filled counter is illegible); this
- * non-uniform model is the legible-outline default. */
+/* COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W, but a COUNTER (hole) caps its
+ * inward offset to keep >= NT_FONT_COUNTER_KEEP of its own inradius, so it NEVER closes at any
+ * width — where a uniform Minkowski offset would fill it once R=W/2 >= inradius. */
 void test_counter_preserving_outline(void) {
     /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100. Uniform would FILL
      * this counter at any W >= 200 (R >= 100); counter-preserve keeps it open at every width. */
@@ -1977,12 +1973,9 @@ void test_embolden_resolves_self_intersecting_outer(void) {
     TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 474.0F)); /* centroid solid */
 }
 
-/* The '@' seal-fill fix's core discriminator (whole-glyph dilation membership). The pentagram test above
- * covers same-sign loops; the opposite-wound KEEP path fires only on real curved keyhole geometry ('@',
- * '&'), which simple integer polygons don't reproduce (their offset+uncross yields only same-sign loops)
- * This unit-tests the decision itself: a grower's
- * opposite loop is KEPT iff its pole lies OUTSIDE the true dilation of the ORIGINAL glyph. A regression
- * that inverts the fill test, breaks the distance test, or drops the r_off gate is caught here. */
+/* Unit-tests the '@' seal-fill KEEP decision directly (real curved keyhole geometry that simple
+ * integer polygons can't reproduce): a grower's opposite loop is KEPT iff its pole lies OUTSIDE the
+ * true dilation of the ORIGINAL glyph — inverting the fill/distance test or dropping r_off breaks it. */
 void test_grower_loop_membership(void) {
     /* Original glyph = solid square [0..600] as flat curves (weight-0 raw outline). */
     const int16_t sq[4][2] = {{0, 0}, {600, 0}, {600, 600}, {0, 600}};
@@ -2083,8 +2076,7 @@ void test_cache_variant_distinct_slots(void) {
     free(blob);
 }
 
-/* key_offset 0 behaves exactly as the pre-change codepoint-only path: the
- * public wrapper delegates to offset 0 and returns the same slot. */
+/* The public wrapper delegates to key_offset 0 and returns the same slot as a direct offset-0 lookup. */
 void test_cache_key_offset_zero_parity(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_parity", &blob);
@@ -2244,10 +2236,9 @@ void test_font_decoration_metrics_from_header(void) {
 }
 
 /* ---- Real-font '@' counter regression ----
- * Drives decode_contours end-to-end on a real curved keyhole glyph (Roboto '@'): the opposite-wound
- * grower KEEP wiring in resolve_and_emit + the r_off = 0.5*|w_eff| derivation that simple integer
- * polygons can't reproduce (they never self-intersect into an opposite loop). Asserts the '@' inner
- * counter stays OPEN under a wide synthetic outline -- the exact seal-fill bug this branch fixes. */
+ * Drives decode_contours end-to-end on a real curved keyhole glyph (LilitaOne '@'): the opposite-
+ * wound grower KEEP path that simple integer polygons can't reproduce. Asserts the '@' inner
+ * counter stays OPEN under a wide synthetic outline. */
 
 typedef struct {
     int16_t x[600];
@@ -2373,10 +2364,9 @@ static unsigned char *at_load_path(const char *const *paths) {
     return NULL;
 }
 
-/* Find the counter POLE: the grid cell that is OPEN (not filled) AND interior (a filled cell exists on
- * all 4 axis rays within the box, so it's inside a counter, not the exterior) AND deepest (max distance
- * to the nearest filled cell). Returns the interior-open cell count; writes the pole's world coords.
- * The pole is the LAST point a legitimate offset would fill, so it's the sharpest seal-fill probe. */
+/* Find the counter POLE: the interior-open grid cell (filled cell on all 4 axis rays, so inside a
+ * counter not the exterior) that is deepest from any filled cell. Returns the interior-open cell
+ * count, writes the pole's world coords; the pole is the sharpest seal-fill probe. */
 #define AT_GRID 44
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static int at_counter_pole(const float *cv, uint16_t n, int x0, int y0, int x1, int y1, float *out_px, float *out_py) {
@@ -2493,11 +2483,9 @@ static void test_at_counter_open_real_font(void) {
     TEST_ASSERT_FALSE_MESSAGE(curves_fill_nonzero(cvw, nw, pole_x, pole_y), "'@' counter center must stay open under a wide outline (seal-fill regression)");
 }
 
-/* Worst-case glyph-miss budget: decode a DENSE CJK ideograph at a heavy outline weight — the most
- * expensive runtime cache-miss path (many contours -> offset_with_joins + O(n^2) self-crossing resolve +
- * counter seal-radius). CATASTROPHIC-regression guard, not a micro-benchmark: measured ~0.8 ms/decode in
- * native-debug, ceiling is 50 ms (~60x headroom) so CI machine/load variance never flakes; it only trips
- * if someone turns an O(n^2) pass into O(n^3), adds an unbounded loop, or drops the graceful-degradation cap. */
+/* Worst-case glyph-miss budget: a DENSE CJK ideograph at a heavy outline weight is the most
+ * expensive cache-miss path (offset_with_joins + O(n^2) self-crossing resolve + seal-radius).
+ * Catastrophic-regression guard: must stay well under the 50 ms ceiling (huge headroom, no flake). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_font_worstcase_glyph_miss_budget(void) {
     const char *paths[] = {NT_LILITA_TTF, "assets/fonts/LilitaOne-RussianChineseKo.ttf", "../assets/fonts/LilitaOne-RussianChineseKo.ttf", NULL};

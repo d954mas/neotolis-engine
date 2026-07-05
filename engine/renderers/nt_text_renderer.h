@@ -58,10 +58,9 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 void nt_text_renderer_set_oblique(float shear);
 
 /* ---- Sticky decoration state ---- */
-/* All four mirror set_oblique's lifetime: kept across restore_gpu, cleared on cold init/shutdown, no
- * flush (folded into the CPU emit). Every float arg is hard-guarded with a REAL if (!isfinite) — NOT an
- * assert — because NT_ASSERT is a no-op in shipping and a NaN would poison the offset/quantize math.
- * Call reset_decoration() (or set each back to 0) when done so state does not leak onto later text. */
+/* All five setters mirror set_oblique's lifetime: kept across restore_gpu, cleared on cold init/shutdown,
+ * no flush (CPU emit). Float args use a REAL if (!isfinite) guard, NOT an assert — NT_ASSERT is a no-op
+ * in shipping and a NaN would poison the offset/quantize math. Call reset_decoration() so state does not leak. */
 
 /* Synthetic weight in em units: subsequent fills emit an emboldened (positive) / thinned (negative)
  * glyph variant via the (codepoint, weight) glyph cache. 0 (default) = the font's natural weight. */
@@ -72,9 +71,8 @@ void nt_text_renderer_set_weight(float weight_em);
 void nt_text_renderer_set_outline(float width, const float color[4]);
 
 /* Hard drop shadow: subsequent draws emit an extra pass offset by (dx,dy) em in `color` (px = d * size,
- * so it scales with the text like weight/outline), behind everything, reusing the outline/fill glyph
- * variant (no new cache key). `blur` is stored for a future soft-shadow mode but UNUSED here (hard shadow
- * only). color alpha 0 (default) = no shadow. */
+ * scales with the text), behind everything, reusing the outline/fill glyph variant (no new cache key).
+ * `blur` is stored but UNUSED (hard shadow only). color alpha 0 (default) = no shadow. */
 void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float color[4]);
 
 /* Underline / strikethrough: subsequent draws emit one continuous solid quad per line at the font's

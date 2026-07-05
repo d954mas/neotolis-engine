@@ -186,10 +186,9 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) {
  *   CLAY({ .userData = NT_UI_DATA_XFORM(LAYER_HUD, &t, 0.8F), ... }) */
 typedef uint8_t nt_ui_layer_t;
 
-/* Optional per-element "special data", tagged by special_kind. The union holds a POINTER into frame
- * scratch, so element_data grows by exactly one pointer no matter how many kinds are added, and this
- * header stays light (forward decls, not full definitions). Text decoration is the first kind; inline
- * images will add their own. NONE (0) = a plain element with no special data (shares the layer singleton). */
+/* Optional per-element payload tagged by special_kind. The union holds a POINTER into frame scratch, so
+ * element_data grows by exactly one pointer no matter how many kinds are added, and this header needs only
+ * forward decls. NONE (0) = a plain element with no special data (shares the layer singleton). */
 typedef struct nt_ui_label_deco nt_ui_label_deco_t; /* full definition in nt_ui_internal.h */
 typedef enum {
     NT_UI_SPECIAL_NONE = 0,
@@ -208,7 +207,7 @@ typedef struct {
         const nt_ui_label_deco_t *text_deco; /* NT_UI_SPECIAL_TEXT_DECO */
     } special;
 } nt_ui_element_data_t;
-/* 64B on 64-bit, 52B on 32-bit/WASM (+8 vs the pre-special ABI for the special union pointer). */
+/* 64B on 64-bit, 52B on 32-bit/WASM. */
 _Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 64 : 52), "nt_ui_element_data_t stable ABI");
 _Static_assert(sizeof(nt_ui_transform_t) == 36, "nt_ui_transform_t — fail loudly if extended");
 

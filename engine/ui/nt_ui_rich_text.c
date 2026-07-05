@@ -202,7 +202,7 @@ static void rich_push_copy(nt_ui_rich_state_t *st) {
 
 /* Select the family member for the composed variant; fall back BI->B->R. Returns the resolved font and,
  * via out_synth_italic/out_synth_bold, whether italic/bold must be synthesized (requested but the family
- * has no matching member). Cascade: a real bold/italic face wins, else the axis is synthesized. */
+ * has no matching member). */
 static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_italic, bool *out_synth_bold) {
     *out_synth_italic = false;
     *out_synth_bold = false;
@@ -828,25 +828,21 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
     }
 }
 
-/* Parse the inline attr tail of `<outline width=2 color=#ff0000>` / `<shadow dx=1 dy=1 color=#000000>`
- * ([s,s+n) = the bytes AFTER the tag name). A THIRD instance of the rich_parse_img_attrs space-separated
- * `key=value` token scanner (NOT a new convention): bounded scan, `eq==0 || eq>=tlen` underflow guard,
- * NT_LOG_WARN_UNIQUE + skip on malformed. Writes through the non-NULL out params for the keys it knows
- * (width|w, dx, dy, color); unknown keys log once + skip. Colors are inline #RRGGBB only (named colors
- * need the tagset that inline decoration attrs do not carry). Untrusted localization data: never asserts,
- * never OOB, never loops. */
+/* Parse the `key=value` attr tail of `<outline>` / `<shadow>` ([s,s+n) = the bytes AFTER the tag name).
+ * Untrusted localization data: bounded scan, warn+skip on malformed, never asserts/OOB/loops. Colors are
+ * inline #RRGGBB only (named colors need the tagset that inline decoration attrs do not carry). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key degrade (mirrors rich_parse_img_attrs)
 static void rich_parse_deco_attrs(const char *s, uint32_t n, float *width, float *dx, float *dy, uint32_t *color_abgr) {
     uint32_t i = 0;
     while (i < n) {
-        while (i < n && s[i] == ' ') { /* skip the separator run */
+        while (i < n && s[i] == ' ') {
             i++;
         }
         if (i >= n) {
             break;
         }
         const uint32_t tok = i;
-        while (i < n && s[i] != ' ') { /* span one key=value token */
+        while (i < n && s[i] != ' ') {
             i++;
         }
         const uint32_t tlen = i - tok;
@@ -2020,9 +2016,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * Per-glyph pen uses cumulative-prefix measures so sum(advances)==measure(whole) (keeps kerning;
  * stays in the reserved box). O(N^2) but N is one word/line-chunk, so tiny.
  * Decoration is per-glyph here BY DESIGN: outline/shadow must ride each transformed glyph (a per-run pass
- * would detach from the moving glyphs), and underline/strike follow the effect. Rich decoration is per-atom
- * in general (plain runs are word atoms; see §32.2b) — the per-run/continuous-underline contract is the
- * label path, not rich. */
+ * would detach from the moving glyphs); underline/strike follow the effect. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);
@@ -2157,10 +2151,8 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* Push the run's full decoration state to the renderer before its draw (the UI sets state per draw,
- * the renderer is transport). Every axis is set explicitly (0/off when absent) so nothing leaks between
- * runs; the caller resets once after the whole band. weight is the SYNTH_BOLD cascade, outline/shadow come
- * from the composed style (looked up via run_idx), underline/strike from the run flags. */
+/* Set every decoration axis explicitly (0/off when absent) so nothing leaks between runs; the caller
+ * resets once after the whole band. */
 static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *e, float opacity) {
     nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
     nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_UI_RICH_SYNTH_BOLD_WEIGHT : 0.0F);

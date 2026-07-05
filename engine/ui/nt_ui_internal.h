@@ -475,10 +475,8 @@ uint32_t nt_ui_internal_current_open_element_id(void);
 /* Call IMMEDIATELY after CLAY_TEXT — text leaf is appended but not pushed on the open stack. */
 uint32_t nt_ui_internal_last_emitted_element_id(void);
 
-/* ---- Label decoration (element_data.special payload) ----
- * nt_ui_label allocates one of these in frame scratch for a decorated label and hangs it off the label's
- * private element_data (special_kind = NT_UI_SPECIAL_TEXT_DECO); the walker applies it via
- * nt_ui_label_deco_apply. Named struct so nt_ui.h can forward-declare it inside the special union. */
+/* Label decoration payload hung off element_data.special. Named struct so nt_ui.h can forward-declare it
+ * inside the special union. */
 struct nt_ui_label_deco {
     uint8_t variant; /* NT_UI_LABEL_VARIANT_* */
     float weight;    /* em */

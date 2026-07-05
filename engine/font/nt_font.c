@@ -165,10 +165,8 @@ static uint16_t next_pot16(uint16_t v) {
     return (uint16_t)(v + 1);
 }
 
-/* Cache-key home slot: fmix32(cp ^ off*golden) & mask. Mixing key_offset in
- * spreads (codepoint, weight) variants across the table so a bold 'A' and a
- * regular 'A' land in different homes. MUST be identical in lookup/insert/remove
- * (incl. the backshift home recompute) or the probe chains corrupt on eviction. */
+/* fmix32(cp ^ off*golden) & mask. MUST be identical in lookup/insert/remove
+ * (incl. the backshift home recompute) or probe chains corrupt on eviction. */
 static inline uint16_t key_home(uint16_t mask, uint32_t cp, int16_t off) {
     uint32_t h = cp ^ ((uint32_t)(int32_t)off * 0x9E3779B1U);
     h ^= h >> 16;
@@ -607,17 +605,14 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
     }
 }
 
-/* CPU embolden + offset self-intersection resolution. All scratch is
- * static preallocated (no heap on the decode miss path); caps measured by the offset-resolution benchmark:
- * reflex joins observed <=7/contour, self-crossings <=31 (齒 @0.32em). Overflow degrades
- * to today's rendering (raw offset ring), never crashes. */
+/* CPU embolden + offset self-intersection resolution; scratch is static preallocated
+ * (no heap on the decode miss path). Overflow degrades to the raw offset ring, never crashes. */
 #define NT_FONT_OFFSET_MAX_JOINS 64 /* reflex retraction joins/contour; beyond -> plain miter (>= today) */
 #define NT_FONT_OFFSET_MAX_XINGS 64 /* proper self-crossings/ring; overflow -> keep raw ring (= today) */
 #define NT_FONT_OFFSET_RING_MAX (NT_FONT_MAX_POINTS_PER_CONTOUR + (2 * NT_FONT_OFFSET_MAX_JOINS))
 #define NT_FONT_OFFSET_NODE_MAX (NT_FONT_OFFSET_RING_MAX + (2 * NT_FONT_OFFSET_MAX_XINGS))
-/* Counter-preserving outline: a counter (hole) keeps >= this fraction of its OWN inradius under
- * any offset, so it never closes on any font. Fraction-of-inradius (not em) => scale/font-
- * invariant, proportionally-consistent openness. Documented default; tune per taste. */
+/* A counter (hole) keeps >= this fraction of its OWN inradius under any offset, so it never
+ * closes on any font. Fraction-of-inradius (not em) => scale/font-invariant openness. */
 #define NT_FONT_COUNTER_KEEP 0.35F
 
 /* Offset+joins destination ring: offset_with_joins reads the base s_decode_pts_*, writes here,
@@ -626,15 +621,12 @@ static int32_t s_offset_x[NT_FONT_OFFSET_RING_MAX];
 static int32_t s_offset_y[NT_FONT_OFFSET_RING_MAX];
 static uint8_t s_offset_on[NT_FONT_OFFSET_RING_MAX];
 
-/* Offset a point ring by W (embolden), writing the result to a SEPARATE dst ring. sign=-1 grows
- * the outer silhouette / shrinks counters for the builder's stbtt winding; miter d capped at
- * d_max=2.0 (geometry guard). No W clamp — set_weight applies W exactly (explicit-over-implicit);
- * the 1e-6 length guard + lrintf keep output finite at any W.
- * At a cap-binding reflex corner of a GROWER ring, emit a Clipper-style retraction join (wall end
- * at exact R, original vertex, wall end) so the converging offset walls cross at the true trim
- * point; resolve_and_emit then excises the pocket (kills the 'W'-valley sealed-dent).
- * a0 = signed area of the source ring (winding reference). Thin (W<0) swaps grower/shrinker by
- * symmetry (NOT raster-validated). Returns dst point count. */
+/* Offset a point ring by W (embolden) into a SEPARATE dst ring. sign=-1 grows the outer /
+ * shrinks counters for the builder's stbtt winding; miter d capped at 2.0. No W clamp —
+ * set_weight applies W exactly (explicit-over-implicit); 1e-6 length guard + lrintf stay finite.
+ * At a cap-binding reflex GROWER corner, a retraction join (wall, vertex, wall) makes the
+ * converging walls cross at the true trim point; resolve_and_emit excises the pocket. a0 =
+ * source signed area (winding ref); thin (W<0) swaps grower/shrinker (NOT raster-validated). */
 static uint16_t offset_with_joins(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, int32_t *dx, int32_t *dy, uint8_t *don, float W, double a0) {
     if (W == 0.0F || n < 2) {
         for (uint16_t i = 0; i < n; i++) {
@@ -838,11 +830,9 @@ static bool ring_point_inside(double px, double py, const int32_t *x, const int3
     return inside;
 }
 
-/* Inradius = radius of the largest inscribed disk (pole of inaccessibility). Polylabel-style
- * quadtree refinement (heap-free bounded DFS): prune cells that cannot beat the running best,
- * refine the promising ones to PREC. A counter's Minkowski erosion by R is non-empty IFF
- * inradius > R — the exact geometric trace/fill boundary, no fudge constant (calibration
- * matches the fine-grid GT on LilitaOne + Roboto + analytic circle/ellipse/square). */
+/* Inradius = radius of the largest inscribed disk (pole of inaccessibility), via Polylabel-style
+ * bounded quadtree refinement to PREC. A counter's Minkowski erosion by R is non-empty IFF
+ * inradius > R — the exact fill/trim boundary, no fudge constant. */
 typedef struct {
     double cx, cy, h;
 } nt_pa_cell_t;
@@ -991,11 +981,9 @@ static int32_t s_seal_x[NT_FONT_OFFSET_RING_MAX];
 static int32_t s_seal_y[NT_FONT_OFFSET_RING_MAX];
 static uint8_t s_seal_on[NT_FONT_OFFSET_RING_MAX];
 
-/* Seal radius: the largest inward offset R at which the counter ring does NOT self-intersect.
- * A narrow neck/channel sealing OR a sharp-corner over-shoot both surface as a self-intersection
- * of the offset ring (which the resolver would split into a wrong-sign loop that drops -> fills).
- * Binary search in (0, inradius]; convex counters never self-intersect -> inradius bounds it.
- * wsign = the offset's shrink direction. O(iters*n²) per shrinker, decode miss path only. */
+/* Seal radius: the largest inward offset R at which the counter ring does NOT self-intersect
+ * (a sealing neck/channel surfaces as a self-intersection). Binary search in (0, inradius];
+ * convex counters never self-intersect -> inradius bounds it. Decode miss path only. */
 static double counter_seal_radius(const int32_t *bx, const int32_t *by, const uint8_t *bon, uint16_t bn, double a0, float wsign, double inradius) {
     if (inradius <= 0.0) {
         return 0.0;
@@ -1094,12 +1082,9 @@ static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8
 }
 
 /* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
- * SAFETY gate: a shrinker whose erosion by r_off empties (inradius <= r_off) fills
- * solid. With counter-preservation the caller caps r_off < inradius, so this never fires for
- * a real counter — it is the fallback for a degenerate/uncapped path. Then uncross (split
- * crossings, rewire orientation-preserving) → signed-loop filter (drop loops opposing the
- * original winding = D1 notches). base_inradius = poly_inradius(base) computed once by the
- * caller (0 for growers). Winding elsewhere preserved; positive overlaps stay filled. */
+ * SAFETY gate: a shrinker whose erosion by r_off empties (inradius <= r_off) fills solid;
+ * counter-preservation caps r_off < inradius so this never fires for a real counter — it is
+ * the fallback for a degenerate/uncapped path. Loops opposing the original winding are dropped. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker,
                              double base_inradius, double r_off, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
@@ -1202,13 +1187,10 @@ static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t
             continue; /* sliver */
         }
         if ((la > 0.0) != orig_pos) {
-            /* Opposite-wound loop → would carve a hole. For a SHRINKER it is a D1 winding-
-             * cancellation notch (drop). For a GROWER it may be a legitimate re-entrant counter of
-             * a keyhole glyph ('@','&'): keep it ONLY if its deepest interior point lies OUTSIDE the
-             * true dilation of the WHOLE original glyph — not inside the original fill AND farther
-             * than r_off from any original edge. A pentagram's center loop is inside the original
-             * fill → dropped (fills solid); '@'s counter is original background beyond r_off → kept
-             * (stays open). Sign alone can't tell them apart; whole-glyph fill is the discriminator. */
+            /* Opposite-wound loop → would carve a hole. A SHRINKER drops it (D1 winding-
+             * cancellation notch). A GROWER keeps it ONLY if its deepest interior point lies
+             * OUTSIDE the whole original glyph's dilation — not inside the original fill AND
+             * farther than r_off from any original edge (real re-entrant counter, not a notch). */
             if (is_shrinker) {
                 continue;
             }
@@ -1269,16 +1251,9 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
     return cap;
 }
 
-/* Decode v4 point-based contour data into absolute float curves. Handles implicit midpoints
- * between consecutive off-curve points. weight == 0 is byte-identical to a plain decode;
- * weight != 0 emboldens each point ring and resolves offset self-intersections.
- *
- * Counter-preserving (non-uniform): the OUTER (grower) offsets by full W (thick outline); a COUNTER
- * (hole/shrinker) caps its inward offset below the SEAL radius so its narrow channel/neck never
- * touches ('@'/'e'/'a' stay open, any width, any font). Beyond that, a grower whose offset ring self-
- * intersects into re-entrant loops (keyhole glyphs '@','&') is filtered against the WHOLE original
- * glyph fill — built here in pass A — so a real counter is kept while a fill-cancellation notch is
- * dropped (resolve_and_emit). Offset runs on a SEPARATE ring so weight==0 stays byte-identical. */
+/* Decode v4 point-based contour data into absolute float curves (implicit midpoints between
+ * consecutive off-curve points). weight == 0 is byte-identical to a plain decode; weight != 0
+ * emboldens each ring and resolves offset self-intersections on a SEPARATE ring (pass A + B). */
 static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves, float weight) {
     uint16_t contour_count;
     memcpy(&contour_count, contour_data, 2);
@@ -1296,10 +1271,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 
     /* Pass A: whole-glyph ORIGINAL outline (weight-0 curves) for the grower dilation-membership
      * filter — needs ALL contours (a keyhole counter is bounded by a different contour's hole).
-     * Built unconditionally on every weight!=0 miss but READ only when a grower's offset ring self-
-     * intersects into an opposite-wound loop ('@','&'-class); most glyphs never read it. Kept eager
-     * for simplicity — it is a plain decode, dwarfed by pass B's O(n^2) crossing scans; lazy-build is
-     * a future option if a distinct-weight cache ever thrashes. */
+     * Read only when a grower's offset ring self-intersects into an opposite-wound loop. */
     s_orig_count = 0;
     const uint8_t *rp_a = body;
     for (uint16_t ci = 0; ci < contour_count; ci++) {
@@ -1731,9 +1703,8 @@ void nt_font_step(void) {
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             bool was = (slot->resource_handles[ri] != 0);
             /* Any provider gain/loss or identity-swap (override/patch pack, hot-reload) flushes glyph +
-             * measure caches: cached glyphs were decoded from the old winner — or from a lower-priority
-             * provider that a late-loading primary now outranks. Glyphs resolve by first-active order but
-             * the cache keys only on (codepoint, weight), so a winner change is invisible without a flush. */
+             * measure caches: the cache keys only on (codepoint, weight), so a winner change (incl. a
+             * late-loading primary outranking a fallback) is invisible without a flush. */
             if ((was != res_now[ri]) || (res_now[ri] && slot->resource_handles[ri] != handle_now[ri])) {
                 changed = true;
                 need_flush = true;

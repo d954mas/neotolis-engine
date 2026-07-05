@@ -289,7 +289,7 @@ static void parse_reset(void) {
     s_fx.ctx->rich_session_open = false;
 }
 
-/* (deco-1) <outline width=2 color=#ff0000> parses width + color into the composed run style
+/* <outline width=2 color=#ff0000> parses width + color into the composed run style
  * (inline key=value attr tail via the rich_parse_deco_attrs scanner). */
 static void test_parse_outline_wellformed(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -302,7 +302,7 @@ static void test_parse_outline_wellformed(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF0000FFU, s.outline_color_abgr, "outline color #ff0000 -> AABBGGRR red");
 }
 
-/* (deco-2) <shadow dx=1 dy=1 color=#000000> parses dx/dy + color into the composed run style. */
+/* <shadow dx=1 dy=1 color=#000000> parses dx/dy + color into the composed run style. */
 static void test_parse_shadow_wellformed(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     parse_reset();
@@ -315,7 +315,7 @@ static void test_parse_shadow_wellformed(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF000000U, s.shadow_color_abgr, "shadow color #000000 -> opaque black");
 }
 
-/* (deco-3) malformed attr (empty value / bare '=') degrades to the safe default with a single warn,
+/* malformed attr (empty value / bare '=') degrades to the safe default with a single warn,
  * no OOB/crash: <outline width= =2 color=#00ff00> -> width stays 0 (no outline), color still parses. */
 static void test_parse_outline_malformed_degrades(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -331,7 +331,7 @@ static void test_parse_outline_malformed_degrades(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF00FF00U, s.outline_color_abgr, "the well-formed color token still parses after the bad ones");
 }
 
-/* (deco-4) an unknown attr key inside the tag is skipped, not fatal: the recognised key still applies. */
+/* an unknown attr key inside the tag is skipped, not fatal: the recognised key still applies. */
 static void test_parse_outline_unknown_key_skips(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     parse_reset();
@@ -344,7 +344,7 @@ static void test_parse_outline_unknown_key_skips(void) {
     TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "unknown key skipped; width=2 still applies");
 }
 
-/* (deco-5) <u>/<s> raise the underline/strike RUN flags (decoration toggles, not font variants). */
+/* <u>/<s> raise the underline/strike RUN flags (decoration toggles, not font variants). */
 static void test_parse_underline_strike_flags(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     parse_reset();

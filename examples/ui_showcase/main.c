@@ -2708,7 +2708,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_outline_shadow"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &od_base, od_mk, strlen(od_mk), container_w, NT_RICH_ALIGN_LEFT,
                                st->rich.time, NULL);
 
-        /* Code-first builder front: push_outline / push_shadow / push_underline / push_strikethrough mirror the markup tags. */
+        /* Code-first builder front: same decorations as the markup above, via the builder API. */
         nt_ui_rich_style_t ob_base = od_base;
         nt_ui_rich_begin(ctx, &ob_base);
         RICH_TEXT_LIT(ctx, "Builder: ");
@@ -2756,8 +2756,8 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
 // #endregion
 
 // #region Decoration tab (type-specimen: styles / weight / outline / shadow / underline+strike)
-/* Same sentence per style row so faces compare directly; A W e o 8 is the sharp/counter set the embolden
- * spike measured (A W miters, e o 8 counters) -- reused for the outline/combo ramps. */
+/* Same sentence per row so faces compare directly; A W e o 8 stresses miters (A W) and counters (e o 8),
+ * reused for the outline/combo ramps. */
 #define DECO_SENT "The quick brown fox jumps."
 
 /* Emit one plain-label line with decoration overlaid on the themed body style (dark/light parity follows
