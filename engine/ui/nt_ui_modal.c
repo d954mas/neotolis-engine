@@ -171,6 +171,8 @@ bool nt_ui_modal_active(const nt_ui_context_t *ctx) {
     return ctx->modal_present_prev;
 }
 
+void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id) { nt_ui_popup_clear_state(ctx, id); }
+
 #ifdef NT_TEST_ACCESS
 uint16_t nt_ui_modal_test_last_zband(void) { return s_last_panel_zband; }
 uint16_t nt_ui_modal_test_last_backdrop_zband(void) { return s_last_backdrop_zband; }

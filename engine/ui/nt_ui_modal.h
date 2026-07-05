@@ -100,6 +100,11 @@ void nt_ui_modal_end(nt_ui_context_t *ctx);
  * nesting/z follow context. Two windows at once = two ids + two bools. */
 bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open);
 
+/* Drop modal-owned retained view state for `id` after a transient modal/sheet has closed. Child
+ * scroll/input/slider state inside the modal body remains caller-owned and should be cleared by id
+ * when it should not survive close/reopen. */
+void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id);
+
 /* True if a modal was up LAST frame (prev-frame presence — the live depth is 0 after nt_ui_end).
  * The game gates its keyboard/gameplay hotkeys on this; pointer routing is already auto-gated by
  * the backdrop occluder. */

@@ -351,6 +351,14 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
     return true;
 }
 
+void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_popup_clear_state: ctx must be non-NULL");
+    if (id == 0U) {
+        return;
+    }
+    nt_ui_state_clear(ctx, popup_tween_id(id));
+}
+
 #ifdef NT_TEST_ACCESS
 uint16_t nt_ui_popup_test_last_zband(void) { return s_last_panel_zband; }
 uint16_t nt_ui_popup_test_last_catcher_zband(void) { return s_last_catcher_zband; }
