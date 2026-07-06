@@ -6,7 +6,7 @@
 /*
  * ntpack binary pack format -- shared between builder (native) and runtime (WASM).
  * All multi-byte fields are little-endian.
- * See docs/neotolis_engine_spec_1.md S19.2 for the canonical layout.
+ * See docs/spec/assets/ntpack.md for the canonical layout.
  */
 
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */

@@ -5,7 +5,7 @@
  * style is static-const safe. Rides the custom-attr image path so radials sharing one
  * material batch to a single draw. Angular convention: 0 = +X, CCW+. The wedge runs CCW
  * from start to end; swapping start/end selects the COMPLEMENTARY span, not a mirror.
- * design + reveal/angle rationale: docs/neotolis_engine_spec_1.md
+ * design + reveal/angle rationale: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 
 #include <stdint.h>

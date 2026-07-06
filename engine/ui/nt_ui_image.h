@@ -40,7 +40,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atla
  * the material attr_map names the floats; the walker fills a_layout/a_uvrect by name, bakes
  * the rest verbatim. Contract: material ready, custom_bytes == attr_map_count*16 (asserted)
  * <= NT_SPRITE_CUSTOM_STRIDE_MAX. data/decl may be NULL.
- * spec: docs/neotolis_engine_spec_1.md "Radial widgets & the custom-attr image path" */
+ * spec: docs/spec/ui/radial-widgets.md */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
