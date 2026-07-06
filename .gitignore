@@ -65,9 +65,8 @@ compile_*.log
 # Accidental outputs when running CLIs with --help or similar as the positional arg
 --help/
 
-# Claude local settings
+# Claude local settings (.claude/settings.json is shared and tracked)
 .claude/settings.local.json
-.claude/settings.json
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 
