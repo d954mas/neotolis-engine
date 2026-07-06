@@ -21,6 +21,25 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
 
 If specific build, check, or run commands appear in the repo, keep them up to date in this file.
 
+### Bootstrap from a clean clone
+
+```
+git lfs pull                          # example assets are LFS pointers without this
+bash scripts/setup.sh                 # install + activate the pinned emsdk (.emsdk-version)
+                                      # later sessions: source emsdk/emsdk_env.sh
+cmake --preset native-debug           # the three presets check.sh expects:
+emcmake cmake --preset wasm-debug
+emcmake cmake --preset wasm-release
+bash scripts/check.sh                 # sanity check that the environment is alive
+```
+
+Running an example additionally needs its asset packs: build the example's
+`build_<name>_packs` target, then run the produced binary with the example's build dir,
+e.g. `cmake --build --preset native-debug --target build_ui_showcase_packs &&
+./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase`.
+Packs depend only on the builder exe — after editing shader/asset sources, delete the
+`.ntpack` before visual QA to force a repack.
+
 ## Philosophy
 
 1. **Code-first** — game controls the main loop. The engine gives building blocks, not a pipeline.
@@ -74,12 +93,14 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 bash scripts/check.sh
 ```
 
-It builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
+It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
 
-- Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts).
-- Full sweep (CI lint equivalent, includes module-composition + EM_JS gates): `bash scripts/check.sh --full`.
+- Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test.
+- Full sweep (CI lint equivalent): `bash scripts/check.sh --full` — whole-tree format + full tidy.
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.
+
+Known CI-only failure class after a green `--push`: GNU ld link order. The Linux linker resolves archives left-to-right; Windows/wasm links don't, so a wrong link order only fails in CI's native job. If CI fails at link while local passes, fix the archive order (see the comment in `tests/submodule/CMakeLists.txt`).
 
 ## Reviewing a branch
 
