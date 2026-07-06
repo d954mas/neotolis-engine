@@ -86,7 +86,7 @@ typedef struct {
  * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
  * material's attr_map names the floats (walker injects a_layout/a_uvrect by name). Sized
  * for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64).
- * injection vocabulary: docs/neotolis_engine_spec_1.md
+ * injection vocabulary: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 typedef struct {
     float custom_attrs[16];

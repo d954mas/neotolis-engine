@@ -6,7 +6,7 @@
  * nt_ui_image; rides the custom-attr image path (REGION geom). Works with any
  * rectangular region (full-bleed or packed). slice9 is rejected in v1 (UV non-linear
  * across patches). Angular convention: 0 = +X, CCW+; swapping the angles reverses sweep.
- * design + reveal modes + v1 limits: docs/neotolis_engine_spec_1.md
+ * design + reveal modes + v1 limits: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 
 #include <stdint.h>

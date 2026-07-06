@@ -6,7 +6,7 @@
 /*
  * ntpack binary pack format -- shared between builder (native) and runtime (WASM).
  * All multi-byte fields are little-endian.
- * See docs/neotolis_engine_spec_1.md S19.2 for the canonical layout.
+ * See docs/spec/assets/ntpack.md for the canonical layout.
  */
 
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
@@ -20,7 +20,8 @@
  *
  * Unaligned offset would be UB on strict-alignment platforms and slower
  * everywhere else. WASM is tolerant to misalignment today, but we align
- * anyway for correctness, portability, and to match the spec (S19.2).
+ * anyway for correctness, portability, and to match the spec
+ * (docs/spec/assets/ntpack.md).
  *
  * NT_PACK_DATA_ALIGN (8) — padding between header/entries region and first
  *   asset data. Ensures data region starts at 8-byte boundary.

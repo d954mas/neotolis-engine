@@ -55,6 +55,19 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "600M"
+
+      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
+      - name: Enable ccache compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+
       - name: Download textured_quad packs
         uses: actions/download-artifact@v4
         with:
@@ -318,6 +331,17 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
 
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "400M"
+
+      - name: Enable ccache compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+
       # Release first — builds packs that debug/WASM need
       - name: Configure native release
         run: cmake --preset native-release
@@ -487,6 +511,17 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri xvfb
 
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "400M"
+
+      - name: Enable ccache compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+
       # Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
       - name: Install capture-path Python deps (Pillow + numpy)
         run: python3 -m pip install --user -r tools/devapi/requirements-capture.txt
@@ -544,6 +579,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "400M"
+
+      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
+      - name: Enable ccache compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
       # Build the devapi_host wasm with the capture group ON so the web host arms the pre-swap seam
       # (NT_DEVAPI_HOST_WEB_CAPTURE) — the deferred capture.frame resolves to a REAL PNG, the exact
@@ -647,6 +695,19 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "400M"
+
+      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
+      - name: Enable ccache compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+
       # The browser_smoke test app reuses the ui_showcase pack (same assets), but the pack is not a CI
       # artifact, so produce it here: build the native pack builder, run it to emit ui_showcase.ntpack,
       # THEN configure+build the wasm browser_smoke target (its CMake copies the pack into assets/).
@@ -734,6 +795,18 @@ jobs:
         with:
           version: ${{ steps.emsdk-version.outputs.version }}
           actions-cache-folder: 'emsdk-cache'
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: "600M"
+
+      - name: Enable ccache launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          # emcc is a python wrapper; mtime-based compiler check is unreliable across emsdk cache restores
+          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
       - name: Upload asset packs to R2
         env:
