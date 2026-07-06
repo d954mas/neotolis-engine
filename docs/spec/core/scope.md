@@ -226,11 +226,14 @@ Related: [Core Principles](principles.md), [Module Layout](module-layout.md), [R
   Slider and progress share one fill-emit
   helper (STRETCH slice9 stretch vs CROP scissor-reveal × four directions).
 
-  **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in
-  `Clay_UpdateScrollContainers` (the unconditional call was REMOVED from
-  `nt_ui_begin`): the engine integrates the offset itself and feeds Clay a ready
-  `clip.childOffset` each frame — it never reads `Clay_GetScrollOffset`, only
-  `Clay_GetScrollContainerData` for the content/container clamp dims. Everything is in
+  **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in scroll
+  integration for physics, but `Clay_UpdateScrollContainers` is STILL called each frame
+  in neutral mode (drag disabled, zero delta) purely for its slot-GC side effect — every
+  CLIP element reclaims its scroll-pool slot through it, so dropping the call leaks slots
+  until the pool overflows (type=7 crash). The engine integrates the scroll offset itself
+  and feeds Clay a ready `clip.childOffset` each frame — it never reads
+  `Clay_GetScrollOffset`, only `Clay_GetScrollContainerData` for the content/container
+  clamp dims. Everything is in
   Clay's NEGATIVE-down sign convention (childOffset negative going down/right, clamped
   to `[-(content-container), 0]`); only the input edge (wheel) and the scrollbar-thumb
   mapping flip sign. The four-behavior feel model lives in `nt_ui_scroll_style_t`
