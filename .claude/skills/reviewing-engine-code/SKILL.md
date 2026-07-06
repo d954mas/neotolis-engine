@@ -1,13 +1,21 @@
-# Branch Review Playbook
+---
+name: reviewing-engine-code
+description: Runs a multi-agent read-only review of the current branch against the Neotolis engine's own principles (explicit-over-implicit, no-heap-in-hot-path, NT_ASSERT crash-early, tiny size, engine/game boundary), the docs/spec/ chapters, plus correctness, performance, and tests. Spawns parallel focus-lens reviewers, then adversarially verifies each finding (CONFIRMED/PLAUSIBLE/REFUTED) and reports P0-P2 with trigger scenarios. Use whenever reviewing a branch, PR, diff, or commit in this engine, before merging, or when asked to check code against the engine's philosophy, spec, hot-path rules, or AGENTS.md — even if the user only says "review this" or "look at my changes".
+---
 
-This document is an executable playbook for a multi-agent review of the current branch of
-Neotolis Engine before merge. It is written for an AI orchestrator: when a developer says
-"Read docs/agents/branch-review.md and run a full review of this branch", the session that
-reads this file becomes the **orchestrator** and executes the three stages below. It works
-with any agent runtime that can spawn read-only subagents (Claude Code, Codex Desktop, or
-similar). Read `AGENTS.md` before starting — it defines the engine principles, the
-NT_ASSERT crash-early policy, hot-path rules, and the pre-commit checks that reviews must
-not duplicate. The review is READ-ONLY end to end: no edits, no commits, no branch changes.
+# Reviewing Engine Code
+
+An executable playbook for a multi-agent, read-only review of the current branch before
+merge. The session that loads this skill becomes the **orchestrator** and runs the three
+stages below. Works with any runtime that can spawn read-only subagents (Claude Code,
+Codex Desktop). Read `AGENTS.md` and `references/principle-catalog.md` before starting —
+they define the engine principles, the NT_ASSERT crash-early policy, hot-path rules, and
+the pre-commit checks a review must not duplicate. The review is READ-ONLY end to end:
+no edits, no commits, no branch changes.
+
+The engine-principle axis (lens 1) is the point of this skill — it is what generic
+bug-finding reviewers miss. Correctness, perf, and test lenses run alongside it, but the
+principle check is never optional.
 
 ## Stage 1 — Orchestrate
 
@@ -16,14 +24,16 @@ not duplicate. The review is READ-ONLY end to end: no edits, no commits, no bran
    - `git diff <merge-base>...HEAD` → the full diff under review
    - `git diff --name-status <merge-base>...HEAD` → the changed-file list
 2. Classify the diff by touched directories and pick **2-4 focus lenses** from the Focus
-   Menu below. ALWAYS include lens 1 (Architecture & spec compliance) regardless of what
-   changed. Pick the remaining lenses by where the diff lands (e.g. `src/web/` or EM_JS →
-   lens 3; `CMakeLists.txt` → lens 4; renderer/frame-loop code → lens 5).
+   Menu below. ALWAYS include lens 1 (Architecture & spec & principles) regardless of what
+   changed. Pick the remaining lenses by where the diff lands (e.g. `engine/*/web/` or
+   EM_JS → lens 3; `CMakeLists.txt` → lens 4; renderer/frame-loop code → lens 5).
 3. Spawn **one subagent per lens**, all in parallel, each with a fresh context (no fork,
    no shared conversation — independence is the point). Every subagent is READ-ONLY: it
    must not edit files, must not commit, must not run builds that modify the tree.
 4. Each subagent's prompt is the Shared Reviewer Template below, verbatim, with
-   `<branch>`, `<merge-base>`, and `<FOCUS LINE>` substituted.
+   `<branch>`, `<merge-base>`, and `<FOCUS LINE>` substituted. For lens 1, also instruct
+   the subagent to load `references/principle-catalog.md` and check each applicable
+   principle against the diff, citing the catalog rule it violates.
 5. While the subagents run, perform your OWN independent review pass over the full diff.
    Do not wait idle; your pass is a peer of theirs and feeds Stage 2 like any other report.
 6. If a subagent fails or errors out, respawn it once with the same prompt. A cheaper
@@ -32,10 +42,11 @@ not duplicate. The review is READ-ONLY end to end: no edits, no commits, no bran
 
 ## Focus Menu (pick by changed dirs)
 
-1. **Architecture & spec compliance** (MANDATORY every review) — engine principles from
-   `AGENTS.md`; the `docs/spec/` chapters relevant to the diff; module boundaries;
-   module-composition and interface/impl link rules; explicit-over-implicit; runtime
-   simplicity; game responsibility not leaking into the engine.
+1. **Architecture & spec & principles** (MANDATORY every review) — the engine principles
+   in `references/principle-catalog.md` (each has a measurable rule + cite target + a
+   compliant/violating example); the `docs/spec/` chapters relevant to the diff; module
+   boundaries; module-composition and interface/impl link rules; explicit-over-implicit;
+   runtime simplicity; game responsibility not leaking into the engine.
 2. **Feature behavior & edge cases** — the feature's state machine; input edge cases;
    buffer ownership; lifecycle (init/reset/teardown); whether test coverage actually
    exercises the new behavior.
@@ -55,16 +66,16 @@ not duplicate. The review is READ-ONLY end to end: no edits, no commits, no bran
 
 Directory-to-lens hints (a diff usually spans several rows; pick the dominant ones):
 
-| Changed paths                                        | Lenses to add |
-| ---------------------------------------------------- | ------------- |
-| `src/` renderer, frame loop, batching, SoA components | 5             |
-| `src/` module with state machine or public API change | 2             |
-| `src/web/`, `EM_JS`, `library_*.js`, exported symbols | 3             |
-| `CMakeLists.txt`, `cmake/`, stubs/interface targets   | 4             |
-| `src/resource/`, pack format, mount/unmount, builder pack output | 6  |
-| `src/ui/`, widgets, `nt_ui_*`, Clay integration       | 7             |
-| `tests/` dominating the diff, or a bugfix branch      | 8             |
-| Anything (always)                                     | 1             |
+| Changed paths                                             | Lenses to add |
+| --------------------------------------------------------- | ------------- |
+| `engine/render*`, `engine/renderers/`, frame loop, batching, SoA components | 5 |
+| an `engine/` module with a state machine or public API change | 2         |
+| `engine/*/web/`, `EM_JS`, `library_*.js`, exported symbols | 3            |
+| `CMakeLists.txt`, `cmake/`, stubs/interface targets       | 4             |
+| `engine/resource/`, atlas, pack format, mount/unmount, builder pack output | 6 |
+| `engine/ui/`, widgets, `nt_ui_*`, Clay integration        | 7             |
+| `tests/` dominating the diff, or a bugfix branch          | 8             |
+| Anything (always)                                         | 1             |
 
 When more than four rows match, prefer the lenses covering the riskiest integration
 points (per AGENTS.md: coordinate/data transforms between systems, lifecycle, hot path)
@@ -147,8 +158,10 @@ Produce one report with these sections, in order:
    otherwise `merge-ready`. Override the mapping only with stated reasoning.
 2. **Findings table** — columns: Severity | file:line | Issue | Trigger | Suggested fix.
    Severity anchors:
-   - **P0** — breaks unconditionally, or violates a locked spec rule. Drop everything.
-   - **P1** — real bug with a narrow but reachable trigger.
+   - **P0** — breaks unconditionally, or violates a locked spec rule or a catalog
+     principle marked P0 (heap in hot path, side effect inside NT_ASSERT). Drop everything.
+   - **P1** — real bug with a narrow but reachable trigger, or a principle divergence
+     from the catalog / spec that ships wrong behavior or the wrong architecture.
    - **P2** — should fix before or immediately after merge.
    - **P3** exists as a judgment level but is NOT reported. Do not include it.
 3. **Good decisions** — short bullets naming design choices in the branch worth keeping

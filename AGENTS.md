@@ -81,6 +81,10 @@ It builds native-debug, runs ctest, then checks clang-format and clang-tidy on c
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.
 
+## Reviewing a branch
+
+For a full pre-merge review against engine principles, spec, correctness, and tests, run the `reviewing-engine-code` skill (Claude Code and Codex both have it): "review this branch". It spawns parallel focus-lens reviewers (including a mandatory engine-principle lens driven by its `references/principle-catalog.md`), adversarially verifies findings, and reports P0-P2.
+
 If build or test infrastructure is missing, state it explicitly in the response — do not imply the check was done.
 
 ## Developer Profile
