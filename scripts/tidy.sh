@@ -9,6 +9,7 @@ if command -v cygpath > /dev/null 2>&1; then
     ROOT_DIR="$(cygpath -m "$ROOT_DIR")"
 fi
 BUILD_DIR="${1:-build/_cmake/native-debug}"
+if [ "$#" -gt 0 ]; then shift; fi
 
 if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
     echo "ERROR: compile_commands.json not found in $BUILD_DIR"
@@ -16,12 +17,53 @@ if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
     exit 1
 fi
 
-# Find all engine .c source files (exclude vendored deps/ and web-only files).
-# Conditionally-gated TUs (e.g. NT_UI_DEBUG_TOOLS) are compiled unconditionally
-# with `#if` guards in the body, so compile_commands.json covers every .c
-# regardless of build options — no source-list filtering needed here.
-SOURCES=$(find engine shared tools examples tests \
-    -name '*.c' | grep -v 'deps/\|/web/\|_web\.c\|tools/research/')
+if [ "$#" -gt 0 ]; then
+    # Explicit file list mode: lint only the given .c files (non-.c args skipped).
+    SOURCES=""
+    for f in "$@"; do
+        case "$f" in
+            *.c) SOURCES="$SOURCES$f"$'\n' ;;
+        esac
+    done
+    SOURCES="${SOURCES%$'\n'}"
+    if [ -z "$SOURCES" ]; then
+        echo "clang-tidy: no .c files in argument list — nothing to check"
+        exit 0
+    fi
+else
+    # Find all engine .c source files (exclude vendored deps/ and web-only files).
+    SOURCES=$(find engine shared tools examples tests \
+        -name '*.c' | grep -v 'deps/\|/web/\|_web\.c\|tools/research/')
+fi
+
+# Lint only TUs present in compile_commands.json. A file absent from the DB
+# (e.g. devapi tests when NT_DEVAPI_GROUP_* options are off) gets guessed
+# flags and bogus diagnostics. check.sh --push lints those via tidy-ci.
+FILTER_RESULT=$(printf '%s\n' "$SOURCES" | python -c "
+import json, sys
+build_dir, root = sys.argv[1], sys.argv[2]
+db = {e['file'].replace(chr(92), '/').lower() for e in json.load(open(build_dir + '/compile_commands.json'))}
+kept, skipped = [], 0
+for line in sys.stdin:
+    f = line.strip()
+    if not f:
+        continue
+    if (root + '/' + f).lower() in db:
+        kept.append(f)
+    else:
+        skipped += 1
+print(skipped)
+print('\n'.join(kept))
+" "$BUILD_DIR" "$ROOT_DIR" | tr -d '\r')
+SKIPPED=$(printf '%s\n' "$FILTER_RESULT" | head -1)
+SOURCES=$(printf '%s\n' "$FILTER_RESULT" | tail -n +2)
+if [ "$SKIPPED" -gt 0 ]; then
+    echo "clang-tidy: skipped $SKIPPED file(s) absent from $BUILD_DIR/compile_commands.json (build options off)"
+fi
+if [ -z "$SOURCES" ]; then
+    echo "clang-tidy: nothing to check in this build dir"
+    exit 0
+fi
 
 FILE_COUNT=$(echo "$SOURCES" | wc -w)
 echo "Running clang-tidy on $FILE_COUNT files..."
@@ -65,12 +107,37 @@ echo "$SOURCES" | tr ' ' '\n' | xargs -n 1 -P "$PARALLEL_JOBS" -I {} clang-tidy 
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
 
+# Windows + xargs -P: clang-tidy sporadically fails to open a file under
+# parallel load (sharing violation → "no such file"/"expected exactly one
+# compiler job"). Retry error files serially once: real diagnostics
+# reproduce, transient infra errors vanish.
 if [ -n "$PROJECT_ERRORS" ]; then
-    echo "$PROJECT_ERRORS"
-    echo ""
-    echo "clang-tidy: FAILED — errors in project files"
-    rm -f "$TIDY_OUTPUT"
-    exit 1
+    RETRY_FILES=$(printf '%s\n' "$PROJECT_ERRORS" | python -c "
+import re, sys
+root = sys.argv[1].lower()
+seen = []
+for m in re.findall(r'[A-Za-z]:[\\\\/][^:\'\"]+\.c', sys.stdin.read()):
+    p = m.replace(chr(92), '/')
+    rel = p[len(root) + 1:] if p.lower().startswith(root) else p
+    if rel not in seen:
+        seen.append(rel)
+print('\n'.join(seen))
+" "$ROOT_DIR" | tr -d '\r')
+    PERSISTENT_ERRORS=""
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        RETRY_OUT=$(clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" "$f" 2>&1) || true
+        ERRS=$(printf '%s\n' "$RETRY_OUT" | grep "error:" | grep -v "deps/" || true)
+        [ -n "$ERRS" ] && PERSISTENT_ERRORS="$PERSISTENT_ERRORS$ERRS"$'\n'
+    done <<< "$RETRY_FILES"
+    if [ -n "$PERSISTENT_ERRORS" ]; then
+        printf '%s' "$PERSISTENT_ERRORS"
+        echo ""
+        echo "clang-tidy: FAILED — errors in project files"
+        rm -f "$TIDY_OUTPUT"
+        exit 1
+    fi
+    echo "clang-tidy: transient parallel-run errors resolved on serial retry ($(printf '%s\n' "$RETRY_FILES" | grep -c . ) file(s))"
 fi
 
 # xargs returns 123 when a subcommand exited 1-125: clang-tidy did run
