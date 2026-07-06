@@ -147,6 +147,10 @@ if [ "$MODE" = "full" ]; then
     bash scripts/check_link_failure_loud.sh
     bash scripts/check_emjs_deps.sh
     ok
+
+    step "doc links"
+    bash scripts/check_doc_links.sh
+    ok
 else
     step "clang-format (changed files)"
     if [ -n "$FORMAT_FILES" ]; then

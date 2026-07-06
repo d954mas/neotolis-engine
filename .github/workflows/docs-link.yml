@@ -1,0 +1,33 @@
+name: Docs Links
+
+# Standalone from ci.yml on purpose: ci.yml's top-level paths-ignore skips the
+# whole workflow for docs-only changes, so broken relative links in docs/ would
+# ship unchecked. This workflow does the opposite — it runs ONLY on doc/md
+# changes and does nothing but the fast link check (no build).
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - '**/*.md'
+      - 'scripts/check_doc_links.sh'
+      - '.github/workflows/docs-link.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '**/*.md'
+      - 'scripts/check_doc_links.sh'
+      - '.github/workflows/docs-link.yml'
+
+concurrency:
+  group: docs-link-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-link:
+    name: Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation links resolve
+        run: bash scripts/check_doc_links.sh
