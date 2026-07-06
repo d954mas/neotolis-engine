@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Unified pre-commit check. Modes:
 #   scripts/check.sh          build + ctest + format/tidy on changed files
-#   scripts/check.sh --full   build + ctest + whole-tree format + full tidy
-#   scripts/check.sh --push   default + wasm-debug build + CI-parity tidy
+#   scripts/check.sh --full   build + ctest + whole-tree format + full tidy + gates
+#   scripts/check.sh --push   default + wasm-debug build
+# All tidy runs use the tidy-ci DB (native-debug + devapi groups ON) so the lint
+# matches the CI lint job exactly — devapi TUs are absent from the plain
+# native-debug compile DB and would otherwise be silently skipped.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,6 +85,24 @@ TIDY_FILES="$(printf '%s\n' "$CHANGED_FILES" \
 CHANGED_HEADERS="$(printf '%s\n' "$CHANGED_FILES" | grep '\.h$' | grep -v 'deps/' || true)"
 # #endregion
 
+# tidy-ci DB = native-debug preset + devapi groups ON. Mirrors the ci.yml "lint"
+# job (Format & Tidy -> Configure step) so devapi TUs land in compile_commands.json
+# with correct flags. Keep the flag list in sync with .github/workflows/ci.yml.
+TIDY_CI_DIR="build/_cmake/tidy-ci"
+TIDY_CI_FLAGS=(
+    -DNT_DEVAPI_ENABLED=ON
+    -DNT_DEVAPI_GROUP_UI=ON
+    -DNT_DEVAPI_GROUP_OBS=ON
+    -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
+    -DNT_DEVAPI_GROUP_CAPTURE=ON
+)
+ensure_tidy_ci() {
+    if [ ! -f "$TIDY_CI_DIR/compile_commands.json" ]; then
+        echo "Configuring $TIDY_CI_DIR (one-time; devapi groups ON to match CI lint)..."
+        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
+    fi
+}
+
 # Runs tidy on changed .c files, or the full tree when headers changed.
 run_tidy_gate() {
     local build_dir="$1"
@@ -116,7 +137,8 @@ if [ "$MODE" = "full" ]; then
     ok
 
     step "clang-tidy (full)"
-    bash scripts/tidy.sh "$NATIVE_BUILD_DIR"
+    ensure_tidy_ci
+    bash scripts/tidy.sh "$TIDY_CI_DIR"
     ok
 
     # The remaining CI lint-job gates (module-composition + EM_JS/Closure).
@@ -137,7 +159,8 @@ else
     ok
 
     step "clang-tidy (changed files)"
-    run_tidy_gate "$NATIVE_BUILD_DIR"
+    ensure_tidy_ci
+    run_tidy_gate "$TIDY_CI_DIR"
     ok
 fi
 
@@ -156,24 +179,5 @@ if [ "$MODE" = "push" ]; then
         exit 1
     fi
     cmake --build build/_cmake/wasm-debug
-    ok
-
-    step "clang-tidy (CI parity)"
-    # Flag list mirrors the ci.yml "lint" job (Format & Tidy -> Configure step):
-    # devapi groups ON so devapi TUs land in compile_commands.json with correct flags.
-    # Keep in sync with .github/workflows/ci.yml when the lint job changes.
-    TIDY_CI_DIR="build/_cmake/tidy-ci"
-    TIDY_CI_FLAGS=(
-        -DNT_DEVAPI_ENABLED=ON
-        -DNT_DEVAPI_GROUP_UI=ON
-        -DNT_DEVAPI_GROUP_OBS=ON
-        -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
-        -DNT_DEVAPI_GROUP_CAPTURE=ON
-    )
-    if [ ! -f "$TIDY_CI_DIR/compile_commands.json" ]; then
-        echo "Configuring $TIDY_CI_DIR (one-time)..."
-        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
-    fi
-    run_tidy_gate "$TIDY_CI_DIR"
     ok
 fi

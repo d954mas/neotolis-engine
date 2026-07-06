@@ -74,16 +74,16 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 bash scripts/check.sh
 ```
 
-It builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
+It builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
 
-- Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts) and runs tidy with CI-parity devapi flags.
-- Full sweep (CI lint equivalent): `bash scripts/check.sh --full`.
+- Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts).
+- Full sweep (CI lint equivalent, includes module-composition + EM_JS gates): `bash scripts/check.sh --full`.
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.
 
 ## Reviewing a branch
 
-For a full pre-merge review against engine principles, spec, correctness, and tests, run the `reviewing-engine-code` skill (Claude Code and Codex both have it): "review this branch". It spawns parallel focus-lens reviewers (including a mandatory engine-principle lens driven by its `references/principle-catalog.md`), adversarially verifies findings, and reports P0-P2.
+For a full pre-merge review against engine principles, spec, correctness, and tests, use the `reviewing-engine-code` skill in `.claude/skills/` — say "review this branch". It spawns parallel focus-lens reviewers (including a mandatory engine-principle lens driven by its `references/principle-catalog.md`), adversarially verifies findings, and reports P0-P2. Claude Code auto-discovers it; in Codex, read `.claude/skills/reviewing-engine-code/SKILL.md` directly (it is a self-contained, runtime-agnostic playbook) or install it into `~/.codex/skills/`.
 
 If build or test infrastructure is missing, state it explicitly in the response — do not imply the check was done.
 

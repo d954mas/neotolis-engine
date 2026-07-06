@@ -9,8 +9,8 @@ Related: [Locked Decisions](../decisions/index.md), [Architecture Snapshot](arch
 
 These do not block implementation:
 
-- exact binary layout of each runtime format header
-- precise bit packing of sort keys
+- ~~exact binary layout of each runtime format header~~ → resolved: pack container defined (`shared/include/nt_pack_format.h`, magic `NPAK` v2), per-asset runtime formats implemented ([Runtime Formats](../assets/runtime-formats.md), [Pack Format](../assets/ntpack.md))
+- ~~precise bit packing of sort keys~~ → resolved: engine provides a `uint64_t sort_key` + radix sort (`engine/sort/nt_sort.h`, [Render Items, Sorting, Batching](../render/items-sorting-batching.md)); the game owns the bit packing per its sort policy ([Engine/Game Boundary](../core/principles.md))
 - future WebGPU backend details
 - ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` ([Resource System — asset types](../assets/resource.md)) builder-side, runtime atlas consumer, `SpriteComponent`, and SpriteRenderer.
 - sprite animation system
@@ -22,7 +22,7 @@ These do not block implementation:
 - 3D audio / positional sound
 - sound groups / mix buses
 - desktop audio backend library choice (miniaudio recommended)
-- entity destruction notification mechanism details
+- ~~entity destruction notification mechanism details~~ → resolved: per-component `nt_comp_on_destroy_fn on_destroy` callback (`engine/entity/nt_entity.h`, [Entity System](../data/entity.md))
 - generation overflow monitoring strategy
 
 These can be solved incrementally without breaking the core architecture.
