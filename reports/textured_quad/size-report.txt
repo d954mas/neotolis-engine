@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 0a98c49
+# Commit: e444d9d
 
 ## WASM Section Sizes
 
