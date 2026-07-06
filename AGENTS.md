@@ -23,6 +23,9 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 
 ### Bootstrap from a clean clone
 
+On Windows run these from Git Bash / MSYS — the system `bash.exe` routes to WSL,
+which is not the supported environment for `scripts/*.sh`.
+
 ```
 git lfs pull                          # example assets are LFS pointers without this
 bash scripts/setup.sh                 # install + activate the pinned emsdk (.emsdk-version)

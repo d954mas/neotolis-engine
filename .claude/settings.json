@@ -1,8 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git:*)",
-      "Bash(gh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
       "Bash(cmake:*)",
       "Bash(ctest:*)",
       "Bash(ninja:*)",
@@ -17,12 +23,10 @@
       "Bash(bash scripts/*)",
       "Bash(scripts/:*)",
       "Bash(./scripts/:*)",
-      "Bash(build/:*)",
-      "Bash(./build/:*)",
       "Bash(node tests/*)",
       "Bash(python tools/*)",
       "Bash(python3 tools/*)",
-      "Bash(npm:*)",
+      "Bash(npm ci:*)",
       "Bash(npx playwright:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
@@ -37,8 +41,6 @@
       "Bash(tree:*)",
       "Bash(grep:*)",
       "Bash(mkdir:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
       "Bash(cd:*)"
     ]
   }
