@@ -112,17 +112,36 @@ PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
 # compiler job"). Retry error files serially once: real diagnostics
 # reproduce, transient infra errors vanish.
 if [ -n "$PROJECT_ERRORS" ]; then
+    # Extract the file path from each "PATH:line:col: error:" line. Handles
+    # Windows (C:\...), POSIX (/home/...), and relative (engine/...) paths by
+    # splitting on the first :NN:NN: — the drive-letter colon is not followed
+    # by a digit, so it is not mistaken for the line:col separator.
     RETRY_FILES=$(printf '%s\n' "$PROJECT_ERRORS" | python -c "
 import re, sys
-root = sys.argv[1].lower()
 seen = []
-for m in re.findall(r'[A-Za-z]:[\\\\/][^:\'\"]+\.c', sys.stdin.read()):
-    p = m.replace(chr(92), '/')
-    rel = p[len(root) + 1:] if p.lower().startswith(root) else p
-    if rel not in seen:
-        seen.append(rel)
+for line in sys.stdin:
+    # Real diagnostic: 'PATH:line:col: error: msg' (drive-letter colon is not
+    # followed by a digit, so it is not mistaken for the line:col separator).
+    m = re.match(r'(.+?):\d+:\d+:\s+(?:error|warning):', line)
+    # Transient infra failure: \"error: no such file or directory: 'PATH'\".
+    if not m:
+        m = re.search(r\"no such file or directory: '([^']+)'\", line)
+    if not m:
+        continue
+    p = m.group(1).strip().replace(chr(92), '/')
+    if p and p not in seen:
+        seen.append(p)
 print('\n'.join(seen))
-" "$ROOT_DIR" | tr -d '\r')
+" | tr -d '\r')
+    # Fail closed: errors exist but no file path could be parsed from them —
+    # do NOT assume they were transient. Surface the raw errors and fail.
+    if [ -z "$RETRY_FILES" ]; then
+        echo "$PROJECT_ERRORS"
+        echo ""
+        echo "clang-tidy: FAILED — errors in project files (unparseable location; not retried)"
+        rm -f "$TIDY_OUTPUT"
+        exit 1
+    fi
     PERSISTENT_ERRORS=""
     while IFS= read -r f; do
         [ -z "$f" ] && continue

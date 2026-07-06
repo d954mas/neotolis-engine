@@ -8,6 +8,11 @@ Includes stub semantics and runtime capability queries.
 
 Related: [Core Principles](principles.md), [Platform Architecture](../runtime/platform.md), [Logging, Errors, Debugging](../debug/logging-errors-debugging.md)
 
+> The tree below is the conceptual module grouping. Some leaf names differ from
+> the actual source dirs (e.g. `engine/resource/`, and the builder lives at
+> `tools/builder/`); the authoritative source-dir → chapter mapping is the module
+> map in [index.md](../index.md).
+
 A fixed module is a single directory with its header + TU(s).
 
 A **swappable** module is a directory with a public interface header plus

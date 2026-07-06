@@ -118,6 +118,13 @@ if [ "$MODE" = "full" ]; then
     step "clang-tidy (full)"
     bash scripts/tidy.sh "$NATIVE_BUILD_DIR"
     ok
+
+    # The remaining CI lint-job gates (module-composition + EM_JS/Closure).
+    step "module-composition & EM_JS gates"
+    bash scripts/check_no_real_impl_links.sh
+    bash scripts/check_link_failure_loud.sh
+    bash scripts/check_emjs_deps.sh
+    ok
 else
     step "clang-format (changed files)"
     if [ -n "$FORMAT_FILES" ]; then
