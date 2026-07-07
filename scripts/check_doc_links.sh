@@ -61,10 +61,36 @@ for src in md_files:
         elif anchor and resolved.endswith(".md") and slugify(anchor) not in heading_slugs(resolved):
             broken.append((src, target, f"no heading anchor #{anchor}"))
 
-if broken:
-    print(f"check_doc_links: FAILED -- {len(broken)} broken link(s):")
-    for src, target, why in broken:
-        print(f"  {src} -> {target}  ({why})")
+# Gate 2: every spec chapter must be referenced from docs/spec/index.md —
+# an unreferenced chapter silently drifts out of the agent-facing map.
+SPEC_INDEX = os.path.join("docs", "spec", "index.md")
+unindexed = []
+if os.path.isfile(SPEC_INDEX):
+    with open(SPEC_INDEX, encoding="utf-8") as fh:
+        index_text = fh.read()
+    index_dir = os.path.dirname(SPEC_INDEX)
+    linked = set()
+    for target in LINK_RE.findall(index_text):
+        path_part = target.strip().partition("#")[0]
+        if path_part and not path_part.startswith(("http://", "https://", "mailto:")):
+            linked.add(os.path.normpath(os.path.join(index_dir, path_part)))
+    spec_prefix = os.path.normpath(index_dir) + os.sep
+    for src in md_files:
+        norm = os.path.normpath(src)
+        if not norm.startswith(spec_prefix) or norm == os.path.normpath(SPEC_INDEX):
+            continue
+        if norm not in linked:
+            unindexed.append(norm)
+
+if broken or unindexed:
+    if broken:
+        print(f"check_doc_links: FAILED -- {len(broken)} broken link(s):")
+        for src, target, why in broken:
+            print(f"  {src} -> {target}  ({why})")
+    if unindexed:
+        print(f"check_doc_links: FAILED -- {len(unindexed)} spec chapter(s) not referenced from {SPEC_INDEX}:")
+        for m in unindexed:
+            print(f"  {m}")
     sys.exit(1)
-print(f"check_doc_links: ok ({len(md_files)} markdown files scanned, all relative links resolve)")
+print(f"check_doc_links: ok ({len(md_files)} markdown files scanned, links resolve, spec chapters indexed)")
 PY

@@ -65,9 +65,8 @@ compile_*.log
 # Accidental outputs when running CLIs with --help or similar as the positional arg
 --help/
 
-# Claude local settings
+# Claude local settings (.claude/settings.json is shared and tracked)
 .claude/settings.local.json
-.claude/settings.json
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 
@@ -77,7 +76,7 @@ compile_*.log
 .claude/gsd-local-patches/
 .claude/agents/gsd-*.md
 .claude/commands/gsd/
-.claude/hooks/gsd-*autoresearch-results.tsv
+.claude/hooks/gsd-*
 
 # Autoresearch perf-tuning experiment log (local dev artifact, regenerated
 # per run — never belongs in source control)

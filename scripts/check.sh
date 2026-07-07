@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Unified pre-commit check. Modes:
-#   scripts/check.sh          build + ctest + format/tidy on changed files
-#   scripts/check.sh --full   build + ctest + whole-tree format + full tidy + gates
-#   scripts/check.sh --push   default + wasm-debug build
+#   scripts/check.sh          gates + build + ctest + format/tidy on changed files
+#   scripts/check.sh --full   default + whole-tree format + full tidy
+#   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
+# The cheap gates (module composition, EM_JS_DEPS, doc links) run in EVERY mode —
+# they cost seconds and previously CI-only failures came exactly from skipping them.
+# Remaining known CI-only class: GNU ld link order (Linux-specific, see AGENTS.md).
 # All tidy runs use the tidy-ci DB (native-debug + devapi groups ON) so the lint
 # matches the CI lint job exactly — devapi TUs are absent from the plain
 # native-debug compile DB and would otherwise be silently skipped.
@@ -120,7 +123,19 @@ run_tidy_gate() {
     fi
 }
 
+step "gates (module composition, EM_JS_DEPS, doc links)"
+bash scripts/check_no_real_impl_links.sh
+bash scripts/check_link_failure_loud.sh
+bash scripts/check_emjs_deps.sh
+bash scripts/check_doc_links.sh
+ok
+
 step "build (native-debug)"
+if [ ! -f "$NATIVE_BUILD_DIR/CMakeCache.txt" ]; then
+    echo "ERROR: $NATIVE_BUILD_DIR is not configured — configure the preset first:"
+    echo "  cmake --preset native-debug"
+    exit 1
+fi
 cmake --build "$NATIVE_BUILD_DIR"
 ok
 
@@ -139,17 +154,6 @@ if [ "$MODE" = "full" ]; then
     step "clang-tidy (full)"
     ensure_tidy_ci
     bash scripts/tidy.sh "$TIDY_CI_DIR"
-    ok
-
-    # The remaining CI lint-job gates (module-composition + EM_JS/Closure).
-    step "module-composition & EM_JS gates"
-    bash scripts/check_no_real_impl_links.sh
-    bash scripts/check_link_failure_loud.sh
-    bash scripts/check_emjs_deps.sh
-    ok
-
-    step "doc links"
-    bash scripts/check_doc_links.sh
     ok
 else
     step "clang-format (changed files)"
@@ -183,5 +187,27 @@ if [ "$MODE" = "push" ]; then
         exit 1
     fi
     cmake --build build/_cmake/wasm-debug
+    ok
+
+    # Release catches the Closure-only class (EM_JS helpers stripped by minification)
+    # that wasm-debug can never see. Measured warm cost: ~25 s.
+    step "build (wasm-release)"
+    if [ ! -d "build/_cmake/wasm-release" ]; then
+        echo "ERROR: build/_cmake/wasm-release missing — configure the preset first:"
+        echo "  emcmake cmake --preset wasm-release"
+        exit 1
+    fi
+    cmake --build build/_cmake/wasm-release
+    ok
+
+    # Mirrors the ci.yml "Submodule consumption test": the engine must stay
+    # consumable via add_subdirectory with the documented link order.
+    step "submodule consumption test"
+    SUBMODULE_DIR="build/submodule-test"
+    if [ ! -f "$SUBMODULE_DIR/CMakeCache.txt" ]; then
+        cmake -S tests/submodule -B "$SUBMODULE_DIR" -DENGINE_ROOT=../.. -DCMAKE_C_COMPILER=clang -G Ninja
+    fi
+    cmake --build "$SUBMODULE_DIR"
+    "./$SUBMODULE_DIR/submodule_test"
     ok
 fi
