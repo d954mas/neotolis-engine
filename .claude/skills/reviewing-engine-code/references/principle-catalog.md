@@ -25,6 +25,7 @@ smell**. Skip anything clang-format / clang-tidy / the size tracker already enfo
 10. Spec is source of truth
 11. Comments: short WHY only
 12. No gold-plating / speculative generality
+13. EM_JS_DEPS covers every referenced JS runtime helper
 
 ---
 
@@ -153,3 +154,17 @@ codebase.
 **Scope:** all engine code.
 ✅ a concrete function that does exactly what's needed now.
 ❌ a plugin registry / callback-vtable layer for a feature with a single call site.
+
+## 13. EM_JS_DEPS covers every referenced JS runtime helper — P1/P2
+
+**Rule:** every JS runtime helper referenced inside an `EM_JS`/`EM_ASM` body (`UTF8ToString`,
+`stringToNewUTF8`, `lengthBytesUTF8`, `wasmExports['x']`, …) must be declared by name in that
+TU's `EM_JS_DEPS`. A helper alive only through another dep's transitive `__deps` is an
+emscripten implementation detail, not a guarantee — it breaks silently in Closure wasm-release
+on an emsdk upgrade or a deps refactor, invisible to wasm-debug and native builds. P1 if no
+declared dep pulls the helper today (release is broken now); P2 if it currently survives
+transitively (latent).
+**Cite:** AGENTS.md §"Pre-commit checks" (EM_JS_DEPS gate) + `scripts/check_emjs_deps.sh` header.
+**Scope:** `engine/*/web/`, any TU with `EM_JS`/`EM_ASM`.
+✅ `EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")` and the body uses exactly those.
+❌ body calls `lengthBytesUTF8(text)` while `EM_JS_DEPS` lists only `$stringToNewUTF8,$UTF8ToString`.
