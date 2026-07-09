@@ -176,11 +176,11 @@ struct nt_atlas_data;
  * Used by tests that DO drive the resource system end-to-end. */
 const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas);
 
-/* Bypass nt_resource_get_user_data and look up a region on a raw
+/* Bypass nt_resource_peek_user_data and look up a region on a raw
  * nt_atlas_data_t* directly. Mirrors nt_atlas_find_region(). */
 uint32_t nt_atlas_test_find_region_raw(const struct nt_atlas_data *ad, uint64_t name_hash);
 
-/* Bypass nt_resource_get_user_data and read a region array entry directly.
+/* Bypass nt_resource_peek_user_data and read a region array entry directly.
  * Mirrors nt_atlas_get_region(). */
 const nt_texture_region_t *nt_atlas_test_get_region_raw(const struct nt_atlas_data *ad, uint32_t index);
 

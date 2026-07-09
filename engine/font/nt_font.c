@@ -108,7 +108,7 @@ static void font_on_cleanup(void *user_data) {
 /* Read the winning resource's live blob through its pinned user_data holder
  * (never a raw pointer cached across frames). NULL when the provider is gone. */
 static const uint8_t *font_provider_blob(nt_resource_t resource, uint32_t *out_size) {
-    const nt_font_provider_t *p = (const nt_font_provider_t *)nt_resource_get_user_data(resource);
+    const nt_font_provider_t *p = (const nt_font_provider_t *)nt_resource_peek_user_data(resource);
     if (p == NULL || p->data == NULL) {
         if (out_size != NULL) {
             *out_size = 0;

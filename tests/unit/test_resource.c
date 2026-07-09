@@ -1657,18 +1657,18 @@ void test_blob_pin_unmount_severs_provider_synchronously(void) {
     nt_resource_step();
 
     /* Provider resolved into the live blob and pinned it. */
-    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
 
     /* Unmount frees the blob; the provider view must be severed inline — NO intervening resolve/step —
      * so no read can dereference the freed blob. The published winner state is reconciled by the next
      * resolve pass (winner-loss + epoch bump), matching the pre-existing unmount contract. */
     nt_resource_unmount(pid);
-    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
 
     /* Next resolve reconciles the dropped winner. */
     nt_resource_step();
-    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
     TEST_ASSERT_FALSE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
@@ -2492,7 +2492,7 @@ void test_aux_publish_waits_for_reload_when_no_usable_fallback_exists(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_LOADING, nt_resource_get_state(h));
     TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid_b));
     TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
-    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
 
     nt_resource_step(); /* re-download B and publish it again */
     if (nt_resource_pack_state(pid_b) == NT_PACK_STATE_REQUESTED) {
@@ -2503,7 +2503,7 @@ void test_aux_publish_waits_for_reload_when_no_usable_fallback_exists(void) {
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(handle_b, nt_resource_get(h));
     TEST_ASSERT_EQUAL_UINT32(3, s_resolve_call_count);
-    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
 
     (void)remove("build/test_aux_reload_b.ntpack");
     (void)remove("build/test_aux_reload_a.ntpack");
@@ -2570,7 +2570,7 @@ void test_on_cleanup_fires_on_shutdown(void) {
     (void)remove("build/test_cleanup_shutdown.ntpack");
 }
 
-void test_get_user_data_valid_handle(void) {
+void test_peek_user_data_valid_handle(void) {
     reset_resolve_state();
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
@@ -2586,7 +2586,7 @@ void test_get_user_data_valid_handle(void) {
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_step(); /* activate + resolve -> on_resolve sets user_data */
 
-    void *ud = nt_resource_get_user_data(h);
+    const void *ud = nt_resource_peek_user_data(h);
     TEST_ASSERT_NOT_NULL(ud);
     TEST_ASSERT_EQUAL_PTR(s_last_resolve_user_data, ud);
 
@@ -2594,9 +2594,9 @@ void test_get_user_data_valid_handle(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_get_user_data_invalid_handle(void) {
+void test_peek_user_data_invalid_handle(void) {
     /* Invalid zero handle */
-    TEST_ASSERT_NULL(nt_resource_get_user_data((nt_resource_t){0}));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data((nt_resource_t){0}));
 
     /* Request a resource to get a valid handle, then shutdown+reinit (stale generation) */
     reset_resolve_state();
@@ -2615,13 +2615,13 @@ void test_get_user_data_invalid_handle(void) {
     nt_resource_step();
 
     /* Handle is valid now */
-    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
 
     /* Shutdown + reinit: old handle becomes stale */
     nt_resource_shutdown();
     nt_resource_init(&s_desc);
 
-    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
 
     (void)remove("build/test_ud_invalid.ntpack");
 }
@@ -2653,7 +2653,7 @@ void test_user_data_null_initially(void) {
     nt_hash64_t rid = nt_hash64_str("ud_null_initial");
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
 
-    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2969,8 +2969,8 @@ int main(void) {
     RUN_TEST(test_aux_publish_waits_for_reload_when_no_usable_fallback_exists);
     RUN_TEST(test_on_cleanup_fires_on_unmount);
     RUN_TEST(test_on_cleanup_fires_on_shutdown);
-    RUN_TEST(test_get_user_data_valid_handle);
-    RUN_TEST(test_get_user_data_invalid_handle);
+    RUN_TEST(test_peek_user_data_valid_handle);
+    RUN_TEST(test_peek_user_data_invalid_handle);
     RUN_TEST(test_no_on_resolve_without_registration);
     RUN_TEST(test_user_data_null_initially);
     RUN_TEST(test_on_resolve_fires_on_priority_change);
