@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: ea87f21
+# Commit: be93520
 
 ## WASM Section Sizes
 
@@ -79,12 +79,12 @@ libnt_material_comp.a       2302 B
 libnt_mesh_comp.a           2164 B
 libnt_mesh_renderer.a       8060 B
 libnt_render.a              5436 B
-libnt_resource.a          188712 B
+libnt_resource.a          188716 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
 libnt_window.a              4616 B
 ------------------------ ----------
-TOTAL (linked)            343414 B
+TOTAL (linked)            343418 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            2620 B

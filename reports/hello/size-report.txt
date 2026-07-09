@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: ea87f21
+# Commit: be93520
 
 ## WASM Section Sizes
 
@@ -103,7 +103,7 @@ libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
 libnt_render.a              5436 B
-libnt_resource.a          188712 B
+libnt_resource.a          188716 B
 libnt_shape_renderer.a   1140976 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
