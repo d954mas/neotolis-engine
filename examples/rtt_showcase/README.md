@@ -1,8 +1,9 @@
 # rtt_showcase
 
 Dedicated Phase 74 render-to-texture proof for the general `nt_gfx` RTT and
-`nt_postfx_blur` workflow. This example is independent of `ui_showcase` and does
-not use asset packs.
+`nt_postfx_blur` workflow. The visual tuning controls use the engine `nt_ui`
+module and a small local UI asset pack for the white atlas region, sprite/text
+shaders, and ASCII font.
 
 ## Build and Run
 
@@ -22,8 +23,8 @@ cmake --build build/_cmake/wasm-debug --target rtt_showcase
 | Input | Action |
 |---|---|
 | R | Toggle the offscreen targets between 512x288 and 768x432. |
-| Mouse drag, blue slider | Adjust sampled texture zoom from 1.0x to 2.5x. |
-| Mouse drag, amber slider | Adjust gaussian blur radius from 2 to 16. |
+| Mouse drag, Sample zoom slider | Adjust sampled texture zoom from 1.0x to 2.5x. |
+| Mouse drag, Blur radius slider | Adjust gaussian blur radius from 2 to 16. |
 | Esc | Quit on native builds. |
 
 ## Visual QA
@@ -39,12 +40,14 @@ Build and run the native example, then confirm:
    visible.
 2. The right panel shows the same offscreen scene blurred through
    `nt_postfx_blur` using caller-supplied source, temp, and destination targets.
-   Drag the amber slider and confirm the blur strength changes continuously.
+   Drag the `Blur radius` UI slider and confirm the blur strength changes
+   continuously while its text value updates.
 3. Press `R`. The target size changes, the scene redraws, and the display
    recovers without rebinding sampled target/color/depth handles. The top status
    bar stays green when handle stability is intact.
-4. Drag the blue slider and confirm the sampled raw/blur panels zoom into the
-   same offscreen texture without changing the depth debug strip.
+4. Drag the `Sample zoom` UI slider and confirm the sampled raw/blur panels zoom
+   into the same offscreen texture without changing the depth debug strip. Its
+   text value should update in-place.
 5. The bottom strip samples the target depth texture directly. It should change
    with the scene depth and read as a low-level depth-texture debug view, not a
    shadow map.

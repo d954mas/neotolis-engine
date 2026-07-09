@@ -1,16 +1,34 @@
 #include "app/nt_app.h"
+#include "atlas/nt_atlas.h"
+#include "clay.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "font/nt_font.h"
+#include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
+#include "http/nt_http.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
+#include "memory/nt_mem_scratch.h"
+#include "nt_pack_format.h"
 #include "postfx/nt_postfx_blur.h"
+#include "render/nt_render_defs.h"
 #include "renderers/nt_shape_renderer.h"
+#include "renderers/nt_sprite_renderer.h"
+#include "renderers/nt_text_renderer.h"
+#include "resource/nt_resource.h"
 #include "time/nt_time.h"
+#include "ui/nt_ui.h"
+#include "ui/nt_ui_label.h"
+#include "ui/nt_ui_slider.h"
 #include "window/nt_window.h"
 
+#include "rtt_showcase_assets.h"
+
+#include <stdio.h>
 #include <string.h>
 
 #ifdef NT_PLATFORM_WEB
@@ -53,6 +71,43 @@ static const char *s_quad_fs_src = "precision mediump float;\n"
 
 static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
+#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
+#define SCRATCH_ARENA_SIZE ((size_t)128U * 1024U)
+
+#define LAYER_UI_BG 0
+#define LAYER_UI_TEXT 1
+
+static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
+
+static nt_ui_context_t *s_ui_ctx;
+static nt_buffer_t s_frame_ubo;
+static nt_hash32_t s_pack_id;
+static nt_resource_t s_atlas_handle;
+static nt_resource_t s_atlas_tex_handle;
+static nt_resource_t s_sprite_vs_handle;
+static nt_resource_t s_sprite_fs_handle;
+static nt_resource_t s_text_vs_handle;
+static nt_resource_t s_text_fs_handle;
+static nt_resource_t s_font_resource;
+static nt_material_t s_sprite_material;
+static nt_material_t s_text_material;
+static nt_font_t s_font;
+static nt_atlas_region_ref_t s_white_ref;
+static bool s_atlas_bound;
+static bool s_font_bound;
+
+static const nt_ui_label_style_t s_title_style = {
+    .font_id = 0,
+    .font_size = 16.0F,
+    .color = {232.0F, 238.0F, 248.0F, 255.0F},
+};
+
+static const nt_ui_label_style_t s_value_style = {
+    .font_id = 0,
+    .font_size = 13.0F,
+    .color = {166.0F, 177.0F, 194.0F, 255.0F},
+};
+
 static struct {
     nt_render_target_t scene;
     nt_render_target_t temp;
@@ -71,73 +126,7 @@ static struct {
     bool handles_stable;
     float sample_zoom;
     float blur_radius;
-    int active_slider;
 } s_demo;
-
-enum {
-    RTT_SLIDER_NONE = 0,
-    RTT_SLIDER_ZOOM = 1,
-    RTT_SLIDER_BLUR = 2,
-};
-
-static float clampf(float value, float min_value, float max_value) {
-    if (value < min_value) {
-        return min_value;
-    }
-    if (value > max_value) {
-        return max_value;
-    }
-    return value;
-}
-
-static bool mouse_ndc(float *out_x, float *out_y) {
-    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
-        const nt_pointer_t *ptr = &g_nt_input.pointers[i];
-        if (ptr->active && ptr->type == NT_POINTER_MOUSE && g_nt_window.fb_width > 0U && g_nt_window.fb_height > 0U) {
-            *out_x = ((ptr->x / (float)g_nt_window.fb_width) * 2.0F) - 1.0F;
-            *out_y = 1.0F - ((ptr->y / (float)g_nt_window.fb_height) * 2.0F);
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool point_in_rect(float x, float y, float x0, float y0, float x1, float y1) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
-
-static float slider_t(float x, float x0, float x1) { return clampf((x - x0) / (x1 - x0), 0.0F, 1.0F); }
-
-static void update_sliders(void) {
-    float mx = 0.0F;
-    float my = 0.0F;
-    bool has_mouse = mouse_ndc(&mx, &my);
-    bool pressed = nt_input_mouse_is_pressed(NT_BUTTON_LEFT);
-    bool down = nt_input_mouse_is_down(NT_BUTTON_LEFT);
-    bool released = nt_input_mouse_is_released(NT_BUTTON_LEFT);
-
-    if (released) {
-        s_demo.active_slider = RTT_SLIDER_NONE;
-    }
-    if (!has_mouse) {
-        return;
-    }
-    if (pressed) {
-        if (point_in_rect(mx, my, -0.92F, 0.91F, -0.08F, 0.98F)) {
-            s_demo.active_slider = RTT_SLIDER_ZOOM;
-        } else if (point_in_rect(mx, my, 0.08F, 0.91F, 0.92F, 0.98F)) {
-            s_demo.active_slider = RTT_SLIDER_BLUR;
-        }
-    }
-    if (!down) {
-        return;
-    }
-    if (s_demo.active_slider == RTT_SLIDER_ZOOM) {
-        float t = slider_t(mx, -0.92F, -0.08F);
-        s_demo.sample_zoom = 1.0F + (t * 1.5F);
-    } else if (s_demo.active_slider == RTT_SLIDER_BLUR) {
-        float t = slider_t(mx, 0.08F, 0.92F);
-        s_demo.blur_radius = 2.0F + (t * 14.0F);
-    }
-}
 
 static void destroy_quad_resources(void) {
     if (s_demo.quad_vbo.id != 0) {
@@ -260,6 +249,119 @@ static void resize_targets(uint16_t width, uint16_t height) {
     nt_log_info("rtt_showcase resized targets to %ux%u, handles stable=%d", (unsigned)width, (unsigned)height, s_demo.handles_stable ? 1 : 0);
 }
 
+static void init_ui_refs(void) { s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value); }
+
+static void try_bind_ui_resources(void) {
+    if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
+        uint32_t white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
+        NT_ASSERT(white_region != NT_ATLAS_INVALID_REGION);
+        nt_ui_set_atlas_white_region(s_ui_ctx, s_atlas_handle, white_region);
+        s_atlas_bound = true;
+        nt_log_info("rtt_showcase: UI atlas white region bound");
+    }
+
+    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
+        nt_font_add(s_font, s_font_resource);
+        nt_ui_set_font(s_ui_ctx, 0U, s_font);
+        s_font_bound = true;
+        nt_log_info("rtt_showcase: UI font bound at slot 0");
+    }
+}
+
+static nt_ui_slider_style_t make_slider_style(uint32_t fill_tint) {
+    nt_ui_slider_style_t style = nt_ui_slider_style_defaults();
+    style.track_w = 300.0F;
+    style.track_h = 8.0F;
+    style.thumb_w = 18.0F;
+    style.thumb_h = 24.0F;
+    style.value_speed = 0.0F;
+    style.states[NT_UI_SLIDER_IDLE].track = s_white_ref;
+    style.states[NT_UI_SLIDER_IDLE].fill = s_white_ref;
+    style.states[NT_UI_SLIDER_IDLE].thumb = s_white_ref;
+    style.states[NT_UI_SLIDER_IDLE].track_tint = 0xFF2A3240U;
+    style.states[NT_UI_SLIDER_IDLE].fill_tint = fill_tint;
+    style.states[NT_UI_SLIDER_IDLE].thumb_tint = 0xFFEAF1FFU;
+    style.states[NT_UI_SLIDER_HOVER].thumb_tint = 0xFFFFFFFFU;
+    style.states[NT_UI_SLIDER_PRESSED].thumb_tint = 0xFFFFFFFFU;
+    return style;
+}
+
+static void declare_slider_control(const char *title, const char *value_text, uint32_t id, float *value, float min_value, float max_value, uint32_t fill_tint) {
+    nt_ui_slider_style_t slider = make_slider_style(fill_tint);
+    static const Clay_ElementDeclaration slider_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(324), CLAY_SIZING_FIXED(34)}},
+    };
+
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(s_ui_ctx, NT_UI_DATA_LAYER(LAYER_UI_TEXT), title, &s_title_style);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}}) {}
+            nt_ui_label(s_ui_ctx, NT_UI_DATA_LAYER(LAYER_UI_TEXT), value_text, &s_value_style);
+        }
+        (void)nt_ui_slider_float(s_ui_ctx, NT_UI_DATA_LAYER(LAYER_UI_BG), LAYER_UI_TEXT, id, NULL, value, min_value, max_value, 0.0F, &slider, &slider_decl, true);
+    }
+}
+
+static bool ui_ready(void) {
+    const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
+    const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
+    return s_atlas_bound && s_font_bound && sprite_info != NULL && sprite_info->ready && text_info != NULL && text_info->ready;
+}
+
+static void draw_ui_overlay(void) {
+    nt_font_step();
+    if (!ui_ready()) {
+        return;
+    }
+
+    const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 960);
+    const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 540);
+
+    mat4 view_m;
+    mat4 proj_m;
+    mat4 vp;
+    glm_mat4_identity(view_m);
+    glm_ortho(0.0F, fb_w, 0.0F, fb_h, -1.0F, 1.0F, proj_m);
+    glm_mat4_mul(proj_m, view_m, vp);
+
+    nt_frame_uniforms_t uniforms = {0};
+    memcpy(uniforms.view_proj, vp, 64);
+    memcpy(uniforms.view, view_m, 64);
+    memcpy(uniforms.proj, proj_m, 64);
+    uniforms.resolution[0] = fb_w;
+    uniforms.resolution[1] = fb_h;
+    uniforms.resolution[2] = (fb_w > 0.0F) ? (1.0F / fb_w) : 0.0F;
+    uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
+    uniforms.near_far[0] = -1.0F;
+    uniforms.near_far[1] = 1.0F;
+    nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+    nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+
+    char zoom_text[32];
+    char blur_text[32];
+    (void)snprintf(zoom_text, sizeof zoom_text, "%.2fx", (double)s_demo.sample_zoom);
+    (void)snprintf(blur_text, sizeof blur_text, "%.1f px", (double)s_demo.blur_radius);
+
+    nt_ui_begin(s_ui_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+    CLAY({.id = CLAY_ID("rtt_ui_root"),
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 18, .right = 18, .top = 14, .bottom = 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        CLAY({.id = CLAY_ID("rtt_controls"),
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
+                         .padding = {.left = 18, .right = 18, .top = 12, .bottom = 12},
+                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                         .childGap = 28,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {9.0F, 13.0F, 20.0F, 224.0F}}) {
+            declare_slider_control("Sample zoom", zoom_text, nt_ui_id("rtt_sample_zoom"), &s_demo.sample_zoom, 1.0F, 2.5F, 0xFFFF8E38U);
+            declare_slider_control("Blur radius", blur_text, nt_ui_id("rtt_blur_radius"), &s_demo.blur_radius, 2.0F, 16.0F, 0xFF2EE4A6U);
+        }
+    }
+    nt_ui_end(s_ui_ctx);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
+    nt_ui_walk(s_ui_ctx, &target);
+}
+
 static void draw_scene_contents(void) {
     float aspect = (float)s_demo.rt_width / (float)s_demo.rt_height;
     mat4 view;
@@ -319,36 +421,23 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
 
 static void draw_solid_quad(float x0, float y0, float x1, float y1, const float color[4]) { draw_textured_quad(s_demo.white, x0, y0, x1, y1, 0, color); }
 
-static void draw_slider(float x0, float y0, float x1, float y1, float t, const float fill[4]) {
-    float track[4] = {0.12F, 0.14F, 0.18F, 1.0F};
-    float thumb[4] = {0.92F, 0.96F, 1.0F, 1.0F};
-    float mid_y = (y0 + y1) * 0.5F;
-    float thumb_x = x0 + ((x1 - x0) * clampf(t, 0.0F, 1.0F));
-    draw_solid_quad(x0, mid_y - 0.010F, x1, mid_y + 0.010F, track);
-    draw_solid_quad(x0, mid_y - 0.015F, thumb_x, mid_y + 0.015F, fill);
-    draw_solid_quad(thumb_x - 0.018F, y0, thumb_x + 0.018F, y1, thumb);
-}
-
 static void draw_default_frame(void) {
     float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     float frame[4] = {0.08F, 0.10F, 0.13F, 1.0F};
     float stable[4] = {0.05F, 0.85F, 0.30F, 1.0F};
     float unstable[4] = {0.95F, 0.10F, 0.05F, 1.0F};
-    float zoom_fill[4] = {0.22F, 0.55F, 1.0F, 1.0F};
-    float blur_fill[4] = {1.0F, 0.70F, 0.12F, 1.0F};
     draw_solid_quad(-0.96F, -0.76F, -0.08F, 0.78F, frame);
     draw_solid_quad(0.08F, -0.76F, 0.96F, 0.78F, frame);
     draw_textured_quad(s_demo.scene_color, -0.92F, -0.62F, -0.12F, 0.70F, 0, white);
     draw_textured_quad(s_demo.blur_color, 0.12F, -0.62F, 0.92F, 0.70F, 0, white);
     draw_textured_quad(s_demo.scene_depth, -0.44F, -0.95F, 0.44F, -0.78F, 1, white);
     draw_solid_quad(-0.92F, 0.82F, 0.92F, 0.89F, s_demo.handles_stable ? stable : unstable);
-    draw_slider(-0.92F, 0.91F, -0.08F, 0.98F, (s_demo.sample_zoom - 1.0F) / 1.5F, zoom_fill);
-    draw_slider(0.08F, 0.91F, 0.92F, 0.98F, (s_demo.blur_radius - 2.0F) / 14.0F, blur_fill);
 }
 
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
+    nt_mem_scratch_reset();
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -363,7 +452,9 @@ static void frame(void) {
             resize_targets(512, 288);
         }
     }
-    update_sliders();
+    nt_resource_step();
+    nt_material_step();
+    try_bind_ui_resources();
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_lost) {
@@ -376,6 +467,20 @@ static void frame(void) {
         destroy_quad_resources();
         bool ok = make_quad_resources();
         NT_ASSERT(ok && "rtt_showcase: failed to restore quad GPU resources");
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "rtt_frame_uniforms",
+        });
+        nt_sprite_renderer_restore_gpu();
+        nt_text_renderer_restore_gpu();
+        s_atlas_bound = false;
+        s_font_bound = false;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -397,6 +502,7 @@ static void frame(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
     draw_default_frame();
+    draw_ui_overlay();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -420,8 +526,85 @@ int main(void) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.max_render_targets = 8;
-    gfx_desc.max_textures = 16;
+    gfx_desc.max_textures = 32;
+    gfx_desc.max_pipelines = 32;
     nt_gfx_init(&gfx_desc);
+    nt_gfx_register_global_block("Globals", 0);
+    nt_http_init();
+    nt_fs_init();
+    nt_hash_init(&(nt_hash_desc_t){0});
+    nt_resource_init(&(nt_resource_desc_t){0});
+    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
+    nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
+    nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
+    nt_atlas_init();
+    nt_material_init(&(nt_material_desc_t){.max_materials = 4});
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
+    nt_sprite_renderer_desc_t sprite_desc = nt_sprite_renderer_desc_defaults();
+    nt_sprite_renderer_init(&sprite_desc);
+    nt_text_renderer_init();
+    nt_ui_module_init();
+    const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
+    s_ui_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
+    NT_ASSERT(s_ui_ctx != NULL && "rtt_showcase: failed to create UI context");
+
+    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = sizeof(nt_frame_uniforms_t),
+        .label = "rtt_frame_uniforms",
+    });
+
+    s_pack_id = nt_hash32_str("rtt_showcase");
+    nt_resource_mount(s_pack_id, 100);
+#ifdef NT_CDN_URL
+    nt_resource_load_auto(s_pack_id, NT_CDN_URL "/rtt_showcase/rtt_showcase.ntpack");
+#else
+    nt_resource_load_auto(s_pack_id, "assets/rtt_showcase.ntpack");
+#endif
+
+    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
+    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_RTT_SHOWCASE_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
+    s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
+    init_ui_refs();
+
+    s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_sprite_vs_handle,
+        .fs = s_sprite_fs_handle,
+        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
+        .texture_count = 1,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .label = "rtt_showcase_ui_sprite",
+    });
+    s_text_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_text_vs_handle,
+        .fs = s_text_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
+        .label = "rtt_showcase_ui_text",
+    });
+    nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
+    nt_ui_set_text_material(s_ui_ctx, s_text_material);
+    s_font = nt_font_create(&(nt_font_create_desc_t){
+        .curve_texture_width = 1024,
+        .curve_texture_height = 512,
+        .band_texture_height = 256,
+        .band_count = 8,
+        .measure_cache_size = 256,
+    });
+    nt_resource_set_activate_time_budget(0);
+
     memset(&s_demo, 0, sizeof(s_demo));
     s_demo.sample_zoom = 1.0F;
     s_demo.blur_radius = 8.0F;
@@ -447,6 +630,21 @@ int main(void) {
     nt_gfx_destroy_render_target(s_demo.temp);
     nt_gfx_destroy_render_target(s_demo.scene);
     destroy_quad_resources();
+    nt_ui_destroy_context(s_ui_ctx);
+    nt_ui_module_shutdown();
+    nt_text_renderer_shutdown();
+    nt_sprite_renderer_shutdown();
+    nt_font_destroy(s_font);
+    nt_font_shutdown();
+    nt_material_destroy(s_sprite_material);
+    nt_material_destroy(s_text_material);
+    nt_material_shutdown();
+    nt_mem_scratch_shutdown();
+    nt_resource_shutdown();
+    nt_fs_shutdown();
+    nt_http_shutdown();
+    nt_hash_shutdown();
+    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_postfx_blur_shutdown();
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
