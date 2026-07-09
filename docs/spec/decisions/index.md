@@ -6,13 +6,14 @@ append-only — a decision that changes course gets a NEW number and supersedes 
 entry rather than editing it. Legacy locked decisions (`LD-*`) predate the per-file
 convention and live only in this table; they graduate to numbered files if revisited.
 
-Related: [0001-render-item-size.md](0001-render-item-size.md), [Core Principles](../core/principles.md), [Open Questions](../meta/open-questions.md)
+Related: [0001-render-item-size.md](0001-render-item-size.md), [0002-render-target-pass-property.md](0002-render-target-pass-property.md), [Core Principles](../core/principles.md), [Open Questions](../meta/open-questions.md)
 
 These decisions are **locked** unless a strong reason appears:
 
 | ID | Date | Decision | Source |
 |---|---|---|---|
 | 0001 | 2026-03-20 | `nt_render_item_t` stays 16 bytes; instance data read from component arrays at draw time (supersedes LD-28) | [0001-render-item-size.md](0001-render-item-size.md) |
+| 0002 | 2026-07-09 | Render target selection is a pass property through `nt_pass_desc_t.target`; zero selects the default framebuffer | [0002-render-target-pass-property.md](0002-render-target-pass-property.md) |
 | LD-01 | — | Web-first startup target | — |
 | LD-02 | — | WebGL 2 as sole baseline (no WebGL 1) | — |
 | LD-03 | — | Game-defined render loop | — |

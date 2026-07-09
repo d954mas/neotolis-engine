@@ -63,6 +63,7 @@ no source-format parsers. The full picture is in
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
 | [decisions/index.md](decisions/index.md) | Registry of locked decisions and the ADR convention |
 | [decisions/0001-render-item-size.md](decisions/0001-render-item-size.md) | ADR: render item size and instance packing strategy |
+| [decisions/0002-render-target-pass-property.md](decisions/0002-render-target-pass-property.md) | ADR: render target selection as a pass property |
 | [meta/implementation-order.md](meta/implementation-order.md) | Suggested subsystem implementation order |
 | [meta/open-questions.md](meta/open-questions.md) | Open, non-blocking future questions |
 | [meta/architecture-snapshot.md](meta/architecture-snapshot.md) | Final architecture snapshot: game / engine / builder |
