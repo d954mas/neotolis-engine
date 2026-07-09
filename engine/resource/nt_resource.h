@@ -55,7 +55,7 @@ static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_
 
 /* ---- Activator callback types ----
  * on_resolve/on_cleanup fire during resolve iteration — they must not call
- * resource API (mount/unmount/request/step/load/parse), because modifying
+ * mutating resource APIs (mount/unmount/request/step/load/parse), because modifying
  * resource state there is UB.
  *
  * on_post_resolve fires after the resolve iteration finishes. It may call
@@ -160,6 +160,10 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 
 /* ---- Virtual packs ---- */
 
+/* Virtual packs publish caller-created runtime handles. The resource system stores the
+ * handle value but does not own/destroy the runtime object; virtual unregister/unmount
+ * never call the asset deactivator. Resolve cleanup callbacks may still release
+ * per-slot user_data. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);
@@ -182,7 +186,9 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
 void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
 void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
-void *nt_resource_get_user_data(nt_resource_t handle);
+/* Borrowed current slot aux pointer. Valid only until the next resource
+ * resolve/cleanup that changes this slot, or shutdown; caller must not free or store it. */
+void *nt_resource_peek_user_data(nt_resource_t handle);
 
 /* ---- Activation time budget ---- */
 

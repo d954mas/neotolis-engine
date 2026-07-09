@@ -26,7 +26,11 @@ void nt_http_shutdown(void);
 nt_http_request_t nt_http_request(const char *url);
 nt_http_state_t nt_http_state(nt_http_request_t req);
 void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total);
+/* Transfers the completed response buffer to the caller; caller frees with free().
+ * Returns NULL with size 0 when the request is not DONE, has no completed
+ * buffer, or was already taken. */
 uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size);
+/* Releases the request slot and frees only data that was not taken. */
 void nt_http_free(nt_http_request_t req);
 
 #endif /* NT_HTTP_H */

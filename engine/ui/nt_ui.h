@@ -239,7 +239,8 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
 void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material);
 void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material);
-/* NULL fn silently skips CUSTOM commands. */
+/* NULL fn silently skips CUSTOM commands. `userdata` is stored by reference
+ * and passed to each CUSTOM call while the handler is installed. */
 void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata);
 
 void nt_ui_module_init(void);

@@ -24,7 +24,10 @@ nt_result_t nt_fs_init(void);
 void nt_fs_shutdown(void);
 nt_fs_request_t nt_fs_read_file(const char *path);
 nt_fs_state_t nt_fs_state(nt_fs_request_t req);
+/* Transfers the completed buffer to the caller; caller frees with free().
+ * Returns NULL when the request is not DONE or was already taken. */
 uint8_t *nt_fs_take_data(nt_fs_request_t req, uint32_t *out_size);
+/* Releases the request slot and frees only data that was not taken. */
 void nt_fs_free(nt_fs_request_t req);
 
 #endif /* NT_FS_H */

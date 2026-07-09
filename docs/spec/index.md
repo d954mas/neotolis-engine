@@ -39,6 +39,7 @@ no source-format parsers. The full picture is in
 | [core/principles.md](core/principles.md) | Design philosophy and the strict engine/game ownership boundary |
 | [core/scope.md](core/scope.md) | Baseline scope, explicit non-goals, and the `nt_ui` module note |
 | [core/module-layout.md](core/module-layout.md) | Module directory layout and interface/impl/stub composition |
+| [core/api-contracts.md](core/api-contracts.md) | Public API ownership, lifetime, and naming contract vocabulary |
 | [runtime/platform.md](runtime/platform.md) | Platform layer: Web/WASM target, responsibilities, canvas/DPR handling |
 | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) | Frame order, game callbacks, fixed update loop |
 | [runtime/memory.md](runtime/memory.md) | Memory categories, frame scratch arena, capacity policy |
@@ -71,6 +72,10 @@ no source-format parsers. The full picture is in
 Source directories under `engine/` (and the builder under `tools/builder/`) mapped to
 the chapter that covers them:
 
+Any public-header/API contract change also reads
+[core/api-contracts.md](core/api-contracts.md) for the cross-cutting ownership,
+lifetime, and naming vocabulary.
+
 | Source dir | Chapter(s) |
 |---|---|
 | `engine/entity` | [data/entity.md](data/entity.md) |
@@ -94,7 +99,7 @@ the chapter that covers them:
 | `engine/app` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (time & render control), [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/log`, `engine/devapi`, `engine/debug_overlay`, `engine/metrics`, `engine/introspect` | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/memory`, `engine/pool` | [runtime/memory.md](runtime/memory.md) |
-| `engine/core` | [core/principles.md](core/principles.md); assert policy: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
+| `engine/core` | [core/principles.md](core/principles.md), [core/api-contracts.md](core/api-contracts.md); assert policy: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/clipboard` | [core/module-layout.md](core/module-layout.md) (stub semantics example) |
 | `engine/systems` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) (explicit system calls) |
 | `engine/basisu`, `engine/fpng` | [builder/builder.md](builder/builder.md) (texture encode), [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (frame capture) |

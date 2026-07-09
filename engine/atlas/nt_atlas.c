@@ -626,28 +626,28 @@ nt_result_t nt_atlas_init(void) {
 
 uint32_t nt_atlas_revision(nt_resource_t atlas) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_revision: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_revision on unresolved atlas");
     return ad->revision;
 }
 
 uint32_t nt_atlas_region_count(nt_resource_t atlas) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_region_count: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_region_count on unresolved atlas");
     return ad->region_count;
 }
 
 uint8_t nt_atlas_page_count(nt_resource_t atlas) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_page_count: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_page_count on unresolved atlas");
     return ad->page_count;
 }
 
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_find_region: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_find_region on unresolved atlas");
     if (ad->region_count == 0) {
         return NT_ATLAS_INVALID_REGION;
@@ -657,7 +657,7 @@ uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
 
 const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t index) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region on unresolved atlas");
     NT_ASSERT(index < ad->region_count && "nt_atlas_get_region index out of range");
     return &ad->regions[index];
@@ -665,7 +665,7 @@ const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t ind
 
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_page_resource: handle is not an atlas resource");
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_page_resource on unresolved atlas");
     NT_ASSERT(page_index < ad->page_count && "page_index out of range");
     return ad->page_resources[page_index];
@@ -673,35 +673,35 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 
 // #region cached projection accessors
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_pixels_per_unit on unresolved atlas");
     NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
     return 1.0F / ad->ipu;
 }
 
 float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas) {
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_inverse_pixels_per_unit on unresolved atlas");
     NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
     return ad->ipu;
 }
 
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2] {
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_pos on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_pos: region_index out of range");
     return (const float(*)[2]) & ad->cached_pos[ad->regions[region_index].vertex_start];
 }
 
 const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index) {
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_raw_vertices on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_raw_vertices: region_index out of range");
     return &ad->vertices[ad->regions[region_index].vertex_start];
 }
 
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index) {
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_indices on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
     return &ad->indices[ad->regions[region_index].index_start];
@@ -711,7 +711,7 @@ const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region
 void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out) {
     NT_ASSERT(out != NULL && "nt_atlas_get_region_handles: out must be non-NULL");
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region_handles: handle is not an atlas resource");
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_handles on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_handles: region_index out of range");
     NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
@@ -731,7 +731,7 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 // #region test access
 #ifdef NT_TEST_ACCESS
 
-const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas) { return (const nt_atlas_data_t *)nt_resource_get_user_data(atlas); }
+const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas) { return (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas); }
 
 uint32_t nt_atlas_test_find_region_raw(const struct nt_atlas_data *ad, uint64_t name_hash) {
     NT_ASSERT(ad != NULL);

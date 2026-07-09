@@ -126,7 +126,7 @@ typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resour
 nt_resource_set_resolve_callbacks(asset_type, on_resolve, on_cleanup);
 nt_resource_set_post_resolve_callback(asset_type, on_post_resolve);
 nt_resource_set_behavior_flags(asset_type, flags);
-void *nt_resource_get_user_data(handle);
+void *nt_resource_peek_user_data(handle);
 ```
 
 Behavior flags:
