@@ -371,6 +371,7 @@ bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 /* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
+bool nt_gfx_render_target_ready(nt_render_target_t rt);
 
 /* ---- Draw state ---- */
 

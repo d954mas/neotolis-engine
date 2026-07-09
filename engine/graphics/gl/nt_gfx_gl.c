@@ -691,7 +691,12 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-void nt_gfx_backend_end_pass(void) {}
+void nt_gfx_backend_end_pass(void) {
+    if (s_bound_framebuffer != 0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        s_bound_framebuffer = 0;
+    }
+}
 
 /* ---- Scissor and viewport ----
  *
@@ -1497,6 +1502,7 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
         return false;
     }
 
+    GLuint restore_fbo = s_bound_framebuffer;
     GLuint fbo = 0;
     GLuint depth_rbo = 0;
     glGenFramebuffers(1, &fbo);
@@ -1511,8 +1517,8 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
         glGenRenderbuffers(1, &depth_rbo);
         if (depth_rbo == 0) {
             glDeleteFramebuffers(1, &fbo);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            s_bound_framebuffer = 0;
+            glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
+            s_bound_framebuffer = restore_fbo;
             return false;
         }
         glBindRenderbuffer(GL_RENDERBUFFER, depth_rbo);
@@ -1522,8 +1528,8 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
     } else if (desc->depth == NT_RT_DEPTH_TEXTURE) {
         if (!nt_gfx_gl_configure_depth_texture(depth_texture_backend, desc->width, desc->height)) {
             glDeleteFramebuffers(1, &fbo);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            s_bound_framebuffer = 0;
+            glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
+            s_bound_framebuffer = restore_fbo;
             return false;
         }
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, s_texture_gl[depth_texture_backend], 0);
@@ -1536,8 +1542,8 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
             glDeleteRenderbuffers(1, &depth_rbo);
         }
         glDeleteFramebuffers(1, &fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        s_bound_framebuffer = 0;
+        glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
+        s_bound_framebuffer = restore_fbo;
         return false;
     }
 
@@ -1549,8 +1555,8 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
         .depth = desc->depth,
         .complete = true,
     };
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    s_bound_framebuffer = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
+    s_bound_framebuffer = restore_fbo;
     return true;
 }
 
@@ -1596,8 +1602,19 @@ bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_rende
     if (backend_handle == 0 || backend_handle > s_init_desc.max_render_targets || s_render_targets == NULL) {
         return false;
     }
-    nt_gfx_backend_destroy_render_target(backend_handle);
-    return nt_gfx_gl_create_render_target_in_slot(backend_handle, desc, color_backend, depth_texture_backend);
+    nt_gfx_gl_render_target_t old = s_render_targets[backend_handle];
+    if (old.fbo == 0 || !nt_gfx_gl_create_render_target_in_slot(backend_handle, desc, color_backend, depth_texture_backend)) {
+        return false;
+    }
+    if (s_bound_framebuffer == old.fbo) {
+        glBindFramebuffer(GL_FRAMEBUFFER, s_render_targets[backend_handle].fbo);
+        s_bound_framebuffer = s_render_targets[backend_handle].fbo;
+    }
+    if (old.depth_rbo != 0) {
+        glDeleteRenderbuffers(1, &old.depth_rbo);
+    }
+    glDeleteFramebuffers(1, &old.fbo);
+    return true;
 }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {

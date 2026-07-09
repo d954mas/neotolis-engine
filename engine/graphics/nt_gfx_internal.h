@@ -121,6 +121,9 @@ uint16_t nt_gfx_stub_test_last_render_target_width(void);
 uint16_t nt_gfx_stub_test_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
 uint32_t nt_gfx_stub_test_last_depth_texture_backend(void);
+uint32_t nt_gfx_stub_test_update_texture_count(void);
+void nt_gfx_stub_test_fail_next_render_target_create(void);
+void nt_gfx_stub_test_fail_next_render_target_resize(void);
 void nt_gfx_stub_test_set_context_lost(bool lost);
 void nt_gfx_stub_test_reset(void);
 #endif

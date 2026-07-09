@@ -135,6 +135,29 @@ static void test_resize_preserves_target_and_attachment_handles(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
 }
 
+static void test_resize_failure_keeps_existing_target_ready(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+    nt_texture_t depth = nt_gfx_render_target_depth(rt);
+
+    nt_gfx_stub_test_fail_next_render_target_resize();
+    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 128, 96));
+
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .target = rt,
+        .clear_depth = 1.0F,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 static void test_resize_rejects_zero_dimensions_without_recreating_storage(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
@@ -146,6 +169,27 @@ static void test_resize_rejects_zero_dimensions_without_recreating_storage(void)
     TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_render_target_resize_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_render_target_create_count());
+}
+
+static void test_make_rejects_mipmap_filters_for_attachments(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    desc.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR;
+
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    TEST_ASSERT_EQUAL_UINT32(0, rt.id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_render_target_create_count());
+}
+
+static void test_update_rejects_render_target_owned_texture(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+    uint8_t pixel[4] = {255, 0, 255, 255};
+
+    nt_gfx_update_texture(color, 0, 0, 1, 1, pixel);
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_texture_count());
 }
 
 static void test_resize_preserves_depth_mode_accessor_matrix(void) {
@@ -200,6 +244,25 @@ static void test_context_restore_recreates_backend_from_retained_descriptor(void
     nt_gfx_end_frame();
 }
 
+static void test_context_restore_marks_failed_target_not_ready(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+
+    nt_gfx_stub_test_fail_next_render_target_create();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
+
+    nt_gfx_end_frame();
+}
+
 static void test_invalid_handles_return_invalid_attachments(void) {
     nt_render_target_t invalid = NT_RENDER_TARGET_INVALID;
 
@@ -243,9 +306,13 @@ int main(void) {
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer);
     RUN_TEST(test_zero_pass_target_restores_default_after_render_target);
     RUN_TEST(test_resize_preserves_target_and_attachment_handles);
+    RUN_TEST(test_resize_failure_keeps_existing_target_ready);
     RUN_TEST(test_resize_rejects_zero_dimensions_without_recreating_storage);
+    RUN_TEST(test_make_rejects_mipmap_filters_for_attachments);
+    RUN_TEST(test_update_rejects_render_target_owned_texture);
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
     RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
+    RUN_TEST(test_context_restore_marks_failed_target_not_ready);
     RUN_TEST(test_invalid_handles_return_invalid_attachments);
     RUN_TEST(test_header_does_not_expose_target_bind_state_api);
     return UNITY_END();

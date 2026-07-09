@@ -139,12 +139,14 @@ Destroying a render target invalidates the target handle and its owned
 attachment texture handles. Callers do not destroy those textures directly.
 Accessors such as `nt_gfx_render_target_color` and
 `nt_gfx_render_target_depth` return invalid texture handles when the target is
-invalid or the requested attachment does not exist.
+invalid or the requested attachment does not exist. `nt_gfx_render_target_ready`
+reports whether a valid target currently has live backend storage.
 
 `nt_gfx_resize_render_target` preserves the logical render-target handle and
 owned attachment texture handles, but reimages backend storage. Pixel contents
-are undefined after resize. WebGL context restore recreates backend objects from
-the retained descriptor; it does not preserve pixels. Consumers must redraw
+are undefined after a successful resize; failed resize leaves the previous
+backend storage active. WebGL context restore recreates backend objects from the
+retained descriptor; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
 
 ## Hot Path Rule

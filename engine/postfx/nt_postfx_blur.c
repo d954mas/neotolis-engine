@@ -223,6 +223,12 @@ static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radiu
     if (pass->source.id == 0 || nt_gfx_render_target_color(pass->temp).id == 0 || nt_gfx_render_target_color(pass->dest).id == 0) {
         return false;
     }
+    if (!nt_gfx_render_target_ready(pass->temp) || !nt_gfx_render_target_ready(pass->dest)) {
+        return false;
+    }
+    if (pass->source.id == nt_gfx_render_target_color(pass->temp).id || pass->temp.id == pass->dest.id) {
+        return false;
+    }
     uint32_t count = build_kernel(pass->radius, pass->sigma, out_weights);
     if (count == 0) {
         return false;
