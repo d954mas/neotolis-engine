@@ -36,12 +36,19 @@ typedef struct {
     uint8_t format;    /* nt_pixel_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool compressed;   /* true for Basis/GPU-compressed textures */
-    uint8_t _pad;
+    bool render_target_owned;
     /* Sampler bound automatically by bind_texture. Always non-zero in
      * normal runtime (make_texture / activator assert this). Reset to
      * NT_SAMPLER_INVALID transiently during context-loss recovery. */
     nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
+
+typedef struct {
+    nt_render_target_desc_t desc;
+    nt_texture_t color;
+    nt_texture_t depth;
+    bool complete;
+} nt_gfx_render_target_meta_t;
 
 /* ---- Global state ---- */
 
@@ -68,14 +75,17 @@ static struct {
     nt_pool_t pipeline_pool;
     nt_pool_t buffer_pool;
     nt_pool_t texture_pool;
+    nt_pool_t render_target_pool;
 
     uint32_t *shader_backends; /* backend handles parallel to pool slots */
     uint32_t *pipeline_backends;
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
+    uint32_t *render_target_backends;
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
+    nt_gfx_render_target_meta_t *render_target_metas;
 
     /* Sampler cache (dedup by descriptor; samplers are immutable after create
      * and shared across materials/textures). nt_sampler_t.id is 1+slot. */
@@ -124,6 +134,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    uint16_t max_render_targets = desc->max_render_targets != 0 ? desc->max_render_targets : nt_gfx_desc_defaults().max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
@@ -131,14 +142,17 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
     nt_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
     nt_pool_init(&s_gfx.texture_pool, desc->max_textures);
+    nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
+    s_gfx.render_target_backends = (uint32_t *)calloc(max_render_targets + 1, sizeof(uint32_t));
 
     s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
+    s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
@@ -161,6 +175,21 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 void nt_gfx_shutdown(void) {
     /* GL deletes MUST run before backend_shutdown — that destroys the
      * GL context, after which any glDelete* call hits a dead context. */
+
+    /* Render targets own attachment texture handles. */
+    for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
+            nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[i]);
+            uint32_t color_slot = nt_pool_slot_index(s_gfx.render_target_metas[i].color.id);
+            if (color_slot != 0) {
+                nt_gfx_backend_destroy_texture(s_gfx.texture_backends[color_slot]);
+            }
+            uint32_t depth_slot = nt_pool_slot_index(s_gfx.render_target_metas[i].depth.id);
+            if (depth_slot != 0) {
+                nt_gfx_backend_destroy_texture(s_gfx.texture_backends[depth_slot]);
+            }
+        }
+    }
 
     /* Destroy active mesh-table buffers */
     for (uint32_t i = 1; i <= s_gfx.mesh_pool.capacity; i++) {
@@ -185,14 +214,17 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.pipeline_pool);
     nt_pool_shutdown(&s_gfx.buffer_pool);
     nt_pool_shutdown(&s_gfx.texture_pool);
+    nt_pool_shutdown(&s_gfx.render_target_pool);
     nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
     free(s_gfx.pipeline_backends);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
+    free(s_gfx.render_target_backends);
     free(s_gfx.buffer_metas);
     free(s_gfx.texture_metas);
+    free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -204,6 +236,111 @@ void nt_gfx_shutdown(void) {
 }
 
 const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
+
+/* ---- Render target helpers ---- */
+
+static nt_texture_desc_t render_target_color_texture_desc(const nt_render_target_desc_t *desc) {
+    return (nt_texture_desc_t){
+        .width = desc->width,
+        .height = desc->height,
+        .data = NULL,
+        .format = desc->color_format,
+        .min_filter = desc->min_filter,
+        .mag_filter = desc->mag_filter,
+        .wrap_u = desc->wrap_u,
+        .wrap_v = desc->wrap_v,
+        .gen_mipmaps = false,
+        .label = desc->label,
+    };
+}
+
+static nt_texture_desc_t render_target_depth_texture_desc(const nt_render_target_desc_t *desc) {
+    return (nt_texture_desc_t){
+        .width = desc->width,
+        .height = desc->height,
+        .data = NULL,
+        .format = NT_PIXEL_RGBA8,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .gen_mipmaps = false,
+        .label = desc->label,
+    };
+}
+
+static nt_texture_t render_target_make_attachment(const nt_texture_desc_t *desc) {
+    nt_texture_t tex = nt_gfx_make_texture(desc);
+    if (tex.id != 0) {
+        s_gfx.texture_metas[nt_pool_slot_index(tex.id)].render_target_owned = true;
+    }
+    return tex;
+}
+
+static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owned) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        NT_LOG_ERROR("destroy_texture: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(tex.id);
+    if (s_gfx.texture_metas[slot].render_target_owned && !allow_render_target_owned) {
+        NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
+        return;
+    }
+    nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
+    s_gfx.texture_backends[slot] = 0;
+    memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
+    nt_pool_free(&s_gfx.texture_pool, tex.id);
+}
+
+static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return false;
+    }
+    uint32_t slot = nt_pool_slot_index(tex.id);
+    nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
+    s_gfx.texture_backends[slot] = nt_gfx_backend_create_texture(desc);
+    if (s_gfx.texture_backends[slot] == 0) {
+        return false;
+    }
+    s_gfx.texture_metas[slot].width = desc->width;
+    s_gfx.texture_metas[slot].height = desc->height;
+    s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
+    s_gfx.texture_metas[slot].mip_count = 1;
+    s_gfx.texture_metas[slot].compressed = false;
+    s_gfx.texture_metas[slot].render_target_owned = true;
+    nt_sampler_desc_t sampler_desc = {
+        .min_filter = desc->min_filter,
+        .mag_filter = desc->mag_filter,
+        .wrap_u = desc->wrap_u,
+        .wrap_v = desc->wrap_v,
+        .label = NULL,
+    };
+    s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
+    return true;
+}
+
+static bool render_target_recreate_backend(uint32_t slot) {
+    nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
+    nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
+    if (!render_target_recreate_attachment(meta->color, &color_desc)) {
+        meta->complete = false;
+        return false;
+    }
+    uint32_t depth_backend = 0;
+    if (meta->desc.depth == NT_RT_DEPTH_TEXTURE) {
+        nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
+        if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
+            meta->complete = false;
+            return false;
+        }
+        depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
+    }
+    uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
+    s_gfx.render_target_backends[slot] = nt_gfx_backend_create_render_target(&meta->desc, color_backend, depth_backend);
+    meta->complete = s_gfx.render_target_backends[slot] != 0;
+    return meta->complete;
+}
 
 /* ---- Frame / Pass ---- */
 
@@ -223,6 +360,10 @@ void nt_gfx_begin_frame(void) {
             }
             for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
                 s_gfx.texture_backends[i] = 0;
+            }
+            for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+                s_gfx.render_target_backends[i] = 0;
+                s_gfx.render_target_metas[i].complete = false;
             }
             /* Mesh table: keep entries active. nt_resource_invalidate() will
              * call deactivate_mesh() which returns slots to mesh pool.
@@ -251,6 +392,11 @@ void nt_gfx_begin_frame(void) {
         /* Context was lost but now available again -- game must re-create resources */
         g_nt_gfx.context_lost = false;
         g_nt_gfx.context_restored = true;
+        for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
+                (void)render_target_recreate_backend(i);
+            }
+        }
         NT_LOG_INFO("WebGL context restored -- game must re-create resources");
     }
 
@@ -323,19 +469,49 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     return true;
 }
 
+static bool render_target_backend_for_pass(nt_render_target_t target, uint32_t *out_backend) {
+    NT_ASSERT(out_backend != NULL);
+    *out_backend = 0;
+    if (target.id == 0) {
+        return true;
+    }
+    if (!nt_pool_valid(&s_gfx.render_target_pool, target.id)) {
+        NT_LOG_ERROR("begin_pass: invalid render target");
+        return false;
+    }
+    uint32_t slot = nt_pool_slot_index(target.id);
+    if (!s_gfx.render_target_metas[slot].complete) {
+        NT_LOG_ERROR("begin_pass: incomplete render target");
+        return false;
+    }
+    *out_backend = s_gfx.render_target_backends[slot];
+    NT_ASSERT(*out_backend != 0);
+    return *out_backend != 0;
+}
+
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
         return;
     }
 
+    NT_ASSERT(desc != NULL);
+    if (desc == NULL) {
+        NT_LOG_ERROR("begin_pass: NULL desc");
+        return;
+    }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
         NT_LOG_ERROR("begin_pass called outside FRAME state");
         return;
     }
 
+    uint32_t render_target_backend;
+    if (!render_target_backend_for_pass(desc->target, &render_target_backend)) {
+        return;
+    }
+
     s_gfx.render_state = NT_GFX_STATE_PASS;
-    nt_gfx_backend_begin_pass(desc);
+    nt_gfx_backend_begin_pass(desc, render_target_backend);
 }
 
 void nt_gfx_end_pass(void) {
@@ -541,6 +717,74 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     return result;
 }
 
+nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc) {
+    nt_render_target_t result = NT_RENDER_TARGET_INVALID;
+    if (!desc) {
+        return result;
+    }
+    if (desc->width == 0 || desc->height == 0) {
+        NT_LOG_ERROR("make_render_target: zero dimension");
+        return result;
+    }
+    if (desc->color_format != NT_PIXEL_RGBA8) {
+        NT_LOG_ERROR("make_render_target: unsupported color format");
+        return result;
+    }
+    if (desc->depth > NT_RT_DEPTH_TEXTURE) {
+        NT_LOG_ERROR("make_render_target: invalid depth mode");
+        return result;
+    }
+
+    uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);
+    if (id == 0) {
+        NT_LOG_ERROR("render target pool full");
+        return result;
+    }
+    uint32_t slot = nt_pool_slot_index(id);
+
+    nt_texture_desc_t color_desc = render_target_color_texture_desc(desc);
+    nt_texture_t color = render_target_make_attachment(&color_desc);
+    if (color.id == 0) {
+        nt_pool_free(&s_gfx.render_target_pool, id);
+        return result;
+    }
+
+    nt_texture_t depth = {0};
+    if (desc->depth == NT_RT_DEPTH_TEXTURE) {
+        nt_texture_desc_t depth_desc = render_target_depth_texture_desc(desc);
+        depth = render_target_make_attachment(&depth_desc);
+        if (depth.id == 0) {
+            destroy_texture_slot(color, true);
+            nt_pool_free(&s_gfx.render_target_pool, id);
+            return result;
+        }
+    }
+
+    s_gfx.render_target_metas[slot] = (nt_gfx_render_target_meta_t){
+        .desc = *desc,
+        .color = color,
+        .depth = depth,
+        .complete = false,
+    };
+
+    uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(color.id)];
+    uint32_t depth_backend = depth.id != 0 ? s_gfx.texture_backends[nt_pool_slot_index(depth.id)] : 0;
+    s_gfx.render_target_backends[slot] = nt_gfx_backend_create_render_target(desc, color_backend, depth_backend);
+    if (s_gfx.render_target_backends[slot] == 0) {
+        if (depth.id != 0) {
+            destroy_texture_slot(depth, true);
+        }
+        destroy_texture_slot(color, true);
+        memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
+        nt_pool_free(&s_gfx.render_target_pool, id);
+        return result;
+    }
+
+    s_gfx.render_target_metas[slot].complete = true;
+    result.id = id;
+    return result;
+}
+
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
@@ -580,16 +824,58 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     nt_pool_free(&s_gfx.buffer_pool, buf.id);
 }
 
-void nt_gfx_destroy_texture(nt_texture_t tex) {
-    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        NT_LOG_ERROR("destroy_texture: invalid handle");
+void nt_gfx_destroy_texture(nt_texture_t tex) { destroy_texture_slot(tex, false); }
+
+void nt_gfx_destroy_render_target(nt_render_target_t rt) {
+    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        NT_LOG_ERROR("destroy_render_target: invalid handle");
         return;
     }
-    uint32_t slot = nt_pool_slot_index(tex.id);
-    nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
-    s_gfx.texture_backends[slot] = 0;
-    memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
-    nt_pool_free(&s_gfx.texture_pool, tex.id);
+    uint32_t slot = nt_pool_slot_index(rt.id);
+    nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[slot]);
+    s_gfx.render_target_backends[slot] = 0;
+    if (s_gfx.render_target_metas[slot].depth.id != 0) {
+        destroy_texture_slot(s_gfx.render_target_metas[slot].depth, true);
+    }
+    destroy_texture_slot(s_gfx.render_target_metas[slot].color, true);
+    memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
+    nt_pool_free(&s_gfx.render_target_pool, rt.id);
+}
+
+bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
+    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        NT_LOG_ERROR("resize_render_target: invalid handle");
+        return false;
+    }
+    if (width == 0 || height == 0) {
+        NT_LOG_ERROR("resize_render_target: zero dimension");
+        return false;
+    }
+    uint32_t slot = nt_pool_slot_index(rt.id);
+    nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
+    meta->desc.width = width;
+    meta->desc.height = height;
+    nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[slot]);
+    s_gfx.render_target_backends[slot] = 0;
+    return render_target_recreate_backend(slot);
+}
+
+nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {
+    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        return (nt_texture_t){0};
+    }
+    return s_gfx.render_target_metas[nt_pool_slot_index(rt.id)].color;
+}
+
+nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt) {
+    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        return (nt_texture_t){0};
+    }
+    uint32_t slot = nt_pool_slot_index(rt.id);
+    if (s_gfx.render_target_metas[slot].desc.depth != NT_RT_DEPTH_TEXTURE) {
+        return (nt_texture_t){0};
+    }
+    return s_gfx.render_target_metas[slot].depth;
 }
 
 /* ---- Draw state ---- */

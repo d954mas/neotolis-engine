@@ -21,7 +21,7 @@ bool nt_gfx_backend_is_context_lost(void);
 
 void nt_gfx_backend_begin_frame(void);
 void nt_gfx_backend_end_frame(void);
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc);
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
@@ -39,6 +39,9 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
+
+uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
+void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
@@ -109,6 +112,10 @@ void nt_gfx_backend_drop_timer_segments(void);
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
+uint32_t nt_gfx_stub_test_last_pass_target(void);
+uint32_t nt_gfx_stub_test_render_target_create_count(void);
+uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
+nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
 void nt_gfx_stub_test_reset(void);
 #endif
 

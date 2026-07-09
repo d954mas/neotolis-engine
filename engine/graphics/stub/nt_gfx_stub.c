@@ -7,6 +7,10 @@
 #define NT_GFX_STUB_MAX_SLOTS 16
 static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
 static uint32_t s_stub_bind_sampler_count;
+static uint32_t s_stub_last_pass_target;
+static uint32_t s_stub_render_target_create_count;
+static uint32_t s_stub_render_target_destroy_count;
+static nt_render_target_depth_t s_stub_last_render_target_depth;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_STUB_MAX_SLOTS) {
@@ -16,12 +20,20 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
 }
 
 uint32_t nt_gfx_stub_test_bind_sampler_count(void) { return s_stub_bind_sampler_count; }
+uint32_t nt_gfx_stub_test_last_pass_target(void) { return s_stub_last_pass_target; }
+uint32_t nt_gfx_stub_test_render_target_create_count(void) { return s_stub_render_target_create_count; }
+uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
+nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void) { return s_stub_last_render_target_depth; }
 
 void nt_gfx_stub_test_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_STUB_MAX_SLOTS; i++) {
         s_stub_last_sampler[i] = 0;
     }
     s_stub_bind_sampler_count = 0;
+    s_stub_last_pass_target = 0;
+    s_stub_render_target_create_count = 0;
+    s_stub_render_target_destroy_count = 0;
+    s_stub_last_render_target_depth = NT_RT_DEPTH_NONE;
 }
 #endif
 
@@ -38,7 +50,14 @@ void nt_gfx_backend_begin_frame(void) {}
 
 void nt_gfx_backend_end_frame(void) {}
 
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
+    (void)desc;
+#ifdef NT_TEST_ACCESS
+    s_stub_last_pass_target = render_target_backend;
+#else
+    (void)render_target_backend;
+#endif
+}
 
 void nt_gfx_backend_end_pass(void) {}
 
@@ -124,6 +143,26 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; }
+
+uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
+    (void)color_backend;
+    (void)depth_texture_backend;
+#ifdef NT_TEST_ACCESS
+    s_stub_render_target_create_count++;
+    s_stub_last_render_target_depth = desc ? desc->depth : NT_RT_DEPTH_NONE;
+    return s_stub_render_target_create_count;
+#else
+    (void)desc;
+    return 1;
+#endif
+}
+
+void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
+    (void)backend_handle;
+#ifdef NT_TEST_ACCESS
+    s_stub_render_target_destroy_count++;
+#endif
+}
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     (void)backend_handle;

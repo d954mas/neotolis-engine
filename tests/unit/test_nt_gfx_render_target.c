@@ -4,8 +4,8 @@
 #include "graphics/nt_gfx_internal.h"
 #include "unity.h"
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static nt_render_target_desc_t rt_desc(nt_render_target_depth_t depth) {
@@ -38,7 +38,8 @@ void setUp(void) {
 void tearDown(void) { nt_gfx_shutdown(); }
 
 static void test_create_returns_target_and_color_attachment(void) {
-    nt_render_target_t rt = nt_gfx_make_render_target(&rt_desc(NT_RT_DEPTH_NONE));
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_render_target_color(rt).id);
@@ -50,9 +51,12 @@ static void test_create_returns_target_and_color_attachment(void) {
 }
 
 static void test_depth_accessor_matches_depth_mode(void) {
-    nt_render_target_t none = nt_gfx_make_render_target(&rt_desc(NT_RT_DEPTH_NONE));
-    nt_render_target_t buffer = nt_gfx_make_render_target(&rt_desc(NT_RT_DEPTH_BUFFER));
-    nt_render_target_t texture = nt_gfx_make_render_target(&rt_desc(NT_RT_DEPTH_TEXTURE));
+    nt_render_target_desc_t none_desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_desc_t buffer_desc = rt_desc(NT_RT_DEPTH_BUFFER);
+    nt_render_target_desc_t texture_desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t none = nt_gfx_make_render_target(&none_desc);
+    nt_render_target_t buffer = nt_gfx_make_render_target(&buffer_desc);
+    nt_render_target_t texture = nt_gfx_make_render_target(&texture_desc);
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(none).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(buffer).id);
@@ -63,7 +67,8 @@ static void test_depth_accessor_matches_depth_mode(void) {
 }
 
 static void test_pass_target_routes_to_backend(void) {
-    nt_render_target_t rt = nt_gfx_make_render_target(&rt_desc(NT_RT_DEPTH_BUFFER));
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -100,7 +105,7 @@ static void test_header_does_not_expose_target_bind_state_api(void) {
 
     char buf[32768];
     size_t n = fread(buf, 1, sizeof(buf) - 1U, f);
-    fclose(f);
+    (void)fclose(f);
     buf[n] = '\0';
 
     const char *rt_name = "render_target";

@@ -31,8 +31,13 @@ typedef struct {
 
 typedef struct {
     uint32_t id;
+} nt_render_target_t;
+
+typedef struct {
+    uint32_t id;
 } nt_mesh_t;
 
+#define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
@@ -161,6 +166,12 @@ typedef enum {
     NT_WRAP_MIRRORED_REPEAT,
 } nt_texture_wrap_t;
 
+typedef enum {
+    NT_RT_DEPTH_NONE = 0,
+    NT_RT_DEPTH_BUFFER,
+    NT_RT_DEPTH_TEXTURE,
+} nt_render_target_depth_t;
+
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
@@ -181,16 +192,17 @@ typedef struct {
 /* ---- Descriptor structs ---- */
 
 typedef struct {
-    uint16_t max_shaders;     /* default: 32 */
-    uint16_t max_pipelines;   /* default: 16 */
-    uint16_t max_buffers;     /* default: 128 */
-    uint16_t max_textures;    /* default: 64 */
-    uint16_t max_meshes;      /* default: 128 */
-    bool depth;               /* request depth buffer (default: true) */
-    bool stencil;             /* request stencil buffer (default: false) */
-    bool antialias;           /* MSAA (default: false) */
-    bool alpha;               /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    uint16_t max_shaders;        /* default: 32 */
+    uint16_t max_pipelines;      /* default: 16 */
+    uint16_t max_buffers;        /* default: 128 */
+    uint16_t max_textures;       /* default: 64 */
+    uint16_t max_meshes;         /* default: 128 */
+    uint16_t max_render_targets; /* default: 16 */
+    bool depth;                  /* request depth buffer (default: true) */
+    bool stencil;                /* request stencil buffer (default: false) */
+    bool antialias;              /* MSAA (default: false) */
+    bool alpha;                  /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;    /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -248,6 +260,19 @@ typedef struct {
 } nt_sampler_desc_t;
 
 typedef struct {
+    uint16_t width;
+    uint16_t height;
+    nt_pixel_format_t color_format;
+    nt_render_target_depth_t depth;
+    nt_texture_filter_t min_filter;
+    nt_texture_filter_t mag_filter;
+    nt_texture_wrap_t wrap_u;
+    nt_texture_wrap_t wrap_v;
+    const char *label; /* debug name; static storage */
+} nt_render_target_desc_t;
+
+typedef struct {
+    nt_render_target_t target; /* zero selects the default framebuffer */
     float clear_color[4];
     float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
@@ -292,6 +317,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_buffers = 128,
         .max_textures = 64,
         .max_meshes = 128,
+        .max_render_targets = 16,
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -324,6 +350,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
+/* The descriptor is copied. Attachment texture handles are owned by the
+ * render target and remain valid until destroy. */
+nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ---- */
 
@@ -331,10 +360,17 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
+void nt_gfx_destroy_render_target(nt_render_target_t rt);
 /* Samplers have no destroy: nt_gfx_make_sampler dedupes against an internal
  * cache (NT_GFX_MAX_SAMPLERS), and all cached samplers are released by
  * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
  * and textures reference the same sampler handle. */
+
+/* Resize preserves logical target and attachment handles; pixels become undefined. */
+bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height);
+nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
+/* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
+nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 
 /* ---- Draw state ---- */
 

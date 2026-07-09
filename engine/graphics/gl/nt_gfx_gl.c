@@ -649,7 +649,8 @@ void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
 bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
 // #endregion
 
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
+    (void)render_target_backend;
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);
@@ -1431,6 +1432,15 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     }
     s_texture_gl[backend_handle] = 0;
 }
+
+uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
+    (void)desc;
+    (void)color_backend;
+    (void)depth_texture_backend;
+    return 1;
+}
+
+void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
