@@ -37,10 +37,12 @@ static const char *s_quad_fs_src = "precision mediump float;\n"
                                    "uniform sampler2D u_texture;\n"
                                    "uniform vec4 u_tint;\n"
                                    "uniform int u_mode;\n"
+                                   "uniform float u_zoom;\n"
                                    "in vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    "void main() {\n"
-                                   "    vec4 sample_color = texture(u_texture, v_uv);\n"
+                                   "    vec2 sample_uv = ((v_uv - vec2(0.5)) / max(u_zoom, 0.001)) + vec2(0.5);\n"
+                                   "    vec4 sample_color = texture(u_texture, sample_uv);\n"
                                    "    if (u_mode == 1) {\n"
                                    "        float depth = 1.0 - sample_color.r;\n"
                                    "        frag_color = vec4(depth, depth, depth, 1.0);\n"
@@ -67,7 +69,75 @@ static struct {
     uint16_t rt_height;
     bool large_target;
     bool handles_stable;
+    float sample_zoom;
+    float blur_radius;
+    int active_slider;
 } s_demo;
+
+enum {
+    RTT_SLIDER_NONE = 0,
+    RTT_SLIDER_ZOOM = 1,
+    RTT_SLIDER_BLUR = 2,
+};
+
+static float clampf(float value, float min_value, float max_value) {
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+static bool mouse_ndc(float *out_x, float *out_y) {
+    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+        const nt_pointer_t *ptr = &g_nt_input.pointers[i];
+        if (ptr->active && ptr->type == NT_POINTER_MOUSE && g_nt_window.fb_width > 0U && g_nt_window.fb_height > 0U) {
+            *out_x = ((ptr->x / (float)g_nt_window.fb_width) * 2.0F) - 1.0F;
+            *out_y = 1.0F - ((ptr->y / (float)g_nt_window.fb_height) * 2.0F);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool point_in_rect(float x, float y, float x0, float y0, float x1, float y1) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
+
+static float slider_t(float x, float x0, float x1) { return clampf((x - x0) / (x1 - x0), 0.0F, 1.0F); }
+
+static void update_sliders(void) {
+    float mx = 0.0F;
+    float my = 0.0F;
+    bool has_mouse = mouse_ndc(&mx, &my);
+    bool pressed = nt_input_mouse_is_pressed(NT_BUTTON_LEFT);
+    bool down = nt_input_mouse_is_down(NT_BUTTON_LEFT);
+    bool released = nt_input_mouse_is_released(NT_BUTTON_LEFT);
+
+    if (released) {
+        s_demo.active_slider = RTT_SLIDER_NONE;
+    }
+    if (!has_mouse) {
+        return;
+    }
+    if (pressed) {
+        if (point_in_rect(mx, my, -0.92F, 0.91F, -0.08F, 0.98F)) {
+            s_demo.active_slider = RTT_SLIDER_ZOOM;
+        } else if (point_in_rect(mx, my, 0.08F, 0.91F, 0.92F, 0.98F)) {
+            s_demo.active_slider = RTT_SLIDER_BLUR;
+        }
+    }
+    if (!down) {
+        return;
+    }
+    if (s_demo.active_slider == RTT_SLIDER_ZOOM) {
+        float t = slider_t(mx, -0.92F, -0.08F);
+        s_demo.sample_zoom = 1.0F + (t * 1.5F);
+    } else if (s_demo.active_slider == RTT_SLIDER_BLUR) {
+        float t = slider_t(mx, 0.08F, 0.92F);
+        s_demo.blur_radius = 2.0F + (t * 14.0F);
+    }
+}
 
 static void destroy_quad_resources(void) {
     if (s_demo.quad_vbo.id != 0) {
@@ -242,23 +312,38 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_bind_texture(texture, 0);
     nt_gfx_set_uniform_int("u_texture", 0);
     nt_gfx_set_uniform_int("u_mode", mode);
+    nt_gfx_set_uniform_float("u_zoom", mode == 1 ? 1.0F : s_demo.sample_zoom);
     nt_gfx_set_uniform_vec4("u_tint", tint);
     nt_gfx_draw(0, 6);
 }
 
 static void draw_solid_quad(float x0, float y0, float x1, float y1, const float color[4]) { draw_textured_quad(s_demo.white, x0, y0, x1, y1, 0, color); }
 
+static void draw_slider(float x0, float y0, float x1, float y1, float t, const float fill[4]) {
+    float track[4] = {0.12F, 0.14F, 0.18F, 1.0F};
+    float thumb[4] = {0.92F, 0.96F, 1.0F, 1.0F};
+    float mid_y = (y0 + y1) * 0.5F;
+    float thumb_x = x0 + ((x1 - x0) * clampf(t, 0.0F, 1.0F));
+    draw_solid_quad(x0, mid_y - 0.010F, x1, mid_y + 0.010F, track);
+    draw_solid_quad(x0, mid_y - 0.015F, thumb_x, mid_y + 0.015F, fill);
+    draw_solid_quad(thumb_x - 0.018F, y0, thumb_x + 0.018F, y1, thumb);
+}
+
 static void draw_default_frame(void) {
     float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     float frame[4] = {0.08F, 0.10F, 0.13F, 1.0F};
     float stable[4] = {0.05F, 0.85F, 0.30F, 1.0F};
     float unstable[4] = {0.95F, 0.10F, 0.05F, 1.0F};
+    float zoom_fill[4] = {0.22F, 0.55F, 1.0F, 1.0F};
+    float blur_fill[4] = {1.0F, 0.70F, 0.12F, 1.0F};
     draw_solid_quad(-0.96F, -0.76F, -0.08F, 0.78F, frame);
     draw_solid_quad(0.08F, -0.76F, 0.96F, 0.78F, frame);
     draw_textured_quad(s_demo.scene_color, -0.92F, -0.62F, -0.12F, 0.70F, 0, white);
     draw_textured_quad(s_demo.blur_color, 0.12F, -0.62F, 0.92F, 0.70F, 0, white);
     draw_textured_quad(s_demo.scene_depth, -0.44F, -0.95F, 0.44F, -0.78F, 1, white);
     draw_solid_quad(-0.92F, 0.82F, 0.92F, 0.89F, s_demo.handles_stable ? stable : unstable);
+    draw_slider(-0.92F, 0.91F, -0.08F, 0.98F, (s_demo.sample_zoom - 1.0F) / 1.5F, zoom_fill);
+    draw_slider(0.08F, 0.91F, 0.92F, 0.98F, (s_demo.blur_radius - 2.0F) / 14.0F, blur_fill);
 }
 
 static void frame(void) {
@@ -278,6 +363,7 @@ static void frame(void) {
             resize_targets(512, 288);
         }
     }
+    update_sliders();
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_lost) {
@@ -304,7 +390,7 @@ static void frame(void) {
         .source = s_demo.scene_color,
         .temp = s_demo.temp,
         .dest = s_demo.blur,
-        .radius = 8.0F,
+        .radius = s_demo.blur_radius,
         .sigma = 0.0F,
     });
     NT_ASSERT(blurred && "rtt_showcase: blur pass failed");
@@ -337,6 +423,8 @@ int main(void) {
     gfx_desc.max_textures = 16;
     nt_gfx_init(&gfx_desc);
     memset(&s_demo, 0, sizeof(s_demo));
+    s_demo.sample_zoom = 1.0F;
+    s_demo.blur_radius = 8.0F;
     nt_shape_renderer_init();
     if (nt_postfx_blur_init() != NT_OK) {
         return 1;

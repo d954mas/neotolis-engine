@@ -22,6 +22,8 @@ cmake --build build/_cmake/wasm-debug --target rtt_showcase
 | Input | Action |
 |---|---|
 | R | Toggle the offscreen targets between 512x288 and 768x432. |
+| Mouse drag, blue slider | Adjust sampled texture zoom from 1.0x to 2.5x. |
+| Mouse drag, amber slider | Adjust gaussian blur radius from 2 to 16. |
 | Esc | Quit on native builds. |
 
 ## Visual QA
@@ -37,10 +39,13 @@ Build and run the native example, then confirm:
    visible.
 2. The right panel shows the same offscreen scene blurred through
    `nt_postfx_blur` using caller-supplied source, temp, and destination targets.
+   Drag the amber slider and confirm the blur strength changes continuously.
 3. Press `R`. The target size changes, the scene redraws, and the display
    recovers without rebinding sampled target/color/depth handles. The top status
    bar stays green when handle stability is intact.
-4. The bottom strip samples the target depth texture directly. It should change
+4. Drag the blue slider and confirm the sampled raw/blur panels zoom into the
+   same offscreen texture without changing the depth debug strip.
+5. The bottom strip samples the target depth texture directly. It should change
    with the scene depth and read as a low-level depth-texture debug view, not a
    shadow map.
 
