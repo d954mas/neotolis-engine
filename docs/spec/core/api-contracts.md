@@ -126,6 +126,27 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+### Render-target handles
+
+`nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
+copies the descriptor into `nt_gfx`; the caller may release or mutate its source
+descriptor after the call returns. The color attachment, and the depth attachment
+when the target was created with sampleable depth, are module-owned
+`nt_texture_t` values. They remain valid until
+`nt_gfx_destroy_render_target(rt)`.
+
+Destroying a render target invalidates the target handle and its owned
+attachment texture handles. Callers do not destroy those textures directly.
+Accessors such as `nt_gfx_render_target_color` and
+`nt_gfx_render_target_depth` return invalid texture handles when the target is
+invalid or the requested attachment does not exist.
+
+`nt_gfx_resize_render_target` preserves the logical render-target handle and
+owned attachment texture handles, but reimages backend storage. Pixel contents
+are undefined after resize. WebGL context restore recreates backend objects from
+the retained descriptor; it does not preserve pixels. Consumers must redraw
+offscreen contents after resize or context restore.
+
 ## Hot Path Rule
 
 In hot paths, prefer handles, borrowed views, scratch-backed temporaries,

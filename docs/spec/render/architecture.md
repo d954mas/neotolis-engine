@@ -45,6 +45,26 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Render targets
+
+Render targets are a general backend capability for offscreen passes, not a
+text-only path and not a shadow-map subsystem. Typical users include post-fx,
+glow or bloom-like effects, minimaps, portals, and depth-aware rendering.
+
+The game still owns pass order. Each pass selects its destination through
+`nt_pass_desc_t.target`: zero selects the default framebuffer, and a valid
+`nt_render_target_t` selects an offscreen target. `nt_gfx` binds the matching
+backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
+bind or unbind render-target state outside the pass descriptor.
+
+Render-target color and sampleable depth attachments are exposed as normal
+`nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
+private to the concrete graphics implementation.
+
+Phase 74 supplies the low-level target and depth-texture primitive only. It does
+not define light cameras, PCF, cascades, shadow atlases, material shadow
+integration, or a shadow-map system.
+
 ## Renderer complexity classes
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
