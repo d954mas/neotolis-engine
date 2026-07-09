@@ -10,6 +10,23 @@
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
+static bool weights_are_finite_and_equal(const float *a, const float *b, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (!isfinite(a[i]) || !float_near(a[i], b[i], 0.000001F)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static float sum_weights(const float *weights, uint32_t count) {
+    float sum = 0.0F;
+    for (uint32_t i = 0; i < count; i++) {
+        sum += weights[i];
+    }
+    return sum;
+}
+
 static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, const char *label) {
     return (nt_render_target_desc_t){
         .width = width,
@@ -53,13 +70,8 @@ static void test_kernel_is_symmetric_normalized_and_deterministic(void) {
     TEST_ASSERT_EQUAL_UINT32(7, count_a);
     TEST_ASSERT_EQUAL_UINT32(count_a, count_b);
 
-    float sum = 0.0F;
-    for (uint32_t i = 0; i < count_a; i++) {
-        TEST_ASSERT_TRUE(isfinite(weights_a[i]));
-        TEST_ASSERT_TRUE(float_near(weights_a[i], weights_b[i], 0.000001F));
-        sum += weights_a[i];
-    }
-    TEST_ASSERT_TRUE(float_near(sum, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(weights_are_finite_and_equal(weights_a, weights_b, count_a));
+    TEST_ASSERT_TRUE(float_near(sum_weights(weights_a, count_a), 1.0F, 0.0001F));
     TEST_ASSERT_TRUE(float_near(weights_a[0], weights_a[6], 0.000001F));
     TEST_ASSERT_TRUE(float_near(weights_a[1], weights_a[5], 0.000001F));
     TEST_ASSERT_TRUE(float_near(weights_a[2], weights_a[4], 0.000001F));
