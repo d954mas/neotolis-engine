@@ -113,6 +113,93 @@ static void test_zero_pass_target_restores_default_after_render_target(void) {
     nt_gfx_end_frame();
 }
 
+static void test_resize_preserves_target_and_attachment_handles(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    uint32_t rt_id = rt.id;
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+    nt_texture_t depth = nt_gfx_render_target_depth(rt);
+
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, color.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, depth.id);
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
+
+    TEST_ASSERT_EQUAL_UINT32(rt_id, rt.id);
+    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_render_target_resize_count());
+    TEST_ASSERT_EQUAL_UINT16(128, nt_gfx_stub_test_last_render_target_width());
+    TEST_ASSERT_EQUAL_UINT16(96, nt_gfx_stub_test_last_render_target_height());
+    TEST_ASSERT_EQUAL_INT(NT_RT_DEPTH_TEXTURE, nt_gfx_stub_test_last_render_target_depth());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
+}
+
+static void test_resize_rejects_zero_dimensions_without_recreating_storage(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+
+    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 0, 96));
+    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 128, 0));
+
+    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_render_target_resize_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_render_target_create_count());
+}
+
+static void test_resize_preserves_depth_mode_accessor_matrix(void) {
+    nt_render_target_desc_t none_desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_desc_t buffer_desc = rt_desc(NT_RT_DEPTH_BUFFER);
+    nt_render_target_desc_t texture_desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t none = nt_gfx_make_render_target(&none_desc);
+    nt_render_target_t buffer = nt_gfx_make_render_target(&buffer_desc);
+    nt_render_target_t texture = nt_gfx_make_render_target(&texture_desc);
+    nt_texture_t texture_depth = nt_gfx_render_target_depth(texture);
+
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(none, 48, 24));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(none).id);
+    TEST_ASSERT_EQUAL_INT(NT_RT_DEPTH_NONE, nt_gfx_stub_test_last_render_target_depth());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
+
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(buffer, 80, 40));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(buffer).id);
+    TEST_ASSERT_EQUAL_INT(NT_RT_DEPTH_BUFFER, nt_gfx_stub_test_last_render_target_depth());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
+
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(texture, 160, 64));
+    TEST_ASSERT_EQUAL_UINT32(texture_depth.id, nt_gfx_render_target_depth(texture).id);
+    TEST_ASSERT_EQUAL_INT(NT_RT_DEPTH_TEXTURE, nt_gfx_stub_test_last_render_target_depth());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
+}
+
+static void test_context_restore_recreates_backend_from_retained_descriptor(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    uint32_t rt_id = rt.id;
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+    nt_texture_t depth = nt_gfx_render_target_depth(rt);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+
+    TEST_ASSERT_EQUAL_UINT32(rt_id, rt.id);
+    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_render_target_create_count());
+    TEST_ASSERT_EQUAL_UINT16(desc.width, nt_gfx_stub_test_last_render_target_width());
+    TEST_ASSERT_EQUAL_UINT16(desc.height, nt_gfx_stub_test_last_render_target_height());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_depth_texture_backend());
+
+    nt_gfx_end_frame();
+}
+
 static void test_invalid_handles_return_invalid_attachments(void) {
     nt_render_target_t invalid = NT_RENDER_TARGET_INVALID;
 
@@ -155,6 +242,10 @@ int main(void) {
     RUN_TEST(test_pass_target_routes_to_backend);
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer);
     RUN_TEST(test_zero_pass_target_restores_default_after_render_target);
+    RUN_TEST(test_resize_preserves_target_and_attachment_handles);
+    RUN_TEST(test_resize_rejects_zero_dimensions_without_recreating_storage);
+    RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
+    RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
     RUN_TEST(test_invalid_handles_return_invalid_attachments);
     RUN_TEST(test_header_does_not_expose_target_bind_state_api);
     return UNITY_END();

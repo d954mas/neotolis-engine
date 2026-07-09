@@ -41,6 +41,7 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
 
 uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
+bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
@@ -114,8 +115,13 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
 uint32_t nt_gfx_stub_test_last_pass_target(void);
 uint32_t nt_gfx_stub_test_render_target_create_count(void);
+uint32_t nt_gfx_stub_test_render_target_resize_count(void);
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
+uint16_t nt_gfx_stub_test_last_render_target_width(void);
+uint16_t nt_gfx_stub_test_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
+uint32_t nt_gfx_stub_test_last_depth_texture_backend(void);
+void nt_gfx_stub_test_set_context_lost(bool lost);
 void nt_gfx_stub_test_reset(void);
 #endif
 
