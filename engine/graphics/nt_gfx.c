@@ -342,6 +342,26 @@ static bool render_target_recreate_backend(uint32_t slot) {
     return meta->complete;
 }
 
+static bool render_target_resize_backend(uint32_t slot) {
+    nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
+    meta->complete = false;
+    nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
+    if (!render_target_recreate_attachment(meta->color, &color_desc)) {
+        return false;
+    }
+    uint32_t depth_backend = 0;
+    if (meta->desc.depth == NT_RT_DEPTH_TEXTURE) {
+        nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
+        if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
+            return false;
+        }
+        depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
+    }
+    uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
+    meta->complete = nt_gfx_backend_resize_render_target(s_gfx.render_target_backends[slot], &meta->desc, color_backend, depth_backend);
+    return meta->complete;
+}
+
 /* ---- Frame / Pass ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
@@ -389,7 +409,10 @@ void nt_gfx_begin_frame(void) {
     }
 
     if (g_nt_gfx.context_lost) {
-        /* Context was lost but now available again -- game must re-create resources */
+        if (!nt_gfx_backend_recreate_all_resources()) {
+            NT_LOG_ERROR("WebGL context restore failed");
+            return;
+        }
         g_nt_gfx.context_lost = false;
         g_nt_gfx.context_restored = true;
         for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
@@ -397,7 +420,7 @@ void nt_gfx_begin_frame(void) {
                 (void)render_target_recreate_backend(i);
             }
         }
-        NT_LOG_INFO("WebGL context restored -- game must re-create resources");
+        NT_LOG_INFO("WebGL context restored -- render targets restored, game must re-create other resources");
     }
 
     /* Normal frame begin */
@@ -855,9 +878,7 @@ bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t
     nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
     meta->desc.width = width;
     meta->desc.height = height;
-    nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[slot]);
-    s_gfx.render_target_backends[slot] = 0;
-    return render_target_recreate_backend(slot);
+    return render_target_resize_backend(slot);
 }
 
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {
