@@ -269,6 +269,11 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx_read_pixels COMMAND test_gfx_read_pixels)
 
+    # --- Graphics render-target tests ---
+    add_executable(test_nt_gfx_render_target unit/test_nt_gfx_render_target.c)
+    target_link_libraries(test_nt_gfx_render_target PRIVATE nt_gfx_stub nt_log_stub unity)
+    nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)
     target_link_libraries(test_base64 PRIVATE nt_base64 unity)
