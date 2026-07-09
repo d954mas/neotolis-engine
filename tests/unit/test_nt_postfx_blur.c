@@ -1,0 +1,151 @@
+#include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
+#include "postfx/nt_postfx_blur.h"
+#include "unity.h"
+
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
+
+static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, const char *label) {
+    return (nt_render_target_desc_t){
+        .width = width,
+        .height = height,
+        .color_format = NT_PIXEL_RGBA8,
+        .depth = NT_RT_DEPTH_NONE,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = label,
+    };
+}
+
+void setUp(void) {
+    nt_gfx_init(&(nt_gfx_desc_t){
+        .max_shaders = 8,
+        .max_pipelines = 8,
+        .max_buffers = 8,
+        .max_textures = 12,
+        .max_meshes = 4,
+        .max_render_targets = 4,
+    });
+    nt_gfx_stub_test_reset();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
+    nt_postfx_blur_test_reset_counters();
+}
+
+void tearDown(void) {
+    nt_postfx_blur_shutdown();
+    nt_gfx_shutdown();
+}
+
+static void test_kernel_is_symmetric_normalized_and_deterministic(void) {
+    float weights_a[NT_POSTFX_BLUR_MAX_KERNEL] = {0};
+    float weights_b[NT_POSTFX_BLUR_MAX_KERNEL] = {0};
+
+    uint32_t count_a = nt_postfx_blur_test_build_kernel(3.0F, 1.5F, weights_a);
+    uint32_t count_b = nt_postfx_blur_test_build_kernel(3.0F, 1.5F, weights_b);
+
+    TEST_ASSERT_EQUAL_UINT32(7, count_a);
+    TEST_ASSERT_EQUAL_UINT32(count_a, count_b);
+
+    float sum = 0.0F;
+    for (uint32_t i = 0; i < count_a; i++) {
+        TEST_ASSERT_TRUE(isfinite(weights_a[i]));
+        TEST_ASSERT_TRUE(float_near(weights_a[i], weights_b[i], 0.000001F));
+        sum += weights_a[i];
+    }
+    TEST_ASSERT_TRUE(float_near(sum, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(float_near(weights_a[0], weights_a[6], 0.000001F));
+    TEST_ASSERT_TRUE(float_near(weights_a[1], weights_a[5], 0.000001F));
+    TEST_ASSERT_TRUE(float_near(weights_a[2], weights_a[4], 0.000001F));
+    TEST_ASSERT_TRUE(weights_a[3] > weights_a[2]);
+}
+
+static void test_kernel_derives_sigma_when_zero(void) {
+    float derived[NT_POSTFX_BLUR_MAX_KERNEL] = {0};
+    float explicit_sigma[NT_POSTFX_BLUR_MAX_KERNEL] = {0};
+
+    uint32_t derived_count = nt_postfx_blur_test_build_kernel(6.0F, 0.0F, derived);
+    uint32_t explicit_count = nt_postfx_blur_test_build_kernel(6.0F, 2.0F, explicit_sigma);
+
+    TEST_ASSERT_EQUAL_UINT32(13, derived_count);
+    TEST_ASSERT_EQUAL_UINT32(derived_count, explicit_count);
+    for (uint32_t i = 0; i < derived_count; i++) {
+        TEST_ASSERT_TRUE(float_near(explicit_sigma[i], derived[i], 0.000001F));
+    }
+}
+
+static void test_invalid_descriptors_return_false_without_draw(void) {
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t source = nt_gfx_render_target_color(dest);
+
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(NULL));
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = (nt_texture_t){0}, .temp = temp, .dest = dest, .radius = 4.0F}));
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = NT_RENDER_TARGET_INVALID, .dest = dest, .radius = 4.0F}));
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = NT_RENDER_TARGET_INVALID, .radius = 4.0F}));
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 0.0F}));
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = -1.0F}));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+}
+
+static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t source = nt_gfx_render_target_color(source_rt);
+    uint32_t creates_before = nt_gfx_stub_test_render_target_create_count();
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = source,
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_stub_test_render_target_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+}
+
+static void test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets(void) {
+    FILE *impl = fopen("engine/postfx/nt_postfx_blur.c", "rb");
+    TEST_ASSERT_NOT_NULL(impl);
+    char impl_buf[32768];
+    size_t impl_n = fread(impl_buf, 1, sizeof(impl_buf) - 1U, impl);
+    (void)fclose(impl);
+    impl_buf[impl_n] = '\0';
+    TEST_ASSERT_NULL(strstr(impl_buf, "nt_gfx_make_render_target"));
+    TEST_ASSERT_NULL(strstr(impl_buf, "nt_gfx_resize_render_target"));
+
+    FILE *gfx = fopen("engine/graphics/nt_gfx.h", "rb");
+    TEST_ASSERT_NOT_NULL(gfx);
+    char gfx_buf[32768];
+    size_t gfx_n = fread(gfx_buf, 1, sizeof(gfx_buf) - 1U, gfx);
+    (void)fclose(gfx);
+    gfx_buf[gfx_n] = '\0';
+    TEST_ASSERT_NULL(strstr(gfx_buf, "nt_postfx_blur"));
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_kernel_is_symmetric_normalized_and_deterministic);
+    RUN_TEST(test_kernel_derives_sigma_when_zero);
+    RUN_TEST(test_invalid_descriptors_return_false_without_draw);
+    RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
+    RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);
+    return UNITY_END();
+}

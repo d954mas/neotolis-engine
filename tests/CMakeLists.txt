@@ -14,7 +14,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
-        nt_shape_renderer nt_mem_scratch nt_metrics nt_devapi_net
+        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -274,6 +274,12 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nt_gfx_render_target PRIVATE nt_gfx_stub nt_log_stub unity)
     target_compile_definitions(test_nt_gfx_render_target PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # --- Post-FX blur tests ---
+    add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c)
+    target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_stub nt_log_stub unity)
+    target_compile_definitions(test_nt_postfx_blur PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_postfx_blur WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)
