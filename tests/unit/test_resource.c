@@ -2586,7 +2586,7 @@ void test_peek_user_data_valid_handle(void) {
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_step(); /* activate + resolve -> on_resolve sets user_data */
 
-    void *ud = nt_resource_peek_user_data(h);
+    const void *ud = nt_resource_peek_user_data(h);
     TEST_ASSERT_NOT_NULL(ud);
     TEST_ASSERT_EQUAL_PTR(s_last_resolve_user_data, ud);
 

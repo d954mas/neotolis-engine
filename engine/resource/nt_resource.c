@@ -1062,7 +1062,7 @@ uint32_t nt_resource_get(nt_resource_t handle) {
     return s_resource.slots[index].runtime_handle;
 }
 
-void *nt_resource_peek_user_data(nt_resource_t handle) {
+const void *nt_resource_peek_user_data(nt_resource_t handle) {
     if (handle.id == 0) {
         return NULL;
     }

@@ -24,9 +24,11 @@
 nt_result_t nt_devapi_init(void);
 void nt_devapi_shutdown(void);
 
-/* Register a command. Copies all 7 descriptor strings; stores `user_data` by reference
-   and passes it to the handler until nt_devapi_shutdown(). NT_ERR_INVALID_ARG if `method`
-   is already registered — the dup is rejected, not overwritten. */
+/* Register a command. desc, handler, and all 7 descriptor strings must be non-NULL.
+   Copies the strings; user_data may be NULL. Non-NULL user_data is stored by
+   reference and passed to the handler until nt_devapi_shutdown(); caller owns it
+   and the engine never frees it. NT_ERR_INVALID_ARG if `method` is already registered —
+   the dup is rejected, not overwritten. */
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data);
 
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid

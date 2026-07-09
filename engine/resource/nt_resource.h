@@ -54,9 +54,9 @@ static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_
 static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
 
 /* ---- Activator callback types ----
- * on_resolve/on_cleanup fire during resolve iteration — they must not call
- * mutating resource APIs (mount/unmount/request/step/load/parse), because modifying
- * resource state there is UB.
+ * on_resolve/on_cleanup fire during resolve iteration. They may use callback
+ * args and APIs explicitly marked callback-safe, but must not request/get,
+ * mount/unmount/step/load/parse resource state; on_post_resolve is the stable read seam.
  *
  * on_post_resolve fires after the resolve iteration finishes. It may call
  * request/find/get-style resource accessors, but must not recurse into
@@ -147,15 +147,16 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle);
  * goes through resolve_pass and bumps the epoch normally. */
 uint32_t nt_resource_publication_epoch(void);
 
-/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready or not a blob.
- * Returned pointer is a view into pack memory — valid until pack blob is evicted.
- * Caller must copy data if it needs to persist beyond the current frame. */
+/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
+ * not a blob, or the current blob is absent; out_size may be NULL. Non-NULL data
+ * is the current published winner's pack-blob view, valid until this slot publishes
+ * another winner, the blob is evicted/unmounted, or shutdown. */
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* Get metadata for a resource by kind hash. Returns pointer to metadata bytes
- * in resident pack memory, NULL if absent. Pointer valid until pack unmount.
- * kind = nt_hash64_str("tag") for example.
- * Returns NULL + size 0 for absent metadata. */
+ * in resident pack memory, NULL + size 0 if absent; out_size may be NULL.
+ * Non-NULL data is the current published winner's metadata view, valid until
+ * this slot publishes another winner, pack unmount, or shutdown. */
 const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_t *out_size);
 
 /* ---- Virtual packs ---- */
@@ -186,9 +187,11 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
 void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
 void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
-/* Borrowed current slot aux pointer. Valid only until the next resource
- * resolve/cleanup that changes this slot, or shutdown; caller must not free or store it. */
-void *nt_resource_peek_user_data(nt_resource_t handle);
+/* Borrowed current slot aux pointer. Returns NULL for invalid/stale handles or
+ * slots with no current aux data. Non-NULL is valid only until the next resource
+ * resolve/cleanup that changes this slot, or shutdown. Resolve/cleanup callbacks
+ * own mutation and freeing; caller must not free, mutate, or store it. */
+const void *nt_resource_peek_user_data(nt_resource_t handle);
 
 /* ---- Activation time budget ---- */
 

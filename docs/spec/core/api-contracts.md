@@ -1,10 +1,9 @@
 # API Contract Style
 
-This chapter defines how Neotolis public C APIs spell ownership, pointer
-lifetime, nullability, and storage authority. It is a style contract for new
-APIs and for APIs touched during nearby work. It is not a new ownership system,
-and it does not change the engine/game boundary from
-[Principles](principles.md).
+This chapter defines how Neotolis public C APIs spell storage ownership,
+pointer lifetime, nullability, and callback/user-data scope. It is a style
+contract, not a new ownership system, and it does not change the engine/game
+boundary from [Principles](principles.md).
 
 Related: [Principles](principles.md), [Memory Policy](../runtime/memory.md),
 [Resource Registry](../assets/resource.md),
@@ -23,98 +22,145 @@ Related: [Principles](principles.md), [Memory Policy](../runtime/memory.md),
 - Do not introduce refcounting, smart-pointer layers, or heap copies in hot
   paths for style compliance.
 
-This chapter was informed by established C/C++ API conventions: GLib
+This chapter borrows intent from established C/C++ conventions such as GLib
 transfer/scope annotations, Core Foundation Create/Get rules, Python C API
-new/borrowed/stolen references, SQLite static/transient binding policy, LLVM
-StringRef/ArrayRef views, C++ Core Guidelines owner/span/not_null, and optional
-SAL/Clang analyzer annotations. Neotolis borrows the intent, not their syntax.
+reference ownership, SQLite static/transient binding policy, LLVM
+StringRef/ArrayRef views, and C++ Core Guidelines owner/span/not_null. Neotolis
+uses plain C wording, not their syntax.
 
-## Contract Checklist
+## Required Contract
 
-New public APIs, and existing APIs whose contract comments are touched, must
-make the relevant questions clear from the signature, name, or nearby comment
-when they expose a pointer, callback, handle, or pointer-carrying struct:
+Public APIs in this chapter's scope that expose a pointer, callback, handle, or
+pointer-carrying struct must make the applicable questions clear from the
+signature, name, or nearby comment:
 
-- who allocates storage
-- who may mutate it
+- which storage backs pointer data: caller, module, frame scratch, pack blob,
+  external runtime object, or caller-provided output
+- who may mutate that storage
 - who frees it, and with which function
+- for containers, arrays, or pointer-carrying structs: whether ownership is
+  outer storage only, elements/subpointers only, both, or neither; name the
+  free path for each owned layer
 - whether the callee may store the pointer
-- the exact invalidation event (`next call`, `next frame`,
-  `nt_mem_scratch_reset`, `unmount`, `destroy`, `shutdown`, etc.)
-- whether `NULL` is a valid public result or a programmer bug
-- which errors are recoverable return values and which are `NT_ASSERT`
+- the exact invalidation event: next call, named mutation, next
+  `nt_mem_scratch_reset`, unmount, destroy, shutdown, etc.
+- whether `NULL` is a valid result/input or a programmer bug
+- which failures are recoverable return values and which are `NT_ASSERT`
   contract violations
 
 Avoid vague words such as "temporary" or "owned" without the invalidation event
 or free path. A good contract says "valid until X" and "freed by Y".
 
-## Vocabulary
+If the primary invalidation event cannot be named precisely, or the invalidating
+mutation set is open-ended, prefer a handle, caller-filled output, or explicit
+copy over returning a raw pointer. Multiple explicit events are OK when written
+as "until X or Y, whichever happens first."
 
-| Word | Meaning |
+## Contract Shapes
+
+Use the smallest shape that matches the real behavior.
+
+| Shape | Contract to state |
 |---|---|
-| `init` / `shutdown` | Initializes or tears down module state or caller-provided storage. This does not imply heap ownership by itself. |
-| `create` / `destroy` | Creates a caller-owned handle/object with a documented destroy pair. Runtime hot paths should use this sparingly. |
-| `make` / `destroy` | Module-local synonym for create/destroy where already established, e.g. gfx resource creation. Do not rename to normalize. |
-| `copy` | Makes an owned deep copy. Input may die after the call returns unless the API says otherwise. |
-| `get` | Returns a current value or borrowed view. Caller must not free. Pointer lifetime must be stated. |
-| `find` | Pure lookup. It must not allocate or create a resource. Missing value is a normal result. |
-| `peek` | Borrowed pointer with a very short lifetime. Stronger warning than `get`: do not store. |
-| `take` / `consume` | Transfers ownership from caller to callee, or from callee to caller for `take_data`-style APIs. The success/failure transfer rule must be documented. |
-| `view` / `nt_*_view_t` | Non-owning pointer plus length/count, usually passed by value. No implicit NUL terminator. The backing lifetime must be stated. |
-| `pin` / `unpin` | Extends the lifetime of engine-owned backing storage without transferring free responsibility. Reserve for real pin semantics. |
+| borrowed input | Default for input pointers: valid only during the call unless the API says it copies, stores, consumes, or pins it. |
+| stored-by-reference input | What must remain pointer-stable, and until which unregister, clear, destroy, or shutdown event. |
+| copied input | Callee copies the needed data before returning; caller may release the input after return. |
+| scratch-backed output | Backed by `nt_mem_scratch`; valid until next `nt_mem_scratch_reset()`; caller must not free or store it beyond that reset or in persistent state. |
+| borrowed module view | Backed by named module/owner storage; valid until the named mutation, destroy, or shutdown event. |
+| caller-owned output | Allocated or transferred to caller; comment names the free function. |
+| caller-filled output | Caller provides storage plus capacity; callee writes count/size and documents truncation or assert behavior. |
+| callback registration | Whether `(fn, user_data)` is stored, when it stops being called, and who frees `user_data`. |
+
+## Naming Rules
+
+| Word | Rule |
+|---|---|
+| `init` / `shutdown` | Initializes or tears down module state or caller-provided storage. Does not imply heap ownership by itself. |
+| `create` / `destroy` | Creates a new logical object, handle, or registry entry; the API must state who owns it and which teardown verb applies. If it returns a caller-owned object, document the destroy/free pair. Avoid in hot paths. |
+| `make` / `destroy` | Module-local synonym where already established, e.g. gfx resource creation. Do not rename only to normalize. |
+| `find` | Pure lookup. Must not allocate or create. Missing value is a normal result. |
+| `get` | Returns a current value or borrowed view with a named owner event. Caller must not free. |
+| `peek` | Returns a mutation-sensitive borrowed pointer. Caller must not store it. |
+| `view` / `nt_*_view_t` | Non-owning pointer plus length/count, passed by value. No implicit NUL terminator. Backing lifetime must be stated. |
+| `copy` | Makes an owned deep copy. Input may die after the call returns. |
+| `take` | Transfers ownership from callee to caller, e.g. `take_data`. Caller frees through the documented function. |
+| `consume` | Transfers ownership from caller to callee. Success and failure ownership rules must be documented. |
+| `pin` / `unpin` | Extends lifetime of engine-owned backing storage without transferring free responsibility. Reserve for real pin semantics. |
 | `retain` / `release` | Reserve for real refcounted APIs only. Do not use as vague synonyms for `pin` or `destroy`. |
-| `out` / `out_*` | Caller-provided output storage. Pair pointer outputs with a count/capacity when applicable. |
+| `out` / `out_*` | Caller-provided output storage. Pair pointer outputs with count/capacity where applicable. |
 
-## Pointer Inputs
+Use `peek` instead of `get` when the returned pointer is mutation-sensitive
+slot/module auxiliary state that must not be stored, such as a pointer
+invalidated by resource resolve/cleanup. Use `get` for borrowed data with a
+named owner event, such as pack-blob views valid until the resource slot
+publishes a different winner, blob eviction, unmount, destroy, or shutdown.
+Established `get_*` pointer APIs may keep their names when renaming would only
+normalize style, but their lifetime and invalidation events must be explicit.
 
-Input pointers are borrowed for the duration of the call by default. If the
-callee stores a pointer or anything derived from it, the API must state one of:
+Use `take` and `consume` only for real ownership transfer. If no ownership
+moves, do not use either word. Never write bare "takes ownership"; say from
+whom to whom, and name the free function or destroy event.
 
-- copied now; caller may release its input after return
-- stored by reference until a named unregister, clear, destroy, or shutdown event
-- taken; caller must not free/use after the documented transfer point
-- pinned; backing storage stays engine-owned but the API extends its lifetime
+Output pointers are not optional by default for APIs in this chapter's scope.
+For `out_*` parameters, state separately whether the output parameter pointer
+itself may be `NULL` to ignore the result, and whether the value written through
+it may be `NULL`. Do not use "nullable" without naming which pointer is
+nullable. Otherwise a `NULL` output parameter pointer is an `NT_ASSERT`
+contract violation. If an older untouched API accepts `NULL` for an output
+pointer but does not say so, fix the comment when that API is next touched.
 
-Do not silently store caller pointers. Stored-by-reference is allowed when it is
-the simplest and cheapest design, but the contract must say what must remain
-pointer-stable and for how long.
+For `nt_*_view_t`, state whether `data` is guaranteed non-NULL when `count > 0`.
+A zero-length view may use `NULL` data unless the API says otherwise.
 
-## Pointer Returns
+## Frame Scratch Storage
 
-Pointer returns fall into one of these shapes:
+`nt_mem_scratch` is engine-owned transient storage. A scratch allocation is not
+an owned object; it is caller-usable storage inside the frame arena. Callers must
+not free it, store it beyond the next reset or in persistent state, or return it
+from an API without documenting that the result is scratch-backed.
 
-- borrowed view into engine/module storage; caller never frees it
-- caller-owned allocation; caller frees through the documented function
-- caller buffer filled by the callee; caller owns the storage
-- optional result; `NULL` is a documented absence/failure result
+The invalidation event is exactly `nt_mem_scratch_reset()`. Do not describe
+scratch-backed pointers as valid "until end of frame": the reset placement is
+the contract, and tests may reset explicitly between simulated frames.
 
-If a pointer return is non-NULL by contract, assert the invariant before
-returning rather than silently returning a null pointer. If absence is normal,
-use `NULL`, `false`, or `NT_ERR_*` as the public result and document it.
+Use `scratch-backed` only for `nt_mem_scratch` storage. For per-context or
+module arenas, say `context-owned buffer`, `module-owned arena`, or another
+named owner, then name that owner-specific invalidation event.
 
-## Views
+Only the code that owns the top-level frame loop, or a test explicitly
+simulating that owner, may call `nt_mem_scratch_init`,
+`nt_mem_scratch_reset`, and `nt_mem_scratch_shutdown`. Modules may allocate
+scratch storage, but must not reset the arena. Public APIs that allocate into
+scratch must say whether they copy caller input into scratch or return a view
+into scratch.
 
-Use `nt_*_view_t` for borrowed pointer-plus-count snapshots such as SoA bulk
-component views. A view is not a container owner. It should normally be passed
-by value and should not be stored unless the API states the backing storage is
-stable for that use.
+Canonical wording:
 
-When a view points into frame scratch, its lifetime is exactly until the next
-`nt_mem_scratch_reset()`, not generically "until next frame".
+```c
+/* Returns a scratch-backed view. Valid until the next
+ * nt_mem_scratch_reset(); caller must not free or store beyond that reset. */
+```
 
 ## Callbacks And User Data
 
-For callbacks, treat `(fn, user_data)` as one registration unit. The API must
-state:
+Treat `(fn, user_data)` as one registration unit. The API must state:
 
 - whether `user_data` is stored or only passed through during the call
+- invocation scope: during this call, after registration until unregister,
+  until replaced, until destroy, or until shutdown
+- cardinality: zero, one, or many callback invocations
 - how long stored `user_data` must remain valid
-- whether there is a destroy callback, and whether it runs exactly once
-- whether the callback may call back into the registering module
+- whether each stored `user_data` value has a destroy callback, and whether
+  that callback runs exactly once for that value when it is replaced,
+  unregistered, destroyed, or shut down
+- replacement behavior and failed-registration ownership
+- if there is no destroy callback, that the engine never frees `user_data`
+- whether the callback may re-enter the module that invokes it, and which
+  mutating or accessor APIs are legal from that callback context
 
 Callback scope should use operational wording: "only during this call", "until
-unregister", "until context destroy", "until shutdown", or "until the destroy
-callback fires".
+unregister", "until replaced", "until context destroy", "until shutdown", or
+"until the destroy callback fires".
 
 ## Handles
 
@@ -123,26 +169,34 @@ transfer ownership of the backing resource. An API that destroys, unregisters,
 invalidates, or releases backing state must say so explicitly.
 
 Virtual-resource APIs that publish a runtime handle do not automatically own or
-destroy the runtime object unless the function says that the handle is taken.
+destroy the runtime object unless the function says it consumes ownership of the
+runtime object represented by that handle.
 
 ## Hot Path Rule
 
-In hot paths, prefer handles, borrowed views, caller-provided output storage, or
-preallocated module storage. Allocation, deep copy, and ownership transfer
-belong in init, builder, loading/resolve, debug/devapi, or explicitly non-hot
-APIs. A style fix must not add heap work to a hot path.
+In hot paths, prefer handles, borrowed views, scratch-backed temporaries,
+caller-filled output storage, or preallocated module storage. Heap allocation,
+persistent deep copy, and ownership transfer belong in init, builder, explicit
+load/activation boundaries, debug/devapi, or APIs documented as non-hot.
+Resource resolve runs from `nt_resource_step()` and is part of the hot path. Do
+not add resolve-time heap work as a style fix. The resource registry's current
+transient resolve-pass storage is an explicitly documented module-specific
+deviation, not a pattern; when touching that behavior, prefer preallocated
+module storage instead.
 
-## Existing Canonical Examples
+## Canonical Examples
 
 - `nt_resource_find`: pure lookup naming.
-- `nt_resource_get_blob`: borrowed blob view wording.
-- `nt_resource_peek_user_data`: short-lived borrowed slot pointer naming.
+- `nt_resource_get_blob`: borrowed pack-blob view wording.
+- `nt_resource_peek_user_data`: read-only, mutation-sensitive borrowed slot pointer.
+- `nt_fs_take_data` / `nt_http_take_data`: callee-to-caller ownership transfer.
 - `nt_ui_state`: retained UI view-state wording.
-- `nt_ui_probe_collect`: caller-buffer output with cap/truncation wording.
-- `nt_ui_probe_collect_owned`: context-owned scratch wording.
+- `nt_ui_probe_collect`: caller-filled output with cap/truncation wording.
+- `nt_ui_probe_collect_owned`: context-owned probe buffer wording.
 - `nt_gfx_read_pixels`: caller-provided buffer with capacity wording.
-- Builder encode/bridge helpers: caller-owned heap output with module-free
-  wording.
+- Builder encode/bridge helpers: caller-owned heap output with documented
+  `free()` or module free-function wording.
 
-Use these as wording patterns, then keep the exact lifetime and invalidation
-event in the owning header or module chapter.
+Use these as wording targets, not as blanket proof that older header comments
+already satisfy this chapter. Before copying a pattern, verify the owning header
+states the output optionality, invalidation event, and free path required above.
