@@ -92,6 +92,27 @@ static void test_zero_pass_target_routes_to_default_framebuffer(void) {
     nt_gfx_end_frame();
 }
 
+static void test_zero_pass_target_restores_default_after_render_target(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .target = rt,
+        .clear_depth = 1.0F,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .target = NT_RENDER_TARGET_INVALID,
+        .clear_depth = 1.0F,
+    });
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 static void test_invalid_handles_return_invalid_attachments(void) {
     nt_render_target_t invalid = NT_RENDER_TARGET_INVALID;
 
@@ -133,6 +154,7 @@ int main(void) {
     RUN_TEST(test_depth_accessor_matches_depth_mode);
     RUN_TEST(test_pass_target_routes_to_backend);
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer);
+    RUN_TEST(test_zero_pass_target_restores_default_after_render_target);
     RUN_TEST(test_invalid_handles_return_invalid_attachments);
     RUN_TEST(test_header_does_not_expose_target_bind_state_api);
     return UNITY_END();
