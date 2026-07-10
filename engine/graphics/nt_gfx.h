@@ -373,6 +373,8 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
+/* Returns INVALID for invalid or stale handles. */
+nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 /* ---- Draw state ---- */
 
@@ -392,6 +394,8 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
  * across frames — caller manages enable/disable explicitly. */
 void nt_gfx_set_scissor(int x, int y, int w, int h);
 void nt_gfx_set_scissor_enabled(bool enabled);
+/* Returns caller-owned state; resets to false after context restore. */
+bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
 /* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
@@ -473,9 +477,6 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Read back the cached scissor enabled flag (last call to
- * nt_gfx_set_scissor_enabled). Default false at frame start. */
-bool nt_gfx_test_scissor_enabled(void);
 /* Read back the cached scissor rect [x, y, w, h] from the last
  * nt_gfx_set_scissor call. Out-param must be a 4-element int array. */
 void nt_gfx_test_scissor_rect(int out[4]);

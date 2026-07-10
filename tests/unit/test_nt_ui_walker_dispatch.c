@@ -173,7 +173,7 @@ static void test_dispatch_scissor_start_end(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Walker MUST disable scissor at exit. */
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 

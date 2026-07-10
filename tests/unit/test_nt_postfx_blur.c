@@ -184,6 +184,34 @@ static void test_stale_source_asserts_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
 }
 
+static void test_integer_source_asserts_without_draw(void) {
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 64,
+        .height = 32,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = "integer_source",
+    });
+
+    nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = source,
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+}
+
 static void test_blur_outside_frame_asserts_without_draw(void) {
     nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
@@ -268,6 +296,31 @@ static void test_mixed_size_targets_assert_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
 }
 
+static void test_enabled_scissor_asserts_without_draw(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+
+    nt_gfx_begin_frame();
+    nt_gfx_set_scissor(0, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_pass_target_count());
+}
+
 static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
     nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
@@ -334,10 +387,12 @@ int main(void) {
     RUN_TEST(test_feedback_aliases_assert_without_draw);
     RUN_TEST(test_depth_feedback_alias_asserts_without_draw);
     RUN_TEST(test_stale_source_asserts_without_draw);
+    RUN_TEST(test_integer_source_asserts_without_draw);
     RUN_TEST(test_blur_outside_frame_asserts_without_draw);
     RUN_TEST(test_blur_inside_active_pass_asserts_without_closing_it);
     RUN_TEST(test_incomplete_targets_assert_without_draw);
     RUN_TEST(test_mixed_size_targets_assert_without_draw);
+    RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
     RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);

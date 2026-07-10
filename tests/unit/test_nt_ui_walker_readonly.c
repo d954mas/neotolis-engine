@@ -183,13 +183,13 @@ static void test_walk_zero_viewport_disables_scissor(void) {
     /* Enable scissor before walking; walker must reset regardless of viewport. */
     nt_gfx_set_scissor(10, 10, 50, 50);
     nt_gfx_set_scissor_enabled(true);
-    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
 
     inject_frozen_cmds(0);
     nt_ui_target_t zero = {.viewport = {0, 0, 0.0F, 0.0F}};
     nt_ui_walk(s_fx.ctx, &zero);
 
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
 /* Set s_setup_bind BEFORE RUN_TEST: setUp fires first, must see the flag. */

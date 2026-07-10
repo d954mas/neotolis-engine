@@ -520,6 +520,31 @@ static void test_context_restore_retries_after_backend_recreate_failure(void) {
     nt_gfx_end_frame();
 }
 
+static void test_context_restore_waits_while_backend_remains_lost(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_frame();
+
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_backend_restore_count());
+    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
+
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_backend_restore_count());
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+    nt_gfx_end_frame();
+}
+
 static void test_context_restore_marks_failed_target_not_ready(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
@@ -586,6 +611,14 @@ static void test_texture_size_tracks_attachment_resize(void) {
     TEST_ASSERT_EQUAL_UINT16(0, height);
 }
 
+static void test_texture_format_reports_logical_format(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(nt_gfx_render_target_color(rt)));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_DEPTH24, nt_gfx_texture_format(nt_gfx_render_target_depth(rt)));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_INVALID, nt_gfx_texture_format((nt_texture_t){UINT32_MAX}));
+}
 static void test_header_does_not_expose_target_bind_state_api(void) {
     FILE *f = fopen("engine/graphics/nt_gfx.h", "rb");
     TEST_ASSERT_NOT_NULL(f);
@@ -644,10 +677,12 @@ int main(void) {
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
     RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
     RUN_TEST(test_context_restore_retries_after_backend_recreate_failure);
+    RUN_TEST(test_context_restore_waits_while_backend_remains_lost);
     RUN_TEST(test_context_restore_marks_failed_target_not_ready);
     RUN_TEST(test_resize_does_not_recover_missing_stub_backend);
     RUN_TEST(test_invalid_handles_return_invalid_attachments);
     RUN_TEST(test_texture_size_tracks_attachment_resize);
+    RUN_TEST(test_texture_format_reports_logical_format);
     RUN_TEST(test_header_does_not_expose_target_bind_state_api);
     return UNITY_END();
 }

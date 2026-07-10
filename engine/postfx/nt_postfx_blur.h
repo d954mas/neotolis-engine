@@ -23,8 +23,10 @@ nt_result_t nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
 /* Rebuilds GPU resources after context restore. */
 nt_result_t nt_postfx_blur_restore_gpu(void);
-/* Borrows ready source/temp/dest handles only for this call; dimensions must
- * match. Never creates, resizes, destroys, or stores them. */
+/* Borrows ready handles with matching dimensions. Source must be an R8/RG8/
+ * RGB8/RGBA8/RGBA16F/RGBA32F sampler2D color texture; integer and depth
+ * formats are invalid. Scissor must be disabled. The helper never changes
+ * caller state or creates, resizes, destroys, or stores the handles. */
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 
 // #region test_access

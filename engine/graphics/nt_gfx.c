@@ -96,10 +96,11 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
+    bool context_restore_retry;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
-    bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST; read in begin_frame */
+    bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -453,17 +454,25 @@ void nt_gfx_begin_frame(void) {
          * on next begin_segment via the lazy-find-or-alloc path. */
         nt_gfx_backend_drop_timer_segments();
         g_nt_gfx.context_lost = true;
+        s_gfx.context_restore_retry = false;
         NT_LOG_ERROR("WebGL context lost");
         return; /* Skip frame */
     }
 
+    if (backend_context_lost && !s_gfx.context_restore_retry) {
+        return;
+    }
+
     if (g_nt_gfx.context_lost) {
         if (!nt_gfx_backend_recreate_all_resources()) {
+            s_gfx.context_restore_retry = true;
             NT_LOG_ERROR("WebGL context restore failed");
             return;
         }
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+        s_gfx.context_restore_retry = false;
         g_nt_gfx.context_lost = false;
+        s_gfx.scissor_enabled = false;
         g_nt_gfx.context_restored = true;
         bool render_targets_restored = true;
         for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
@@ -1044,6 +1053,12 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
     return true;
 }
 
+nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return NT_TEXTURE_FORMAT_INVALID;
+    }
+    return (nt_texture_format_t)s_gfx.texture_metas[nt_pool_slot_index(tex.id)].format;
+}
 /* ---- Draw state ---- */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
@@ -1141,8 +1156,6 @@ uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt) {
     }
     return s_gfx.render_target_backends[nt_pool_slot_index(rt.id)];
 }
-
-bool nt_gfx_test_scissor_enabled(void) { return s_gfx.scissor_enabled; }
 
 void nt_gfx_test_scissor_rect(int out[4]) {
     NT_ASSERT(out != NULL);
@@ -1283,6 +1296,8 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
     s_gfx.scissor_enabled = enabled;
     nt_gfx_backend_set_scissor_enabled(enabled);
 }
+
+bool nt_gfx_scissor_enabled(void) { return s_gfx.scissor_enabled; }
 
 void nt_gfx_set_viewport(int x, int y, int w, int h) {
     NT_ASSERT(w >= 0);

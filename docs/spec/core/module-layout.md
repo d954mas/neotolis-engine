@@ -98,6 +98,11 @@ layer.
 borrows ready source, temp, and destination handles for each call; their
 dimensions must match. The helper owns its shader, pipeline, and fullscreen
 primitive, but it does not allocate, resize, destroy, or retain caller handles.
+The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
+`RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
+`dest` are distinct ready `RGBA8` targets matching the source size. Scissor
+must be disabled for the call. The helper does not change or restore caller
+state.
 Blur arguments and GPU readiness are caller preconditions and assert when
 violated; initialization and context-restore GPU allocation failures return a
 result.

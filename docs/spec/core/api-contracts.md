@@ -155,6 +155,8 @@ Both readiness queries return `false` for invalid handles, so callers can also
 use them after a failed resource-creation call.
 `nt_gfx_texture_size` writes a texture's logical dimensions to its two required
 outputs. Invalid handles write zero to both outputs and return `false`.
+`nt_gfx_texture_format` returns the retained logical format, or
+`NT_TEXTURE_FORMAT_INVALID` for an invalid handle.
 
 `nt_gfx_resize_render_target` preserves the logical render-target handle and
 owned attachment texture handles, but reimages backend storage. Pixel contents
@@ -163,6 +165,9 @@ backend storage active. WebGL context restore recreates backend objects from the
 retained descriptor, including attachment formats and independent color/depth
 default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
+While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
+without attempting recreation. Recreation starts only after the backend leaves
+the lost state; a failed recreation is retried on a later frame.
 
 Render-target descriptors explicitly separate depth storage from depth format.
 `NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth
