@@ -278,6 +278,7 @@ int main(void) {
     s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_checker_4x4,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,

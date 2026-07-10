@@ -33,7 +33,7 @@ typedef struct {
 typedef struct {
     uint16_t width;
     uint16_t height;
-    uint8_t format;    /* nt_pixel_format_t */
+    uint8_t format;    /* nt_texture_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool compressed;   /* true for Basis/GPU-compressed textures */
     bool render_target_owned;
@@ -260,7 +260,7 @@ static nt_texture_desc_t render_target_depth_texture_desc(const nt_render_target
         .width = desc->width,
         .height = desc->height,
         .data = NULL,
-        .format = NT_PIXEL_RGBA8,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
@@ -755,11 +755,17 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     }
     nt_texture_desc_t local_desc = *desc;
 
+    bool format_valid = local_desc.format > NT_TEXTURE_FORMAT_INVALID && local_desc.format <= NT_TEXTURE_FORMAT_DEPTH32F;
+    NT_ASSERT(format_valid && "make_texture: format is required");
+    if (!format_valid) {
+        return result;
+    }
+
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
     /* Integer textures: NEAREST only, no mipmaps */
-    if (local_desc.format == NT_PIXEL_RG16UI) {
+    if (local_desc.format == NT_TEXTURE_FORMAT_RG16UI) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
         NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
@@ -837,8 +843,8 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
         NT_LOG_ERROR("make_render_target: zero dimension");
         return result;
     }
-    NT_ASSERT(desc->color_format == NT_PIXEL_RGBA8 && "make_render_target: unsupported color format");
-    if (desc->color_format != NT_PIXEL_RGBA8) {
+    NT_ASSERT(desc->color_format == NT_TEXTURE_FORMAT_RGBA8 && "make_render_target: unsupported color format");
+    if (desc->color_format != NT_TEXTURE_FORMAT_RGBA8) {
         NT_LOG_ERROR("make_render_target: unsupported color format");
         return result;
     }
@@ -1514,7 +1520,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
-    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_pixel_format_t)s_gfx.texture_metas[slot].format, data);
+    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)s_gfx.texture_metas[slot].format, data);
 }
 
 /* ---- Mesh side table helpers ---- */
@@ -1559,23 +1565,23 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
 
     /* RAW compression: uncompressed pixel data after header */
     if (hdr2->compression == NT_TEXTURE_COMPRESSION_RAW) {
-        nt_pixel_format_t pixel_fmt;
+        nt_texture_format_t pixel_fmt;
         uint32_t bpp;
         switch (hdr2->format) {
         case NT_TEXTURE_FORMAT_RGBA8:
-            pixel_fmt = NT_PIXEL_RGBA8;
+            pixel_fmt = NT_TEXTURE_FORMAT_RGBA8;
             bpp = 4;
             break;
         case NT_TEXTURE_FORMAT_RGB8:
-            pixel_fmt = NT_PIXEL_RGB8;
+            pixel_fmt = NT_TEXTURE_FORMAT_RGB8;
             bpp = 3;
             break;
         case NT_TEXTURE_FORMAT_RG8:
-            pixel_fmt = NT_PIXEL_RG8;
+            pixel_fmt = NT_TEXTURE_FORMAT_RG8;
             bpp = 2;
             break;
         case NT_TEXTURE_FORMAT_R8:
-            pixel_fmt = NT_PIXEL_R8;
+            pixel_fmt = NT_TEXTURE_FORMAT_R8;
             bpp = 1;
             break;
         default:

@@ -421,8 +421,8 @@ void setUp(void) {
 
     nt_hash32_t page_pid = nt_hash32_str("sprite_renderer_pages");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(page_pid, 100));
-    nt_texture_t page0 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "page0"});
-    nt_texture_t page1 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "page1"});
+    nt_texture_t page0 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page0"});
+    nt_texture_t page1 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page1"});
     TEST_ASSERT_TRUE(page0.id != 0);
     TEST_ASSERT_TRUE(page1.id != 0);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pid, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, page0.id));

@@ -13,7 +13,7 @@ static nt_render_target_desc_t rt_desc(nt_render_target_depth_t depth) {
     return (nt_render_target_desc_t){
         .width = 64,
         .height = 32,
-        .color_format = NT_PIXEL_RGBA8,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
         .depth = depth,
         .min_filter = NT_FILTER_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,
@@ -263,7 +263,7 @@ static void test_make_render_target_rejects_null_and_zero_dimensions(void) {
 static void test_make_render_target_rejects_invalid_formats(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
 
-    desc.color_format = NT_PIXEL_R8;
+    desc.color_format = NT_TEXTURE_FORMAT_R8;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
     desc = rt_desc(NT_RT_DEPTH_NONE);
     desc.depth = (nt_render_target_depth_t)(NT_RT_DEPTH_TEXTURE + 1);

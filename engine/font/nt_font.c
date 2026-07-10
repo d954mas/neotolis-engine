@@ -1638,7 +1638,7 @@ void nt_font_step(void) {
             slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
                 .width = slot->curve_tex_width,
                 .height = slot->curve_tex_height,
-                .format = NT_PIXEL_RGBA16F,
+                .format = NT_TEXTURE_FORMAT_RGBA16F,
                 .min_filter = NT_FILTER_NEAREST,
                 .mag_filter = NT_FILTER_NEAREST,
                 .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
@@ -1648,7 +1648,7 @@ void nt_font_step(void) {
             slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
                 .width = (uint16_t)(slot->band_count * 2),
                 .height = slot->band_tex_height,
-                .format = NT_PIXEL_RG16UI,
+                .format = NT_TEXTURE_FORMAT_RG16UI,
                 .min_filter = NT_FILTER_NEAREST,
                 .mag_filter = NT_FILTER_NEAREST,
                 .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
@@ -1888,7 +1888,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = desc->curve_texture_width,
         .height = desc->curve_texture_height,
-        .format = NT_PIXEL_RGBA16F,
+        .format = NT_TEXTURE_FORMAT_RGBA16F,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
@@ -1900,7 +1900,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = (uint16_t)(band_count * 2), /* Y-bands + X-bands */
         .height = desc->band_texture_height,
-        .format = NT_PIXEL_RG16UI,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,

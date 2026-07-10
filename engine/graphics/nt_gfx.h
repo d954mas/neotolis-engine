@@ -4,6 +4,7 @@
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
+#include "nt_texture_format.h"
 
 /* ---- Index buffer type constants ---- */
 
@@ -142,16 +143,6 @@ typedef enum {
 } nt_depth_func_t;
 
 typedef enum {
-    NT_PIXEL_RGBA8 = 0,   /* 4 bpp, 8 bits per channel */
-    NT_PIXEL_RGB8 = 1,    /* 3 bpp, no alpha */
-    NT_PIXEL_RG8 = 2,     /* 2 bpp, two channels */
-    NT_PIXEL_R8 = 3,      /* 1 bpp, single channel */
-    NT_PIXEL_RGBA16F = 4, /* 8 bpp, half-float */
-    NT_PIXEL_RG16UI = 5,  /* 4 bpp, unsigned integer */
-    NT_PIXEL_RGBA32F = 6, /* 16 bpp, full float */
-} nt_pixel_format_t;
-
-typedef enum {
     NT_FILTER_NEAREST = 0,
     NT_FILTER_LINEAR,
     NT_FILTER_NEAREST_MIPMAP_NEAREST,
@@ -242,7 +233,7 @@ typedef struct {
     uint16_t width;
     uint16_t height;
     const void *data;               /* raw pixel data (width * height * bpp bytes) */
-    nt_pixel_format_t format;       /* default: NT_PIXEL_RGBA8 */
+    nt_texture_format_t format;     /* required */
     nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
     nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (only NEAREST or LINEAR valid) */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
@@ -262,7 +253,7 @@ typedef struct {
 typedef struct {
     uint16_t width;
     uint16_t height;
-    nt_pixel_format_t color_format;
+    nt_texture_format_t color_format;
     nt_render_target_depth_t depth;
     nt_texture_filter_t min_filter;
     nt_texture_filter_t mag_filter;

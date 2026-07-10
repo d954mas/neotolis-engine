@@ -32,7 +32,7 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
     return (nt_render_target_desc_t){
         .width = width,
         .height = height,
-        .color_format = NT_PIXEL_RGBA8,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
         .depth = NT_RT_DEPTH_NONE,
         .min_filter = NT_FILTER_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,

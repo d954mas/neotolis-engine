@@ -318,7 +318,7 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 #endif
 }
 
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
 #ifdef NT_TEST_ACCESS
     s_stub_update_texture_count++;
 #endif

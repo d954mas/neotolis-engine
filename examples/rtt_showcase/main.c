@@ -195,7 +195,7 @@ static bool make_quad_resources(void) {
         .width = 1,
         .height = 1,
         .data = s_white_pixel,
-        .format = NT_PIXEL_RGBA8,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
@@ -209,7 +209,7 @@ static nt_render_target_t make_target(const char *label, uint16_t width, uint16_
     return nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = width,
         .height = height,
-        .color_format = NT_PIXEL_RGBA8,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
         .depth = depth,
         .min_filter = NT_FILTER_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,

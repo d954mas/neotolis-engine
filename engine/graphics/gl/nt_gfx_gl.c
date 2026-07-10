@@ -1228,7 +1228,7 @@ void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *blo
 
 /* ---- Texture management ---- */
 
-/* Complete nt_pixel_format_t → GL mapping.
+/* Complete nt_texture_format_t → GL mapping.
    Single source of truth for internal format, upload format, upload type, and alignment. */
 typedef struct {
     GLenum internal; /* sized: GL_RGBA8, GL_RGBA16F, ... */
@@ -1237,21 +1237,21 @@ typedef struct {
     bool align4;     /* true if rows are naturally 4-byte aligned */
 } nt_gfx_gl_fmt_t;
 
-static nt_gfx_gl_fmt_t nt_gfx_gl_pixel_format(nt_pixel_format_t fmt) {
+static nt_gfx_gl_fmt_t nt_gfx_gl_pixel_format(nt_texture_format_t fmt) {
     switch (fmt) {
-    case NT_PIXEL_RGB8:
+    case NT_TEXTURE_FORMAT_RGB8:
         return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false};
-    case NT_PIXEL_RG8:
+    case NT_TEXTURE_FORMAT_RG8:
         return (nt_gfx_gl_fmt_t){GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false};
-    case NT_PIXEL_R8:
+    case NT_TEXTURE_FORMAT_R8:
         return (nt_gfx_gl_fmt_t){GL_R8, GL_RED, GL_UNSIGNED_BYTE, false};
-    case NT_PIXEL_RGBA16F:
+    case NT_TEXTURE_FORMAT_RGBA16F:
         return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true};
-    case NT_PIXEL_RG16UI:
+    case NT_TEXTURE_FORMAT_RG16UI:
         return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true};
-    case NT_PIXEL_RGBA32F:
+    case NT_TEXTURE_FORMAT_RGBA32F:
         return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true};
-    case NT_PIXEL_RGBA8:
+    case NT_TEXTURE_FORMAT_RGBA8:
     default:
         return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true};
     }
@@ -1351,7 +1351,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     return slot;
 }
 
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && "backend_update_texture: invalid handle");
     GLuint tex = s_texture_gl[backend_handle];
     NT_ASSERT(tex != 0 && "backend_update_texture: no GL texture at handle");

@@ -256,7 +256,7 @@ minimal_ui_atlas_t minimal_ui_atlas_create(void) {
     (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", suffix);
     out._page_pack_id = nt_hash32_str(page_pack);
     NT_ASSERT(nt_resource_create_pack(out._page_pack_id, 100) == NT_OK);
-    out._page_tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "ui_atlas_white_page"});
+    out._page_tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "ui_atlas_white_page"});
     NT_ASSERT(out._page_tex.id != 0);
     NT_ASSERT(nt_resource_register(out._page_pack_id, nt_hash64_str(page_name), NT_ASSET_TEXTURE, out._page_tex.id) == NT_OK);
 

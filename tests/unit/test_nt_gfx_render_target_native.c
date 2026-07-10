@@ -45,7 +45,7 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
         .height = 4,
-        .color_format = NT_PIXEL_RGBA8,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
         .depth = NT_RT_DEPTH_TEXTURE,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
