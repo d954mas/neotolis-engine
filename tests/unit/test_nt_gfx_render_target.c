@@ -251,14 +251,18 @@ static void test_update_rejects_render_target_owned_texture(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_texture_count());
 }
 
-static void test_render_target_invalid_arguments_assert(void) {
+static void test_make_render_target_rejects_null_and_zero_dimensions(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(NULL));
     desc.width = 0;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
-    desc = rt_desc(NT_RT_DEPTH_NONE);
+}
+
+// NOLINTBEGIN(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum values are the subject under test.
+static void test_make_render_target_rejects_invalid_formats(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+
     desc.color_format = NT_PIXEL_R8;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
     desc = rt_desc(NT_RT_DEPTH_NONE);
@@ -267,7 +271,11 @@ static void test_render_target_invalid_arguments_assert(void) {
     desc = rt_desc(NT_RT_DEPTH_NONE);
     desc.depth = (nt_render_target_depth_t)-1;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
-    desc = rt_desc(NT_RT_DEPTH_NONE);
+}
+
+static void test_make_render_target_rejects_invalid_sampler_modes(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+
     desc.min_filter = (nt_texture_filter_t)-1;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
     desc = rt_desc(NT_RT_DEPTH_NONE);
@@ -276,6 +284,12 @@ static void test_render_target_invalid_arguments_assert(void) {
     desc = rt_desc(NT_RT_DEPTH_NONE);
     desc.wrap_v = (nt_texture_wrap_t)-1;
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
+}
+// NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
+
+static void test_invalid_render_target_lifecycle_arguments_assert(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(NT_RENDER_TARGET_INVALID, 64, 32));
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(NT_RENDER_TARGET_INVALID));
@@ -502,7 +516,10 @@ int main(void) {
     RUN_TEST(test_resize_rejects_zero_dimensions_without_recreating_storage);
     RUN_TEST(test_make_rejects_mipmap_filters_for_attachments);
     RUN_TEST(test_update_rejects_render_target_owned_texture);
-    RUN_TEST(test_render_target_invalid_arguments_assert);
+    RUN_TEST(test_make_render_target_rejects_null_and_zero_dimensions);
+    RUN_TEST(test_make_render_target_rejects_invalid_formats);
+    RUN_TEST(test_make_render_target_rejects_invalid_sampler_modes);
+    RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_incomplete_target);
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);

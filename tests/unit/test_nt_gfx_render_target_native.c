@@ -2,6 +2,7 @@
 #include "unity.h"
 #include "window/nt_window.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define GLFW_INCLUDE_NONE
@@ -9,10 +10,11 @@
 
 static void assert_rgba(const uint8_t *pixels, uint32_t pixel_count, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     for (uint32_t i = 0; i < pixel_count; i++) {
-        TEST_ASSERT_UINT8_WITHIN(1, r, pixels[i * 4U]);
-        TEST_ASSERT_UINT8_WITHIN(1, g, pixels[i * 4U + 1U]);
-        TEST_ASSERT_UINT8_WITHIN(1, b, pixels[i * 4U + 2U]);
-        TEST_ASSERT_UINT8_WITHIN(1, a, pixels[i * 4U + 3U]);
+        const uint8_t *pixel = &pixels[(size_t)i * 4U];
+        TEST_ASSERT_UINT8_WITHIN(1, r, pixel[0]);
+        TEST_ASSERT_UINT8_WITHIN(1, g, pixel[1]);
+        TEST_ASSERT_UINT8_WITHIN(1, b, pixel[2]);
+        TEST_ASSERT_UINT8_WITHIN(1, a, pixel[3]);
     }
 }
 
