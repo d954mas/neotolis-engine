@@ -278,7 +278,7 @@ if(NOT EMSCRIPTEN)
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
     add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c)
-    target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity)
+    target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity glad)
     nt_setup_test_target(test_nt_gfx_render_target_native)
     set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
 

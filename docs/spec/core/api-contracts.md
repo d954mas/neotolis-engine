@@ -126,6 +126,15 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+### Texture descriptors
+
+`nt_texture_desc_t.format` is required and names the real storage format.
+`RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
+and `DEPTH32F` additionally require `data == NULL` and no mipmaps until comparison
+sampling exists. A separately bound sampler must obey the same format
+restrictions; it cannot replace the explicit texture state with an incompatible
+filter.
+
 ### Render-target handles
 
 `nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
@@ -151,14 +160,25 @@ outputs. Invalid handles write zero to both outputs and return `false`.
 owned attachment texture handles, but reimages backend storage. Pixel contents
 are undefined after a successful resize; failed resize leaves the previous
 backend storage active. WebGL context restore recreates backend objects from the
-retained descriptor; it does not preserve pixels. Consumers must redraw
+retained descriptor, including attachment formats and independent color/depth
+default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
 
-Invalid render-target descriptors, exhausted configured target capacity, stale
-handles, direct mutation of owned attachments, and render-target lifecycle
-calls inside an active pass are developer errors and assert. Backend allocation,
-framebuffer completeness, resize, and context-restore failures remain runtime
-failures reported through invalid handles, `false`, or readiness queries.
+Render-target descriptors explicitly separate depth storage from depth format.
+`NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth
+attachment, and `TEXTURE` has a sampleable `nt_texture_t`. Returned attachment
+texture metadata uses the real storage format; color formats are never used as
+placeholders for depth. The backend receives the complete descriptor and does not
+choose attachment formats or sampler defaults.
+
+Invalid render-target descriptors include mismatched color/depth format classes,
+a missing or extraneous depth format for the selected storage, invalid sampler
+values, and non-`NEAREST` depth filtering without comparison mode. These cases,
+exhausted configured target capacity, stale handles, direct mutation of owned
+attachments, and render-target lifecycle calls inside an active pass are
+developer errors and assert. Backend allocation, framebuffer completeness,
+resize, and context-restore failures remain runtime failures reported through
+invalid handles, `false`, or readiness queries.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
 Callers check readiness before beginning work that depends on restored GPU

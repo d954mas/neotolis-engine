@@ -33,11 +33,12 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
         .width = width,
         .height = height,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth = NT_RT_DEPTH_NONE,
-        .min_filter = NT_FILTER_LINEAR,
-        .mag_filter = NT_FILTER_LINEAR,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .color_min_filter = NT_FILTER_LINEAR,
+        .color_mag_filter = NT_FILTER_LINEAR,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_NONE,
+        .depth_format = NT_TEXTURE_FORMAT_INVALID,
         .label = label,
     };
 }
@@ -140,7 +141,12 @@ static void test_feedback_aliases_assert_without_draw(void) {
 static void test_depth_feedback_alias_asserts_without_draw(void) {
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
     nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    temp_desc.depth = NT_RT_DEPTH_TEXTURE;
+    temp_desc.depth_storage = NT_RT_DEPTH_TEXTURE;
+    temp_desc.depth_format = NT_TEXTURE_FORMAT_DEPTH24;
+    temp_desc.depth_texture_min_filter = NT_FILTER_NEAREST;
+    temp_desc.depth_texture_mag_filter = NT_FILTER_NEAREST;
+    temp_desc.depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE;
+    temp_desc.depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE;
     nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
 

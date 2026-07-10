@@ -96,7 +96,8 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
-    uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
+    uint32_t bound_pipeline; /* currently bound pipeline backend handle */
+    uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
     bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST; read in begin_frame */
 
@@ -246,10 +247,10 @@ static nt_texture_desc_t render_target_color_texture_desc(const nt_render_target
         .height = desc->height,
         .data = NULL,
         .format = desc->color_format,
-        .min_filter = desc->min_filter,
-        .mag_filter = desc->mag_filter,
-        .wrap_u = desc->wrap_u,
-        .wrap_v = desc->wrap_v,
+        .min_filter = desc->color_min_filter,
+        .mag_filter = desc->color_mag_filter,
+        .wrap_u = desc->color_wrap_u,
+        .wrap_v = desc->color_wrap_v,
         .gen_mipmaps = false,
         .label = desc->label,
     };
@@ -260,11 +261,11 @@ static nt_texture_desc_t render_target_depth_texture_desc(const nt_render_target
         .width = desc->width,
         .height = desc->height,
         .data = NULL,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .format = desc->depth_format,
+        .min_filter = desc->depth_texture_min_filter,
+        .mag_filter = desc->depth_texture_mag_filter,
+        .wrap_u = desc->depth_texture_wrap_u,
+        .wrap_v = desc->depth_texture_wrap_v,
         .gen_mipmaps = false,
         .label = desc->label,
     };
@@ -278,12 +279,26 @@ static nt_texture_t render_target_make_attachment(const nt_texture_desc_t *desc)
     return tex;
 }
 
-static bool render_target_filters_valid(const nt_render_target_desc_t *desc) {
-    return desc->min_filter >= NT_FILTER_NEAREST && desc->min_filter <= NT_FILTER_LINEAR && desc->mag_filter >= NT_FILTER_NEAREST && desc->mag_filter <= NT_FILTER_LINEAR;
+static bool render_target_color_sampler_valid(const nt_render_target_desc_t *desc) {
+    return desc->color_min_filter >= NT_FILTER_NEAREST && desc->color_min_filter <= NT_FILTER_LINEAR && desc->color_mag_filter >= NT_FILTER_NEAREST && desc->color_mag_filter <= NT_FILTER_LINEAR &&
+           desc->color_wrap_u >= NT_WRAP_CLAMP_TO_EDGE && desc->color_wrap_u <= NT_WRAP_MIRRORED_REPEAT && desc->color_wrap_v >= NT_WRAP_CLAMP_TO_EDGE && desc->color_wrap_v <= NT_WRAP_MIRRORED_REPEAT;
 }
 
-static bool render_target_wraps_valid(const nt_render_target_desc_t *desc) {
-    return desc->wrap_u >= NT_WRAP_CLAMP_TO_EDGE && desc->wrap_u <= NT_WRAP_MIRRORED_REPEAT && desc->wrap_v >= NT_WRAP_CLAMP_TO_EDGE && desc->wrap_v <= NT_WRAP_MIRRORED_REPEAT;
+static bool render_target_depth_sampler_valid(const nt_render_target_desc_t *desc) {
+    if (desc->depth_storage != NT_RT_DEPTH_TEXTURE) {
+        return true;
+    }
+    return desc->depth_texture_min_filter == NT_FILTER_NEAREST && desc->depth_texture_mag_filter == NT_FILTER_NEAREST && desc->depth_texture_wrap_u >= NT_WRAP_CLAMP_TO_EDGE &&
+           desc->depth_texture_wrap_u <= NT_WRAP_MIRRORED_REPEAT && desc->depth_texture_wrap_v >= NT_WRAP_CLAMP_TO_EDGE && desc->depth_texture_wrap_v <= NT_WRAP_MIRRORED_REPEAT;
+}
+
+static bool texture_format_is_depth(nt_texture_format_t format) { return format >= NT_TEXTURE_FORMAT_DEPTH16 && format <= NT_TEXTURE_FORMAT_DEPTH32F; }
+
+static bool render_target_depth_format_valid(const nt_render_target_desc_t *desc) {
+    if (desc->depth_storage == NT_RT_DEPTH_NONE) {
+        return desc->depth_format == NT_TEXTURE_FORMAT_INVALID;
+    }
+    return texture_format_is_depth(desc->depth_format);
 }
 
 static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owned) {
@@ -322,23 +337,6 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
     s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
 }
 
-static nt_texture_t render_target_make_depth_attachment(const nt_texture_desc_t *desc) {
-    nt_texture_t result = {0};
-    uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("texture pool full");
-        return result;
-    }
-    uint32_t backend = nt_gfx_backend_create_depth_texture(desc->width, desc->height);
-    if (backend == 0) {
-        nt_pool_free(&s_gfx.texture_pool, id);
-        return result;
-    }
-    result.id = id;
-    render_target_commit_attachment_backend(result, backend, desc);
-    return result;
-}
-
 static uint32_t render_target_create_attachment_backend(nt_texture_t tex, const nt_texture_desc_t *desc) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return 0;
@@ -361,21 +359,6 @@ static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture
     return true;
 }
 
-static bool render_target_recreate_depth_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
-    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        return false;
-    }
-    uint32_t replacement = nt_gfx_backend_create_depth_texture(desc->width, desc->height);
-    if (replacement == 0) {
-        return false;
-    }
-    uint32_t slot = nt_pool_slot_index(tex.id);
-    uint32_t old_backend = s_gfx.texture_backends[slot];
-    render_target_commit_attachment_backend(tex, replacement, desc);
-    nt_gfx_backend_destroy_texture(old_backend);
-    return true;
-}
-
 static bool render_target_recreate_backend(uint32_t slot) {
     nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
     nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
@@ -384,9 +367,9 @@ static bool render_target_recreate_backend(uint32_t slot) {
         return false;
     }
     uint32_t depth_backend = 0;
-    if (meta->desc.depth == NT_RT_DEPTH_TEXTURE) {
+    if (meta->desc.depth_storage == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
-        if (!render_target_recreate_depth_attachment(meta->depth, &depth_desc)) {
+        if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
             meta->complete = false;
             return false;
         }
@@ -408,7 +391,7 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
     uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
     uint32_t depth_backend = 0;
     nt_texture_desc_t depth_desc = {0};
-    if (next_desc.depth == NT_RT_DEPTH_TEXTURE) {
+    if (next_desc.depth_storage == NT_RT_DEPTH_TEXTURE) {
         depth_desc = render_target_depth_texture_desc(&next_desc);
         depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
     }
@@ -419,7 +402,7 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 
     render_target_commit_attachment_backend(meta->color, color_backend, &color_desc);
 
-    if (next_desc.depth == NT_RT_DEPTH_TEXTURE) {
+    if (next_desc.depth_storage == NT_RT_DEPTH_TEXTURE) {
         render_target_commit_attachment_backend(meta->depth, depth_backend, &depth_desc);
     }
 
@@ -455,6 +438,7 @@ void nt_gfx_begin_frame(void) {
          * call deactivate_mesh() which returns slots to mesh pool.
          * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
         s_gfx.bound_pipeline = 0;
+        memset(s_gfx.bound_texture_ids, 0, sizeof(s_gfx.bound_texture_ids));
         /* Sampler cache: zero only the GL backend ids — keys, descs
          * and sampler_count stay so material-stored sampler.id values
          * remain valid slot references. Backend is lazy-recreated on
@@ -770,6 +754,12 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
         NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
     }
+    if (texture_format_is_depth(local_desc.format)) {
+        NT_ASSERT(local_desc.data == NULL && "depth texture upload is not supported");
+        NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST min_filter without compare mode");
+        NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
+        NT_ASSERT(!local_desc.gen_mipmaps && "depth texture mipmaps are not supported");
+    }
 
     /* Mipmap min_filter requires gen_mipmaps */
     NT_ASSERT((local_desc.gen_mipmaps || local_desc.min_filter <= NT_FILTER_LINEAR) && "make_texture: mipmap filter requires gen_mipmaps");
@@ -848,20 +838,25 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
         NT_LOG_ERROR("make_render_target: unsupported color format");
         return result;
     }
-    bool depth_valid = desc->depth >= NT_RT_DEPTH_NONE && desc->depth <= NT_RT_DEPTH_TEXTURE;
+    bool depth_valid = desc->depth_storage >= NT_RT_DEPTH_NONE && desc->depth_storage <= NT_RT_DEPTH_TEXTURE;
     NT_ASSERT(depth_valid && "make_render_target: invalid depth mode");
     if (!depth_valid) {
         NT_LOG_ERROR("make_render_target: invalid depth mode");
         return result;
     }
-    NT_ASSERT(render_target_filters_valid(desc) && "make_render_target: render target attachments require NEAREST or LINEAR filters");
-    if (!render_target_filters_valid(desc)) {
-        NT_LOG_ERROR("make_render_target: render target attachments do not support mipmap or invalid filters");
+    NT_ASSERT(render_target_depth_format_valid(desc) && "make_render_target: depth format does not match depth storage");
+    if (!render_target_depth_format_valid(desc)) {
+        NT_LOG_ERROR("make_render_target: depth format does not match depth storage");
         return result;
     }
-    NT_ASSERT(render_target_wraps_valid(desc) && "make_render_target: invalid attachment wrap mode");
-    if (!render_target_wraps_valid(desc)) {
-        NT_LOG_ERROR("make_render_target: invalid attachment wrap mode");
+    NT_ASSERT(render_target_color_sampler_valid(desc) && "make_render_target: invalid color sampler");
+    if (!render_target_color_sampler_valid(desc)) {
+        NT_LOG_ERROR("make_render_target: invalid color sampler");
+        return result;
+    }
+    NT_ASSERT(render_target_depth_sampler_valid(desc) && "make_render_target: invalid depth texture sampler");
+    if (!render_target_depth_sampler_valid(desc)) {
+        NT_LOG_ERROR("make_render_target: invalid depth texture sampler");
         return result;
     }
 
@@ -881,9 +876,9 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     }
 
     nt_texture_t depth = {0};
-    if (desc->depth == NT_RT_DEPTH_TEXTURE) {
+    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(desc);
-        depth = render_target_make_depth_attachment(&depth_desc);
+        depth = render_target_make_attachment(&depth_desc);
         if (depth.id == 0) {
             destroy_texture_slot(color, true);
             nt_pool_free(&s_gfx.render_target_pool, id);
@@ -1013,7 +1008,7 @@ nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt) {
         return (nt_texture_t){0};
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
-    if (s_gfx.render_target_metas[slot].desc.depth != NT_RT_DEPTH_TEXTURE) {
+    if (s_gfx.render_target_metas[slot].desc.depth_storage != NT_RT_DEPTH_TEXTURE) {
         return (nt_texture_t){0};
     }
     return s_gfx.render_target_metas[slot].depth;
@@ -1114,6 +1109,7 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
+    s_gfx.bound_texture_ids[slot] = tex.id;
     nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
 }
 
@@ -1194,6 +1190,17 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     return (nt_sampler_t){.id = slot + 1};
 }
 
+static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_desc_t *desc) {
+    uint32_t texture_id = s_gfx.bound_texture_ids[slot];
+    if (!nt_pool_valid(&s_gfx.texture_pool, texture_id)) {
+        return true;
+    }
+    uint32_t texture_slot = nt_pool_slot_index(texture_id);
+    uint8_t format = s_gfx.texture_metas[texture_slot].format;
+    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    return !nearest_only || (desc->min_filter == NT_FILTER_NEAREST && desc->mag_filter == NT_FILTER_NEAREST);
+}
+
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return;
@@ -1209,6 +1216,11 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
     }
     NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
     nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[s.id - 1];
+    bool sampler_compatible = bound_texture_sampler_compatible(slot, &e->desc);
+    NT_ASSERT(sampler_compatible && "bind_sampler: texture format requires NEAREST filtering");
+    if (!sampler_compatible) {
+        return;
+    }
     if (e->backend == 0) {
         /* Lazy recreate after context-loss recovery — desc was preserved. */
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
@@ -1509,6 +1521,12 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
         return;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
+    uint8_t stored_format = s_gfx.texture_metas[slot].format;
+    bool format_valid = stored_format > (uint8_t)NT_TEXTURE_FORMAT_INVALID && stored_format <= (uint8_t)NT_TEXTURE_FORMAT_DEPTH32F;
+    NT_ASSERT(format_valid && "update_texture: invalid stored format");
+    if (!format_valid) {
+        return;
+    }
     NT_ASSERT(!s_gfx.texture_metas[slot].render_target_owned && "update_texture: texture is owned by a render target");
     if (s_gfx.texture_metas[slot].render_target_owned) {
         NT_LOG_ERROR("update_texture: texture is owned by a render target");
@@ -1518,9 +1536,14 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     NT_ASSERT(!s_gfx.texture_metas[slot].compressed && "update_texture: compressed textures cannot be sub-updated");
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
+    bool is_depth = stored_format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    NT_ASSERT(!is_depth && "update_texture: depth texture updates are not supported");
+    if (is_depth) {
+        return;
+    }
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
-    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)s_gfx.texture_metas[slot].format, data);
+    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)stored_format, data);
 }
 
 /* ---- Mesh side table helpers ---- */

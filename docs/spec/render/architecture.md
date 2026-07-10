@@ -61,9 +61,25 @@ Render-target color and sampleable depth attachments are exposed as normal
 `nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
 private to the concrete graphics implementation.
 
-Phase 74 supplies the low-level target and depth-texture primitive only. It does
-not define light cameras, PCF, cascades, shadow atlases, material shadow
-integration, or a shadow-map system.
+`nt_render_target_desc_t` explicitly selects the color format and default sampler
+state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
+current render-target color format is `RGBA8`. `NONE`
+requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
+renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
+texture in the requested depth format with its own filter and wrap state. The
+descriptor is retained as the single source for creation, resize, and context
+restore. A backend must not substitute its own attachment format or default
+sampler state.
+
+The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. The current
+sampler contract has no depth-comparison mode, so WebGL 2 texture completeness
+requires `NEAREST` minification and magnification for depth textures. Wrap state
+remains explicit and may use clamp, repeat, or mirrored repeat. Binding a
+separate sampler does not relax the depth filtering restriction.
+
+This capability supplies low-level targets and depth textures only. It does not
+define light cameras, PCF, cascades, shadow atlases, material shadow integration,
+or a shadow-map system.
 
 ## Renderer complexity classes
 

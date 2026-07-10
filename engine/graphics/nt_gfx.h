@@ -232,13 +232,13 @@ typedef struct {
 typedef struct {
     uint16_t width;
     uint16_t height;
-    const void *data;               /* raw pixel data (width * height * bpp bytes) */
+    const void *data;               /* raw pixel data; DEPTH* requires NULL */
     nt_texture_format_t format;     /* required */
-    nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
-    nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (only NEAREST or LINEAR valid) */
+    nt_texture_filter_t min_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
+    nt_texture_filter_t mag_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
-    bool gen_mipmaps;               /* call glGenerateMipmap after upload */
+    bool gen_mipmaps;               /* DEPTH* requires false */
     const char *label;
 } nt_texture_desc_t;
 
@@ -254,12 +254,17 @@ typedef struct {
     uint16_t width;
     uint16_t height;
     nt_texture_format_t color_format;
-    nt_render_target_depth_t depth;
-    nt_texture_filter_t min_filter;
-    nt_texture_filter_t mag_filter;
-    nt_texture_wrap_t wrap_u;
-    nt_texture_wrap_t wrap_v;
-    const char *label; /* debug name; static storage */
+    nt_texture_filter_t color_min_filter;
+    nt_texture_filter_t color_mag_filter;
+    nt_texture_wrap_t color_wrap_u;
+    nt_texture_wrap_t color_wrap_v;
+    nt_render_target_depth_t depth_storage;
+    nt_texture_format_t depth_format;             /* INVALID for NONE; DEPTH* otherwise */
+    nt_texture_filter_t depth_texture_min_filter; /* TEXTURE only; NEAREST without compare mode */
+    nt_texture_filter_t depth_texture_mag_filter; /* TEXTURE only; NEAREST without compare mode */
+    nt_texture_wrap_t depth_texture_wrap_u;       /* TEXTURE only */
+    nt_texture_wrap_t depth_texture_wrap_v;       /* TEXTURE only */
+    const char *label;                            /* debug name; static storage */
 } nt_render_target_desc_t;
 
 typedef struct {
@@ -374,7 +379,7 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
- * to the texture's own filter/wrap state (set via glTexParameteri). */
+ * to texture state. RG16UI/DEPTH* require NEAREST min/mag. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----
@@ -446,7 +451,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
-/* ---- Texture update (non-mipmapped textures only, level 0) ---- */
+/* ---- Texture update (non-mipmapped, non-depth textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 

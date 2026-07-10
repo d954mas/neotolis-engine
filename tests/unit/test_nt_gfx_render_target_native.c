@@ -7,6 +7,7 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <glad/gl.h>
 
 static void assert_rgba(const uint8_t *pixels, uint32_t pixel_count, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     for (uint32_t i = 0; i < pixel_count; i++) {
@@ -46,11 +47,16 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth = NT_RT_DEPTH_TEXTURE,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_TEXTURE,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+        .depth_texture_min_filter = NT_FILTER_NEAREST,
+        .depth_texture_mag_filter = NT_FILTER_NEAREST,
+        .depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "native_rt_smoke",
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -86,8 +92,78 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     nt_gfx_destroy_render_target(target);
 }
 
+static void test_depth_texture_uses_explicit_format_and_wrap(void) {
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_TEXTURE,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH16,
+        .depth_texture_min_filter = NT_FILTER_NEAREST,
+        .depth_texture_mag_filter = NT_FILTER_NEAREST,
+        .depth_texture_wrap_u = NT_WRAP_REPEAT,
+        .depth_texture_wrap_v = NT_WRAP_MIRRORED_REPEAT,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
+
+    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), 0);
+    GLint value = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
+    TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &value);
+    TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &value);
+    TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &value);
+    TEST_ASSERT_EQUAL_INT(GL_REPEAT, value);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &value);
+    TEST_ASSERT_EQUAL_INT(GL_MIRRORED_REPEAT, value);
+
+    nt_gfx_destroy_render_target(target);
+}
+
+static void test_depth_buffer_uses_explicit_format(void) {
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_BUFFER,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH32F,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
+    GLint object_type = 0;
+    GLint renderbuffer = 0;
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &renderbuffer);
+    TEST_ASSERT_EQUAL_INT(GL_RENDERBUFFER, object_type);
+    TEST_ASSERT_NOT_EQUAL_INT(0, renderbuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)renderbuffer);
+    GLint format = 0;
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &format);
+    TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT32F, format);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_render_target(target);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
+    RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
+    RUN_TEST(test_depth_buffer_uses_explicit_format);
     return UNITY_END();
 }

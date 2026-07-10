@@ -19,6 +19,7 @@ static uint32_t s_stub_gpu_caps_probe_count;
 static uint16_t s_stub_last_render_target_width;
 static uint16_t s_stub_last_render_target_height;
 static nt_render_target_depth_t s_stub_last_render_target_depth;
+static nt_texture_desc_t s_stub_last_texture_desc;
 static uint32_t s_stub_last_depth_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
@@ -46,6 +47,7 @@ uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void) { return s_stub_gpu_caps_pr
 uint16_t nt_gfx_stub_test_last_render_target_width(void) { return s_stub_last_render_target_width; }
 uint16_t nt_gfx_stub_test_last_render_target_height(void) { return s_stub_last_render_target_height; }
 nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void) { return s_stub_last_render_target_depth; }
+nt_texture_desc_t nt_gfx_stub_test_last_texture_desc(void) { return s_stub_last_texture_desc; }
 uint32_t nt_gfx_stub_test_last_depth_texture_backend(void) { return s_stub_last_depth_texture_backend; }
 void nt_gfx_stub_test_fail_next_render_target_create(void) { s_stub_fail_next_render_target_create = true; }
 void nt_gfx_stub_test_fail_next_render_target_resize(void) { s_stub_fail_next_render_target_resize = true; }
@@ -69,6 +71,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_last_render_target_width = 0;
     s_stub_last_render_target_height = 0;
     s_stub_last_render_target_depth = NT_RT_DEPTH_NONE;
+    s_stub_last_texture_desc = (nt_texture_desc_t){0};
     s_stub_last_depth_texture_backend = 0;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
@@ -171,26 +174,15 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_handle; }
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
-    (void)desc;
 #ifdef NT_TEST_ACCESS
+    s_stub_last_texture_desc = *desc;
     s_stub_texture_create_count++;
     if (s_stub_fail_next_texture_create) {
         s_stub_fail_next_texture_create = false;
         return 0;
     }
 #endif
-    return 1;
-}
-
-uint32_t nt_gfx_backend_create_depth_texture(uint16_t width, uint16_t height) {
-    (void)width;
-    (void)height;
-#ifdef NT_TEST_ACCESS
-    if (s_stub_fail_next_texture_create) {
-        s_stub_fail_next_texture_create = false;
-        return 0;
-    }
-#endif
+    (void)desc;
     return 1;
 }
 
@@ -221,7 +213,7 @@ uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc
     (void)depth_texture_backend;
 #ifdef NT_TEST_ACCESS
     s_stub_render_target_create_count++;
-    s_stub_last_render_target_depth = desc ? desc->depth : NT_RT_DEPTH_NONE;
+    s_stub_last_render_target_depth = desc ? desc->depth_storage : NT_RT_DEPTH_NONE;
     s_stub_last_render_target_width = desc ? desc->width : 0;
     s_stub_last_render_target_height = desc ? desc->height : 0;
     s_stub_last_depth_texture_backend = depth_texture_backend;
@@ -244,7 +236,7 @@ bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_rende
     }
 #ifdef NT_TEST_ACCESS
     s_stub_render_target_resize_count++;
-    s_stub_last_render_target_depth = desc ? desc->depth : NT_RT_DEPTH_NONE;
+    s_stub_last_render_target_depth = desc ? desc->depth_storage : NT_RT_DEPTH_NONE;
     s_stub_last_render_target_width = desc ? desc->width : 0;
     s_stub_last_render_target_height = desc ? desc->height : 0;
     s_stub_last_depth_texture_backend = depth_texture_backend;

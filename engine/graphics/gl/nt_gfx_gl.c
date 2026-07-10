@@ -1237,7 +1237,7 @@ typedef struct {
     bool align4;     /* true if rows are naturally 4-byte aligned */
 } nt_gfx_gl_fmt_t;
 
-static nt_gfx_gl_fmt_t nt_gfx_gl_pixel_format(nt_texture_format_t fmt) {
+static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGB8:
         return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false};
@@ -1251,9 +1251,18 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_pixel_format(nt_texture_format_t fmt) {
         return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true};
     case NT_TEXTURE_FORMAT_RGBA32F:
         return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true};
+    case NT_TEXTURE_FORMAT_DEPTH16:
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, true};
+    case NT_TEXTURE_FORMAT_DEPTH24:
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, true};
+    case NT_TEXTURE_FORMAT_DEPTH32F:
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true};
     case NT_TEXTURE_FORMAT_RGBA8:
-    default:
         return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true};
+    case NT_TEXTURE_FORMAT_INVALID:
+    default:
+        NT_ASSERT(0 && "unsupported texture format");
+        return (nt_gfx_gl_fmt_t){0};
     }
 }
 
@@ -1300,8 +1309,11 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
 
-    /* Map pixel format to GL constants */
-    nt_gfx_gl_fmt_t gl = nt_gfx_gl_pixel_format(desc->format);
+    nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(desc->format);
+    if (gl.internal == 0) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
 
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -1358,7 +1370,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 
     glBindTexture(GL_TEXTURE_2D, tex);
 
-    nt_gfx_gl_fmt_t gl = nt_gfx_gl_pixel_format(format);
+    nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(format);
 
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -1509,47 +1521,6 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     s_texture_gl[backend_handle] = 0;
 }
 
-static GLuint nt_gfx_gl_create_depth_texture_name(uint16_t width, uint16_t height) {
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    if (tex == 0 || !nt_gfx_gl_begin_texture_upload(tex)) {
-        if (tex != 0) {
-            glDeleteTextures(1, &tex);
-        }
-        return 0;
-    }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, (GLsizei)width, (GLsizei)height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
-    if (glGetError() != GL_NO_ERROR) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-    return tex;
-}
-
-uint32_t nt_gfx_backend_create_depth_texture(uint16_t width, uint16_t height) {
-    GLuint tex = nt_gfx_gl_create_depth_texture_name(width, height);
-    if (tex == 0) {
-        return 0;
-    }
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
-        if (s_texture_gl[i] == 0) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == 0) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-    s_texture_gl[slot] = tex;
-    return slot;
-}
-
 static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, GLuint color, GLuint depth, nt_gfx_gl_render_target_t *out_rt) {
     NT_ASSERT(desc != NULL && color != 0 && out_rt != NULL);
     if (desc == NULL || color == 0 || out_rt == NULL) {
@@ -1567,7 +1538,7 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
     s_bound_framebuffer = fbo;
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
 
-    if (desc->depth == NT_RT_DEPTH_BUFFER) {
+    if (desc->depth_storage == NT_RT_DEPTH_BUFFER) {
         glGenRenderbuffers(1, &depth_rbo);
         if (depth_rbo == 0) {
             glDeleteFramebuffers(1, &fbo);
@@ -1576,10 +1547,11 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
             return false;
         }
         glBindRenderbuffer(GL_RENDERBUFFER, depth_rbo);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, (GLsizei)desc->width, (GLsizei)desc->height);
+        nt_gfx_gl_fmt_t depth_fmt = nt_gfx_gl_texture_format(desc->depth_format);
+        glRenderbufferStorage(GL_RENDERBUFFER, depth_fmt.internal, (GLsizei)desc->width, (GLsizei)desc->height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth_rbo);
         glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    } else if (desc->depth == NT_RT_DEPTH_TEXTURE) {
+    } else if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         if (depth == 0) {
             glDeleteFramebuffers(1, &fbo);
             glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
@@ -1624,7 +1596,7 @@ static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_rende
     if (color == 0) {
         return false;
     }
-    if (desc->depth == NT_RT_DEPTH_TEXTURE) {
+    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         bool valid_depth = depth_texture_backend != 0 && depth_texture_backend <= s_init_desc.max_textures;
         NT_ASSERT(valid_depth && "render target: invalid depth texture backend");
         if (!valid_depth || s_texture_gl[depth_texture_backend] == 0) {
@@ -1707,17 +1679,26 @@ static bool nt_gfx_gl_stage_render_target_resize(const nt_render_target_desc_t *
         .width = desc->width,
         .height = desc->height,
         .format = desc->color_format,
-        .min_filter = desc->min_filter,
-        .mag_filter = desc->mag_filter,
-        .wrap_u = desc->wrap_u,
-        .wrap_v = desc->wrap_v,
+        .min_filter = desc->color_min_filter,
+        .mag_filter = desc->color_mag_filter,
+        .wrap_u = desc->color_wrap_u,
+        .wrap_v = desc->color_wrap_v,
     };
     out->color = nt_gfx_gl_create_texture_name(&color_desc);
     if (out->color == 0) {
         return false;
     }
-    if (desc->depth == NT_RT_DEPTH_TEXTURE) {
-        out->depth = nt_gfx_gl_create_depth_texture_name(desc->width, desc->height);
+    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
+        nt_texture_desc_t depth_desc = {
+            .width = desc->width,
+            .height = desc->height,
+            .format = desc->depth_format,
+            .min_filter = desc->depth_texture_min_filter,
+            .mag_filter = desc->depth_texture_mag_filter,
+            .wrap_u = desc->depth_texture_wrap_u,
+            .wrap_v = desc->depth_texture_wrap_v,
+        };
+        out->depth = nt_gfx_gl_create_texture_name(&depth_desc);
         if (out->depth == 0) {
             nt_gfx_gl_discard_resize_staging(out);
             return false;
@@ -1737,7 +1718,7 @@ static void nt_gfx_gl_commit_render_target_resize(uint32_t backend_handle, uint3
     nt_gfx_gl_forget_texture(old_color);
     glDeleteTextures(1, &old_color);
 
-    if (desc->depth == NT_RT_DEPTH_TEXTURE) {
+    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         GLuint old_depth = s_texture_gl[depth_backend];
         s_texture_gl[depth_backend] = staging->depth;
         nt_gfx_gl_forget_texture(old_depth);
@@ -1761,7 +1742,7 @@ static bool nt_gfx_gl_render_target_resize_args_valid(uint32_t backend_handle, c
 }
 
 static bool nt_gfx_gl_render_target_resize_depth_valid(const nt_render_target_desc_t *desc, uint32_t depth_backend) {
-    return desc->depth != NT_RT_DEPTH_TEXTURE || (depth_backend != 0 && depth_backend <= s_init_desc.max_textures && s_texture_gl[depth_backend] != 0);
+    return desc->depth_storage != NT_RT_DEPTH_TEXTURE || (depth_backend != 0 && depth_backend <= s_init_desc.max_textures && s_texture_gl[depth_backend] != 0);
 }
 
 bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {

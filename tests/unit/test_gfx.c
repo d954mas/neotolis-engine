@@ -801,6 +801,44 @@ void test_gfx_make_texture_rg16ui_rejects_mipmaps(void) {
     }));
 }
 
+void test_gfx_make_depth_texture_uses_explicit_format(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH16,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_MIRRORED_REPEAT,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
+}
+
+void test_gfx_make_depth_texture_rejects_linear_without_compare_mode(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_NEAREST,
+    }));
+}
+
+void test_gfx_update_depth_texture_rejected(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+    });
+    uint32_t depth = 0;
+
+    EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 1, 1, &depth));
+    nt_gfx_destroy_texture(tex);
+}
+
 /* ---- GPU caps: max_texture_size accessible ---- */
 
 void test_gfx_gpu_caps_max_texture_size(void) {
@@ -959,6 +997,9 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_rg16ui);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
+    RUN_TEST(test_gfx_make_depth_texture_uses_explicit_format);
+    RUN_TEST(test_gfx_make_depth_texture_rejects_linear_without_compare_mode);
+    RUN_TEST(test_gfx_update_depth_texture_rejected);
     /* GPU caps tests */
     RUN_TEST(test_gfx_gpu_caps_max_texture_size);
     /* Texture update tests */

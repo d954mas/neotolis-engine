@@ -1,6 +1,7 @@
 #ifndef NT_TEXTURE_FORMAT_H
 #define NT_TEXTURE_FORMAT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Magic: ASCII "TTEX" as uint32_t little-endian = 0x58455454 */
@@ -25,6 +26,8 @@ typedef enum {
 /* Builder source formats are the packed-asset subset RGBA8..R8. */
 typedef nt_texture_format_t nt_texture_pixel_format_t;
 
+static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8; }
+
 /* Bytes per pixel for each format */
 static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     switch (fmt) {
@@ -37,7 +40,7 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     case NT_TEXTURE_FORMAT_R8:
         return 1;
     default:
-        return 4;
+        return 0;
     }
 }
 
