@@ -520,6 +520,7 @@ static void test_context_restore_retries_after_backend_recreate_failure(void) {
     nt_gfx_end_frame();
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_context_restore_waits_while_backend_remains_lost(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
