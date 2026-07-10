@@ -94,7 +94,7 @@ int main(void) {
     nt_window_init();
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .max_render_targets = 16, .depth = true});
     /* No nt_fpng_init here: the capture group inits its own encoder dependency in nt_devapi_register_capture. */
 
     /* devapi wiring: init builds the framework, then this capture-focused host registers ONLY the groups

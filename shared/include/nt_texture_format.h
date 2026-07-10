@@ -1,19 +1,32 @@
 #ifndef NT_TEXTURE_FORMAT_H
 #define NT_TEXTURE_FORMAT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Magic: ASCII "TTEX" as uint32_t little-endian = 0x58455454 */
 #define NT_TEXTURE_MAGIC 0x58455454
 #define NT_TEXTURE_VERSION 3
 
-/* Texture pixel formats */
+/* GPU texture/storage formats. Values 1..4 are also valid packed-asset pixel formats. */
 typedef enum {
+    NT_TEXTURE_FORMAT_INVALID = 0,
     NT_TEXTURE_FORMAT_RGBA8 = 1, /* 4 bytes per pixel, 8 bits per channel */
     NT_TEXTURE_FORMAT_RGB8 = 2,  /* 3 bytes per pixel, no alpha */
     NT_TEXTURE_FORMAT_RG8 = 3,   /* 2 bytes per pixel, two channels */
     NT_TEXTURE_FORMAT_R8 = 4,    /* 1 byte per pixel, single channel */
-} nt_texture_pixel_format_t;
+    NT_TEXTURE_FORMAT_RGBA16F = 5,
+    NT_TEXTURE_FORMAT_RG16UI = 6,
+    NT_TEXTURE_FORMAT_RGBA32F = 7,
+    NT_TEXTURE_FORMAT_DEPTH16 = 8,
+    NT_TEXTURE_FORMAT_DEPTH24 = 9,
+    NT_TEXTURE_FORMAT_DEPTH32F = 10,
+} nt_texture_format_t;
+
+/* Builder source formats are the packed-asset subset RGBA8..R8. */
+typedef nt_texture_format_t nt_texture_pixel_format_t;
+
+static inline bool nt_texture_pixel_format_valid(nt_texture_pixel_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_R8; }
 
 /* Bytes per pixel for each format */
 static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
@@ -27,7 +40,7 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     case NT_TEXTURE_FORMAT_R8:
         return 1;
     default:
-        return 4;
+        return 0;
     }
 }
 

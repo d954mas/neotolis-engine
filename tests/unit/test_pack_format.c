@@ -232,7 +232,14 @@ void test_texture_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(24, offsetof(NtTextureAssetHeaderV2, data_size));
 }
 
-void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
+void test_texture_format_enum(void) {
+    TEST_ASSERT_EQUAL_UINT(0, NT_TEXTURE_FORMAT_INVALID);
+    TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8);
+    TEST_ASSERT_EQUAL_UINT(4, NT_TEXTURE_FORMAT_R8);
+    TEST_ASSERT_EQUAL_UINT(5, NT_TEXTURE_FORMAT_RGBA16F);
+    TEST_ASSERT_EQUAL_UINT(10, NT_TEXTURE_FORMAT_DEPTH32F);
+    TEST_ASSERT_EQUAL_UINT(0, nt_texture_bpp(NT_TEXTURE_FORMAT_DEPTH24));
+}
 
 /* --- Metadata struct tests --- */
 

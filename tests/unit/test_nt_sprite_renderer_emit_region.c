@@ -275,7 +275,7 @@ void setUp(void) {
     s_vpack_counter = 0;
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_render_targets = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
 
@@ -284,7 +284,7 @@ void setUp(void) {
      * needs nt_resource_get(page) != 0 to write into a cmd). */
     nt_hash32_t page_pid = nt_hash32_str("emit_region_pages");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(page_pid, 100));
-    nt_texture_t page0 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "page0"});
+    nt_texture_t page0 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page0"});
     TEST_ASSERT_TRUE(page0.id != 0);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pid, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, page0.id));
 

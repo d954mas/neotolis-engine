@@ -61,8 +61,6 @@ no source-format parsers. The full picture is in
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
-| [decisions/index.md](decisions/index.md) | Registry of locked decisions and the ADR convention |
-| [decisions/0001-render-item-size.md](decisions/0001-render-item-size.md) | ADR: render item size and instance packing strategy |
 | [meta/implementation-order.md](meta/implementation-order.md) | Suggested subsystem implementation order |
 | [meta/open-questions.md](meta/open-questions.md) | Open, non-blocking future questions |
 | [meta/architecture-snapshot.md](meta/architecture-snapshot.md) | Final architecture snapshot: game / engine / builder |

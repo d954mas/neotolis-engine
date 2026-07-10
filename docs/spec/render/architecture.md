@@ -45,6 +45,49 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Render targets
+
+Render targets are a general backend capability for offscreen passes, not a
+text-only path and not a shadow-map subsystem. Typical users include post-fx,
+glow or bloom-like effects, minimaps, portals, and depth-aware rendering.
+
+The game still owns pass order. Each pass selects its destination through
+`nt_pass_desc_t.target`: zero selects the default framebuffer, and a valid
+`nt_render_target_t` selects an offscreen target. `nt_gfx` binds the matching
+backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
+bind or unbind render-target state outside the pass descriptor.
+
+Pass color and depth clears are pass-owned operations. In particular,
+`clear_depth` is applied independently of the previous pipeline's `depth_write`
+state; pipeline write masks affect draws, not the next pass initialization.
+
+Render-target color and sampleable depth attachments are exposed as normal
+`nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
+private to the concrete graphics implementation.
+
+`nt_render_target_desc_t` explicitly selects the color format and default sampler
+state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
+current render-target color format is `RGBA8`. `NONE`
+requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
+renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
+texture in the requested depth format with its own filter and wrap state. The
+descriptor is retained as the single source for creation, resize, and context
+restore. A backend must not substitute its own attachment format or default
+sampler state.
+
+The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. The current
+sampler contract has no depth-comparison mode, so WebGL 2 texture completeness
+requires `NEAREST` minification and magnification for depth textures. Wrap state
+remains explicit and may use clamp, repeat, or mirrored repeat. Binding a
+separate sampler does not relax the depth filtering restriction.
+
+Sampler overrides with a mipmap minification filter require complete mip
+storage for the bound texture. A 1x1 base level is already a complete chain.
+
+This capability supplies low-level targets and depth textures only. It does not
+define light cameras, PCF, cascades, shadow atlases, material shadow integration,
+or a shadow-map system.
+
 ## Renderer complexity classes
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.

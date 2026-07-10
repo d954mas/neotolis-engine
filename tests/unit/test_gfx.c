@@ -48,7 +48,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 };
 
-void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8}); }
+void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
@@ -146,7 +146,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -186,7 +186,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -275,9 +275,18 @@ void test_gfx_make_texture_valid(void) {
         .width = 4,
         .height = 4,
         .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
     nt_gfx_destroy_texture(tex);
+}
+
+void test_gfx_make_texture_requires_explicit_format(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+    }));
 }
 
 /* ---- Texture: NULL desc ---- */
@@ -293,6 +302,7 @@ void test_gfx_make_texture_null_data(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
     nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4);
@@ -305,6 +315,7 @@ void test_gfx_make_texture_zero_width(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 0,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_EQUAL_UINT32(0, tex.id);
@@ -316,6 +327,7 @@ void test_gfx_make_texture_zero_height(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 0,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_EQUAL_UINT32(0, tex.id);
@@ -328,6 +340,7 @@ void test_gfx_make_texture_npot(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 3,
         .height = 5,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -340,6 +353,7 @@ void test_gfx_make_texture_mag_filter_rejects_mipmap(void) {
     EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
         .mag_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
     }));
@@ -351,6 +365,7 @@ void test_gfx_make_texture_gen_mipmaps(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = true,
@@ -365,6 +380,7 @@ void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
     EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = false,
@@ -377,6 +393,7 @@ void test_gfx_bind_texture_valid(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -397,6 +414,7 @@ void test_gfx_destroy_texture_and_reuse(void) {
     nt_texture_t first = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     uint32_t first_slot = first.id & 0xFFFF;
@@ -404,6 +422,7 @@ void test_gfx_destroy_texture_and_reuse(void) {
     nt_texture_t second = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     uint32_t second_slot = second.id & 0xFFFF;
@@ -418,6 +437,7 @@ void test_gfx_double_destroy_texture(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     nt_gfx_destroy_texture(tex);
@@ -432,6 +452,7 @@ void test_gfx_texture_pool_full(void) {
         textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){
             .width = 4,
             .height = 4,
+            .format = NT_TEXTURE_FORMAT_RGBA8,
             .data = s_test_pixels_4x4,
         });
         TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
@@ -439,6 +460,7 @@ void test_gfx_texture_pool_full(void) {
     nt_texture_t overflow = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_EQUAL_UINT32(0, overflow.id);
@@ -722,7 +744,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);
@@ -735,7 +757,7 @@ void test_gfx_make_texture_rgba16f(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
-        .format = NT_PIXEL_RGBA16F,
+        .format = NT_TEXTURE_FORMAT_RGBA16F,
         .data = s_test_half_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -748,7 +770,7 @@ void test_gfx_make_texture_rg16ui(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
-        .format = NT_PIXEL_RG16UI,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
         .data = s_test_rg16ui_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -761,7 +783,7 @@ void test_gfx_make_texture_rg16ui_rejects_linear(void) {
     EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
-        .format = NT_PIXEL_RG16UI,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
         .min_filter = NT_FILTER_LINEAR,
         .data = s_test_rg16ui_4x4,
     }));
@@ -773,10 +795,48 @@ void test_gfx_make_texture_rg16ui_rejects_mipmaps(void) {
     EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
-        .format = NT_PIXEL_RG16UI,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
         .gen_mipmaps = true,
         .data = s_test_rg16ui_4x4,
     }));
+}
+
+void test_gfx_make_depth_texture_uses_explicit_format(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH16,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_MIRRORED_REPEAT,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
+}
+
+void test_gfx_make_depth_texture_rejects_linear_without_compare_mode(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_NEAREST,
+    }));
+}
+
+void test_gfx_update_depth_texture_rejected(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+    });
+    uint32_t depth = 0;
+
+    EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 1, 1, &depth));
+    nt_gfx_destroy_texture(tex);
 }
 
 /* ---- GPU caps: max_texture_size accessible ---- */
@@ -793,6 +853,7 @@ void test_gfx_update_texture_valid(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -808,6 +869,7 @@ void test_gfx_update_texture_full(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
@@ -897,6 +959,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
     /* Texture tests */
     RUN_TEST(test_gfx_make_texture_valid);
+    RUN_TEST(test_gfx_make_texture_requires_explicit_format);
     RUN_TEST(test_gfx_make_texture_null_desc);
     RUN_TEST(test_gfx_make_texture_null_data);
     RUN_TEST(test_gfx_make_texture_zero_width);
@@ -934,6 +997,9 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_rg16ui);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
+    RUN_TEST(test_gfx_make_depth_texture_uses_explicit_format);
+    RUN_TEST(test_gfx_make_depth_texture_rejects_linear_without_compare_mode);
+    RUN_TEST(test_gfx_update_depth_texture_rejected);
     /* GPU caps tests */
     RUN_TEST(test_gfx_gpu_caps_max_texture_size);
     /* Texture update tests */

@@ -6,7 +6,7 @@ renderer-specific batching/instancing (sprite CPU batching, mesh instancing).
 sort_key controls draw order; batch_key controls instancing compatibility —
 independent concerns.
 
-Related: [Rendering Architecture](architecture.md), [Render Components](render-components.md), [Material System](material.md), [ADR 0001 — render item size](../decisions/0001-render-item-size.md)
+Related: [Rendering Architecture](architecture.md), [Render Components](render-components.md), [Material System](material.md)
 
 ## Render Tags
 

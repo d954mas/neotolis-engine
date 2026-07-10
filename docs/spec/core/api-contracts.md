@@ -16,7 +16,7 @@ Related: [Principles](principles.md), [Memory Policy](../runtime/memory.md),
 - On a deliberate breaking-change branch, rename or reshape an actively
   misleading API instead of explaining the mismatch with a comment.
 - Do not change behavior to make a lifetime easier to describe. If the current
-  behavior is bad, fix it through a focused behavior issue or ADR.
+  behavior is bad, fix it through a focused spec and code change.
 - Keep exact per-API lifetimes next to the API declaration or in the module
   chapter; this chapter defines the shared vocabulary.
 - Do not introduce refcounting, smart-pointer layers, heap copies, or extra
@@ -125,6 +125,69 @@ invalidates, or releases backing state must say so explicitly.
 Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
+
+### Texture descriptors
+
+`nt_texture_desc_t.format` is required and names the real storage format.
+`RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
+and `DEPTH32F` additionally require `data == NULL` and no mipmaps until comparison
+sampling exists. A separately bound sampler must obey the same format
+restrictions; it cannot replace the explicit texture state with an incompatible
+filter.
+
+### Render-target handles
+
+`nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
+copies the descriptor into `nt_gfx`; the caller may release or mutate its source
+descriptor after the call returns. The color attachment, and the depth attachment
+when the target was created with sampleable depth, are module-owned
+`nt_texture_t` values. They remain valid until
+`nt_gfx_destroy_render_target(rt)`.
+
+Destroying a render target invalidates the target handle and its owned
+attachment texture handles. Callers do not destroy those textures directly.
+Accessors such as `nt_gfx_render_target_color` and
+`nt_gfx_render_target_depth` return invalid texture handles when the target is
+invalid or the requested attachment does not exist. `nt_gfx_render_target_ready`
+reports whether a valid target currently has live backend storage.
+`nt_gfx_texture_ready` provides the same live-backend check for a texture handle.
+Both readiness queries return `false` for invalid handles, so callers can also
+use them after a failed resource-creation call.
+`nt_gfx_texture_size` writes a texture's logical dimensions to its two required
+outputs. Invalid handles write zero to both outputs and return `false`.
+`nt_gfx_texture_format` returns the retained logical format, or
+`NT_TEXTURE_FORMAT_INVALID` for an invalid handle.
+
+`nt_gfx_resize_render_target` preserves the logical render-target handle and
+owned attachment texture handles, but reimages backend storage. Pixel contents
+are undefined after a successful resize; failed resize leaves the previous
+backend storage active. WebGL context restore recreates backend objects from the
+retained descriptor, including attachment formats and independent color/depth
+default sampler state; it does not preserve pixels. Consumers must redraw
+offscreen contents after resize or context restore.
+While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
+without attempting recreation. Recreation starts only after the backend leaves
+the lost state; a failed recreation is retried on a later frame.
+
+Render-target descriptors explicitly separate depth storage from depth format.
+`NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth
+attachment, and `TEXTURE` has a sampleable `nt_texture_t`. Returned attachment
+texture metadata uses the real storage format; color formats are never used as
+placeholders for depth. The backend receives the complete descriptor and does not
+choose attachment formats or sampler defaults.
+
+Invalid render-target descriptors include mismatched color/depth format classes,
+a missing or extraneous depth format for the selected storage, invalid sampler
+values, and non-`NEAREST` depth filtering without comparison mode. These cases,
+exhausted configured target capacity, stale handles, direct mutation of owned
+attachments, and render-target lifecycle calls inside an active pass are
+developer errors and assert. Backend allocation, framebuffer completeness,
+resize, and context-restore failures remain runtime failures reported through
+invalid handles, `false`, or readiness queries.
+
+`nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
+Callers check readiness before beginning work that depends on restored GPU
+storage; there is no non-asserting pass-begin variant.
 
 ## Hot Path Rule
 

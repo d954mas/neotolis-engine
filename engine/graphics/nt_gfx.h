@@ -4,6 +4,7 @@
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
+#include "nt_texture_format.h"
 
 /* ---- Index buffer type constants ---- */
 
@@ -31,8 +32,13 @@ typedef struct {
 
 typedef struct {
     uint32_t id;
+} nt_render_target_t;
+
+typedef struct {
+    uint32_t id;
 } nt_mesh_t;
 
+#define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
@@ -137,16 +143,6 @@ typedef enum {
 } nt_depth_func_t;
 
 typedef enum {
-    NT_PIXEL_RGBA8 = 0,   /* 4 bpp, 8 bits per channel */
-    NT_PIXEL_RGB8 = 1,    /* 3 bpp, no alpha */
-    NT_PIXEL_RG8 = 2,     /* 2 bpp, two channels */
-    NT_PIXEL_R8 = 3,      /* 1 bpp, single channel */
-    NT_PIXEL_RGBA16F = 4, /* 8 bpp, half-float */
-    NT_PIXEL_RG16UI = 5,  /* 4 bpp, unsigned integer */
-    NT_PIXEL_RGBA32F = 6, /* 16 bpp, full float */
-} nt_pixel_format_t;
-
-typedef enum {
     NT_FILTER_NEAREST = 0,
     NT_FILTER_LINEAR,
     NT_FILTER_NEAREST_MIPMAP_NEAREST,
@@ -160,6 +156,12 @@ typedef enum {
     NT_WRAP_REPEAT,
     NT_WRAP_MIRRORED_REPEAT,
 } nt_texture_wrap_t;
+
+typedef enum {
+    NT_RT_DEPTH_NONE = 0,
+    NT_RT_DEPTH_BUFFER,
+    NT_RT_DEPTH_TEXTURE,
+} nt_render_target_depth_t;
 
 /* ---- Vertex layout ---- */
 
@@ -181,16 +183,17 @@ typedef struct {
 /* ---- Descriptor structs ---- */
 
 typedef struct {
-    uint16_t max_shaders;     /* default: 32 */
-    uint16_t max_pipelines;   /* default: 16 */
-    uint16_t max_buffers;     /* default: 128 */
-    uint16_t max_textures;    /* default: 64 */
-    uint16_t max_meshes;      /* default: 128 */
-    bool depth;               /* request depth buffer (default: true) */
-    bool stencil;             /* request stencil buffer (default: false) */
-    bool antialias;           /* MSAA (default: false) */
-    bool alpha;               /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    uint16_t max_shaders;        /* default: 32 */
+    uint16_t max_pipelines;      /* default: 16 */
+    uint16_t max_buffers;        /* default: 128 */
+    uint16_t max_textures;       /* default: 64 */
+    uint16_t max_meshes;         /* default: 128 */
+    uint16_t max_render_targets; /* default: 16 */
+    bool depth;                  /* request depth buffer (default: true) */
+    bool stencil;                /* request stencil buffer (default: false) */
+    bool antialias;              /* MSAA (default: false) */
+    bool alpha;                  /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;    /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -229,13 +232,13 @@ typedef struct {
 typedef struct {
     uint16_t width;
     uint16_t height;
-    const void *data;               /* raw pixel data (width * height * bpp bytes) */
-    nt_pixel_format_t format;       /* default: NT_PIXEL_RGBA8 */
-    nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
-    nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (only NEAREST or LINEAR valid) */
+    const void *data;               /* raw pixel data; DEPTH* requires NULL */
+    nt_texture_format_t format;     /* required */
+    nt_texture_filter_t min_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
+    nt_texture_filter_t mag_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
-    bool gen_mipmaps;               /* call glGenerateMipmap after upload */
+    bool gen_mipmaps;               /* DEPTH* requires false */
     const char *label;
 } nt_texture_desc_t;
 
@@ -248,8 +251,28 @@ typedef struct {
 } nt_sampler_desc_t;
 
 typedef struct {
+    uint16_t width;
+    uint16_t height;
+    nt_texture_format_t color_format;
+    nt_texture_filter_t color_min_filter;
+    nt_texture_filter_t color_mag_filter;
+    nt_texture_wrap_t color_wrap_u;
+    nt_texture_wrap_t color_wrap_v;
+    nt_render_target_depth_t depth_storage;
+    nt_texture_format_t depth_format;             /* INVALID for NONE; DEPTH* otherwise */
+    nt_texture_filter_t depth_texture_min_filter; /* TEXTURE only; NEAREST without compare mode */
+    nt_texture_filter_t depth_texture_mag_filter; /* TEXTURE only; NEAREST without compare mode */
+    nt_texture_wrap_t depth_texture_wrap_u;       /* TEXTURE only */
+    nt_texture_wrap_t depth_texture_wrap_v;       /* TEXTURE only */
+    const char *label;                            /* debug name; static storage */
+} nt_render_target_desc_t;
+
+typedef struct {
+    nt_render_target_t target; /* zero selects the default framebuffer */
     float clear_color[4];
-    float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
+    /* Applied regardless of the previous pipeline's depth_write state.
+     * Typically 1.0f; zero-init gives 0.0 which fails all depth tests. */
+    float clear_depth;
 } nt_pass_desc_t;
 
 /* ---- Frame statistics ---- */
@@ -292,6 +315,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_buffers = 128,
         .max_textures = 64,
         .max_meshes = 128,
+        .max_render_targets = 16,
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -324,6 +348,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
+/* The descriptor is copied. Attachment textures belong to the target and
+ * remain valid until nt_gfx_destroy_render_target(). */
+nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ---- */
 
@@ -331,10 +358,23 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
+void nt_gfx_destroy_render_target(nt_render_target_t rt);
 /* Samplers have no destroy: nt_gfx_make_sampler dedupes against an internal
  * cache (NT_GFX_MAX_SAMPLERS), and all cached samplers are released by
  * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
  * and textures reference the same sampler handle. */
+
+/* Resize preserves logical target and attachment handles; pixels become undefined. */
+bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height);
+nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
+/* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
+nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
+bool nt_gfx_render_target_ready(nt_render_target_t rt);
+bool nt_gfx_texture_ready(nt_texture_t tex);
+/* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
+bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
+/* Returns INVALID for invalid or stale handles. */
+nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 /* ---- Draw state ---- */
 
@@ -343,7 +383,8 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
- * to the texture's own filter/wrap state (set via glTexParameteri). */
+ * to texture state. RG16UI/DEPTH* require NEAREST min/mag. Mipmap min filters
+ * require a complete chain; a 1x1 base level is already complete. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----
@@ -353,6 +394,8 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
  * across frames — caller manages enable/disable explicitly. */
 void nt_gfx_set_scissor(int x, int y, int w, int h);
 void nt_gfx_set_scissor_enabled(bool enabled);
+/* Returns caller-owned state; resets to false after context restore. */
+bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
 /* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
@@ -415,7 +458,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
-/* ---- Texture update (non-mipmapped textures only, level 0) ---- */
+/* ---- Texture update (non-mipmapped, non-depth textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
@@ -434,9 +477,6 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Read back the cached scissor enabled flag (last call to
- * nt_gfx_set_scissor_enabled). Default false at frame start. */
-bool nt_gfx_test_scissor_enabled(void);
 /* Read back the cached scissor rect [x, y, w, h] from the last
  * nt_gfx_set_scissor call. Out-param must be a 4-element int array. */
 void nt_gfx_test_scissor_rect(int out[4]);

@@ -44,7 +44,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 /* clang-format on */
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
     nt_text_renderer_init();
     nt_text_renderer_test_reset_call_counters();
     nt_metrics_init();

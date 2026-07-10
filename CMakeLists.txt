@@ -11,6 +11,20 @@ include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 
+if(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
+    set(_nt_default_em_cache "${NT_ENGINE_ROOT}/build/emscripten-cache")
+    if(DEFINED ENV{EM_CACHE} AND NOT "$ENV{EM_CACHE}" STREQUAL "")
+        set(_nt_default_em_cache "$ENV{EM_CACHE}")
+    endif()
+    set(NT_EMSCRIPTEN_CACHE_DIR "${_nt_default_em_cache}" CACHE PATH "Emscripten cache directory for this engine checkout.")
+    file(MAKE_DIRECTORY "${NT_EMSCRIPTEN_CACHE_DIR}")
+
+    # Build invocations do not inherit the environment used during CMake configure.
+    set(_nt_emcache_prefix "${CMAKE_COMMAND}" -E env "EM_CACHE=${NT_EMSCRIPTEN_CACHE_DIR}")
+    set(CMAKE_C_COMPILER_LAUNCHER ${_nt_emcache_prefix} ${CMAKE_C_COMPILER_LAUNCHER})
+    set(CMAKE_C_LINKER_LAUNCHER ${_nt_emcache_prefix} ${CMAKE_C_LINKER_LAUNCHER})
+endif()
+
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
 
@@ -165,6 +179,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/bench_shapes)
     add_subdirectory(examples/spinning_cube)
     add_subdirectory(examples/textured_quad)
+    add_subdirectory(examples/rtt_showcase)
     add_subdirectory(examples/sponza)
     add_subdirectory(examples/text)
     add_subdirectory(examples/atlas)

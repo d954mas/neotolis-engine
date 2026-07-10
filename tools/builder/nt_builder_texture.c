@@ -167,6 +167,7 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
                                                    nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
+    NT_BUILD_ASSERT(nt_texture_pixel_format_valid(fmt) && "texture encode: invalid packed-asset format");
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
 

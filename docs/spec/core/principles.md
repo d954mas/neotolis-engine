@@ -6,7 +6,7 @@ engine/game ownership boundary — the engine owns platform, memory, entities,
 resources, the GPU backend and render primitives; the game owns gameplay, system
 order, render passes, sort/batch policy, and content organization.
 
-Related: [Scope](scope.md), [Module Layout](module-layout.md), [Architecture Snapshot](../meta/architecture-snapshot.md), [Locked Decisions](../decisions/index.md)
+Related: [Scope](scope.md), [Module Layout](module-layout.md), [Architecture Snapshot](../meta/architecture-snapshot.md)
 
 ## Design Philosophy
 

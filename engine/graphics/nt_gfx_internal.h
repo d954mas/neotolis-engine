@@ -21,7 +21,7 @@ bool nt_gfx_backend_is_context_lost(void);
 
 void nt_gfx_backend_begin_frame(void);
 void nt_gfx_backend_end_frame(void);
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc);
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
@@ -38,7 +38,11 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
+
+uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
+bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
+void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
@@ -109,6 +113,28 @@ void nt_gfx_backend_drop_timer_segments(void);
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
+uint32_t nt_gfx_stub_test_last_pass_target(void);
+uint32_t nt_gfx_stub_test_pass_target_count(void);
+uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index);
+uint32_t nt_gfx_stub_test_bound_texture_count(void);
+uint32_t nt_gfx_stub_test_bound_texture_at(uint32_t index);
+uint32_t nt_gfx_stub_test_render_target_create_count(void);
+uint32_t nt_gfx_stub_test_render_target_resize_count(void);
+uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
+uint32_t nt_gfx_stub_test_texture_create_count(void);
+uint16_t nt_gfx_stub_test_last_render_target_width(void);
+uint16_t nt_gfx_stub_test_last_render_target_height(void);
+nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
+nt_texture_desc_t nt_gfx_stub_test_last_texture_desc(void);
+uint32_t nt_gfx_stub_test_last_depth_texture_backend(void);
+uint32_t nt_gfx_stub_test_update_texture_count(void);
+uint32_t nt_gfx_stub_test_backend_restore_count(void);
+uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void);
+void nt_gfx_stub_test_fail_next_texture_create(void);
+void nt_gfx_stub_test_fail_next_backend_restore(void);
+void nt_gfx_stub_test_fail_next_render_target_create(void);
+void nt_gfx_stub_test_fail_next_render_target_resize(void);
+void nt_gfx_stub_test_set_context_lost(bool lost);
 void nt_gfx_stub_test_reset(void);
 #endif
 
@@ -118,6 +144,8 @@ void nt_gfx_stub_test_reset(void);
  * (or any non-stub) backend, so a test running with the real backend can
  * still reach this without enabling stub-only state. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
+uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
+uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

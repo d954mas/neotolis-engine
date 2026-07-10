@@ -40,6 +40,7 @@ engine/
     window/                 # swappable: nt_window.h + native/ web/ stub/
     app/                    # swappable: nt_app.h + native/ web/ stub/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
+    postfx/                 # optional fixed helpers over nt_gfx_interface
     ui/
     font/
     debug_overlay/          # dev HUD — consumes nt_metrics (frame time / draw calls / user counters)
@@ -87,6 +88,25 @@ Two gates enforce this:
 Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
 `nt_window`, `nt_app`, `nt_fs`, `nt_clipboard`.
 
+Fixed helper modules may sit above a swappable interface without selecting its
+implementation. `engine/postfx` is optional and currently starts with
+`nt_postfx_blur`. It links `nt_gfx_interface`; each executable or test still
+selects the concrete gfx implementation (`nt_gfx` or `nt_gfx_stub`) at the link
+layer.
+
+`nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
+borrows ready source, temp, and destination handles for each call; their
+dimensions must match. The helper owns its shader, pipeline, and fullscreen
+primitive, but it does not allocate, resize, destroy, or retain caller handles.
+The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
+`RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
+`dest` are distinct ready `RGBA8` targets matching the source size. Scissor
+must be disabled for the call. The helper does not change or restore caller
+state.
+Blur arguments and GPU readiness are caller preconditions and assert when
+violated; initialization and context-restore GPU allocation failures return a
+result.
+
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol
 approach. Link-time selection keeps each consumer compiled exactly once (one
@@ -99,9 +119,7 @@ gate-enforced instead of buried in per-TU macros.
 2. Declare the interface target: `nt_declare_interface(nt_X)` in the module's
    `CMakeLists.txt`.
 3. Write `native/`, `web/`, `stub/` impls with identical signatures.
-4. Add `nt_X` to the `SWAPPABLE` list in
-   `scripts/check_no_real_impl_links.sh`.
-5. Each executable picks exactly one impl in its `target_link_libraries`
+4. Each executable picks exactly one impl in its `target_link_libraries`
    (the real `nt_X` or `nt_X_stub`).
 
 ## Stub semantics and capability queries

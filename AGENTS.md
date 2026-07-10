@@ -8,7 +8,6 @@ Check the spec before making code changes:
 
 - `docs/spec/index.md` — start here: overview, chapter list, module → chapter map
 - Changing a module → read its chapter in `docs/spec/` (chapters are small, read them whole)
-- Before changing decided behavior → check `docs/spec/decisions/index.md` (locked decisions, ADR journal)
 
 If code and spec diverge, flag it explicitly in the response. Do not silently "normalize" behavior by guessing.
 
@@ -131,4 +130,3 @@ If build or test infrastructure is missing, state it explicitly in the response 
 ### Boundaries
 - Execute what was requested precisely, no deviations.
   Improvements and findings — suggest separately after the main task.
-

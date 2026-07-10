@@ -14,6 +14,7 @@ void setUp(void) {
         .max_buffers = 8,
         .max_textures = 4,
         .max_meshes = 4,
+        .max_render_targets = 16,
     });
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
@@ -34,9 +35,9 @@ static void test_set_scissor_round_trips(void) {
 /* ---- GFX-02: nt_gfx_set_scissor_enabled round-trips via probe ---- */
 static void test_set_scissor_enabled_round_trips(void) {
     nt_gfx_set_scissor_enabled(true);
-    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
     nt_gfx_set_scissor_enabled(false);
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
 /* ---- GFX-03: nt_gfx_set_viewport round-trips ---- */

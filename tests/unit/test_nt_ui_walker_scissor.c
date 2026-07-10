@@ -49,7 +49,7 @@ static void test_scissor_depth_8_ok(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
 /* Hard cap NT_UI_WALKER_SCISSOR_DEPTH_CAP push asserts on overflow. */
@@ -157,7 +157,7 @@ static void test_walker_exit_disables_scissor(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
 /* Clay's bounding box is target-local. With a non-zero
@@ -345,7 +345,7 @@ static void test_scissor_depth_at_cap_ok(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
     free(cmds);
 }
 

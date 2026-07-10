@@ -1929,7 +1929,7 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
 
     /* Overlay must disable scissor on exit (walker-exit invariant). */
-    TEST_ASSERT_FALSE_MESSAGE(nt_gfx_test_scissor_enabled(), "overlay must restore scissor to DISABLED on exit");
+    TEST_ASSERT_FALSE_MESSAGE(nt_gfx_scissor_enabled(), "overlay must restore scissor to DISABLED on exit");
 }
 
 /* ---- Test 15: inactive inspector never intercepts ----

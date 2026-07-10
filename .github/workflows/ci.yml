@@ -98,6 +98,12 @@ jobs:
           name: bunnymark-packs
           path: build/examples/bunnymark
 
+      - name: Download rtt_showcase packs
+        uses: actions/download-artifact@v4
+        with:
+          name: rtt-showcase-packs
+          path: build/examples/rtt_showcase
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -347,7 +353,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs build_rtt_showcase_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -357,6 +363,7 @@ jobs:
             build/examples/textured_quad/_cache
             build/examples/text/_cache
             build/examples/atlas/_cache
+            build/examples/rtt_showcase/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
@@ -380,10 +387,14 @@ jobs:
         timeout-minutes: 10
         run: ./build/examples/bunnymark/native-release/build_bunnymark_packs build/examples/bunnymark
 
-      # Bunnymark CMakeLists wires the per-preset asset copy at configure time
+      - name: Build asset packs — rtt_showcase (release)
+        timeout-minutes: 10
+        run: ./build/examples/rtt_showcase/native-release/build_rtt_showcase_packs build/examples/rtt_showcase
+
+      # Bunnymark/rtt_showcase CMakeLists wire per-preset asset copy at configure time
       # only if .ntpack files exist (graceful local DX). The packs were just
       # generated above, so reconfigure to wire the copy step before build-all.
-      - name: Reconfigure native release (wire bunnymark pack copy)
+      - name: Reconfigure native release (wire generated pack copies)
         run: cmake --preset native-release
 
       - name: Build native release (all targets)
@@ -483,6 +494,13 @@ jobs:
         with:
           name: bunnymark-packs
           path: build/examples/bunnymark/*.ntpack
+          retention-days: 1
+
+      - name: Upload rtt_showcase packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtt-showcase-packs
+          path: build/examples/rtt_showcase/*.ntpack
           retention-days: 1
 
       - name: Submodule consumption test
@@ -782,6 +800,12 @@ jobs:
         with:
           name: bunnymark-packs
           path: build/examples/bunnymark
+
+      - name: Download rtt_showcase packs
+        uses: actions/download-artifact@v4
+        with:
+          name: rtt-showcase-packs
+          path: build/examples/rtt_showcase
 
       - uses: actions/setup-node@v4
         with:

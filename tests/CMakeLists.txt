@@ -14,7 +14,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
-        nt_shape_renderer nt_mem_scratch nt_metrics nt_devapi_net
+        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -268,6 +268,26 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_gfx_read_pixels COMMAND test_gfx_read_pixels)
+
+    # --- Graphics render-target tests ---
+    add_executable(test_nt_gfx_render_target unit/test_nt_gfx_render_target.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_gfx_render_target PRIVATE nt_gfx_stub nt_log_stub unity)
+    target_include_directories(test_nt_gfx_render_target PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_gfx_render_target PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
+    add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c)
+    target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity glad)
+    nt_setup_test_target(test_nt_gfx_render_target_native)
+    set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
+
+    # --- Post-FX blur tests ---
+    add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_stub nt_log_stub unity)
+    target_include_directories(test_nt_postfx_blur PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_postfx_blur PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_postfx_blur WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)
