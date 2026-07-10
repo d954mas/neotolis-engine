@@ -16,7 +16,7 @@ Related: [Principles](principles.md), [Memory Policy](../runtime/memory.md),
 - On a deliberate breaking-change branch, rename or reshape an actively
   misleading API instead of explaining the mismatch with a comment.
 - Do not change behavior to make a lifetime easier to describe. If the current
-  behavior is bad, fix it through a focused behavior issue or ADR.
+  behavior is bad, fix it through a focused spec and code change.
 - Keep exact per-API lifetimes next to the API declaration or in the module
   chapter; this chapter defines the shared vocabulary.
 - Do not introduce refcounting, smart-pointer layers, heap copies, or extra

@@ -5,7 +5,7 @@ animation, camera structure, audio extensions. All can be solved incrementally
 without breaking the core architecture. Resolved questions are removed from this
 list once their answer lands in the code and the relevant chapter.
 
-Related: [Locked Decisions](../decisions/index.md), [Architecture Snapshot](architecture-snapshot.md)
+Related: [Architecture Snapshot](architecture-snapshot.md)
 
 These do not block implementation:
 
