@@ -1,6 +1,6 @@
 # Shared per-test-target setup. Bundles the boilerplate repeated under
 # every add_executable in tests/CMakeLists.txt:
-#   - -U_DLL: MSVC CRT workaround (link against static CRT, not the DLL one)
+#   - nt_set_static_crt: MSVC CRT pin (static CRT, gated by NT_STATIC_CRT)
 #   - nt_set_warning_flags / nt_set_sanitizer_flags
 #   - RUNTIME_OUTPUT_DIRECTORY: keep test binaries in build/tests/<preset>/
 #   - add_test for ctest registration
@@ -15,7 +15,7 @@
 function(nt_setup_test_target target_name)
     cmake_parse_arguments(ARG "" "WORKING_DIRECTORY" "" ${ARGN})
 
-    target_compile_options(${target_name} PRIVATE -U_DLL)
+    nt_set_static_crt(${target_name})
     nt_set_warning_flags(${target_name})
     nt_set_sanitizer_flags(${target_name})
     set_target_properties(${target_name} PROPERTIES

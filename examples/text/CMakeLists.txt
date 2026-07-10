@@ -29,7 +29,7 @@ if(NOT EMSCRIPTEN)
     add_executable(build_text_packs build_packs.c)
     target_link_libraries(build_text_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(build_text_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(build_text_packs PRIVATE -U_DLL)
+    nt_set_static_crt(build_text_packs)
     nt_set_warning_flags(build_text_packs)
     nt_set_sanitizer_flags(build_text_packs)
     set_target_properties(build_text_packs PROPERTIES

@@ -41,10 +41,7 @@ target_compile_options(nt_basisu_transcoder PRIVATE -fno-strict-aliasing)
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_transcoder PRIVATE -w)
 
-# Match ASAN runtime: release static CRT + _ITERATOR_DEBUG_LEVEL=0 in debug
-target_compile_definitions(nt_basisu_transcoder PRIVATE
-    $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
-)
+nt_set_static_crt_cxx(nt_basisu_transcoder)
 
 # Link C++ stdlib — needed on Linux where C linker doesn't pull it automatically
 if(NOT WIN32 AND NOT EMSCRIPTEN)
@@ -53,7 +50,6 @@ endif()
 
 set_target_properties(nt_basisu_transcoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
 )

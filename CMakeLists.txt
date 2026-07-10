@@ -14,6 +14,9 @@ include(cmake/nt_shell.cmake)
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
 
+# OFF lets an exe that embeds both builder and runtime pick its own CRT (see nt_set_static_crt).
+option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the consumer's CMAKE_MSVC_RUNTIME_LIBRARY." ON)
+
 # Web counterpart to the native KHR_debug callback. ONE flag enables Emscripten GL_ASSERTIONS (validate
 # GL call params) + GL_DEBUG (log every GL call). OFF by default EVEN in debug: GL_DEBUG logs every GL
 # call, so it is opt-in for active GL bug-hunts only. Inert on native builds (warned below).
@@ -139,11 +142,9 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(deps/mikktspace EXCLUDE_FROM_ALL)
     add_subdirectory(deps/miniz EXCLUDE_FROM_ALL)
 
-    # GLFW uses CRT functions (assert, sscanf, powf, wcscpy) that resolve to
-    # __declspec(dllimport) stubs under the default -D_DLL flag. Since we link
-    # static UCRT, those dllimport thunks are missing. Remove _DLL so GLFW
-    # calls the static CRT symbols directly.
-    target_compile_options(glfw PRIVATE -U_DLL)
+    # GLFW calls CRT functions (assert, sscanf, powf, wcscpy) that resolve to
+    # __declspec(dllimport) stubs under the default -D_DLL flag — missing with a static UCRT.
+    nt_set_static_crt(glfw)
 endif()
 
 # Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the
