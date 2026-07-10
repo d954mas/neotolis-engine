@@ -18,6 +18,7 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
 - **Builder**: native C binary
 - **Standard**: C17
 - **Why C17**: broader compiler, Emscripten toolchain, and build environment support
+- **NT_STATIC_CRT** (CMake option, default ON): pins the static release CRT on Windows. Consumers embedding builder + runtime in one exe set OFF to inherit their own `CMAKE_MSVC_RUNTIME_LIBRARY`. All pinning goes through `nt_set_static_crt(_cxx)` — never raw `-U_DLL` (gated by `scripts/check_crt_pins.sh`).
 
 If specific build, check, or run commands appear in the repo, keep them up to date in this file.
 
@@ -96,7 +97,7 @@ Packs depend only on the builder exe — after editing shader/asset sources, del
 bash scripts/check.sh
 ```
 
-It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
+It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage, CRT-pin centralization), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
 
 - Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test.
 - Full sweep (CI lint equivalent): `bash scripts/check.sh --full` — whole-tree format + full tidy.

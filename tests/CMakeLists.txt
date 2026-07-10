@@ -375,7 +375,6 @@ if(NOT EMSCRIPTEN)
     add_executable(test_font unit/test_font.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub stb_truetype unity)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
-    target_compile_options(nt_font PRIVATE -U_DLL)
     nt_setup_test_target(test_font)
 
     # --- Font measure benchmark ---
@@ -685,6 +684,13 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
+
+    # --- Basis encode + runtime transcode in one exe ---
+    # Transcoder listed first on purpose: the runtime-first consumer link line that
+    # must resolve against a single shared basisu TU. Do not reorder.
+    add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
+    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity)
+    nt_setup_test_target(test_basisu_roundtrip)
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)

@@ -39,7 +39,7 @@ if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
     target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(build_ui_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(build_ui_showcase_packs PRIVATE -U_DLL)
+    nt_set_static_crt(build_ui_showcase_packs)
     nt_set_warning_flags(build_ui_showcase_packs)
     nt_set_sanitizer_flags(build_ui_showcase_packs)
     set_target_properties(build_ui_showcase_packs PROPERTIES

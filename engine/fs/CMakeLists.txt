@@ -11,8 +11,7 @@ endif()
 target_link_libraries(nt_fs PUBLIC nt_core nt_fs_interface)
 if(NOT EMSCRIPTEN)
     target_compile_definitions(nt_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    # Static CRT: remove _DLL so CRT calls resolve to static symbols
-    target_compile_options(nt_fs PRIVATE -U_DLL)
+    nt_set_static_crt(nt_fs)
 endif()
 
 nt_add_module(nt_fs_stub LOG_DOMAIN "fs_stub" nt_fs.c stub/nt_fs_stub.c nt_fs.h)

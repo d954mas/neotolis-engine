@@ -3,7 +3,7 @@
 #   scripts/check.sh          gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full   default + whole-tree format + full tidy
 #   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
-# The cheap gates (module composition, EM_JS_DEPS, doc links) run in EVERY mode —
+# The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
 # Remaining known CI-only class: GNU ld link order (Linux-specific, see AGENTS.md).
 # All tidy runs use the tidy-ci DB (native-debug + devapi groups ON) so the lint
@@ -123,11 +123,12 @@ run_tidy_gate() {
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links)"
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
 bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
+bash scripts/check_crt_pins.sh
 ok
 
 step "build (native-debug)"
