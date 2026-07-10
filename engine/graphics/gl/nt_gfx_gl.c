@@ -693,7 +693,15 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     glViewport(0, 0, viewport_w, viewport_h);
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);
+    /* Pass clears must not inherit the previous pipeline's depth-write mask. */
+    bool restore_depth_write = !s_gl_cache.depth_write;
+    if (restore_depth_write) {
+        glDepthMask(GL_TRUE);
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (restore_depth_write) {
+        glDepthMask(GL_FALSE);
+    }
 }
 
 void nt_gfx_backend_end_pass(void) {

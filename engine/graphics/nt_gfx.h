@@ -270,7 +270,9 @@ typedef struct {
 typedef struct {
     nt_render_target_t target; /* zero selects the default framebuffer */
     float clear_color[4];
-    float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
+    /* Applied regardless of the previous pipeline's depth_write state.
+     * Typically 1.0f; zero-init gives 0.0 which fails all depth tests. */
+    float clear_depth;
 } nt_pass_desc_t;
 
 /* ---- Frame statistics ---- */

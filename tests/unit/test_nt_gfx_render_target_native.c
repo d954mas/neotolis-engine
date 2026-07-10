@@ -160,10 +160,63 @@ static void test_depth_buffer_uses_explicit_format(void) {
     nt_gfx_destroy_render_target(target);
 }
 
+static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0); }\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(1.0); }\n";
+
+    nt_shader_t vertex_shader = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fragment_shader = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_pipeline_t no_depth_write_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .depth_write = false,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, no_depth_write_pipeline.id);
+
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_BUFFER,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 0.25F});
+    nt_gfx_bind_pipeline(no_depth_write_pipeline);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 0.75F});
+    float depth = 0.0F;
+    glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    uint32_t depth_milli = (uint32_t)(depth * 1000.0F + 0.5F);
+    TEST_ASSERT_UINT32_WITHIN(1, 750, depth_milli);
+    GLboolean depth_write_enabled = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, depth_write_enabled);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_pipeline(no_depth_write_pipeline);
+    nt_gfx_destroy_shader(fragment_shader);
+    nt_gfx_destroy_shader(vertex_shader);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
     RUN_TEST(test_depth_buffer_uses_explicit_format);
+    RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     return UNITY_END();
 }

@@ -57,6 +57,10 @@ The game still owns pass order. Each pass selects its destination through
 backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
 
+Pass color and depth clears are pass-owned operations. In particular,
+`clear_depth` is applied independently of the previous pipeline's `depth_write`
+state; pipeline write masks affect draws, not the next pass initialization.
+
 Render-target color and sampleable depth attachments are exposed as normal
 `nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
 private to the concrete graphics implementation.
