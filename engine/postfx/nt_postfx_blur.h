@@ -21,10 +21,11 @@ typedef struct {
 /* The module owns only shader, pipeline, and fullscreen primitive state. */
 nt_result_t nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
-/* Rebuilds GPU resources after context restore; logical API state is unchanged. */
-void nt_postfx_blur_restore_gpu(void);
-/* Caller owns source/temp/dest. The call never creates or resizes render targets. */
-bool nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
+/* Rebuilds GPU resources after context restore. */
+nt_result_t nt_postfx_blur_restore_gpu(void);
+/* Borrows ready source/temp/dest handles only for this call; dimensions must
+ * match. Never creates, resizes, destroys, or stores them. */
+void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

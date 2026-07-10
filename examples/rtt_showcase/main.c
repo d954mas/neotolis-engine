@@ -124,9 +124,16 @@ static struct {
     uint16_t rt_height;
     bool large_target;
     bool handles_stable;
+    bool render_resources_ready;
     float sample_zoom;
     float blur_radius;
 } s_demo;
+
+typedef enum {
+    RTT_RESIZE_UNUSABLE,
+    RTT_RESIZE_ROLLED_BACK,
+    RTT_RESIZE_COMMITTED,
+} rtt_resize_result_t;
 
 static void destroy_quad_resources(void) {
     if (s_demo.quad_vbo.id != 0) {
@@ -212,10 +219,25 @@ static nt_render_target_t make_target(const char *label, uint16_t width, uint16_
     });
 }
 
-static void make_targets(uint16_t width, uint16_t height) {
+static bool make_targets(uint16_t width, uint16_t height) {
     s_demo.scene = make_target("rtt_scene", width, height, NT_RT_DEPTH_TEXTURE);
     s_demo.temp = make_target("rtt_blur_temp", width, height, NT_RT_DEPTH_NONE);
     s_demo.blur = make_target("rtt_blur_dest", width, height, NT_RT_DEPTH_NONE);
+    if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
+        if (s_demo.blur.id != 0) {
+            nt_gfx_destroy_render_target(s_demo.blur);
+        }
+        if (s_demo.temp.id != 0) {
+            nt_gfx_destroy_render_target(s_demo.temp);
+        }
+        if (s_demo.scene.id != 0) {
+            nt_gfx_destroy_render_target(s_demo.scene);
+        }
+        s_demo.scene = NT_RENDER_TARGET_INVALID;
+        s_demo.temp = NT_RENDER_TARGET_INVALID;
+        s_demo.blur = NT_RENDER_TARGET_INVALID;
+        return false;
+    }
     s_demo.scene_color = nt_gfx_render_target_color(s_demo.scene);
     s_demo.scene_depth = nt_gfx_render_target_depth(s_demo.scene);
     s_demo.blur_color = nt_gfx_render_target_color(s_demo.blur);
@@ -224,9 +246,10 @@ static void make_targets(uint16_t width, uint16_t height) {
     s_demo.rt_width = width;
     s_demo.rt_height = height;
     s_demo.handles_stable = true;
+    return true;
 }
 
-static void resize_targets(uint16_t width, uint16_t height) {
+static rtt_resize_result_t resize_targets(uint16_t width, uint16_t height) {
     nt_render_target_t old_scene = s_demo.scene;
     nt_render_target_t old_temp = s_demo.temp;
     nt_render_target_t old_blur = s_demo.blur;
@@ -234,19 +257,40 @@ static void resize_targets(uint16_t width, uint16_t height) {
     nt_texture_t old_scene_depth = s_demo.scene_depth;
     nt_texture_t old_blur_color = s_demo.blur_color;
 
-    bool ok = nt_gfx_resize_render_target(s_demo.scene, width, height);
-    ok = nt_gfx_resize_render_target(s_demo.temp, width, height) && ok;
-    ok = nt_gfx_resize_render_target(s_demo.blur, width, height) && ok;
+    bool scene_resized = nt_gfx_resize_render_target(s_demo.scene, width, height);
+    bool temp_resized = scene_resized && nt_gfx_resize_render_target(s_demo.temp, width, height);
+    bool blur_resized = temp_resized && nt_gfx_resize_render_target(s_demo.blur, width, height);
+    if (!blur_resized) {
+        bool rollback_ok = true;
+        if (temp_resized) {
+            rollback_ok = nt_gfx_resize_render_target(s_demo.temp, s_demo.rt_width, s_demo.rt_height) && rollback_ok;
+        }
+        if (scene_resized) {
+            rollback_ok = nt_gfx_resize_render_target(s_demo.scene, s_demo.rt_width, s_demo.rt_height) && rollback_ok;
+        }
+        if (!rollback_ok) {
+            nt_log_error("rtt_showcase: render-target resize rollback failed");
+            return RTT_RESIZE_UNUSABLE;
+        }
+        nt_log_error("rtt_showcase: render-target resize failed; previous size restored");
+        return RTT_RESIZE_ROLLED_BACK;
+    }
 
     s_demo.scene_color = nt_gfx_render_target_color(s_demo.scene);
     s_demo.scene_depth = nt_gfx_render_target_depth(s_demo.scene);
     s_demo.blur_color = nt_gfx_render_target_color(s_demo.blur);
-    s_demo.handles_stable = ok && old_scene.id == s_demo.scene.id && old_temp.id == s_demo.temp.id && old_blur.id == s_demo.blur.id && old_scene_color.id == s_demo.scene_color.id &&
+    s_demo.handles_stable = old_scene.id == s_demo.scene.id && old_temp.id == s_demo.temp.id && old_blur.id == s_demo.blur.id && old_scene_color.id == s_demo.scene_color.id &&
                             old_scene_depth.id == s_demo.scene_depth.id && old_blur_color.id == s_demo.blur_color.id;
     NT_ASSERT(s_demo.handles_stable && "render-target resize must preserve target/color/depth handles");
     s_demo.rt_width = width;
     s_demo.rt_height = height;
     nt_log_info("rtt_showcase resized targets to %ux%u, handles stable=%d", (unsigned)width, (unsigned)height, s_demo.handles_stable ? 1 : 0);
+    return RTT_RESIZE_COMMITTED;
+}
+
+static bool render_targets_ready(void) {
+    return nt_gfx_render_target_ready(s_demo.scene) && nt_gfx_render_target_ready(s_demo.temp) && nt_gfx_render_target_ready(s_demo.blur) && nt_gfx_texture_ready(s_demo.scene_color) &&
+           nt_gfx_texture_ready(s_demo.scene_depth) && nt_gfx_texture_ready(s_demo.blur_color);
 }
 
 static void init_ui_refs(void) { s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value); }
@@ -255,6 +299,9 @@ static void try_bind_ui_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         uint32_t white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
         NT_ASSERT(white_region != NT_ATLAS_INVALID_REGION);
+        if (white_region == NT_ATLAS_INVALID_REGION) {
+            return;
+        }
         nt_ui_set_atlas_white_region(s_ui_ctx, s_atlas_handle, white_region);
         s_atlas_bound = true;
         nt_log_info("rtt_showcase: UI atlas white region bound");
@@ -445,11 +492,11 @@ static void frame(void) {
     }
 #endif
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        s_demo.large_target = !s_demo.large_target;
-        if (s_demo.large_target) {
-            resize_targets(768, 432);
-        } else {
-            resize_targets(512, 288);
+        bool make_large = !s_demo.large_target;
+        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
+        s_demo.render_resources_ready = resize_result != RTT_RESIZE_UNUSABLE;
+        if (resize_result == RTT_RESIZE_COMMITTED) {
+            s_demo.large_target = make_large;
         }
     }
     nt_resource_step();
@@ -463,10 +510,9 @@ static void frame(void) {
     }
     if (g_nt_gfx.context_restored) {
         nt_shape_renderer_restore_gpu();
-        nt_postfx_blur_restore_gpu();
+        bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
-        bool ok = make_quad_resources();
-        NT_ASSERT(ok && "rtt_showcase: failed to restore quad GPU resources");
+        restored = make_quad_resources() && restored;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -477,10 +523,20 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "rtt_frame_uniforms",
         });
+        restored = s_frame_ubo.id != 0 && restored;
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
         s_atlas_bound = false;
         s_font_bound = false;
+        s_demo.render_resources_ready = restored && render_targets_ready();
+        if (!s_demo.render_resources_ready) {
+            nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
+        }
+    }
+    if (!s_demo.render_resources_ready || !render_targets_ready()) {
+        nt_gfx_end_frame();
+        nt_window_swap_buffers();
+        return;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -491,14 +547,13 @@ static void frame(void) {
     draw_scene_contents();
     nt_gfx_end_pass();
 
-    bool blurred = nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = s_demo.scene_color,
         .temp = s_demo.temp,
         .dest = s_demo.blur,
         .radius = s_demo.blur_radius,
         .sigma = 0.0F,
     });
-    NT_ASSERT(blurred && "rtt_showcase: blur pass failed");
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
     draw_default_frame();
@@ -617,7 +672,10 @@ int main(void) {
     if (!quad_ok) {
         return 1;
     }
-    make_targets(512, 288);
+    if (!make_targets(512, 288)) {
+        return 1;
+    }
+    s_demo.render_resources_ready = true;
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();

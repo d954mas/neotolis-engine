@@ -128,6 +128,7 @@ bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
+bash scripts/check_cmake_linked_libraries.sh
 ok
 
 step "build (native-debug)"

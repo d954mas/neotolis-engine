@@ -189,6 +189,10 @@ static bool make_gpu_resources(void) {
 }
 
 nt_result_t nt_postfx_blur_init(void) {
+    NT_ASSERT(!s_blur.initialized && "nt_postfx_blur_init: already initialized");
+    if (s_blur.initialized) {
+        return NT_ERR_INIT_FAILED;
+    }
     memset(&s_blur, 0, sizeof(s_blur));
     if (!make_gpu_resources()) {
         NT_LOG_ERROR("postfx_blur init failed");
@@ -204,32 +208,70 @@ void nt_postfx_blur_shutdown(void) {
     memset(&s_blur, 0, sizeof(s_blur));
 }
 
-void nt_postfx_blur_restore_gpu(void) {
+nt_result_t nt_postfx_blur_restore_gpu(void) {
+    NT_ASSERT(s_blur.initialized && "nt_postfx_blur_restore_gpu: module is not initialized");
     if (!s_blur.initialized) {
-        return;
+        return NT_ERR_INIT_FAILED;
     }
     destroy_gpu_resources();
-    bool ok = make_gpu_resources();
-    NT_ASSERT(ok && "nt_postfx_blur_restore_gpu: failed to rebuild GPU resources");
-    if (!ok) {
+    if (!make_gpu_resources()) {
+        NT_LOG_ERROR("postfx_blur restore failed");
+        destroy_gpu_resources();
         s_blur.initialized = false;
+        return NT_ERR_INIT_FAILED;
     }
+    return NT_OK;
 }
 
 static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
+    NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
+    NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
     if (!s_blur.initialized || pass == NULL) {
         return false;
     }
-    if (pass->source.id == 0 || nt_gfx_render_target_color(pass->temp).id == 0 || nt_gfx_render_target_color(pass->dest).id == 0) {
+    bool temp_ready = nt_gfx_render_target_ready(pass->temp);
+    bool dest_ready = nt_gfx_render_target_ready(pass->dest);
+    NT_ASSERT(temp_ready && "nt_postfx_blur_gaussian: temp target is not ready");
+    NT_ASSERT(dest_ready && "nt_postfx_blur_gaussian: dest target is not ready");
+    if (!temp_ready || !dest_ready) {
         return false;
     }
-    if (!nt_gfx_render_target_ready(pass->temp) || !nt_gfx_render_target_ready(pass->dest)) {
+    nt_texture_t temp_color = nt_gfx_render_target_color(pass->temp);
+    nt_texture_t temp_depth = nt_gfx_render_target_depth(pass->temp);
+    nt_texture_t dest_color = nt_gfx_render_target_color(pass->dest);
+    bool source_ready = nt_gfx_texture_ready(pass->source);
+    NT_ASSERT(source_ready && "nt_postfx_blur_gaussian: source texture is not ready");
+    NT_ASSERT(temp_color.id != 0 && dest_color.id != 0 && "nt_postfx_blur_gaussian: target color attachment is invalid");
+    if (!source_ready || temp_color.id == 0 || dest_color.id == 0) {
         return false;
     }
-    if (pass->source.id == nt_gfx_render_target_color(pass->temp).id || pass->temp.id == pass->dest.id) {
+    uint16_t source_width = 0;
+    uint16_t source_height = 0;
+    uint16_t temp_width = 0;
+    uint16_t temp_height = 0;
+    uint16_t dest_width = 0;
+    uint16_t dest_height = 0;
+    bool sizes_valid =
+        nt_gfx_texture_size(pass->source, &source_width, &source_height) && nt_gfx_texture_size(temp_color, &temp_width, &temp_height) && nt_gfx_texture_size(dest_color, &dest_width, &dest_height);
+    NT_ASSERT(sizes_valid && "nt_postfx_blur_gaussian: texture dimensions unavailable");
+    if (!sizes_valid) {
         return false;
     }
+    bool sizes_match = source_width == temp_width && source_width == dest_width && source_height == temp_height && source_height == dest_height;
+    NT_ASSERT(sizes_match && "nt_postfx_blur_gaussian: source, temp, and dest dimensions must match");
+    if (!sizes_match) {
+        return false;
+    }
+    bool source_aliases_temp = pass->source.id == temp_color.id || (temp_depth.id != 0 && pass->source.id == temp_depth.id);
+    NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
+    NT_ASSERT(pass->temp.id != pass->dest.id && "nt_postfx_blur_gaussian: temp and dest targets alias");
+    if (source_aliases_temp || pass->temp.id == pass->dest.id) {
+        return false;
+    }
+    NT_ASSERT(isfinite(pass->radius) && pass->radius > 0.0F && pass->radius <= (float)NT_POSTFX_BLUR_MAX_RADIUS && "nt_postfx_blur_gaussian: invalid radius");
+    NT_ASSERT(isfinite(pass->sigma) && pass->sigma >= 0.0F && "nt_postfx_blur_gaussian: invalid sigma");
     uint32_t count = build_kernel(pass->radius, pass->sigma, out_weights);
+    NT_ASSERT(count != 0 && "nt_postfx_blur_gaussian: invalid kernel");
     if (count == 0) {
         return false;
     }
@@ -261,11 +303,11 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
 #endif
 }
 
-bool nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
+void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
     float weights[NT_POSTFX_BLUR_MAX_KERNEL];
     uint32_t radius = 0;
     if (!validate_pass(pass, &radius, weights)) {
-        return false;
+        return;
     }
     float packed[20];
     pack_kernel_pairs(weights, radius, packed);
@@ -274,7 +316,6 @@ bool nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
     static const float vertical[4] = {0.0F, 1.0F, 0.0F, 0.0F};
     draw_blur_pass(pass->source, pass->temp, horizontal, radius, packed);
     draw_blur_pass(nt_gfx_render_target_color(pass->temp), pass->dest, vertical, radius, packed);
-    return true;
 }
 
 #ifdef NT_TEST_ACCESS

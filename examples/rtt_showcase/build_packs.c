@@ -1,6 +1,6 @@
 /* Build RTT showcase UI pack:
  *   rtt_showcase.ntpack -- white atlas region + UI sprite/text shaders + ASCII font.
- * Usage: rtt_showcase_build_packs <pack_dir>
+ * Usage: build_rtt_showcase_packs <pack_dir>
  * Run from the project root directory. */
 
 /* clang-format off */
@@ -31,7 +31,7 @@ static const char *pack_path(const char *dir, const char *name) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        (void)fprintf(stderr, "Usage: rtt_showcase_build_packs <pack_dir>\n");
+        (void)fprintf(stderr, "Usage: build_rtt_showcase_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];

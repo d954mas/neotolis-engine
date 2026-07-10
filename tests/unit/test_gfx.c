@@ -48,7 +48,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 };
 
-void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8}); }
+void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
@@ -146,7 +146,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -186,7 +186,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -722,7 +722,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);

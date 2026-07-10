@@ -10,7 +10,7 @@ PRESET="${PRESET:-wasm-analysis}"
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
-    echo "Usage: size-report.sh <target-name> [--top N]"
+    echo "Usage: size-report.sh <example-name> [--top N]"
     echo ""
     echo "Produce a diff-friendly WASM binary analysis report with 4 sections:"
     echo "  1. WASM section sizes"
@@ -19,7 +19,7 @@ usage() {
     echo "  4. Data segments summary"
     echo ""
     echo "Arguments:"
-    echo "  target-name   Name of the build target (e.g. hello)"
+    echo "  example-name  Example directory name (e.g. atlas)"
     echo "  --top N       Number of top functions to show (default: 30)"
     echo ""
     echo "Environment:"
@@ -158,14 +158,13 @@ echo ""
 echo "## Per-Module Contributions"
 echo ""
 
-# Parse linked libraries from target's CMakeLists.txt
+# Parse linked libraries from the example's first executable target.
 TARGET_CMAKE="$ROOT_DIR/examples/$TARGET/CMakeLists.txt"
-LINKED_LIBS=""
-if [ -f "$TARGET_CMAKE" ]; then
-    LINKED_LIBS=$(grep 'target_link_libraries' "$TARGET_CMAKE" \
-        | sed -E 's/.*target_link_libraries\([^ ]+ [A-Z]+ //' \
-        | sed -E 's/\)$//' || true)
+if [ ! -f "$TARGET_CMAKE" ]; then
+    echo "ERROR: Target CMakeLists.txt not found: $TARGET_CMAKE" >&2
+    exit 1
 fi
+LINKED_LIBS=$(bash "$SCRIPT_DIR/cmake_linked_libraries.sh" "$TARGET_CMAKE" --first-executable EMSCRIPTEN)
 
 echo "(pre-link archive sizes, before LTO)"
 echo ""

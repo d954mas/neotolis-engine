@@ -350,8 +350,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
-/* The descriptor is copied. Attachment texture handles are owned by the
- * render target and remain valid until destroy. */
+/* The descriptor is copied. Attachment textures belong to the target and
+ * remain valid until nt_gfx_destroy_render_target(). */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ---- */
@@ -372,6 +372,9 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 /* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
+bool nt_gfx_texture_ready(nt_texture_t tex);
+/* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
+bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
 
 /* ---- Draw state ---- */
 

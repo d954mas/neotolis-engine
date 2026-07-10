@@ -25,13 +25,13 @@ set_target_properties(rtt_showcase PROPERTIES
 set(RTT_SHOWCASE_PACK_NAMES rtt_showcase.ntpack)
 
 if(NOT EMSCRIPTEN)
-    add_executable(rtt_showcase_build_packs build_packs.c)
-    target_link_libraries(rtt_showcase_build_packs PRIVATE nt_builder nt_log)
-    target_compile_definitions(rtt_showcase_build_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(rtt_showcase_build_packs PRIVATE -U_DLL)
-    nt_set_warning_flags(rtt_showcase_build_packs)
-    nt_set_sanitizer_flags(rtt_showcase_build_packs)
-    set_target_properties(rtt_showcase_build_packs PROPERTIES
+    add_executable(build_rtt_showcase_packs build_packs.c)
+    target_link_libraries(build_rtt_showcase_packs PRIVATE nt_builder nt_log)
+    target_compile_definitions(build_rtt_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(build_rtt_showcase_packs PRIVATE -U_DLL)
+    nt_set_warning_flags(build_rtt_showcase_packs)
+    nt_set_sanitizer_flags(build_rtt_showcase_packs)
+    set_target_properties(build_rtt_showcase_packs PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${RTT_SHOWCASE_OUTPUT_DIR}"
     )
 
@@ -41,8 +41,8 @@ if(NOT EMSCRIPTEN)
     add_custom_command(
         OUTPUT ${RTT_SHOWCASE_PACK_FILES}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${RTT_SHOWCASE_PACK_DIR}"
-        COMMAND "$<TARGET_FILE:rtt_showcase_build_packs>" "${RTT_SHOWCASE_PACK_DIR}"
-        DEPENDS rtt_showcase_build_packs
+        COMMAND "$<TARGET_FILE:build_rtt_showcase_packs>" "${RTT_SHOWCASE_PACK_DIR}"
+        DEPENDS build_rtt_showcase_packs
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Building rtt_showcase pack(s)"
     )

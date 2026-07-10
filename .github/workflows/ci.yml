@@ -353,7 +353,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs rtt_showcase_build_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs build_rtt_showcase_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -389,7 +389,7 @@ jobs:
 
       - name: Build asset packs — rtt_showcase (release)
         timeout-minutes: 10
-        run: ./build/examples/rtt_showcase/native-release/rtt_showcase_build_packs build/examples/rtt_showcase
+        run: ./build/examples/rtt_showcase/native-release/build_rtt_showcase_packs build/examples/rtt_showcase
 
       # Bunnymark/rtt_showcase CMakeLists wire per-preset asset copy at configure time
       # only if .ntpack files exist (graceful local DX). The packs were just
@@ -666,6 +666,9 @@ jobs:
       # wasm-release (invisible to debug/native). Caught here at lint time, not at release runtime.
       - name: Run EM_JS_DEPS guard
         run: bash scripts/check_emjs_deps.sh
+
+      - name: Run CMake linked-library parser guard
+        run: bash scripts/check_cmake_linked_libraries.sh
 
       # devapi + ui/obs groups ON so all devapi TUs (incl. nt_devapi_ui.c + nt_devapi_obs.c) are in compile_commands.json.
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,

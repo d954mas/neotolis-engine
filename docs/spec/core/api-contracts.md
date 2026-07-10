@@ -141,6 +141,11 @@ Accessors such as `nt_gfx_render_target_color` and
 `nt_gfx_render_target_depth` return invalid texture handles when the target is
 invalid or the requested attachment does not exist. `nt_gfx_render_target_ready`
 reports whether a valid target currently has live backend storage.
+`nt_gfx_texture_ready` provides the same live-backend check for a texture handle.
+Both readiness queries return `false` for invalid handles, so callers can also
+use them after a failed resource-creation call.
+`nt_gfx_texture_size` writes a texture's logical dimensions to its two required
+outputs. Invalid handles write zero to both outputs and return `false`.
 
 `nt_gfx_resize_render_target` preserves the logical render-target handle and
 owned attachment texture handles, but reimages backend storage. Pixel contents
@@ -148,6 +153,16 @@ are undefined after a successful resize; failed resize leaves the previous
 backend storage active. WebGL context restore recreates backend objects from the
 retained descriptor; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
+
+Invalid render-target descriptors, exhausted configured target capacity, stale
+handles, direct mutation of owned attachments, and render-target lifecycle
+calls inside an active pass are developer errors and assert. Backend allocation,
+framebuffer completeness, resize, and context-restore failures remain runtime
+failures reported through invalid handles, `false`, or readiness queries.
+
+`nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
+Callers check readiness before beginning work that depends on restored GPU
+storage; there is no non-asserting pass-begin variant.
 
 ## Hot Path Rule
 

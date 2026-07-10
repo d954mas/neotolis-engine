@@ -134,7 +134,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
-    uint16_t max_render_targets = desc->max_render_targets != 0 ? desc->max_render_targets : nt_gfx_desc_defaults().max_render_targets;
+    NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
@@ -277,7 +278,13 @@ static nt_texture_t render_target_make_attachment(const nt_texture_desc_t *desc)
     return tex;
 }
 
-static bool render_target_filters_valid(const nt_render_target_desc_t *desc) { return desc->min_filter <= NT_FILTER_LINEAR && desc->mag_filter <= NT_FILTER_LINEAR; }
+static bool render_target_filters_valid(const nt_render_target_desc_t *desc) {
+    return desc->min_filter >= NT_FILTER_NEAREST && desc->min_filter <= NT_FILTER_LINEAR && desc->mag_filter >= NT_FILTER_NEAREST && desc->mag_filter <= NT_FILTER_LINEAR;
+}
+
+static bool render_target_wraps_valid(const nt_render_target_desc_t *desc) {
+    return desc->wrap_u >= NT_WRAP_CLAMP_TO_EDGE && desc->wrap_u <= NT_WRAP_MIRRORED_REPEAT && desc->wrap_v >= NT_WRAP_CLAMP_TO_EDGE && desc->wrap_v <= NT_WRAP_MIRRORED_REPEAT;
+}
 
 static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owned) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
@@ -285,6 +292,7 @@ static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owne
         return;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
+    NT_ASSERT((!s_gfx.texture_metas[slot].render_target_owned || allow_render_target_owned) && "destroy_texture: texture is owned by a render target");
     if (s_gfx.texture_metas[slot].render_target_owned && !allow_render_target_owned) {
         NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
         return;
@@ -314,6 +322,23 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
     s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
 }
 
+static nt_texture_t render_target_make_depth_attachment(const nt_texture_desc_t *desc) {
+    nt_texture_t result = {0};
+    uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
+    if (id == 0) {
+        NT_LOG_ERROR("texture pool full");
+        return result;
+    }
+    uint32_t backend = nt_gfx_backend_create_depth_texture(desc->width, desc->height);
+    if (backend == 0) {
+        nt_pool_free(&s_gfx.texture_pool, id);
+        return result;
+    }
+    result.id = id;
+    render_target_commit_attachment_backend(result, backend, desc);
+    return result;
+}
+
 static uint32_t render_target_create_attachment_backend(nt_texture_t tex, const nt_texture_desc_t *desc) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return 0;
@@ -336,6 +361,21 @@ static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture
     return true;
 }
 
+static bool render_target_recreate_depth_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return false;
+    }
+    uint32_t replacement = nt_gfx_backend_create_depth_texture(desc->width, desc->height);
+    if (replacement == 0) {
+        return false;
+    }
+    uint32_t slot = nt_pool_slot_index(tex.id);
+    uint32_t old_backend = s_gfx.texture_backends[slot];
+    render_target_commit_attachment_backend(tex, replacement, desc);
+    nt_gfx_backend_destroy_texture(old_backend);
+    return true;
+}
+
 static bool render_target_recreate_backend(uint32_t slot) {
     nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
     nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
@@ -346,7 +386,7 @@ static bool render_target_recreate_backend(uint32_t slot) {
     uint32_t depth_backend = 0;
     if (meta->desc.depth == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
-        if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
+        if (!render_target_recreate_depth_attachment(meta->depth, &depth_desc)) {
             meta->complete = false;
             return false;
         }
@@ -365,38 +405,22 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
     next_desc.height = height;
 
     nt_texture_desc_t color_desc = render_target_color_texture_desc(&next_desc);
-    uint32_t replacement_color = render_target_create_attachment_backend(meta->color, &color_desc);
-    if (replacement_color == 0) {
-        return false;
-    }
-
-    uint32_t replacement_depth = 0;
+    uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
+    uint32_t depth_backend = 0;
     nt_texture_desc_t depth_desc = {0};
     if (next_desc.depth == NT_RT_DEPTH_TEXTURE) {
         depth_desc = render_target_depth_texture_desc(&next_desc);
-        replacement_depth = render_target_create_attachment_backend(meta->depth, &depth_desc);
-        if (replacement_depth == 0) {
-            nt_gfx_backend_destroy_texture(replacement_color);
-            return false;
-        }
+        depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
     }
 
-    if (!nt_gfx_backend_resize_render_target(s_gfx.render_target_backends[slot], &next_desc, replacement_color, replacement_depth)) {
-        nt_gfx_backend_destroy_texture(replacement_depth);
-        nt_gfx_backend_destroy_texture(replacement_color);
+    if (!nt_gfx_backend_resize_render_target(s_gfx.render_target_backends[slot], &next_desc, color_backend, depth_backend)) {
         return false;
     }
 
-    uint32_t color_slot = nt_pool_slot_index(meta->color.id);
-    uint32_t old_color = s_gfx.texture_backends[color_slot];
-    render_target_commit_attachment_backend(meta->color, replacement_color, &color_desc);
-    nt_gfx_backend_destroy_texture(old_color);
+    render_target_commit_attachment_backend(meta->color, color_backend, &color_desc);
 
     if (next_desc.depth == NT_RT_DEPTH_TEXTURE) {
-        uint32_t depth_slot = nt_pool_slot_index(meta->depth.id);
-        uint32_t old_depth = s_gfx.texture_backends[depth_slot];
-        render_target_commit_attachment_backend(meta->depth, replacement_depth, &depth_desc);
-        nt_gfx_backend_destroy_texture(old_depth);
+        render_target_commit_attachment_backend(meta->depth, depth_backend, &depth_desc);
     }
 
     meta->desc = next_desc;
@@ -408,45 +432,44 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 void nt_gfx_begin_frame(void) {
-    if (nt_gfx_backend_is_context_lost()) {
-        if (!g_nt_gfx.context_lost) {
-            /* First detection: wipe all backend handles */
-            for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
-                s_gfx.shader_backends[i] = 0;
-            }
-            for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-                s_gfx.pipeline_backends[i] = 0;
-            }
-            for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-                s_gfx.buffer_backends[i] = 0;
-            }
-            for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-                s_gfx.texture_backends[i] = 0;
-            }
-            for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
-                s_gfx.render_target_backends[i] = 0;
-                s_gfx.render_target_metas[i].complete = false;
-            }
-            /* Mesh table: keep entries active. nt_resource_invalidate() will
-             * call deactivate_mesh() which returns slots to mesh pool.
-             * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
-            s_gfx.bound_pipeline = 0;
-            /* Sampler cache: zero only the GL backend ids — keys, descs
-             * and sampler_count stay so material-stored sampler.id values
-             * remain valid slot references. Backend is lazy-recreated on
-             * the next nt_gfx_make_sampler hit or on bind_sampler. */
-            for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
-                s_gfx.sampler_cache[i].backend = 0;
-            }
-            for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-                s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
-            }
-            /* Timer-segment GL queries are dead too — let backend re-allocate
-             * on next begin_segment via the lazy-find-or-alloc path. */
-            nt_gfx_backend_drop_timer_segments();
-            g_nt_gfx.context_lost = true;
-            NT_LOG_ERROR("WebGL context lost");
+    bool backend_context_lost = nt_gfx_backend_is_context_lost();
+    if (backend_context_lost && !g_nt_gfx.context_lost) {
+        /* First detection: wipe all backend handles */
+        for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+            s_gfx.shader_backends[i] = 0;
         }
+        for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+            s_gfx.pipeline_backends[i] = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+            s_gfx.buffer_backends[i] = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+            s_gfx.texture_backends[i] = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+            s_gfx.render_target_backends[i] = 0;
+            s_gfx.render_target_metas[i].complete = false;
+        }
+        /* Mesh table: keep entries active. nt_resource_invalidate() will
+         * call deactivate_mesh() which returns slots to mesh pool.
+         * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
+        s_gfx.bound_pipeline = 0;
+        /* Sampler cache: zero only the GL backend ids — keys, descs
+         * and sampler_count stay so material-stored sampler.id values
+         * remain valid slot references. Backend is lazy-recreated on
+         * the next nt_gfx_make_sampler hit or on bind_sampler. */
+        for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+            s_gfx.sampler_cache[i].backend = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+            s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
+        }
+        /* Timer-segment GL queries are dead too — let backend re-allocate
+         * on next begin_segment via the lazy-find-or-alloc path. */
+        nt_gfx_backend_drop_timer_segments();
+        g_nt_gfx.context_lost = true;
+        NT_LOG_ERROR("WebGL context lost");
         return; /* Skip frame */
     }
 
@@ -455,6 +478,7 @@ void nt_gfx_begin_frame(void) {
             NT_LOG_ERROR("WebGL context restore failed");
             return;
         }
+        g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
         g_nt_gfx.context_lost = false;
         g_nt_gfx.context_restored = true;
         bool render_targets_restored = true;
@@ -541,17 +565,24 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     return true;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool render_target_backend_for_pass(nt_render_target_t target, uint32_t *out_backend) {
     NT_ASSERT(out_backend != NULL);
+    if (out_backend == NULL) {
+        return false;
+    }
     *out_backend = 0;
     if (target.id == 0) {
         return true;
     }
-    if (!nt_pool_valid(&s_gfx.render_target_pool, target.id)) {
+    bool valid = nt_pool_valid(&s_gfx.render_target_pool, target.id);
+    NT_ASSERT(valid && "begin_pass: invalid render target");
+    if (!valid) {
         NT_LOG_ERROR("begin_pass: invalid render target");
         return false;
     }
     uint32_t slot = nt_pool_slot_index(target.id);
+    NT_ASSERT(s_gfx.render_target_metas[slot].complete && "begin_pass: render target is not ready");
     if (!s_gfx.render_target_metas[slot].complete) {
         NT_LOG_ERROR("begin_pass: incomplete render target");
         return false;
@@ -789,29 +820,47 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc) {
     nt_render_target_t result = NT_RENDER_TARGET_INVALID;
+    NT_ASSERT(desc != NULL);
     if (!desc) {
         return result;
     }
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
+    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("make_render_target called inside a pass");
+        return result;
+    }
+    NT_ASSERT(desc->width > 0 && desc->height > 0 && "make_render_target: zero dimension");
     if (desc->width == 0 || desc->height == 0) {
         NT_LOG_ERROR("make_render_target: zero dimension");
         return result;
     }
+    NT_ASSERT(desc->color_format == NT_PIXEL_RGBA8 && "make_render_target: unsupported color format");
     if (desc->color_format != NT_PIXEL_RGBA8) {
         NT_LOG_ERROR("make_render_target: unsupported color format");
         return result;
     }
-    if (desc->depth > NT_RT_DEPTH_TEXTURE) {
+    bool depth_valid = desc->depth >= NT_RT_DEPTH_NONE && desc->depth <= NT_RT_DEPTH_TEXTURE;
+    NT_ASSERT(depth_valid && "make_render_target: invalid depth mode");
+    if (!depth_valid) {
         NT_LOG_ERROR("make_render_target: invalid depth mode");
         return result;
     }
+    NT_ASSERT(render_target_filters_valid(desc) && "make_render_target: render target attachments require NEAREST or LINEAR filters");
     if (!render_target_filters_valid(desc)) {
         NT_LOG_ERROR("make_render_target: render target attachments do not support mipmap or invalid filters");
         return result;
     }
+    NT_ASSERT(render_target_wraps_valid(desc) && "make_render_target: invalid attachment wrap mode");
+    if (!render_target_wraps_valid(desc)) {
+        NT_LOG_ERROR("make_render_target: invalid attachment wrap mode");
+        return result;
+    }
 
     uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);
+    NT_ASSERT(id != 0 && "render target pool full; raise nt_gfx_desc_t.max_render_targets");
     if (id == 0) {
         NT_LOG_ERROR("render target pool full");
         return result;
@@ -828,7 +877,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     nt_texture_t depth = {0};
     if (desc->depth == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(desc);
-        depth = render_target_make_attachment(&depth_desc);
+        depth = render_target_make_depth_attachment(&depth_desc);
         if (depth.id == 0) {
             destroy_texture_slot(color, true);
             nt_pool_free(&s_gfx.render_target_pool, id);
@@ -903,8 +952,15 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
 void nt_gfx_destroy_texture(nt_texture_t tex) { destroy_texture_slot(tex, false); }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
-    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+    bool valid = nt_pool_valid(&s_gfx.render_target_pool, rt.id);
+    NT_ASSERT(valid && "destroy_render_target: invalid handle");
+    if (!valid) {
         NT_LOG_ERROR("destroy_render_target: invalid handle");
+        return;
+    }
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
+    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("destroy_render_target called inside a pass");
         return;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
@@ -919,10 +975,18 @@ void nt_gfx_destroy_render_target(nt_render_target_t rt) {
 }
 
 bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
-    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+    bool valid = nt_pool_valid(&s_gfx.render_target_pool, rt.id);
+    NT_ASSERT(valid && "resize_render_target: invalid handle");
+    if (!valid) {
         NT_LOG_ERROR("resize_render_target: invalid handle");
         return false;
     }
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
+    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("resize_render_target called inside a pass");
+        return false;
+    }
+    NT_ASSERT(width > 0 && height > 0 && "resize_render_target: zero dimension");
     if (width == 0 || height == 0) {
         NT_LOG_ERROR("resize_render_target: zero dimension");
         return false;
@@ -954,6 +1018,29 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt) {
         return false;
     }
     return s_gfx.render_target_metas[nt_pool_slot_index(rt.id)].complete;
+}
+
+bool nt_gfx_texture_ready(nt_texture_t tex) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return false;
+    }
+    return s_gfx.texture_backends[nt_pool_slot_index(tex.id)] != 0;
+}
+
+bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height) {
+    NT_ASSERT(out_width != NULL && out_height != NULL);
+    if (out_width == NULL || out_height == NULL) {
+        return false;
+    }
+    *out_width = 0;
+    *out_height = 0;
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return false;
+    }
+    uint32_t slot = nt_pool_slot_index(tex.id);
+    *out_width = s_gfx.texture_metas[slot].width;
+    *out_height = s_gfx.texture_metas[slot].height;
+    return true;
 }
 
 /* ---- Draw state ---- */
@@ -1416,6 +1503,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
         return;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
+    NT_ASSERT(!s_gfx.texture_metas[slot].render_target_owned && "update_texture: texture is owned by a render target");
     if (s_gfx.texture_metas[slot].render_target_owned) {
         NT_LOG_ERROR("update_texture: texture is owned by a render target");
         return;

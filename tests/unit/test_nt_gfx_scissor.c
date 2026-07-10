@@ -14,6 +14,7 @@ void setUp(void) {
         .max_buffers = 8,
         .max_textures = 4,
         .max_meshes = 4,
+        .max_render_targets = 16,
     });
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }

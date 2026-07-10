@@ -1,6 +1,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "postfx/nt_postfx_blur.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
 #include <math.h>
@@ -92,24 +93,26 @@ static void test_kernel_derives_sigma_when_zero(void) {
     }
 }
 
-static void test_invalid_descriptors_return_false_without_draw(void) {
+static void test_invalid_descriptors_assert_without_draw(void) {
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
     nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
     nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
     nt_texture_t source = nt_gfx_render_target_color(dest);
 
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(NULL));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = (nt_texture_t){0}, .temp = temp, .dest = dest, .radius = 4.0F}));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = NT_RENDER_TARGET_INVALID, .dest = dest, .radius = 4.0F}));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = NT_RENDER_TARGET_INVALID, .radius = 4.0F}));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 0.0F}));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = -1.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = (nt_texture_t){0}, .temp = temp, .dest = dest, .radius = 4.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = NT_RENDER_TARGET_INVALID, .dest = dest, .radius = 4.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = NT_RENDER_TARGET_INVALID, .radius = 4.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 0.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = -1.0F}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = NAN}));
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 4.0F, .sigma = -1.0F}));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
 }
 
-static void test_feedback_aliases_return_false_without_draw(void) {
+static void test_feedback_aliases_assert_without_draw(void) {
     nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
     nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
@@ -118,13 +121,13 @@ static void test_feedback_aliases_return_false_without_draw(void) {
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
     nt_texture_t source = nt_gfx_render_target_color(source_rt);
 
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = nt_gfx_render_target_color(temp),
         .temp = temp,
         .dest = dest,
         .radius = 4.0F,
     }));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = source,
         .temp = dest,
         .dest = dest,
@@ -134,7 +137,86 @@ static void test_feedback_aliases_return_false_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
 }
 
-static void test_incomplete_targets_return_false_without_draw(void) {
+static void test_depth_feedback_alias_asserts_without_draw(void) {
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    temp_desc.depth = NT_RT_DEPTH_TEXTURE;
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+
+    nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_depth(temp),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+}
+
+static void test_stale_source_asserts_without_draw(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t stale_source = nt_gfx_render_target_color(source_rt);
+    nt_gfx_destroy_render_target(source_rt);
+
+    nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = stale_source,
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+}
+
+static void test_blur_outside_frame_asserts_without_draw(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+}
+
+static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static void test_incomplete_targets_assert_without_draw(void) {
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
     nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
     nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
@@ -149,7 +231,7 @@ static void test_incomplete_targets_return_false_without_draw(void) {
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(temp));
-    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = nt_gfx_render_target_color(source_rt),
         .temp = temp,
         .dest = dest,
@@ -158,6 +240,26 @@ static void test_incomplete_targets_return_false_without_draw(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
     nt_gfx_end_frame();
+}
+
+static void test_mixed_size_targets_assert_without_draw(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(32, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+
+    nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
 }
 
 static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
@@ -171,17 +273,26 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     uint32_t creates_before = nt_gfx_stub_test_render_target_create_count();
 
     nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = source,
         .temp = temp,
         .dest = dest,
         .radius = 4.0F,
-    }));
+    });
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_stub_test_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+}
+
+static void test_blur_lifecycle_misuse_asserts(void) {
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_init());
+
+    nt_postfx_blur_shutdown();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_restore_gpu());
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
 }
 
 static void test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets(void) {
@@ -207,10 +318,16 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_kernel_is_symmetric_normalized_and_deterministic);
     RUN_TEST(test_kernel_derives_sigma_when_zero);
-    RUN_TEST(test_invalid_descriptors_return_false_without_draw);
-    RUN_TEST(test_feedback_aliases_return_false_without_draw);
-    RUN_TEST(test_incomplete_targets_return_false_without_draw);
+    RUN_TEST(test_invalid_descriptors_assert_without_draw);
+    RUN_TEST(test_feedback_aliases_assert_without_draw);
+    RUN_TEST(test_depth_feedback_alias_asserts_without_draw);
+    RUN_TEST(test_stale_source_asserts_without_draw);
+    RUN_TEST(test_blur_outside_frame_asserts_without_draw);
+    RUN_TEST(test_blur_inside_active_pass_asserts_without_closing_it);
+    RUN_TEST(test_incomplete_targets_assert_without_draw);
+    RUN_TEST(test_mixed_size_targets_assert_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
+    RUN_TEST(test_blur_lifecycle_misuse_asserts);
     RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);
     return UNITY_END();
 }
