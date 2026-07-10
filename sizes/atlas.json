@@ -1426,5 +1426,47 @@
       "raw": 9232449,
       "gzip": 1539192
     }
+  },
+  {
+    "commit": "43a88e3",
+    "date": "2026-07-10T20:08:00Z",
+    "files": {
+      "index.html": {
+        "raw": 2556,
+        "gzip": 1282
+      },
+      "index_simd.wasm": {
+        "raw": 816999,
+        "gzip": 332083
+      },
+      "index.wasm": {
+        "raw": 735540,
+        "gzip": 317865
+      },
+      "index_simd.js": {
+        "raw": 19924,
+        "gzip": 7965
+      },
+      "index.js": {
+        "raw": 19924,
+        "gzip": 7960
+      },
+      "assets/atlas_demo.ntpack": {
+        "raw": 8397064,
+        "gzip": 1198717
+      }
+    },
+    "engine": {
+      "raw": 839479,
+      "gzip": 341330
+    },
+    "resources": {
+      "raw": 8397064,
+      "gzip": 1198717
+    },
+    "total": {
+      "raw": 9236543,
+      "gzip": 1540047
+    }
   }
 ]

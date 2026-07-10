@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 8d0133c
+# Commit: 43a88e3
 
 ## WASM Section Sizes
 
@@ -57,21 +57,13 @@ TOTAL              19634 B
 Total functions: 36
 Total code size: 17217 B
 
-## Per-Module Contributions
+## Built Engine Archives
 
-(pre-link archive sizes, before LTO)
+(all archives found in the preset output; pre-link sizes before LTO, not a link graph)
 
 Module                         Size
 ------------------------ ----------
 libnt_app.a                 2666 B
-libnt_core.a                2628 B
-libnt_input.a              19520 B
-libnt_log.a                11954 B
-libnt_window.a              4616 B
------------------------- ----------
-TOTAL (linked)             41384 B
-
-Not linked to hello:
 libnt_app_stub.a            2620 B
 libnt_atlas.a               6728 B
 libnt_base64.a               964 B
@@ -79,19 +71,22 @@ libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
+libnt_core.a                2628 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       5530 B
 libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                55034 B
-libnt_gfx_stub.a           31960 B
+libnt_gfx.a                66750 B
+libnt_gfx_stub.a           39194 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
+libnt_input.a              19520 B
 libnt_input_stub.a         23432 B
 libnt_introspect.a          5080 B
+libnt_log.a                11954 B
 libnt_log_ring.a          595390 B
 libnt_log_stub.a             746 B
 libnt_material.a            4428 B
@@ -102,6 +97,7 @@ libnt_mesh_renderer.a       8060 B
 libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
+libnt_postfx_blur.a         7226 B
 libnt_render.a              5436 B
 libnt_resource.a          188716 B
 libnt_shape_renderer.a   1140976 B
@@ -114,8 +110,10 @@ libnt_transform_comp.a      6872 B
 libnt_ui.a                614048 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
+libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
-
+------------------------ ----------
+TOTAL (archives)         5892360 B
 
 ## Data Segments Summary
 
