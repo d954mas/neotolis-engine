@@ -15,7 +15,7 @@ usage() {
     echo "Produce a diff-friendly WASM binary analysis report with 4 sections:"
     echo "  1. WASM section sizes"
     echo "  2. Top N functions by size"
-    echo "  3. Per-module contributions (.a archive sizes)"
+    echo "  3. Built engine archives (.a archive sizes)"
     echo "  4. Data segments summary"
     echo ""
     echo "Arguments:"
@@ -153,64 +153,31 @@ echo "Total code size: $FUNC_TOTAL B"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Section 3: Per-Module Contributions
+# Section 3: Built Engine Archives
 # ---------------------------------------------------------------------------
-echo "## Per-Module Contributions"
+echo "## Built Engine Archives"
 echo ""
-
-# Parse linked libraries from the example's first executable target.
-TARGET_CMAKE="$ROOT_DIR/examples/$TARGET/CMakeLists.txt"
-if [ ! -f "$TARGET_CMAKE" ]; then
-    echo "ERROR: Target CMakeLists.txt not found: $TARGET_CMAKE" >&2
-    exit 1
-fi
-LINKED_LIBS=$(bash "$SCRIPT_DIR/cmake_linked_libraries.sh" "$TARGET_CMAKE" --first-executable EMSCRIPTEN)
-
-echo "(pre-link archive sizes, before LTO)"
+echo "(all archives found in the preset output; pre-link sizes before LTO, not a link graph)"
 echo ""
 printf "%-24s %10s\n" "Module" "Size"
 printf "%-24s %10s\n" "------------------------" "----------"
 
-LINKED_TOTAL=0
-NOT_LINKED=""
+ARCHIVE_TOTAL=0
 
 if [ -d "$ENGINE_LIB_DIR" ]; then
     for afile in "$ENGINE_LIB_DIR"/*.a; do
         [ -f "$afile" ] || continue
         fname=$(basename "$afile")
         fsize=$(wc -c < "$afile" | tr -d ' ')
-
-        # Strip lib prefix and .a suffix to get CMake target name
-        cmake_name=$(echo "$fname" | sed -E 's/^lib//; s/\.a$//')
-
-        # Check if this module is in linked libraries
-        is_linked=0
-        for lib in $LINKED_LIBS; do
-            if [ "$lib" = "$cmake_name" ]; then
-                is_linked=1
-                break
-            fi
-        done
-
-        if [ "$is_linked" -eq 1 ]; then
-            LINKED_TOTAL=$((LINKED_TOTAL + fsize))
-            printf "%-24s %7d B\n" "$fname" "$fsize"
-        else
-            NOT_LINKED="${NOT_LINKED}$(printf "%-24s %7d B" "$fname" "$fsize")\n"
-        fi
+        ARCHIVE_TOTAL=$((ARCHIVE_TOTAL + fsize))
+        printf "%-24s %7d B\n" "$fname" "$fsize"
     done
 else
     echo "(no .a files found in $ENGINE_LIB_DIR)"
 fi
 
 printf "%-24s %10s\n" "------------------------" "----------"
-printf "%-24s %7d B\n" "TOTAL (linked)" "$LINKED_TOTAL"
-
-if [ -n "$NOT_LINKED" ]; then
-    echo ""
-    echo "Not linked to $TARGET:"
-    printf "%b\n" "$NOT_LINKED"
-fi
+printf "%-24s %7d B\n" "TOTAL (archives)" "$ARCHIVE_TOTAL"
 echo ""
 
 # ---------------------------------------------------------------------------

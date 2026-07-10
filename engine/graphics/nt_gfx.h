@@ -381,7 +381,8 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
- * to texture state. RG16UI/DEPTH* require NEAREST min/mag. */
+ * to texture state. RG16UI/DEPTH* require NEAREST min/mag. Mipmap min filters
+ * require a complete chain; a 1x1 base level is already complete. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----

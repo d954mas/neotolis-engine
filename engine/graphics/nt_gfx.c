@@ -1128,6 +1128,20 @@ uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     return s_gfx.sampler_cache[s.id - 1].backend;
 }
 
+uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return 0;
+    }
+    return s_gfx.texture_backends[nt_pool_slot_index(tex.id)];
+}
+
+uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt) {
+    if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        return 0;
+    }
+    return s_gfx.render_target_backends[nt_pool_slot_index(rt.id)];
+}
+
 bool nt_gfx_test_scissor_enabled(void) { return s_gfx.scissor_enabled; }
 
 void nt_gfx_test_scissor_rect(int out[4]) {
@@ -1190,15 +1204,30 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     return (nt_sampler_t){.id = slot + 1};
 }
 
+static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
+    uint16_t max_dim = meta->width > meta->height ? meta->width : meta->height;
+    uint8_t required_levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1;
+        required_levels++;
+    }
+    return meta->mip_count >= required_levels;
+}
+
 static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_desc_t *desc) {
     uint32_t texture_id = s_gfx.bound_texture_ids[slot];
     if (!nt_pool_valid(&s_gfx.texture_pool, texture_id)) {
         return true;
     }
     uint32_t texture_slot = nt_pool_slot_index(texture_id);
-    uint8_t format = s_gfx.texture_metas[texture_slot].format;
+    const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
+    uint8_t format = meta->format;
     bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
-    return !nearest_only || (desc->min_filter == NT_FILTER_NEAREST && desc->mag_filter == NT_FILTER_NEAREST);
+    if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
+        return false;
+    }
+    bool mipmap_filter = desc->min_filter > NT_FILTER_LINEAR;
+    return !mipmap_filter || texture_has_complete_mip_chain(meta);
 }
 
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
@@ -1217,7 +1246,7 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
     NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
     nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[s.id - 1];
     bool sampler_compatible = bound_texture_sampler_compatible(slot, &e->desc);
-    NT_ASSERT(sampler_compatible && "bind_sampler: texture format requires NEAREST filtering");
+    NT_ASSERT(sampler_compatible && "bind_sampler: sampler is incompatible with texture storage");
     if (!sampler_compatible) {
         return;
     }

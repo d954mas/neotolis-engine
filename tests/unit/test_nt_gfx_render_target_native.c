@@ -115,13 +115,16 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
-    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &value);
+    GLint sampler = 0;
+    glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
+    TEST_ASSERT_NOT_EQUAL_INT(0, sampler);
+    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_MIN_FILTER, &value);
     TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
-    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &value);
+    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_MAG_FILTER, &value);
     TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
-    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &value);
+    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_WRAP_S, &value);
     TEST_ASSERT_EQUAL_INT(GL_REPEAT, value);
-    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &value);
+    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_WRAP_T, &value);
     TEST_ASSERT_EQUAL_INT(GL_MIRRORED_REPEAT, value);
 
     nt_gfx_destroy_render_target(target);

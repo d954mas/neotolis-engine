@@ -123,12 +123,11 @@ run_tidy_gate() {
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links, linked libraries, CRT pins)"
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
 bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
-bash scripts/check_cmake_linked_libraries.sh
 bash scripts/check_crt_pins.sh
 ok
 

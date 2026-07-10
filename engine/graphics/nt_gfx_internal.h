@@ -114,6 +114,10 @@ void nt_gfx_backend_drop_timer_segments(void);
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
 uint32_t nt_gfx_stub_test_last_pass_target(void);
+uint32_t nt_gfx_stub_test_pass_target_count(void);
+uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index);
+uint32_t nt_gfx_stub_test_bound_texture_count(void);
+uint32_t nt_gfx_stub_test_bound_texture_at(uint32_t index);
 uint32_t nt_gfx_stub_test_render_target_create_count(void);
 uint32_t nt_gfx_stub_test_render_target_resize_count(void);
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
@@ -140,6 +144,8 @@ void nt_gfx_stub_test_reset(void);
  * (or any non-stub) backend, so a test running with the real backend can
  * still reach this without enabling stub-only state. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
+uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
+uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

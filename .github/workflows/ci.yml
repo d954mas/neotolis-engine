@@ -667,9 +667,6 @@ jobs:
       - name: Run EM_JS_DEPS guard
         run: bash scripts/check_emjs_deps.sh
 
-      - name: Run CMake linked-library parser guard
-        run: bash scripts/check_cmake_linked_libraries.sh
-
       # devapi + ui/obs groups ON so all devapi TUs (incl. nt_devapi_ui.c + nt_devapi_obs.c) are in compile_commands.json.
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
       # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.

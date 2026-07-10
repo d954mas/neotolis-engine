@@ -81,6 +81,9 @@ requires `NEAREST` minification and magnification for depth textures. Wrap state
 remains explicit and may use clamp, repeat, or mirrored repeat. Binding a
 separate sampler does not relax the depth filtering restriction.
 
+Sampler overrides with a mipmap minification filter require complete mip
+storage for the bound texture. A 1x1 base level is already a complete chain.
+
 This capability supplies low-level targets and depth textures only. It does not
 define light cameras, PCF, cascades, shadow atlases, material shadow integration,
 or a shadow-map system.

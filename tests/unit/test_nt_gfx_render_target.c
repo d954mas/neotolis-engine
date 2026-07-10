@@ -359,6 +359,42 @@ static void test_integer_texture_rejects_linear_sampler_override(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0));
 }
 
+static nt_sampler_t make_mipmap_sampler(void) {
+    return nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    });
+}
+
+static void test_render_target_color_rejects_mipmap_sampler_override(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_sampler_t mipmap_sampler = make_mipmap_sampler();
+
+    nt_gfx_bind_texture(nt_gfx_render_target_color(rt), 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(mipmap_sampler, 0));
+}
+
+static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
+    const uint8_t pixel[4] = {255, 255, 255, 255};
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 1,
+        .height = 1,
+        .data = pixel,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    });
+    nt_sampler_t mipmap_sampler = make_mipmap_sampler();
+
+    nt_gfx_bind_texture(texture, 0);
+    nt_gfx_bind_sampler(mipmap_sampler, 0);
+}
+
 static void test_invalid_render_target_lifecycle_arguments_assert(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
@@ -600,6 +636,8 @@ int main(void) {
     RUN_TEST(test_make_render_target_rejects_invalid_sampler_modes);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);
     RUN_TEST(test_integer_texture_rejects_linear_sampler_override);
+    RUN_TEST(test_render_target_color_rejects_mipmap_sampler_override);
+    RUN_TEST(test_one_pixel_texture_accepts_mipmap_sampler_override);
     RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_incomplete_target);
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);

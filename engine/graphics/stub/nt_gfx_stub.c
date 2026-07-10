@@ -6,9 +6,14 @@
 
 #ifdef NT_TEST_ACCESS
 #define NT_GFX_STUB_MAX_SLOTS 16
+#define NT_GFX_STUB_HISTORY_CAPACITY 16
 static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
 static uint32_t s_stub_bind_sampler_count;
 static uint32_t s_stub_last_pass_target;
+static uint32_t s_stub_pass_targets[NT_GFX_STUB_HISTORY_CAPACITY];
+static uint32_t s_stub_pass_target_count;
+static uint32_t s_stub_bound_textures[NT_GFX_STUB_HISTORY_CAPACITY];
+static uint32_t s_stub_bound_texture_count;
 static uint32_t s_stub_render_target_create_count;
 static uint32_t s_stub_render_target_resize_count;
 static uint32_t s_stub_render_target_destroy_count;
@@ -21,6 +26,7 @@ static uint16_t s_stub_last_render_target_height;
 static nt_render_target_depth_t s_stub_last_render_target_depth;
 static nt_texture_desc_t s_stub_last_texture_desc;
 static uint32_t s_stub_last_depth_texture_backend;
+static uint32_t s_stub_next_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
 static bool s_stub_fail_next_texture_create;
@@ -37,6 +43,10 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
 
 uint32_t nt_gfx_stub_test_bind_sampler_count(void) { return s_stub_bind_sampler_count; }
 uint32_t nt_gfx_stub_test_last_pass_target(void) { return s_stub_last_pass_target; }
+uint32_t nt_gfx_stub_test_pass_target_count(void) { return s_stub_pass_target_count; }
+uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index) { return index < s_stub_pass_target_count ? s_stub_pass_targets[index] : 0; }
+uint32_t nt_gfx_stub_test_bound_texture_count(void) { return s_stub_bound_texture_count; }
+uint32_t nt_gfx_stub_test_bound_texture_at(uint32_t index) { return index < s_stub_bound_texture_count ? s_stub_bound_textures[index] : 0; }
 uint32_t nt_gfx_stub_test_render_target_create_count(void) { return s_stub_render_target_create_count; }
 uint32_t nt_gfx_stub_test_render_target_resize_count(void) { return s_stub_render_target_resize_count; }
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
@@ -61,6 +71,8 @@ void nt_gfx_stub_test_reset(void) {
     }
     s_stub_bind_sampler_count = 0;
     s_stub_last_pass_target = 0;
+    s_stub_pass_target_count = 0;
+    s_stub_bound_texture_count = 0;
     s_stub_render_target_create_count = 0;
     s_stub_render_target_resize_count = 0;
     s_stub_render_target_destroy_count = 0;
@@ -73,6 +85,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_last_render_target_depth = NT_RT_DEPTH_NONE;
     s_stub_last_texture_desc = (nt_texture_desc_t){0};
     s_stub_last_depth_texture_backend = 0;
+    s_stub_next_texture_backend = 0;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_next_texture_create = false;
@@ -105,6 +118,9 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     (void)desc;
 #ifdef NT_TEST_ACCESS
     s_stub_last_pass_target = render_target_backend;
+    if (s_stub_pass_target_count < NT_GFX_STUB_HISTORY_CAPACITY) {
+        s_stub_pass_targets[s_stub_pass_target_count++] = render_target_backend;
+    }
 #else
     (void)render_target_backend;
 #endif
@@ -181,9 +197,11 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
         s_stub_fail_next_texture_create = false;
         return 0;
     }
-#endif
+    return ++s_stub_next_texture_backend;
+#else
     (void)desc;
     return 1;
+#endif
 }
 
 uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
@@ -198,7 +216,11 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     (void)wrap_u;
     (void)wrap_v;
     (void)transcode_target;
+#ifdef NT_TEST_ACCESS
+    return ++s_stub_next_texture_backend;
+#else
     return 1;
+#endif
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; }
@@ -259,8 +281,14 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
-    (void)backend_handle;
     (void)slot;
+#ifdef NT_TEST_ACCESS
+    if (s_stub_bound_texture_count < NT_GFX_STUB_HISTORY_CAPACITY) {
+        s_stub_bound_textures[s_stub_bound_texture_count++] = backend_handle;
+    }
+#else
+    (void)backend_handle;
+#endif
 }
 
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size) {

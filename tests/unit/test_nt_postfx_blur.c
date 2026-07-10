@@ -276,6 +276,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
     nt_texture_t source = nt_gfx_render_target_color(source_rt);
+    nt_texture_t temp_color = nt_gfx_render_target_color(temp);
     uint32_t creates_before = nt_gfx_stub_test_render_target_create_count();
 
     nt_gfx_begin_frame();
@@ -290,7 +291,12 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_stub_test_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_pass_target());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_pass_target_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_stub_test_pass_target_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(dest), nt_gfx_stub_test_pass_target_at(1));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(source), nt_gfx_stub_test_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_stub_test_bound_texture_at(1));
 }
 
 static void test_blur_lifecycle_misuse_asserts(void) {
