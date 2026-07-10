@@ -686,6 +686,13 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
+    # --- Basis encode + runtime transcode in one exe ---
+    # Transcoder listed first on purpose: mirrors a runtime-first consumer link line,
+    # which is the order that duplicated the basisu TU symbols before the shared target.
+    add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
+    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity)
+    nt_setup_test_target(test_basisu_roundtrip)
+
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
     target_link_libraries(test_mesh_renderer PRIVATE

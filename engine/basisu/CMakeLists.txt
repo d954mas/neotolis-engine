@@ -2,6 +2,30 @@
 # C++ module -- enable_language(CXX) scoped to this subdirectory
 enable_language(CXX)
 
+# Shared transcoder build config. The builder's encoder compiles the same basisu
+# headers and links this TU, so its defines must match exactly (ODR).
+add_library(nt_basisu_transcoder_config INTERFACE)
+# Disable unused transcode targets to minimize WASM size
+target_compile_definitions(nt_basisu_transcoder_config INTERFACE
+    BASISD_SUPPORT_DXT1=0
+    BASISD_SUPPORT_DXT5A=0
+    BASISD_SUPPORT_PVRTC1=0
+    BASISD_SUPPORT_PVRTC2=0
+    BASISD_SUPPORT_FXT1=0
+    BASISD_SUPPORT_ATC=0
+    BASISD_SUPPORT_KTX2_ZSTD=0
+    BASISD_SUPPORT_BC7=1
+    BASISD_SUPPORT_ASTC=1
+    BASISD_SUPPORT_ETC2_EAC_A8=1
+)
+if(EMSCRIPTEN)
+    # Runtime .basis loading never reads KTX2; the encoder does not build on WASM
+    target_compile_definitions(nt_basisu_transcoder_config INTERFACE BASISD_SUPPORT_KTX2=0)
+else()
+    # Native superset: the encoder requires KTX2 support in the shared TU
+    target_compile_definitions(nt_basisu_transcoder_config INTERFACE BASISD_SUPPORT_KTX2=1)
+endif()
+
 add_library(nt_basisu_transcoder STATIC
     nt_basisu_transcoder.cpp
     ${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp
@@ -9,27 +33,13 @@ add_library(nt_basisu_transcoder STATIC
 
 target_include_directories(nt_basisu_transcoder PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_include_directories(nt_basisu_transcoder PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
+target_link_libraries(nt_basisu_transcoder PRIVATE nt_basisu_transcoder_config)
 
 # -fno-strict-aliasing required by Basis transcoder (TEX-10)
 target_compile_options(nt_basisu_transcoder PRIVATE -fno-strict-aliasing)
 
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_transcoder PRIVATE -w)
-
-# Disable unused transcode targets to minimize WASM size
-target_compile_definitions(nt_basisu_transcoder PRIVATE
-    BASISD_SUPPORT_DXT1=0
-    BASISD_SUPPORT_DXT5A=0
-    BASISD_SUPPORT_PVRTC1=0
-    BASISD_SUPPORT_PVRTC2=0
-    BASISD_SUPPORT_FXT1=0
-    BASISD_SUPPORT_ATC=0
-    BASISD_SUPPORT_KTX2=0
-    BASISD_SUPPORT_KTX2_ZSTD=0
-    BASISD_SUPPORT_BC7=1
-    BASISD_SUPPORT_ASTC=1
-    BASISD_SUPPORT_ETC2_EAC_A8=1
-)
 
 # Match ASAN runtime: release static CRT + _ITERATOR_DEBUG_LEVEL=0 in debug
 target_compile_definitions(nt_basisu_transcoder PRIVATE

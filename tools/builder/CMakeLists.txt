@@ -3,23 +3,21 @@ enable_language(CXX)
 
 file(GLOB BASISU_ENCODER_SOURCES "${NT_ENGINE_ROOT}/deps/basisu/encoder/*.cpp")
 file(GLOB BASISU_ENCODER_3RDPARTY "${NT_ENGINE_ROOT}/deps/basisu/encoder/3rdparty/*.cpp")
-set(BASISU_TRANSCODER_SRC "${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp")
 
 add_library(nt_basisu_encoder STATIC
     nt_basisu_encoder.cpp
     ${BASISU_ENCODER_SOURCES}
     ${BASISU_ENCODER_3RDPARTY}
-    ${BASISU_TRANSCODER_SRC}
 )
 target_include_directories(nt_basisu_encoder PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${NT_ENGINE_ROOT}/deps/basisu/encoder
     ${NT_ENGINE_ROOT}/deps/basisu/transcoder
 )
-# Encoder requires KTX2 support enabled in transcoder
+# Transcoder TU comes from the shared runtime target (one copy per exe); the config
+# target keeps the encoder's header defines identical to that TU (ODR).
+target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder nt_basisu_transcoder_config)
 target_compile_definitions(nt_basisu_encoder PRIVATE
-    BASISD_SUPPORT_KTX2=1
-    BASISD_SUPPORT_KTX2_ZSTD=0
     _CRT_SECURE_NO_WARNINGS
     # Match ASAN runtime's iterator debug level (0) to avoid /failifmismatch link error
     $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
