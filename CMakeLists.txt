@@ -15,7 +15,7 @@ option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
 
 # OFF lets an exe that embeds both builder and runtime pick its own CRT (see nt_set_static_crt).
-option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the consumer's CMAKE_MSVC_RUNTIME_LIBRARY." ON)
+option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the embedding project's CRT." ON)
 
 # Web counterpart to the native KHR_debug callback. ONE flag enables Emscripten GL_ASSERTIONS (validate
 # GL call params) + GL_DEBUG (log every GL call). OFF by default EVEN in debug: GL_DEBUG logs every GL

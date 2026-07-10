@@ -5,7 +5,8 @@ enable_language(CXX)
 # Shared transcoder build config. The builder's encoder compiles the same basisu
 # headers and links this TU, so its defines must match exactly (ODR).
 add_library(nt_basisu_transcoder_config INTERFACE)
-# Disable unused transcode targets to minimize WASM size
+# Disable unused transcode targets: minimizes WASM size and caps the formats
+# available to BOTH consumers (the builder's validate/stats paths included)
 target_compile_definitions(nt_basisu_transcoder_config INTERFACE
     BASISD_SUPPORT_DXT1=0
     BASISD_SUPPORT_DXT5A=0

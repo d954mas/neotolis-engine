@@ -375,7 +375,6 @@ if(NOT EMSCRIPTEN)
     add_executable(test_font unit/test_font.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub stb_truetype unity)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
-    nt_set_static_crt(nt_font)
     nt_setup_test_target(test_font)
 
     # --- Font measure benchmark ---
@@ -687,8 +686,8 @@ if(NOT EMSCRIPTEN)
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
     # --- Basis encode + runtime transcode in one exe ---
-    # Transcoder listed first on purpose: mirrors a runtime-first consumer link line,
-    # which is the order that duplicated the basisu TU symbols before the shared target.
+    # Transcoder listed first on purpose: the runtime-first consumer link line that
+    # must resolve against a single shared basisu TU. Do not reorder.
     add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
     target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity)
     nt_setup_test_target(test_basisu_roundtrip)
