@@ -28,7 +28,7 @@ if(NOT EMSCRIPTEN)
     add_executable(build_rtt_showcase_packs build_packs.c)
     target_link_libraries(build_rtt_showcase_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(build_rtt_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(build_rtt_showcase_packs PRIVATE -U_DLL)
+    nt_set_static_crt(build_rtt_showcase_packs)
     nt_set_warning_flags(build_rtt_showcase_packs)
     nt_set_sanitizer_flags(build_rtt_showcase_packs)
     set_target_properties(build_rtt_showcase_packs PROPERTIES
