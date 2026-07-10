@@ -102,8 +102,6 @@ typedef struct {
     GLuint depth_rbo;
     uint16_t width;
     uint16_t height;
-    nt_render_target_depth_t depth;
-    bool complete;
 } nt_gfx_gl_render_target_t;
 
 /* ---- File-scope state ---- */
@@ -680,8 +678,8 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
             return;
         }
         const nt_gfx_gl_render_target_t *rt = &s_render_targets[render_target_backend];
-        NT_ASSERT(rt->complete && rt->fbo != 0 && "begin_pass: incomplete GL render target");
-        if (!rt->complete || rt->fbo == 0) {
+        NT_ASSERT(rt->fbo != 0 && "begin_pass: invalid GL render target");
+        if (rt->fbo == 0) {
             return;
         }
         fbo = rt->fbo;
@@ -1608,8 +1606,6 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
         .depth_rbo = depth_rbo,
         .width = desc->width,
         .height = desc->height,
-        .depth = desc->depth,
-        .complete = true,
     };
     glBindFramebuffer(GL_FRAMEBUFFER, restore_fbo);
     s_bound_framebuffer = restore_fbo;
