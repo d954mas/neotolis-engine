@@ -20,6 +20,18 @@ typedef struct {
     uint32_t hull_vert_max;
     double poly_area_uv;      /* summed hull polygon area, normalized-UV^2 units */
     double trim_bbox_area_uv; /* summed per-region UV bbox area, normalized-UV^2 */
+
+    /* Per-page geometry in that page's own UV^2 (atlas_u/v normalize per page).
+     * Blob parser fills the _uv accumulators; the full-file parser fills the
+     * pixel dims from the paired texture asset and derives the densities. */
+    double page_poly_area_uv[NT_BENCH_MAX_PAGES]; /* per-page hull poly area */
+    double page_bbox_area_uv[NT_BENCH_MAX_PAGES]; /* per-page used-extent bbox */
+
+    /* Filled only by nt_bench_parse_ntpack (need the texture-asset pixel dims). */
+    uint32_t page_w[NT_BENCH_MAX_PAGES];
+    uint32_t page_h[NT_BENCH_MAX_PAGES];
+    double density_fill_texture;  /* Σ poly_px / Σ page_px  (packer fill_texture) */
+    double density_fill_frontier; /* Σ poly_px / Σ used-bbox_px (packer fill_frontier) */
 } nt_bench_atlas_metrics_t;
 
 /* Parse one atlas asset blob (NtAtlasHeader + pages + regions + verts).

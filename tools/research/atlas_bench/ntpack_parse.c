@@ -1,9 +1,14 @@
 #include "ntpack_parse.h"
 
 #include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "nt_atlas_format.h"
+#include "nt_pack_format.h"
+#include "nt_texture_format.h"
 
 /* atlas_u/atlas_v are normalized 0-65535 over the atlas; scale to [0,1] UV so
  * areas come out in normalized-UV^2 units regardless of page pixel size. */
@@ -55,6 +60,19 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     double poly_area = 0.0;
     double bbox_area = 0.0;
 
+    /* Per-page used-extent tracking (in that page's 0-65535 UV). page_index is
+     * skipped when >= page_count so the page_count==0 mock stays valid. */
+    uint16_t pumin[NT_BENCH_MAX_PAGES];
+    uint16_t pumax[NT_BENCH_MAX_PAGES];
+    uint16_t pvmin[NT_BENCH_MAX_PAGES];
+    uint16_t pvmax[NT_BENCH_MAX_PAGES];
+    for (uint16_t p = 0; p < NT_BENCH_MAX_PAGES; p++) {
+        pumin[p] = UINT16_MAX;
+        pumax[p] = 0;
+        pvmin[p] = UINT16_MAX;
+        pvmax[p] = 0;
+    }
+
     for (uint16_t i = 0; i < h->region_count; i++) {
         const uint32_t vstart = regions[i].vertex_start;
         const uint32_t nv = regions[i].vertex_count;
@@ -89,8 +107,32 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                 if (p->atlas_v > vmax)
                     vmax = p->atlas_v;
             }
-            poly_area += fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
+            const double region_area = fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
+            poly_area += region_area;
             bbox_area += (double)(umax - umin) * (double)(vmax - vmin) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
+
+            const uint8_t page = regions[i].page_index;
+            if (page < h->page_count && page < NT_BENCH_MAX_PAGES) {
+                out->page_poly_area_uv[page] += region_area;
+                if (umin < pumin[page]) {
+                    pumin[page] = umin;
+                }
+                if (umax > pumax[page]) {
+                    pumax[page] = umax;
+                }
+                if (vmin < pvmin[page]) {
+                    pvmin[page] = vmin;
+                }
+                if (vmax > pvmax[page]) {
+                    pvmax[page] = vmax;
+                }
+            }
+        }
+    }
+
+    for (uint16_t p = 0; p < h->page_count && p < NT_BENCH_MAX_PAGES; p++) {
+        if (pumax[p] >= pumin[p] && pvmax[p] >= pvmin[p]) {
+            out->page_bbox_area_uv[p] = (double)(pumax[p] - pumin[p]) * (double)(pvmax[p] - pvmin[p]) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
         }
     }
 
@@ -106,5 +148,124 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     out->hull_vert_max = hull_max;
     out->poly_area_uv = poly_area;
     out->trim_bbox_area_uv = bbox_area;
+    return 0;
+}
+
+/* Locate the single NT_ASSET_ATLAS entry, feed its blob to the blob parser,
+ * then recover each page's pixel dims from the paired NT_ASSET_TEXTURE asset
+ * (matched by resource_id — the atlas page_ids[] key it). Densities are then
+ * poly_px / page_px (texture) and poly_px / used-bbox_px (frontier), summed
+ * over pages so they line up with the packer's own BENCH fill numbers.
+ * Every offset is an explicit if-guard — safe against a truncated/corrupt file
+ * regardless of NT_ASSERT mode; the read buffer is freed on every exit. */
+int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) {
+    if (pack_path == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+
+    FILE *file = fopen(pack_path, "rb");
+    if (file == NULL) {
+        return -2;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        (void)fclose(file);
+        return -3;
+    }
+    long file_size_long = ftell(file);
+    if (file_size_long < 0 || (uint64_t)file_size_long < sizeof(NtPackHeader)) {
+        (void)fclose(file);
+        return -4;
+    }
+    (void)fseek(file, 0, SEEK_SET);
+    const size_t file_size = (size_t)file_size_long;
+
+    uint8_t *buf = (uint8_t *)malloc(file_size);
+    if (buf == NULL) {
+        (void)fclose(file);
+        return -5;
+    }
+    if (fread(buf, 1, file_size, file) != file_size) {
+        free(buf);
+        (void)fclose(file);
+        return -6;
+    }
+    (void)fclose(file);
+
+    const NtPackHeader *hdr = (const NtPackHeader *)buf;
+    if (hdr->magic != NT_PACK_MAGIC || hdr->version != NT_PACK_VERSION) {
+        free(buf);
+        return -7;
+    }
+
+    const uint64_t entries_off = sizeof(NtPackHeader);
+    const uint64_t entries_end = entries_off + (uint64_t)hdr->asset_count * sizeof(NtAssetEntry);
+    if (entries_end > file_size) {
+        free(buf);
+        return -8;
+    }
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + entries_off);
+
+    /* Single NT_ASSET_ATLAS entry (atlas_bench packs exactly one atlas). */
+    const NtAssetEntry *atlas = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS && entries[i].offset < file_size && (uint64_t)entries[i].size <= file_size - entries[i].offset) {
+            atlas = &entries[i];
+            break;
+        }
+    }
+    if (atlas == NULL) {
+        free(buf);
+        return -9;
+    }
+
+    const int rc = nt_bench_parse_atlas_blob(buf + atlas->offset, atlas->size, out);
+    if (rc != 0) {
+        free(buf);
+        return rc;
+    }
+
+    /* Atlas header already validated by the blob parser; read page_ids to match
+     * each page to its texture asset. page_count is capped at NT_BENCH_MAX_PAGES. */
+    const uint8_t *ablob = buf + atlas->offset;
+    const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
+    const uint16_t page_count = ah->page_count;
+    const uint64_t pages_off = sizeof(NtAtlasHeader);
+    const uint64_t pages_end = pages_off + (uint64_t)page_count * sizeof(uint64_t);
+    if (pages_end > atlas->size) {
+        free(buf);
+        return -10;
+    }
+    const uint64_t *page_ids = (const uint64_t *)(ablob + pages_off);
+
+    for (uint16_t p = 0; p < page_count && p < NT_BENCH_MAX_PAGES; p++) {
+        for (uint16_t i = 0; i < hdr->asset_count; i++) {
+            if (entries[i].asset_type != NT_ASSET_TEXTURE || entries[i].resource_id != page_ids[p]) {
+                continue;
+            }
+            if (entries[i].offset < file_size && (uint64_t)entries[i].size <= file_size - entries[i].offset && entries[i].size >= sizeof(NtTextureAssetHeader)) {
+                const NtTextureAssetHeader *th = (const NtTextureAssetHeader *)(buf + entries[i].offset);
+                if (th->magic == NT_TEXTURE_MAGIC && th->version == NT_TEXTURE_VERSION) {
+                    out->page_w[p] = th->width;
+                    out->page_h[p] = th->height;
+                }
+            }
+            break;
+        }
+    }
+
+    double poly_px = 0.0;
+    double tex_px = 0.0;
+    double frontier_px = 0.0;
+    for (uint16_t p = 0; p < page_count && p < NT_BENCH_MAX_PAGES; p++) {
+        const double area = (double)out->page_w[p] * (double)out->page_h[p];
+        poly_px += out->page_poly_area_uv[p] * area;
+        frontier_px += out->page_bbox_area_uv[p] * area;
+        tex_px += area;
+    }
+    out->density_fill_texture = (tex_px > 0.0) ? (poly_px / tex_px) : 0.0;
+    out->density_fill_frontier = (frontier_px > 0.0) ? (poly_px / frontier_px) : 0.0;
+
+    free(buf);
     return 0;
 }
