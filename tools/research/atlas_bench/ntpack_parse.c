@@ -1,6 +1,7 @@
 #include "ntpack_parse.h"
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,6 +89,19 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
             hull_max = nv;
         }
 
+        /* Dedup: identical sprites alias the same deduplicated vertex span, so
+         * they occupy the SAME atlas pixels. Count each unique span's polygon
+         * area ONCE — matching the packer's poly_area (unique-set fill). Hull
+         * counts above stay per-region (region_count == input-sprite count).
+         * O(n^2) scan keeps the blob parser allocation-free (T-78-02). */
+        bool is_unique_span = true;
+        for (uint16_t j = 0; j < i; j++) {
+            if (regions[j].vertex_start == vstart) {
+                is_unique_span = false;
+                break;
+            }
+        }
+
         if (nv >= 3) {
             double shoelace = 0.0;
             uint16_t umin = UINT16_MAX;
@@ -108,12 +122,16 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                     vmax = p->atlas_v;
             }
             const double region_area = fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
-            poly_area += region_area;
             bbox_area += (double)(umax - umin) * (double)(vmax - vmin) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
+            if (is_unique_span) {
+                poly_area += region_area;
+            }
 
             const uint8_t page = regions[i].page_index;
             if (page < h->page_count && page < NT_BENCH_MAX_PAGES) {
-                out->page_poly_area_uv[page] += region_area;
+                if (is_unique_span) {
+                    out->page_poly_area_uv[page] += region_area;
+                }
                 if (umin < pumin[page]) {
                     pumin[page] = umin;
                 }
