@@ -9,6 +9,8 @@ target_include_directories(atlas_bench PRIVATE
 target_compile_definitions(atlas_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
 nt_set_static_crt(atlas_bench)
 nt_set_warning_flags(atlas_bench)
+# Links the sanitizer-instrumented nt_builder in Debug — must match its ASan/UBSan flags.
+nt_set_sanitizer_flags(atlas_bench)
 set_target_properties(atlas_bench PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}"
 )

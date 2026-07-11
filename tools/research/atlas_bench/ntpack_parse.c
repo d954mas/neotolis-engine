@@ -254,11 +254,14 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
         free(buf);
         return -10;
     }
-    const uint64_t *page_ids = (const uint64_t *)(ablob + pages_off);
+    /* Pack assets are only 4-aligned; a direct uint64_t* load here is UB. */
+    const uint8_t *page_ids_bytes = ablob + pages_off;
 
     for (uint16_t p = 0; p < page_count && p < NT_BENCH_MAX_PAGES; p++) {
+        uint64_t page_id;
+        memcpy(&page_id, page_ids_bytes + (uint64_t)p * sizeof(uint64_t), sizeof(uint64_t));
         for (uint16_t i = 0; i < hdr->asset_count; i++) {
-            if (entries[i].asset_type != NT_ASSET_TEXTURE || entries[i].resource_id != page_ids[p]) {
+            if (entries[i].asset_type != NT_ASSET_TEXTURE || entries[i].resource_id != page_id) {
                 continue;
             }
             if (entries[i].offset < file_size && (uint64_t)entries[i].size <= file_size - entries[i].offset && entries[i].size >= sizeof(NtTextureAssetHeader)) {
