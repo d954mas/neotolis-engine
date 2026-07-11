@@ -88,7 +88,7 @@ static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
                 if (d >= 3) {
                     a = 255;
                 } else if (d >= 0) {
-                    a = (uint8_t)(64 + d * 64); /* 64,128,192 across the band */
+                    a = (uint8_t)(64 + (d * 64)); /* 64,128,192 across the band */
                 } else {
                     a = 0;
                 }
@@ -100,7 +100,7 @@ static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
                 break;
             }
             }
-            uint8_t *p = px + (size_t)(y * s->w + x) * 4;
+            uint8_t *p = px + ((size_t)((y * s->w) + x) * 4);
             p[0] = s->r;
             p[1] = s->g;
             p[2] = s->b;
@@ -157,7 +157,8 @@ static int64_t density_fixed(double d) { return llround(d * 1000000.0); }
 /* Two in-process packs of the SAME corpus at default opts must produce identical
  * region/page/vertex/hull counts and a bit-stable density. */
 void test_metrics_stable_across_two_packs(void) {
-    nt_bench_atlas_metrics_t a, b;
+    nt_bench_atlas_metrics_t a;
+    nt_bench_atlas_metrics_t b;
     TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_a.ntpack", &a), "pack/parse A failed");
     TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_b.ntpack", &b), "pack/parse B failed");
 

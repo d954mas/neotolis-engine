@@ -201,7 +201,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 0.75F});
     float depth = 0.0F;
     glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
-    uint32_t depth_milli = (uint32_t)(depth * 1000.0F + 0.5F);
+    uint32_t depth_milli = (uint32_t)((depth * 1000.0F) + 0.5F);
     TEST_ASSERT_UINT32_WITHIN(1, 750, depth_milli);
     GLboolean depth_write_enabled = GL_TRUE;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);

@@ -21,6 +21,7 @@
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard chain; splitting would separate bounds checks from the reads they protect
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out) {
     if (blob == NULL || out == NULL) {
         return -1;
@@ -42,12 +43,12 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     /* All bounds in uint64_t so a corrupt count can never wrap the comparison. */
     const uint64_t page_bytes = (uint64_t)h->page_count * sizeof(uint64_t);
     const uint64_t regions_off = (uint64_t)sizeof(NtAtlasHeader) + page_bytes;
-    const uint64_t regions_end = regions_off + (uint64_t)h->region_count * sizeof(NtAtlasRegion);
+    const uint64_t regions_end = regions_off + ((uint64_t)h->region_count * sizeof(NtAtlasRegion));
     if (regions_end > blob_size) {
         return -5;
     }
 
-    const uint64_t verts_end = (uint64_t)h->vertex_offset + (uint64_t)h->total_vertex_count * sizeof(NtAtlasVertex);
+    const uint64_t verts_end = (uint64_t)h->vertex_offset + ((uint64_t)h->total_vertex_count * sizeof(NtAtlasVertex));
     if (verts_end > blob_size) {
         return -6;
     }
@@ -112,14 +113,18 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                 const NtAtlasVertex *p = &verts[vstart + j];
                 const NtAtlasVertex *q = &verts[vstart + ((j + 1) % nv)];
                 shoelace += (double)p->atlas_u * (double)q->atlas_v - (double)q->atlas_u * (double)p->atlas_v;
-                if (p->atlas_u < umin)
+                if (p->atlas_u < umin) {
                     umin = p->atlas_u;
-                if (p->atlas_u > umax)
+                }
+                if (p->atlas_u > umax) {
                     umax = p->atlas_u;
-                if (p->atlas_v < vmin)
+                }
+                if (p->atlas_v < vmin) {
                     vmin = p->atlas_v;
-                if (p->atlas_v > vmax)
+                }
+                if (p->atlas_v > vmax) {
                     vmax = p->atlas_v;
+                }
             }
             const double region_area = fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
             bbox_area += (double)(umax - umin) * (double)(vmax - vmin) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
@@ -176,6 +181,7 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
  * over pages so they line up with the packer's own BENCH fill numbers.
  * Every offset is an explicit if-guard — safe against a truncated/corrupt file
  * regardless of NT_ASSERT mode; the read buffer is freed on every exit. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — linear guard-per-read file walk; helpers would detach guards from their reads
 int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) {
     if (pack_path == NULL || out == NULL) {
         return -1;
@@ -217,7 +223,7 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
     }
 
     const uint64_t entries_off = sizeof(NtPackHeader);
-    const uint64_t entries_end = entries_off + (uint64_t)hdr->asset_count * sizeof(NtAssetEntry);
+    const uint64_t entries_end = entries_off + ((uint64_t)hdr->asset_count * sizeof(NtAssetEntry));
     if (entries_end > file_size) {
         free(buf);
         return -8;
@@ -249,7 +255,7 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
     const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
     const uint16_t page_count = ah->page_count;
     const uint64_t pages_off = sizeof(NtAtlasHeader);
-    const uint64_t pages_end = pages_off + (uint64_t)page_count * sizeof(uint64_t);
+    const uint64_t pages_end = pages_off + ((uint64_t)page_count * sizeof(uint64_t));
     if (pages_end > atlas->size) {
         free(buf);
         return -10;
@@ -260,7 +266,7 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
     for (uint16_t p = 0; p < page_count && p < NT_BENCH_MAX_PAGES; p++) {
         uint64_t page_id;
         bool found_page = false;
-        memcpy(&page_id, page_ids_bytes + (uint64_t)p * sizeof(uint64_t), sizeof(uint64_t));
+        memcpy(&page_id, page_ids_bytes + ((uint64_t)p * sizeof(uint64_t)), sizeof(uint64_t));
         for (uint16_t i = 0; i < hdr->asset_count; i++) {
             if (entries[i].asset_type != NT_ASSET_TEXTURE || entries[i].resource_id != page_id) {
                 continue;
