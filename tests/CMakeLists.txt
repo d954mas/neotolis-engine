@@ -719,6 +719,14 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
+    # ROBUST-03 characterization: fully-transparent-after-trim sprite aborts today.
+    add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
+    target_link_libraries(test_atlas_transparent_trim PRIVATE nt_builder nt_log unity)
+    target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_transparent_trim WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # EXPECT_BUILD_ASSERT longjmps mid-pipeline; leaked allocations are expected.
+    set_tests_properties(test_atlas_transparent_trim PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
+
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.
