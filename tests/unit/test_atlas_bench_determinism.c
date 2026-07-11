@@ -1,9 +1,4 @@
-/* AUDIT-01 determinism guard (D-04): packing a fixed in-memory mini-corpus twice
- * with default opts must yield byte-stable density + hull-vertex metrics, and those
- * metrics must match pinned baselines. This is the tripwire that catches a Phase
- * 80/81/82 change silently altering default-path output — which by contract stays
- * byte-identical (tolerance 0.0, mask 0xFF, dedup OFF). Metrics only, NEVER timings:
- * CI wall-clock is noise, so no pack_ms / nt_time_now assertion lives here. */
+/* Default packing keeps density and hull metrics stable; wall-clock time is intentionally excluded. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
@@ -174,10 +169,7 @@ void test_metrics_stable_across_two_packs(void) {
     TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_frontier), density_fixed(b.density_fill_frontier));
 }
 
-/* Pinned baselines captured 2026-07-11 from the first green run. The default path
- * is byte-identical by contract, so these MUST NOT move without an
- * ATLAS_CACHE_KEY_VERSION-bumping change to the packer — a Phase 80/81/82 diff that
- * trips this test is exactly the silent-regression signal AUDIT-01 exists to catch. */
+/* These pins move only with an intentional default-output or cache-key change. */
 #define PIN_REGION_COUNT 7
 #define PIN_PAGE_COUNT 1
 #define PIN_HULL_VERT_TOTAL 36

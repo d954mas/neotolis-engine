@@ -1,12 +1,4 @@
-/* Characterization test — pins the pre-Phase-79 abort on empty-mask-after-trim;
- * Phase 79 flips this to expect NT_BUILD_ERR_LIMIT.
- *
- * A fully-transparent sprite trims to an empty mask, reaching the content-dependent
- * NT_BUILD_ASSERT at nt_builder_atlas.c:888 ("pipeline_alpha_trim: sprite is fully
- * transparent") when end_atlas runs the pack pipeline. This test documents that the builder ABORTS on
- * that legitimate-but-degenerate artist input TODAY (ROBUST-03). Phase 79 (ROBUST-01)
- * converts the abort to a graceful error return; this test then inverts to assert the
- * clean NT_BUILD_ERR_LIMIT instead of catching the longjmp. */
+/* Fully transparent sprites currently fail loud during alpha trim. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -77,8 +69,7 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 void setUp(void) {}
 void tearDown(void) {}
 
-/* A fully-transparent-after-trim sprite reaches a content-dependent abort TODAY. */
-void test_transparent_after_trim_aborts_today(void) {
+void test_transparent_after_trim_aborts(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_transparent_trim.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -92,9 +83,7 @@ void test_transparent_after_trim_aborts_today(void) {
     /* raw sprites require an explicit name (no path to derive one from). */
     nt_builder_atlas_add_raw(ctx, pixels, 32, 32, &(nt_atlas_sprite_opts_t){.name = "ghost.png", .origin_x = 0.5F, .origin_y = 0.5F});
 
-    /* end_atlas runs the pack pipeline (alpha_trim → geometry → vpack). pipeline_alpha_trim
-     * asserts on the empty mask (nt_builder_atlas.c:888). EXPECT_BUILD_ASSERT catches the
-     * abort via longjmp so the process survives; it also frees the context after the jump. */
+    /* Catch the alpha-trim invariant without terminating the test process. */
     EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
 
     free(pixels);
@@ -102,6 +91,6 @@ void test_transparent_after_trim_aborts_today(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_transparent_after_trim_aborts_today);
+    RUN_TEST(test_transparent_after_trim_aborts);
     return UNITY_END();
 }

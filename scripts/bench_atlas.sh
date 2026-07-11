@@ -57,6 +57,13 @@ resolve_exe() {
 
 # --- Step 1: Build ---
 if [[ "$NO_BUILD" == false ]]; then
+    case "$PRESET" in
+        native-*) ;;
+        *) echo "ERROR: atlas_bench requires a native preset, got '${PRESET}'." >&2; exit 1 ;;
+    esac
+    if [[ ! -f "build/_cmake/${PRESET}/CMakeCache.txt" ]]; then
+        cmake --preset "$PRESET"
+    fi
     echo "=== Building atlas_bench (${PRESET}) ==="
     cmake --build "build/_cmake/${PRESET}" --target atlas_bench 2>&1 | tail -3
     echo ""
@@ -78,8 +85,6 @@ for spec in "${CORPORA[@]}"; do
         continue
     fi
 
-    # Non-empty glob assertion (Pitfall 5) — an empty glob means unpulled LFS
-    # pointers or a bad path; a zero-sprite pack would emit meaningless numbers.
     shopt -s nullglob
     matches=( $glob )
     shopt -u nullglob
@@ -88,6 +93,13 @@ for spec in "${CORPORA[@]}"; do
         echo "       If these are LFS-tracked corpora, run: git lfs pull" >&2
         exit 1
     fi
+    for match in "${matches[@]}"; do
+        if IFS= read -r first_line < "$match" && [[ "$first_line" == "version https://git-lfs.github.com/spec/v1" ]]; then
+            echo "ERROR: corpus '${name}' contains an unsmudged Git LFS pointer: ${match}" >&2
+            echo "       Run: git lfs pull" >&2
+            exit 1
+        fi
+    done
 
     # Cache-wipe (Pitfall 2) — a warm atlas cache short-circuits packing and
     # zeroes pack_ms. Wipe before every run so timing is real.

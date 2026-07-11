@@ -259,6 +259,7 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
 
     for (uint16_t p = 0; p < page_count && p < NT_BENCH_MAX_PAGES; p++) {
         uint64_t page_id;
+        bool found_page = false;
         memcpy(&page_id, page_ids_bytes + (uint64_t)p * sizeof(uint64_t), sizeof(uint64_t));
         for (uint16_t i = 0; i < hdr->asset_count; i++) {
             if (entries[i].asset_type != NT_ASSET_TEXTURE || entries[i].resource_id != page_id) {
@@ -266,12 +267,17 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
             }
             if (entries[i].offset < file_size && (uint64_t)entries[i].size <= file_size - entries[i].offset && entries[i].size >= sizeof(NtTextureAssetHeader)) {
                 const NtTextureAssetHeader *th = (const NtTextureAssetHeader *)(buf + entries[i].offset);
-                if (th->magic == NT_TEXTURE_MAGIC && th->version == NT_TEXTURE_VERSION) {
+                if (th->magic == NT_TEXTURE_MAGIC && th->version == NT_TEXTURE_VERSION && th->width > 0 && th->height > 0) {
                     out->page_w[p] = th->width;
                     out->page_h[p] = th->height;
+                    found_page = true;
                 }
             }
             break;
+        }
+        if (!found_page) {
+            free(buf);
+            return -11;
         }
     }
 

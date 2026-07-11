@@ -460,8 +460,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 
-    # --- Atlas bench parser test (Phase 78) ---
-    # Compiles the parser source DIRECTLY (no atlas_bench exe target) so it runs in Wave 1.
+    # Parser stays independently testable without linking the benchmark executable.
     add_executable(test_atlas_bench_parse
         unit/test_atlas_bench_parse.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
@@ -719,7 +718,7 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    # ROBUST-03 characterization: fully-transparent-after-trim sprite aborts today.
+    # Characterizes the builder's fail-loud policy for transparent sprites.
     add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
     target_link_libraries(test_atlas_transparent_trim PRIVATE nt_builder nt_log unity)
     target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -727,9 +726,7 @@ if(NOT EMSCRIPTEN)
     # EXPECT_BUILD_ASSERT longjmps mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_atlas_transparent_trim PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    # AUDIT-01 determinism guard (Phase 78): pack a fixed in-memory mini-corpus twice
-    # at default opts, assert byte-stable + pinned density/hull metrics (no timings, D-04).
-    # Compiles ntpack_parse.c DIRECTLY (no atlas_bench exe) and links nt_builder to pack.
+    # Fixed in-memory corpus keeps density and hull metrics deterministic without timing assertions.
     add_executable(test_atlas_bench_determinism
         unit/test_atlas_bench_determinism.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
@@ -741,8 +738,6 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(test_atlas_bench_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(test_atlas_bench_determinism PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
-
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.

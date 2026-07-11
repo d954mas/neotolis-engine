@@ -2,9 +2,8 @@
  * atlas_bench — AUDIT-01 measurement engine.
  *
  * Packs one corpus glob into a single-atlas .ntpack with a chosen atlas-opts
- * profile, times finish_pack externally (NO cache dir — Pitfall 2: the atlas
- * cache short-circuits packing and zeroes pack_ms), then parses the PRODUCED
- * pack (D-02: never scrapes the drifting BENCH log line) and writes one JSON
+ * profile, times the uncached atlas pipeline, then parses the produced pack
+ * and writes one JSON
  * file of per-atlas density / page / pack_ms / hull-vertex metrics.
  *
  * Usage:
@@ -135,11 +134,10 @@ int main(int argc, char *argv[]) {
         nt_builder_free_pack(ctx);
         return 1;
     }
-    nt_builder_end_atlas(ctx);
-
     const double t0 = nt_time_now();
-    const nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_builder_end_atlas(ctx);
     const double pack_ms = (nt_time_now() - t0) * 1000.0;
+    const nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
 
     if (r != NT_BUILD_OK) {

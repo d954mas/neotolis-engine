@@ -6,13 +6,12 @@
 
 /* clang-format off */
 #include "nt_atlas_format.h"
+#include "nt_pack_format.h"
 #include "ntpack_parse.h"
 #include "unity.h"
 /* clang-format on */
 
-/* ---- Mock blob builder (verbatim from tests/unit/test_atlas.c:34-84) ----
- * Builds a byte-for-byte valid NT_ASSET_ATLAS blob so the parser is tested
- * against the same layout the runtime consumes. */
+/* Build the same byte layout consumed by the runtime atlas loader. */
 
 typedef struct {
     const NtAtlasRegion *regions;
@@ -196,6 +195,44 @@ static void reject_oob_vertex_offset(void) {
     TEST_ASSERT_TRUE(rc < 0);
 }
 
+static void reject_missing_page_texture(void) {
+    const char *path = "test_atlas_bench_missing_texture.ntpack";
+    uint8_t atlas_blob[sizeof(NtAtlasHeader) + sizeof(uint64_t)] = {0};
+    NtAtlasHeader *atlas = (NtAtlasHeader *)atlas_blob;
+    atlas->magic = NT_ATLAS_MAGIC;
+    atlas->version = NT_ATLAS_VERSION;
+    atlas->page_count = 1;
+
+    const uint64_t page_id = 0x12345678ULL;
+    memcpy(atlas_blob + sizeof(NtAtlasHeader), &page_id, sizeof(page_id));
+
+    NtPackHeader header = {0};
+    header.magic = NT_PACK_MAGIC;
+    header.version = NT_PACK_VERSION;
+    header.asset_count = 1;
+    header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
+    header.total_size = header.header_size + sizeof(atlas_blob);
+
+    NtAssetEntry entry = {0};
+    entry.resource_id = 1;
+    entry.offset = header.header_size;
+    entry.size = sizeof(atlas_blob);
+    entry.format_version = NT_ATLAS_VERSION;
+    entry.asset_type = NT_ASSET_ATLAS;
+
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
+    TEST_ASSERT_EQUAL_size_t(sizeof(entry), fwrite(&entry, 1, sizeof(entry), file));
+    TEST_ASSERT_EQUAL_size_t(sizeof(atlas_blob), fwrite(atlas_blob, 1, sizeof(atlas_blob), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+
+    nt_bench_atlas_metrics_t m;
+    int rc = nt_bench_parse_ntpack(path, &m);
+    (void)remove(path);
+    TEST_ASSERT_TRUE(rc < 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(region_and_vertex_counts);
@@ -203,5 +240,6 @@ int main(void) {
     RUN_TEST(reject_bad_magic);
     RUN_TEST(reject_bad_version);
     RUN_TEST(reject_oob_vertex_offset);
+    RUN_TEST(reject_missing_page_texture);
     return UNITY_END();
 }
