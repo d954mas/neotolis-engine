@@ -570,7 +570,12 @@ Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_
             }
         }
     }
-    NT_BUILD_ASSERT(boundary_pixel_count > 0 && "binary_build_convex_polygon: empty mask");
+    /* Content failure: no boundary pixels. Signal to the caller via NULL so it
+     * can append a graceful error instead of aborting. */
+    if (boundary_pixel_count == 0) {
+        *out_count = 0;
+        return NULL;
+    }
 
     uint32_t point_count = boundary_pixel_count * 4;
     Point2D *points = (Point2D *)malloc((size_t)point_count * sizeof(Point2D));
@@ -594,7 +599,12 @@ Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_
     uint32_t hull_count = convex_hull(points, point_count, hull);
     free(points);
 
-    NT_BUILD_ASSERT(hull_count >= 3 && "binary_build_convex_polygon: convex hull is degenerate");
+    /* Content failure: a degenerate hull (<3 verts) has no usable outline. */
+    if (hull_count < 3) {
+        free(hull);
+        *out_count = 0;
+        return NULL;
+    }
     if (hull_count > max_vertices) {
         Point2D *reduced = (Point2D *)malloc((size_t)hull_count * sizeof(Point2D));
         NT_BUILD_ASSERT(reduced && "binary_build_convex_polygon: alloc failed");
@@ -618,7 +628,10 @@ Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_
  * Uses CW edge-following (inside on the right) with right-turn priority.
  * Returns vertex count. Output polygon is CCW (reversed from CW trace). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D *out, uint32_t max_out) {
+uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D *out, uint32_t max_out, bool *out_overflow) {
+    if (out_overflow) {
+        *out_overflow = false;
+    }
     /* Find topmost-leftmost opaque pixel */
     int32_t sx = -1;
     int32_t sy = -1;
@@ -685,7 +698,14 @@ uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D 
 
     /* Trace until we return to the starting position */
     while (cx != sx || cy != sy) {
-        NT_BUILD_ASSERT(count < max_out && "trace_contour: exceeded max vertices");
+        /* Content failure: vertex budget exceeded. Signal the caller and stop
+         * tracing (partial contour) rather than aborting mid-trace. */
+        if (count >= max_out) {
+            if (out_overflow) {
+                *out_overflow = true;
+            }
+            return count;
+        }
         out[count++] = (Point2D){cx, cy};
         r_ = (dir + 1) & 3;
         s_ = dir;

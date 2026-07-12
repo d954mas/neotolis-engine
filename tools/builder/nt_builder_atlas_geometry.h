@@ -54,8 +54,10 @@ uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices
 
 /* --- Contour tracing and polygon simplification ---------------------- */
 
-/* Trace outer boundary of opaque pixels (CCW). Returns vertex count. */
-uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D *out, uint32_t max_out);
+/* Trace outer boundary of opaque pixels (CCW). Returns vertex count.
+ * out_overflow (optional) is set true when max_out is exceeded — the returned
+ * contour is then partial and the caller should treat it as a content error. */
+uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D *out, uint32_t max_out, bool *out_overflow);
 
 /* Remove collinear vertices from a closed polygon. */
 uint32_t remove_collinear(const Point2D *in, uint32_t n, Point2D *out);

@@ -1336,6 +1336,10 @@ static void pipeline_geometry(AtlasPipeline *p) {
                  * none of that machinery is needed. */
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, effective_max_verts, &p->vertex_counts[idx]);
                 free(binary);
+                if (!p->hull_vertices[idx]) {
+                    /* Empty mask / degenerate hull — graceful error, skip sprite (D-09). */
+                    push_content_error(p->ctx, p->state->name, p->sprites[idx].name, NT_BUILD_ERR_KIND_DEGENERATE_HULL, tw, th);
+                }
                 continue;
             }
 
@@ -1402,7 +1406,17 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 uint32_t max_contour = (2 * opaque_count) + 2;
                 Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
                 NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
-                uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);
+                bool contour_overflow = false;
+                uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour, &contour_overflow);
+                if (contour_overflow) {
+                    /* D-02: vertex-budget overflow routes to a graceful error, not
+                     * the silent convex fallback used for a degenerate contour. */
+                    free(contour);
+                    free(binary_source);
+                    free(binary);
+                    push_content_error(p->ctx, p->state->name, p->sprites[idx].name, NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW, tw, th);
+                    continue;
+                }
 
                 if (contour_count < 3) {
                     free(contour);
@@ -1505,6 +1519,10 @@ static void pipeline_geometry(AtlasPipeline *p) {
             if (convex_reason) {
                 NT_LOG_WARN("pipeline_geometry: sprite '%s' using convex fallback (%s)", p->sprites[idx].name, convex_reason);
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary_source, tw, th, effective_max_verts, &p->vertex_counts[idx]);
+                if (!p->hull_vertices[idx]) {
+                    /* Even the convex fallback found no usable outline — graceful error. */
+                    push_content_error(p->ctx, p->state->name, p->sprites[idx].name, NT_BUILD_ERR_KIND_DEGENERATE_HULL, tw, th);
+                }
             }
             free(binary_source);
             free(binary);
@@ -2239,6 +2257,12 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     pipeline_geometry(&p);
     double bench_geometry = nt_time_now() - t0;
     NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
+
+    /* D-13 single-exit: a content error during geometry (empty mask / degenerate
+     * hull / contour overflow) skips packing and falls through to cleanup. */
+    if (ctx->poisoned) {
+        goto cleanup;
+    }
 
     double bench_tile_pack = 0.0;
     double bench_compose = 0.0;
