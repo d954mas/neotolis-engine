@@ -41,6 +41,15 @@ void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err) {
     ctx->poisoned = true; /* poison even when the list is full */
 }
 
+/* Fill atlas+sprite names and append a content error (D-07/D-09).
+ * sprite may be NULL for atlas-level caps (region/page count). */
+static void push_content_error(NtBuilderContext *ctx, const char *atlas, const char *sprite, nt_build_error_kind kind, uint32_t w, uint32_t h) {
+    nt_build_error_t e = {.kind = kind, .w = w, .h = h};
+    error_copy_name(e.atlas, atlas);
+    error_copy_name(e.sprite, sprite);
+    nt_builder_push_error(ctx, &e);
+}
+
 const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
     if (out_count) {
         *out_count = ctx->error_count;
@@ -789,6 +798,12 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
+    /* D-10: a prior atlas poisoned the pack, so begin_atlas no-oped and left no
+     * active atlas — make this add a no-op too instead of asserting. An OPEN
+     * poisoned atlas (D-09) still has active_atlas, so it keeps collecting. */
+    if (ctx->poisoned && !ctx->active_atlas) {
+        return;
+    }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
 
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
@@ -810,13 +825,27 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     int channels = 0;
     uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
     free(file_data);
-    NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
-    NT_BUILD_ASSERT(w > 0 && h > 0 && "atlas_add: decoded image has zero dimensions");
-    NT_BUILD_ASSERT((uint64_t)w * (uint64_t)h <= (UINT32_MAX / 4) && "atlas_add: decoded image too large (w*h*4 overflows uint32_t)");
 
     /* Determine region name. opts->name takes precedence; NULL falls back to
-     * basename of the source path. */
+     * basename of the source path. Needed early to name a decode error. */
     const char *region_name = sopts.name ? sopts.name : extract_filename(path);
+
+    /* Content-dependent decode failures append a graceful error and skip the
+     * sprite; the open atlas keeps decoding later adds (D-09). */
+    if (!pixels) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
+        return;
+    }
+    if (w <= 0 || h <= 0) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
+        free(pixels);
+        return;
+    }
+    if ((uint64_t)w * (uint64_t)h > (UINT32_MAX / 4)) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, (uint32_t)w, (uint32_t)h);
+        free(pixels);
+        return;
+    }
 
     /* Compute decoded hash */
     uint64_t decoded_hash = nt_hash64(pixels, (uint32_t)w * (uint32_t)h * 4).value;
@@ -842,6 +871,10 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
+    /* D-10: no-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
+    if (ctx->poisoned && !ctx->active_atlas) {
+        return;
+    }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
     NT_BUILD_ASSERT(width > 0 && height > 0 && "atlas_add_raw: width and height must be > 0");
     NT_BUILD_ASSERT((uint64_t)width * height <= (UINT32_MAX / 4) && "atlas_add_raw: width * height * 4 overflows uint32_t");
@@ -899,6 +932,10 @@ static void atlas_glob_callback(const char *full_path, void *user) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
+    /* D-10: no-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
+    if (ctx->poisoned && !ctx->active_atlas) {
+        return;
+    }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
     /* If opts is non-NULL, name MUST be NULL — a single name can't apply to
      * N matched files without hash collisions. Each file derives its own name
@@ -1711,8 +1748,15 @@ static void pipeline_serialize(AtlasPipeline *p) {
      * the atlas is broken. O(n²) but n ≤ 65535 and this is an offline check. */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         for (uint32_t j = i + 1; j < p->sprite_count; j++) {
-            NT_BUILD_ASSERT(strcmp(p->sprites[i].name, p->sprites[j].name) != 0 && "pipeline_serialize: duplicate region name — each sprite in an atlas must have a unique name");
+            if (strcmp(p->sprites[i].name, p->sprites[j].name) == 0) {
+                push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+            }
         }
+    }
+    /* Duplicate names make runtime name_hash lookups ambiguous — abandon the
+     * blob; the post-serialize poison check routes end_atlas to cleanup. */
+    if (p->ctx->poisoned) {
+        return;
     }
 
     /* Count total vertices and indices for UNIQUE sprites only.
@@ -1766,8 +1810,14 @@ static void pipeline_serialize(AtlasPipeline *p) {
     NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
     hdr->magic = NT_ATLAS_MAGIC;
     hdr->version = NT_ATLAS_VERSION;
-    NT_BUILD_ASSERT(p->sprite_count <= UINT16_MAX && "pipeline_serialize: region_count exceeds uint16_t");
-    NT_BUILD_ASSERT(p->page_count <= UINT16_MAX && "pipeline_serialize: page_count exceeds uint16_t");
+    /* Size-limit caps: extreme content only (>65535 sprites/pages). Push and
+     * proceed — the truncated blob is never written (finish_pack poison gate). */
+    if (p->sprite_count > UINT16_MAX) {
+        push_content_error(p->ctx, p->state->name, NULL, NT_BUILD_ERR_KIND_TOO_MANY_REGIONS, 0, 0);
+    }
+    if (p->page_count > UINT16_MAX) {
+        push_content_error(p->ctx, p->state->name, NULL, NT_BUILD_ERR_KIND_TOO_MANY_PAGES, 0, 0);
+    }
     hdr->region_count = (uint16_t)p->sprite_count;
     hdr->page_count = (uint16_t)p->page_count;
     hdr->_pad = 0;
@@ -1910,16 +1960,21 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
         NT_BUILD_ASSERT(reg->name_hash != 0xFFFFFFFFFFFFFFFFULL && "pipeline_serialize: region name_hash collides with runtime tombstone sentinel");
-        NT_BUILD_ASSERT(p->sprites[i].width <= UINT16_MAX && "pipeline_serialize: source_w overflows uint16_t");
-        NT_BUILD_ASSERT(p->sprites[i].height <= UINT16_MAX && "pipeline_serialize: source_h overflows uint16_t");
+        /* Size-limit: sprite dims must fit the uint16 stored fields (>65535px). */
+        if (p->sprites[i].width > UINT16_MAX || p->sprites[i].height > UINT16_MAX) {
+            push_content_error(p->ctx, p->state->name, p->sprites[i].name, NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE, p->sprites[i].width, p->sprites[i].height);
+            continue;
+        }
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
-        NT_BUILD_ASSERT(p->trim_x[i] <= INT16_MAX && "pipeline_serialize: trim_offset_x overflows int16_t");
         /* trim_offset_y_up = pixels stripped from the BOTTOM edge in y-up
          * source space. Builder's alpha-trim records trim_y as pixels stripped
          * from the PNG-top, so the y-up conversion is source_h - trim_y - trim_h. */
         int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
-        NT_BUILD_ASSERT(trim_offset_y_up >= INT16_MIN && trim_offset_y_up <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t after y-up flip");
+        if (p->trim_x[i] > INT16_MAX || trim_offset_y_up < INT16_MIN || trim_offset_y_up > INT16_MAX) {
+            push_content_error(p->ctx, p->state->name, p->sprites[i].name, NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW, 0, 0);
+            continue;
+        }
         reg->trim_offset_x = (int16_t)p->trim_x[i];
         reg->trim_offset_y = (int16_t)trim_offset_y_up;
         reg->origin_x = p->sprites[i].origin_x;
@@ -1946,8 +2001,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint16_t st = p->sprites[i].slice9_top;
         uint16_t sb = p->sprites[i].slice9_bottom;
         if (sl || sr || st || sb) {
-            NT_BUILD_ASSERT((uint32_t)sl + (uint32_t)sr < p->sprites[i].width && "slice9: left + right >= source width");
-            NT_BUILD_ASSERT((uint32_t)st + (uint32_t)sb < p->sprites[i].height && "slice9: top + bottom >= source height");
+            /* Defense-in-depth: pipeline_alpha_trim already reports this (892/893),
+             * poisoning before serialize — kept graceful for direct-call safety. */
+            if ((uint32_t)sl + (uint32_t)sr >= p->sprites[i].width || (uint32_t)st + (uint32_t)sb >= p->sprites[i].height) {
+                push_content_error(p->ctx, p->state->name, p->sprites[i].name, NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, p->sprites[i].width, p->sprites[i].height);
+                continue;
+            }
         }
         reg->_pad0 = 0;
         reg->slice9_lrtb[0] = sl;
@@ -2120,6 +2179,12 @@ static void pipeline_cleanup(AtlasPipeline *p) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — linear sequence of pipeline_* stage calls with shared cleanup; "high" complexity reflects stage count, not control-flow depth
 void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
+
+    /* D-10: after poison, begin_atlas no-ops so subsequent atlases have no
+     * active state — make end a no-op too instead of asserting. */
+    if (ctx->poisoned && !ctx->active_atlas) {
+        return;
+    }
     NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");
 
     NtBuildAtlasState *state = ctx->active_atlas;
@@ -2198,6 +2263,11 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     t0 = nt_time_now();
     pipeline_serialize(&p);
+    /* A content error found during serialize (duplicate name / size-limit) must
+     * not register texture pages — route to the single cleanup exit. */
+    if (ctx->poisoned) {
+        goto cleanup;
+    }
     pipeline_register(&p);
     double bench_serialize = nt_time_now() - t0;
 
