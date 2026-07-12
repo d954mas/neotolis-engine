@@ -726,18 +726,19 @@ if(NOT EMSCRIPTEN)
     # EXPECT_BUILD_ASSERT longjmps mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_atlas_transparent_trim PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    # Fixed in-memory corpus keeps density and hull metrics deterministic without timing assertions.
-    add_executable(test_atlas_bench_determinism
-        unit/test_atlas_bench_determinism.c
+    # Packer determinism tripwire: fixed in-memory corpus keeps density and hull
+    # metrics deterministic without timing assertions (bench parser is the probe).
+    add_executable(test_atlas_pack_determinism
+        unit/test_atlas_pack_determinism.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
     )
-    target_link_libraries(test_atlas_bench_determinism PRIVATE nt_builder nt_log unity)
-    target_include_directories(test_atlas_bench_determinism PRIVATE
+    target_link_libraries(test_atlas_pack_determinism PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_pack_determinism PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
-    target_compile_definitions(test_atlas_bench_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_setup_test_target(test_atlas_bench_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.
