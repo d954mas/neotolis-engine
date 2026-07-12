@@ -718,13 +718,12 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
-    # Characterizes the builder's fail-loud policy for transparent sprites.
+    # Proves the graceful transparent-after-trim error path is leak-free
+    # (ROBUST-02): runs under live LSan, no detect_leaks=0 masking.
     add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
     target_link_libraries(test_atlas_transparent_trim PRIVATE nt_builder nt_log unity)
     target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_transparent_trim WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    # EXPECT_BUILD_ASSERT longjmps mid-pipeline; leaked allocations are expected.
-    set_tests_properties(test_atlas_transparent_trim PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
     # Packer determinism tripwire: fixed in-memory corpus keeps density and hull
     # metrics deterministic without timing assertions (bench parser is the probe).

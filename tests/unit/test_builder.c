@@ -5604,18 +5604,28 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
 }
 
 /* Test: invalid slice9 borders (l+r >= width) triggers NT_BUILD_ASSERT. */
-void test_atlas_slice9_invalid_borders_asserts(void) {
+void test_atlas_slice9_invalid_borders_reports_error(void) {
     (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_slice9_invalid.ntpack");
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_invalid.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* 60px wide sprite, borders 32+32 = 64 >= 60 -> should assert */
+    /* 60px wide sprite, borders 32+32 = 64 >= 60 -> graceful SLICE9_TOO_BIG */
     uint8_t *s = make_test_sprite(60, 60, 200, 100, 50, 255);
     nt_builder_begin_atlas(ctx, "s9invalid", NULL);
     nt_builder_atlas_add_raw(ctx, s, 60, 60,
                              &(nt_atlas_sprite_opts_t){.name = "bad_s9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 32, .slice9_right = 32, .slice9_top = 4, .slice9_bottom = 4});
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("bad_s9.png", errs[0].sprite);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
     free(s);
 }
 
@@ -5883,7 +5893,7 @@ int main(void) {
 
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);
-    RUN_TEST(test_atlas_slice9_invalid_borders_asserts);
+    RUN_TEST(test_atlas_slice9_invalid_borders_reports_error);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);
 

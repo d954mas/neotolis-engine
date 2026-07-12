@@ -23,6 +23,15 @@
 
 /* --- Content-error channel (D-04/D-05/D-07) --- */
 
+/* Bounded copy into a fixed error-name buffer (src may be NULL). */
+static void error_copy_name(char *dst, const char *src) {
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    (void)snprintf(dst, NT_BUILD_ERR_NAME_MAX, "%s", src);
+}
+
 void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err) {
     if (ctx->error_count < NT_BUILD_MAX_ERRORS) {
         ctx->errors[ctx->error_count++] = *err;
@@ -959,12 +968,34 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
         bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
-        NT_BUILD_ASSERT(has_pixels && "pipeline_alpha_trim: sprite is fully transparent");
+        if (!has_pixels) {
+            /* D-09: accumulate and keep validating the rest of this atlas. */
+            nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
+            error_copy_name(e.atlas, p->state->name);
+            error_copy_name(e.sprite, p->sprites[i].name);
+            nt_builder_push_error(p->ctx, &e);
+            continue;
+        }
         /* Slice9 requires untrimmed source rect — runtime asserts trim_offset == 0 */
         bool has_s9 = p->sprites[i].slice9_left || p->sprites[i].slice9_right || p->sprites[i].slice9_top || p->sprites[i].slice9_bottom;
         if (has_s9) {
-            NT_BUILD_ASSERT(p->sprites[i].slice9_left + p->sprites[i].slice9_right < p->sprites[i].width && "slice9 left+right borders >= source width");
-            NT_BUILD_ASSERT(p->sprites[i].slice9_top + p->sprites[i].slice9_bottom < p->sprites[i].height && "slice9 top+bottom borders >= source height");
+            uint32_t lr = (uint32_t)p->sprites[i].slice9_left + (uint32_t)p->sprites[i].slice9_right;
+            uint32_t tb = (uint32_t)p->sprites[i].slice9_top + (uint32_t)p->sprites[i].slice9_bottom;
+            /* Report once here; serialize re-check (Plan 02) is defense-in-depth. */
+            if (lr >= p->sprites[i].width) {
+                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = lr, .detail_b = p->sprites[i].width};
+                error_copy_name(e.atlas, p->state->name);
+                error_copy_name(e.sprite, p->sprites[i].name);
+                nt_builder_push_error(p->ctx, &e);
+                continue;
+            }
+            if (tb >= p->sprites[i].height) {
+                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = tb, .detail_b = p->sprites[i].height};
+                error_copy_name(e.atlas, p->state->name);
+                error_copy_name(e.sprite, p->sprites[i].name);
+                nt_builder_push_error(p->ctx, &e);
+                continue;
+            }
             p->trim_x[i] = 0;
             p->trim_y[i] = 0;
             p->trim_w[i] = p->sprites[i].width;
