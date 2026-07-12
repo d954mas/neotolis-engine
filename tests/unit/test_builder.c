@@ -5412,7 +5412,7 @@ void test_atlas_cache_corrupt_file_falls_back(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
 }
 
-/* ROBUST-02: exhausting ATLAS_MAX_PAGES must be a graceful PAGES_EXHAUSTED error
+/* Exhausting ATLAS_MAX_PAGES must be a graceful PAGES_EXHAUSTED error
  * (pool joined, buffers freed), not an abort. Generates enough sprites that each
  * fits one-per-page but the set overflows all ATLAS_MAX_PAGES (64) pages. The
  * live-LSan no-leak proof for this path lives in test_atlas_unfittable. */
@@ -5638,7 +5638,7 @@ void test_atlas_slice9_invalid_borders_reports_error(void) {
     free(s);
 }
 
-/* D-09: one atlas reports ALL of its bad sprites as a list, add-order-stable. */
+/* One atlas reports ALL of its bad sprites as a list, add-order-stable. */
 void test_atlas_collects_all_errors_in_one_atlas(void) {
     (void)MKDIR(TMP_DIR);
     (void)remove(TMP_DIR "/atlas_collect_all.ntpack");
@@ -5676,7 +5676,7 @@ void test_atlas_collects_all_errors_in_one_atlas(void) {
     free(t2);
 }
 
-/* D-10: a poisoned pack no-ops subsequent atlases and returns the first
+/* A poisoned pack no-ops subsequent atlases and returns the first
  * failing atlas's error list (between-atlas hard stop). */
 void test_atlas_poison_stops_subsequent_atlases(void) {
     (void)MKDIR(TMP_DIR);

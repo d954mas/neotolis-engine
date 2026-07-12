@@ -21,7 +21,7 @@
 #include <windows.h>
 #endif
 
-/* --- Content-error channel (D-04/D-05/D-07) --- */
+/* --- Content-error channel --- */
 
 /* Bounded copy into a fixed error-name buffer (src may be NULL). */
 static void error_copy_name(char *dst, const char *src) {
@@ -41,7 +41,7 @@ void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err) {
     ctx->poisoned = true; /* poison even when the list is full */
 }
 
-/* Fill atlas+sprite names and append a content error (D-07/D-09).
+/* Fill atlas+sprite names and append a content error.
  * sprite may be NULL for atlas-level caps (region/page count). */
 static void push_content_error(NtBuilderContext *ctx, const char *atlas, const char *sprite, nt_build_error_kind kind, uint32_t w, uint32_t h) {
     nt_build_error_t e = {.kind = kind, .w = w, .h = h};
@@ -701,7 +701,7 @@ static const char *extract_filename(const char *path) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
-    /* D-10 between-atlas hard stop: leave active_atlas NULL so a poisoned pack
+    /* Between-atlas hard stop: leave active_atlas NULL so a poisoned pack
      * opens no further atlases. */
     if (ctx->poisoned) {
         return;
@@ -800,9 +800,9 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
-    /* D-10: a prior atlas poisoned the pack, so begin_atlas no-oped and left no
+    /* A prior atlas poisoned the pack, so begin_atlas no-oped and left no
      * active atlas — make this add a no-op too instead of asserting. An OPEN
-     * poisoned atlas (D-09) still has active_atlas, so it keeps collecting. */
+     * poisoned atlas still has active_atlas, so it keeps collecting. */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
     }
@@ -833,7 +833,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     const char *region_name = sopts.name ? sopts.name : extract_filename(path);
 
     /* Content-dependent decode failures append a graceful error and skip the
-     * sprite; the open atlas keeps decoding later adds (D-09). */
+     * sprite; the open atlas keeps decoding later adds. */
     if (!pixels) {
         push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
         return;
@@ -873,7 +873,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
-    /* D-10: no-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
+    /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
     }
@@ -934,7 +934,7 @@ static void atlas_glob_callback(const char *full_path, void *user) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
-    /* D-10: no-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
+    /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
     }
@@ -1008,7 +1008,7 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
         bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
         if (!has_pixels) {
-            /* D-09: accumulate and keep validating the rest of this atlas. */
+            /* Accumulate and keep validating the rest of this atlas. */
             nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
             error_copy_name(e.atlas, p->state->name);
             error_copy_name(e.sprite, p->sprites[i].name);
@@ -1020,7 +1020,7 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
         if (has_s9) {
             uint32_t lr = (uint32_t)p->sprites[i].slice9_left + (uint32_t)p->sprites[i].slice9_right;
             uint32_t tb = (uint32_t)p->sprites[i].slice9_top + (uint32_t)p->sprites[i].slice9_bottom;
-            /* Report once here; serialize re-check (Plan 02) is defense-in-depth. */
+            /* Report once here; the serialize re-check is defense-in-depth. */
             if (lr >= p->sprites[i].width) {
                 nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = lr, .detail_b = p->sprites[i].width};
                 error_copy_name(e.atlas, p->state->name);
@@ -1347,7 +1347,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, effective_max_verts, &p->vertex_counts[idx]);
                 free(binary);
                 if (!p->hull_vertices[idx]) {
-                    /* Empty mask / degenerate hull — graceful error, skip sprite (D-09). */
+                    /* Empty mask / degenerate hull — graceful error, skip sprite. */
                     push_content_error(p->ctx, p->state->name, p->sprites[idx].name, NT_BUILD_ERR_KIND_DEGENERATE_HULL, tw, th);
                 }
                 continue;
@@ -1419,8 +1419,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 bool contour_overflow = false;
                 uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour, &contour_overflow);
                 if (contour_overflow) {
-                    /* D-02: vertex-budget overflow routes to a graceful error, not
-                     * the silent convex fallback used for a degenerate contour. */
+                    /* Vertex-budget overflow routes to a graceful error, not the
+                     * silent convex fallback used for a degenerate contour. */
                     free(contour);
                     free(binary_source);
                     free(binary);
@@ -1628,11 +1628,11 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
-    /* ROBUST-01: reject any sprite that cannot fit an empty max_size page BEFORE
-     * packing, using the exact vector_pack fit test on the same hull + opts — so
-     * an unfittable sprite becomes a graceful UNFITTABLE error instead of tripping
+    /* Reject any sprite that cannot fit an empty max_size page BEFORE packing,
+     * using the exact vector_pack fit test on the same hull + opts — so an
+     * unfittable sprite becomes a graceful UNFITTABLE error instead of tripping
      * vector_pack's "empty page should accept placement" invariant. Collect every
-     * unfittable sprite (D-09), not just the first. */
+     * unfittable sprite, not just the first. */
     bool any_unfittable = false;
     for (uint32_t i = 0; i < p->unique_count; i++) {
         if (vpack_sprite_fits_empty_page(u_hulls[i], u_hull_counts[i], p->opts)) {
@@ -1657,8 +1657,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count,
                                      &pages_exhausted);
     if (pages_exhausted) {
-        /* ROBUST-02: ATLAS_MAX_PAGES exhausted — vector_pack already joined its
-         * worker pool and freed its buffers; report gracefully and bail. */
+        /* ATLAS_MAX_PAGES exhausted — vector_pack already joined its worker pool
+         * and freed its buffers; report gracefully and bail. */
         nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, .max_size = p->opts->max_size, .detail_a = ATLAS_MAX_PAGES};
         error_copy_name(e.atlas, p->state->name);
         nt_builder_push_error(p->ctx, &e);
@@ -2261,7 +2261,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
 void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
 
-    /* D-10: after poison, begin_atlas no-ops so subsequent atlases have no
+    /* After poison, begin_atlas no-ops so subsequent atlases have no
      * active state — make end a no-op too instead of asserting. */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
@@ -2337,9 +2337,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         pipeline_tile_pack(&p);
         bench_tile_pack = nt_time_now() - t0;
 
-        /* D-13 single-exit: an UNFITTABLE (pre-check) or PAGES_EXHAUSTED
-         * (vector_pack) content error skips compose/serialize and falls through
-         * to the one cleanup block. */
+        /* An UNFITTABLE (pre-check) or PAGES_EXHAUSTED (vector_pack) content error
+         * skips compose/serialize and falls through to the one cleanup block. */
         if (ctx->poisoned) {
             goto cleanup;
         }

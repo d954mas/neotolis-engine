@@ -1994,9 +1994,9 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
         /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
-         * exhausted (a whole-set property, not a per-sprite one). ROBUST-02:
-         * signal the caller and break to the single cleanup region below — an
-         * early return here would leak every buffer and hang the worker pool. */
+         * exhausted (a whole-set property, not a per-sprite one). Signal the
+         * caller and break to the single cleanup region below — an early return
+         * here would leak every buffer and hang the worker pool. */
         if (!vpack_place_one_sprite(&pctx, idx, s, &out_placements[idx])) {
             *out_pages_exhausted = true;
             break;

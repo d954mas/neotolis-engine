@@ -73,7 +73,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
 /* Empty-page fit test for one sprite. Returns false when the sprite's inflated
  * hull cannot fit an empty max_size page — pipeline_tile_pack uses this for the
- * graceful ROBUST-01 UNFITTABLE pre-check before vector_pack. Bit-exact with the
+ * graceful UNFITTABLE pre-check before vector_pack. Bit-exact with the
  * real placement fit test (same inflate + per-axis bound), so it is never
  * stricter than vector_pack for any shape. */
 bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts);

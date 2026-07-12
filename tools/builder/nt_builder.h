@@ -83,7 +83,7 @@ typedef enum {
     NT_BUILD_ERR_KIND_UNFITTABLE,
 } nt_build_error_kind;
 
-/* Pure-data error detail (D-04). Names are COPIED into fixed buffers, never
+/* Pure-data error detail. Names are COPIED into fixed buffers, never
    pointers — sprite names are freed in pipeline_cleanup, a pointer would dangle. */
 typedef struct {
     nt_build_error_kind kind;
