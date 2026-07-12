@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 43a88e3
+# Commit: c621305
 
 ## WASM Section Sizes
 
