@@ -3,13 +3,7 @@
 
 #include <stdint.h>
 
-/* AUDIT-01 bench emit model + dependency-free JSON writer (D-03: one file per
- * run, per-atlas metrics + a machine-meta block). No cJSON/jansson dep — the
- * engine's tiny-size philosophy favours a ~40-line numbers+strings writer.
- *
- * Portability of the numbers (D-13): pack_ms is MACHINE-BOUND (compare timings
- * only across runs on the same CPU, recorded in meta.cpu); density / page /
- * vertex counts are deterministic and portable across machines. */
+/* Timings are machine-bound; density, page, and vertex metrics are portable. */
 
 #define NT_BENCH_MAX_ATLASES 16
 #define NT_BENCH_STR_MAX 256
@@ -20,7 +14,7 @@ typedef struct {
     uint32_t unique;       /* deduped unique-sprite count */
     uint32_t pages;        /* atlas page count */
     uint32_t region_count; /* NtAtlasHeader.region_count (== sprites) */
-    double pack_ms;        /* finish_pack wall time, machine-bound (D-13) */
+    double pack_ms;        /* atlas pipeline wall time, machine-bound */
     double density_fill_frontier;
     double density_fill_texture;
     uint32_t hull_total; /* summed hull vertex count across regions */

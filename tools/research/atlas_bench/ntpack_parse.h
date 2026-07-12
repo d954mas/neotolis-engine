@@ -4,9 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Atlas-blob metric parser for the AUDIT-01 benchmark. Reads region/hull/area
- * numbers straight from the produced atlas binary (D-02: never scrapes the
- * drifting BENCH log line, zero packer-production coupling). */
+/* Metrics come from the produced atlas binary, never diagnostic log text. */
 
 /* Page-array cap; a corrupt header cannot force an unbounded page walk. */
 #define NT_BENCH_MAX_PAGES 64
@@ -39,8 +37,7 @@ typedef struct {
  * against blob_size — safe in every NT_ASSERT mode (asserts are void in OFF). */
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out);
 
-/* Parse a full .ntpack file: locates the NT_ASSET_ATLAS entry and fills page
- * pixel dims from the paired NT_ASSET_TEXTURE entry. Implemented in plan 78-03. */
+/* Parse the atlas and its paired texture-page dimensions from a full pack. */
 int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out);
 
 #endif /* NT_BENCH_NTPACK_PARSE_H */

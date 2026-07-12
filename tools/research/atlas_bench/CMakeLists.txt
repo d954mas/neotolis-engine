@@ -1,6 +1,5 @@
 add_executable(atlas_bench main.c ntpack_parse.c bench_json.c)
-# nt_builder links only nt_log_interface (header-only) — the exe must supply the
-# real nt_log implementation, mirroring the builder exe (tools/builder:119).
+# The executable selects the real logger; nt_builder keeps an interface-only dependency.
 target_link_libraries(atlas_bench PRIVATE nt_builder nt_log)
 target_include_directories(atlas_bench PRIVATE
     ${CMAKE_SOURCE_DIR}/shared/include   # nt_atlas_format.h, nt_pack_format.h, nt_texture_format.h

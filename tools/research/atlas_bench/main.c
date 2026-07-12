@@ -1,20 +1,4 @@
-/*
- * atlas_bench — AUDIT-01 measurement engine.
- *
- * Packs one corpus glob into a single-atlas .ntpack with a chosen atlas-opts
- * profile, times the uncached atlas pipeline, then parses the produced pack
- * and writes one JSON
- * file of per-atlas density / page / pack_ms / hull-vertex metrics.
- *
- * Usage:
- *   atlas_bench <out_json> <corpus_glob> <atlas_name> <shape> <max_size> [max_sprites]
- *     shape       = rect | convex | concave
- *     max_size    = max atlas page dimension (e.g. 2048)
- *     max_sprites = optional cap on sprites added (0 / omitted = all)
- *
- * The output directory of <out_json> (and the sibling .ntpack it writes) must
- * already exist. Run from the project root so corpus globs resolve.
- */
+/* Times an uncached atlas pipeline and reads metrics from the produced pack. */
 
 #define NT_BUILD_MAX_ASSETS 16384 /* bigatlas is 4813 files */
 #define GLOB_MAX_MATCHES 8192
@@ -28,13 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Per-corpus atlas-opts matrix (Claude discretion, D-03 "atlas opts" meta):
- * start from nt_atlas_opts_defaults() and override only shape + max_size from
- * argv. max_vertices stays at the builder default (8) — the same silhouette
- * budget the atlas example ships, so bench numbers track real packs. padding,
- * alpha_threshold, allow_transform, power_of_two keep their defaults (2, 1,
- * true, true). Raw RGBA pages (compress == NULL) so the parser can read page
- * pixel dims from the texture asset header. */
+/* Keep production defaults; corpus profiles vary only shape and page size. */
 #define BENCH_MAX_VERTICES 8
 
 typedef struct {
@@ -115,8 +93,7 @@ int main(int argc, char *argv[]) {
     } else {
         nt_builder_set_threads_auto(ctx);
     }
-    /* Deliberately NO nt_builder_set_cache_dir — a cache hit skips packing and
-     * would report a garbage (near-zero) pack_ms (Pitfall 2). */
+    /* Cache stays disabled so pack_ms always covers real packing work. */
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = shape;
@@ -127,9 +104,7 @@ int main(int argc, char *argv[]) {
     bench_add_data_t add = {ctx, 0, max_sprites};
     (void)nt_builder_glob_iterate(corpus_glob, bench_add_callback, &add);
     if (add.count == 0) {
-        /* Fail loud (Pitfall 5): an empty glob means missing LFS assets or a
-         * bad path — a zero-sprite pack would silently produce meaningless
-         * metrics. */
+        /* Empty corpora would produce meaningless metrics. */
         (void)fprintf(stderr, "atlas_bench: corpus glob '%s' matched 0 sprites (LFS pulled? path correct?)\n", corpus_glob);
         nt_builder_free_pack(ctx);
         return 1;
@@ -180,9 +155,7 @@ int main(int argc, char *argv[]) {
     run.opts_allow_transform = opts.allow_transform ? 1 : 0;
     run.opts_alpha_threshold = opts.alpha_threshold;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;
-    /* cache_hits/misses and unique are reserved for the Phase 83 builder stats
-     * API (DIAG-01); Phase 78 reads only the produced pack (D-02), which does
-     * not encode the dedup-unique or cache counters. Left at 0. */
+    /* The pack format does not expose dedup or cache counters. */
     run.cache_hits = 0;
     run.cache_misses = 0;
 

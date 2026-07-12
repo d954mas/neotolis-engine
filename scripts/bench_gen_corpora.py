@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
-# Deterministic synthetic corpus generator for the atlas packer benchmark (AUDIT-01).
-#
-# Emits three fixture corpora under assets/bench/ as raw RGBA PNGs:
-#   anim_heavy/ - multi-frame sequences with byte-identical (dedup-able) frames
-#   rect_only/  - solid opaque rectangles of varied sizes
-#   slice9/     - rounded-corner 9-slice panels (transparent corners -> real hulls)
-#
-# Pure stdlib (struct + zlib): no Pillow, no numpy. A raw PNG encoder keeps the
-# output byte-identical on every re-run and on any fresh clone, so the committed
-# LFS corpora are reproducible forever. Fixed level-9 deflate is deterministic.
-#
-# Usage:
-#   python scripts/bench_gen_corpora.py [out_root]   # default out_root = assets/bench
+# Generates deterministic decoded RGBA fixtures with no third-party dependencies.
+# Compressed PNG bytes may vary across zlib implementations.
 
 import os
 import struct
@@ -136,8 +125,7 @@ def gen_slice9(out):
 
 
 def _anim_frame(state):
-    # Render one 64x64 frame purely from `state`; identical state -> identical
-    # bytes, which is what the dedup pass (Phase 82) collapses.
+    # Identical states deliberately produce dedup-able frame bytes.
     size = 64
     buf = canvas(size, size)
     radius = 8 + (state * 5) % 20
@@ -152,7 +140,7 @@ def gen_anim_heavy(out):
     # Sequences whose frame->state maps repeat, creating byte-identical frames.
     os.makedirs(out, exist_ok=True)
     sequences = {
-        # 10 frames, 4 unique states -> the Phase 82 "anim 10->4" dedup case
+        # 10 frames, 4 unique states.
         "orb": [0, 1, 2, 3, 3, 2, 1, 0, 1, 2],
         # 8 frames, all-unique states
         "spark": [10, 11, 12, 13, 14, 15, 16, 17],

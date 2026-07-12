@@ -94,7 +94,7 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
          * they occupy the SAME atlas pixels. Count each unique span's polygon
          * area ONCE — matching the packer's poly_area (unique-set fill). Hull
          * counts above stay per-region (region_count == input-sprite count).
-         * O(n^2) scan keeps the blob parser allocation-free (T-78-02). */
+         * O(n^2) scan keeps the blob parser allocation-free. */
         bool is_unique_span = true;
         for (uint16_t j = 0; j < i; j++) {
             if (regions[j].vertex_start == vstart) {
