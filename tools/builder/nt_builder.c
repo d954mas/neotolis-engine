@@ -492,15 +492,33 @@ static int parallel_encode_worker(void *arg) {
 
 /* NtEncodeResult array is heap-allocated in finish_pack to support large asset counts. */
 
-/* Map the first content error's kind to a coarse result (D-06). ROBUST-01
- * requires the unfittable/limit family → NT_BUILD_ERR_LIMIT; names → DUPLICATE. */
+/* Map the first content error's kind to a coarse result. The unfittable/limit
+ * family stays NT_BUILD_ERR_LIMIT; names → DUPLICATE; format/validation keep
+ * their own categories so a caller can switch on the coarse result. */
 static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) {
     if (ctx->error_count == 0) {
         return NT_BUILD_ERR_LIMIT;
     }
     switch (ctx->errors[0].kind) {
+    case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
+        return NT_BUILD_ERR_FORMAT;
+    case NT_BUILD_ERR_KIND_ZERO_DIM:
+    case NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM:
+    case NT_BUILD_ERR_KIND_SLICE9_TOO_BIG:
+    case NT_BUILD_ERR_KIND_DEGENERATE_HULL:
+        return NT_BUILD_ERR_VALIDATION;
+    case NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE:
+    case NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW:
+    case NT_BUILD_ERR_KIND_TOO_MANY_REGIONS:
+    case NT_BUILD_ERR_KIND_TOO_MANY_PAGES:
+    case NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE:
+    case NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW:
+    case NT_BUILD_ERR_KIND_PAGES_EXHAUSTED:
+    case NT_BUILD_ERR_KIND_UNFITTABLE:
+        return NT_BUILD_ERR_LIMIT;
     case NT_BUILD_ERR_KIND_DUPLICATE_NAME:
         return NT_BUILD_ERR_DUPLICATE;
+    case NT_BUILD_ERR_KIND_NONE:
     default:
         return NT_BUILD_ERR_LIMIT;
     }

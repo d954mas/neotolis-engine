@@ -57,6 +57,8 @@ const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint3
     return ctx->errors;
 }
 
+bool nt_builder_errors_truncated(const NtBuilderContext *ctx) { return ctx->errors_truncated; }
+
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
     switch (err->kind) {
     case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
@@ -1815,11 +1817,16 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
     /* Detect duplicate region names. Two sprites with the same name produce
      * ambiguous name_hash lookups at runtime — the caller must rename one or
-     * the atlas is broken. O(n²) but n ≤ 65535 and this is an offline check. */
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        for (uint32_t j = i + 1; j < p->sprite_count; j++) {
+     * the atlas is broken. O(n²) but n ≤ 65535 and this is an offline check.
+     * Report each offending sprite once: on the first earlier match, push one
+     * error and stop scanning it — N identical names would otherwise flood the
+     * accumulator with N(N-1)/2 errors and hide other atlases' failures. The
+     * first occurrence of a name is canonical and is not reported. */
+    for (uint32_t j = 1; j < p->sprite_count; j++) {
+        for (uint32_t i = 0; i < j; i++) {
             if (strcmp(p->sprites[i].name, p->sprites[j].name) == 0) {
                 push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+                break;
             }
         }
     }

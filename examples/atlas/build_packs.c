@@ -50,6 +50,24 @@ static void limited_add_callback(const char *path, void *user) {
     d->count++;
 }
 
+/* Print the graceful content-error list for a failed pack. Read the list BEFORE
+   free_pack — the array lives on ctx. */
+static void report_atlas_errors(NtBuilderContext *ctx, nt_build_result_t r) {
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    for (uint32_t i = 0; i < n; i++) {
+        char msg[512];
+        nt_build_error_format(&errs[i], msg, sizeof(msg));
+        (void)fprintf(stderr, "atlas error: %s\n", msg);
+    }
+    if (nt_builder_errors_truncated(ctx)) {
+        (void)fprintf(stderr, "atlas error: list truncated at %d errors — more were dropped\n", NT_BUILD_MAX_ERRORS);
+    }
+    if (n == 0) {
+        (void)fprintf(stderr, "Pack failed: %d\n", r);
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir> [max_size] [glob] [name] [r=rect] [max_sprites]\n");
@@ -132,18 +150,8 @@ int main(int argc, char *argv[]) {
     /* Finish and generate headers */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     if (r != NT_BUILD_OK) {
-        /* Library is always graceful (D-11); the frontend sets fail-fast policy.
-           Read + format the error list BEFORE free_pack — the array lives on ctx. */
-        uint32_t n = 0;
-        const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
-        for (uint32_t i = 0; i < n; i++) {
-            char msg[512];
-            nt_build_error_format(&errs[i], msg, sizeof(msg));
-            (void)fprintf(stderr, "atlas error: %s\n", msg);
-        }
-        if (n == 0) {
-            (void)fprintf(stderr, "Pack failed: %d\n", r);
-        }
+        /* Library is always graceful; the frontend sets fail-fast policy. */
+        report_atlas_errors(ctx, r);
         nt_builder_free_pack(ctx);
         return 1;
     }

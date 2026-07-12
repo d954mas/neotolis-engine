@@ -186,8 +186,15 @@ typedef struct NtBuilderContext NtBuilderContext;
 
 /* --- Content-error channel (see nt_build_error_t above) ---
  * get_errors exposes the sticky accumulator (add-order-stable); format renders
- * one line on demand (D-05: not stored, keeps the struct pure data). */
+ * one line on demand (not stored, keeps the struct pure data).
+ *
+ * The returned pointer is a BORROWED, READ-ONLY view into the context: the
+ * caller must NOT free it, and it is valid only until nt_builder_free_pack()
+ * (dangles afterward). out_count may be NULL. */
 const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count);
+/* True if the accumulator hit NT_BUILD_MAX_ERRORS and dropped further errors —
+ * the returned list is then a capped prefix, not the complete set. */
+bool nt_builder_errors_truncated(const NtBuilderContext *ctx);
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len);
 
 /* --- Texture options (game controls format and resize per-texture) --- */
