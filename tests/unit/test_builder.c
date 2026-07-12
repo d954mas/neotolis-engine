@@ -5629,6 +5629,117 @@ void test_atlas_slice9_invalid_borders_reports_error(void) {
     free(s);
 }
 
+/* D-09: one atlas reports ALL of its bad sprites as a list, add-order-stable. */
+void test_atlas_collects_all_errors_in_one_atlas(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_collect_all.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_collect_all.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Three fully-transparent (alpha=0) sprites — each fails alpha-trim. */
+    uint8_t *t0 = make_test_sprite(16, 16, 255, 0, 0, 0);
+    uint8_t *t1 = make_test_sprite(16, 16, 0, 255, 0, 0);
+    uint8_t *t2 = make_test_sprite(16, 16, 0, 0, 255, 0);
+    nt_builder_begin_atlas(ctx, "allbad", NULL);
+    nt_builder_atlas_add_raw(ctx, t0, 16, 16, &(nt_atlas_sprite_opts_t){.name = "one.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, t1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "two.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, t2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "three.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(3, n); /* all three reported, not just the first */
+    /* add-order-stable: errors listed in the order sprites were added. */
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("one.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_STRING("two.png", errs[1].sprite);
+    TEST_ASSERT_EQUAL_STRING("three.png", errs[2].sprite);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    /* No .ntpack written on failure. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_collect_all.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(t0);
+    free(t1);
+    free(t2);
+}
+
+/* D-10: a poisoned pack no-ops subsequent atlases and returns the first
+ * failing atlas's error list (between-atlas hard stop). */
+void test_atlas_poison_stops_subsequent_atlases(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_poison_stop.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_stop.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Atlas A: a single transparent sprite poisons the pack. */
+    uint8_t *bad = make_test_sprite(16, 16, 255, 0, 0, 0);
+    nt_builder_begin_atlas(ctx, "atlasA", NULL);
+    nt_builder_atlas_add_raw(ctx, bad, 16, 16, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t after_a = 0;
+    (void)nt_builder_get_errors(ctx, &after_a);
+    TEST_ASSERT_EQUAL_UINT32(1, after_a);
+
+    /* Atlas B: valid content, but the pack is already poisoned → begin/add/end
+     * are all no-ops; no new errors, no re-opened atlas. */
+    uint8_t *good = make_test_sprite(16, 16, 255, 128, 0, 255);
+    nt_builder_begin_atlas(ctx, "atlasB", NULL);
+    nt_builder_atlas_add_raw(ctx, good, 16, 16, &(nt_atlas_sprite_opts_t){.name = "good.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t after_b = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &after_b);
+    TEST_ASSERT_EQUAL_UINT32(1, after_b); /* still only A's error */
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("bad.png", errs[0].sprite);
+
+    /* finish_pack returns A's coarse code, writes no file. */
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_poison_stop.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(bad);
+    free(good);
+}
+
+/* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
+ * NT_BUILD_ERR_DUPLICATE, no file written. */
+void test_atlas_duplicate_name_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_dupname.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_dupname.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Two opaque sprites with DIFFERENT pixels (so no dedup) but the SAME name. */
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_builder_begin_atlas(ctx, "dupatlas", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "same.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "same.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_DUPLICATE_NAME, errs[0].kind);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, nt_builder_finish_pack(ctx));
+
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_dupname.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(s1);
+    free(s2);
+}
+
 /* Test: slice9 region forces rect packing (vertex_count == 4). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_slice9_forces_rect_packing(void) {
@@ -5894,6 +6005,9 @@ int main(void) {
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);
     RUN_TEST(test_atlas_slice9_invalid_borders_reports_error);
+    RUN_TEST(test_atlas_collects_all_errors_in_one_atlas);
+    RUN_TEST(test_atlas_poison_stops_subsequent_atlases);
+    RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);
 
