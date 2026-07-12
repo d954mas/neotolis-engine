@@ -1283,6 +1283,14 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
+        /* Skip a sprite that failed alpha_trim (degenerate 0-size trim). It was
+         * already reported (transparent-after-trim / slice9) so building a hull
+         * here would double-report it as a degenerate hull. Never hit on the
+         * happy path — trim is always non-zero when nothing poisoned. */
+        if (tw == 0 || th == 0) {
+            continue;
+        }
+
         /* Resolve per-sprite shape override (0 = atlas default) */
         nt_atlas_shape_t effective_shape = p->opts->shape;
         uint8_t effective_max_verts = p->opts->max_vertices;
@@ -2255,9 +2263,11 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     NtBuildAtlasState *state = ctx->active_atlas;
 
-    /* D-10: if this atlas was poisoned during its adds, skip the whole pipeline
-     * (sprites may be unpackable) and free the open atlas state. */
-    if (ctx->poisoned) {
+    /* When poisoned mid-adds, still run the pre-packing VALIDATION stages on the
+     * surviving good sprites so every bad sprite in this atlas is reported — not
+     * just the one that first poisoned. Only bail early when nothing remains to
+     * validate; packing/compose/serialize stay gated off below. */
+    if (ctx->poisoned && state->sprite_count == 0) {
         atlas_state_free(state);
         ctx->active_atlas = NULL;
         return;
@@ -2288,13 +2298,13 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     pipeline_alpha_trim(&p);
     double bench_alpha_trim = nt_time_now() - t0;
 
-    /* D-13 single-exit: a content error during trim skips all heavy packing and
-     * falls through to the one cleanup block. */
-    if (ctx->poisoned) {
-        goto cleanup;
+    /* No poison gate here: geometry must still run on the surviving sprites so it
+     * can report bad hulls too (cross-stage collect-all). The first hard gate
+     * sits after geometry, before packing. Skip the cache probe once poisoned —
+     * the result is discarded and its "cache hit" log would mislead. */
+    if (!ctx->poisoned) {
+        pipeline_cache_check(&p);
     }
-
-    pipeline_cache_check(&p);
 
     t0 = nt_time_now();
     pipeline_dedup(&p);
@@ -2306,8 +2316,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     double bench_geometry = nt_time_now() - t0;
     NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
 
-    /* D-13 single-exit: a content error during geometry (empty mask / degenerate
-     * hull / contour overflow) skips packing and falls through to cleanup. */
+    /* First hard gate: a content error from trim or geometry skips all packing,
+     * compose, serialize and register — fall through to the single cleanup. */
     if (ctx->poisoned) {
         goto cleanup;
     }
