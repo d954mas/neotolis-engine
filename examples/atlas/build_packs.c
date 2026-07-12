@@ -131,11 +131,23 @@ int main(int argc, char *argv[]) {
 
     /* Finish and generate headers */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    nt_builder_free_pack(ctx);
     if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "Pack failed: %d\n", r);
+        /* Library is always graceful (D-11); the frontend sets fail-fast policy.
+           Read + format the error list BEFORE free_pack — the array lives on ctx. */
+        uint32_t n = 0;
+        const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+        for (uint32_t i = 0; i < n; i++) {
+            char msg[512];
+            nt_build_error_format(&errs[i], msg, sizeof(msg));
+            (void)fprintf(stderr, "atlas error: %s\n", msg);
+        }
+        if (n == 0) {
+            (void)fprintf(stderr, "Pack failed: %d\n", r);
+        }
+        nt_builder_free_pack(ctx);
         return 1;
     }
+    nt_builder_free_pack(ctx);
 
     /* Generate combined header */
     const char *headers[] = {pack_hdr};
