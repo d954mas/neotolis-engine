@@ -21,6 +21,75 @@
 #include <windows.h>
 #endif
 
+/* --- Content-error channel (D-04/D-05/D-07) --- */
+
+void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err) {
+    if (ctx->error_count < NT_BUILD_MAX_ERRORS) {
+        ctx->errors[ctx->error_count++] = *err;
+    } else {
+        ctx->errors_truncated = true;
+    }
+    ctx->poisoned = true; /* poison even when the list is full */
+}
+
+const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
+    if (out_count) {
+        *out_count = ctx->error_count;
+    }
+    return ctx->errors;
+}
+
+void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
+    switch (err->kind) {
+    case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
+        (void)snprintf(buf, len, "sprite '%s': corrupt or undecodable image", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_ZERO_DIM:
+        (void)snprintf(buf, len, "sprite '%s': zero width or height", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE:
+        (void)snprintf(buf, len, "sprite '%s': image %ux%u exceeds decode limit", err->sprite, err->w, err->h);
+        break;
+    case NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM:
+        (void)snprintf(buf, len, "sprite '%s': fully transparent after trim", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_SLICE9_TOO_BIG:
+        (void)snprintf(buf, len, "sprite '%s': slice9 borders (%u) >= source extent (%u)", err->sprite, err->detail_a, err->detail_b);
+        break;
+    case NT_BUILD_ERR_KIND_DEGENERATE_HULL:
+        (void)snprintf(buf, len, "sprite '%s': degenerate hull (no usable outline)", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW:
+        (void)snprintf(buf, len, "sprite '%s': contour exceeds vertex budget", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_DUPLICATE_NAME:
+        (void)snprintf(buf, len, "atlas '%s': duplicate region name '%s'", err->atlas, err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_TOO_MANY_REGIONS:
+        (void)snprintf(buf, len, "atlas '%s': region count exceeds 65535", err->atlas);
+        break;
+    case NT_BUILD_ERR_KIND_TOO_MANY_PAGES:
+        (void)snprintf(buf, len, "atlas '%s': page count exceeds 65535", err->atlas);
+        break;
+    case NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE:
+        (void)snprintf(buf, len, "sprite '%s': %ux%u exceeds 65535px", err->sprite, err->w, err->h);
+        break;
+    case NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW:
+        (void)snprintf(buf, len, "sprite '%s': trim offset overflow", err->sprite);
+        break;
+    case NT_BUILD_ERR_KIND_PAGES_EXHAUSTED:
+        (void)snprintf(buf, len, "atlas '%s': ran out of pages (max_size=%u)", err->atlas, err->max_size);
+        break;
+    case NT_BUILD_ERR_KIND_UNFITTABLE:
+        (void)snprintf(buf, len, "sprite '%s': %ux%u + padding %u + margin %u does not fit an empty page of max_size %u", err->sprite, err->w, err->h, err->padding, err->margin, err->max_size);
+        break;
+    case NT_BUILD_ERR_KIND_NONE:
+    default:
+        (void)snprintf(buf, len, "no error");
+        break;
+    }
+}
+
 /* ===================================================================
  * Atlas Builder — sprite atlas packing pipeline
  * ===================================================================

@@ -220,7 +220,18 @@ struct NtBuilderContext {
     NtAtlasRegionCodegen *atlas_regions;
     uint32_t atlas_region_count;
     uint32_t atlas_region_capacity;
+
+    /* Content-error accumulator (D-07). poisoned = at least one error appended;
+     * gates finish_pack write and the between-atlas hard stop (D-10). */
+    nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
+    uint32_t error_count;
+    bool errors_truncated;
+    bool poisoned;
 };
+
+/* Append a content error (sequential-call-only for add-order determinism, D-09).
+ * Always sets ctx->poisoned; truncates past NT_BUILD_MAX_ERRORS. */
+void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);

@@ -53,6 +53,45 @@ typedef enum {
     NT_BUILD_ERR_DUPLICATE = 5,
 } nt_build_result_t;
 
+/* Content-error channel (game can override before including this header) */
+#ifndef NT_BUILD_MAX_ERRORS
+#define NT_BUILD_MAX_ERRORS 256
+#endif
+#ifndef NT_BUILD_ERR_NAME_MAX
+#define NT_BUILD_ERR_NAME_MAX 128
+#endif
+
+/* Closed set of content-dependent failure kinds. Compiler-checked switch,
+   stable contract — never a hash (that idiom is for open sets like resource ids). */
+typedef enum {
+    NT_BUILD_ERR_KIND_NONE = 0,
+    NT_BUILD_ERR_KIND_CORRUPT_IMAGE,
+    NT_BUILD_ERR_KIND_ZERO_DIM,
+    NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE,
+    NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM,
+    NT_BUILD_ERR_KIND_SLICE9_TOO_BIG,
+    NT_BUILD_ERR_KIND_DEGENERATE_HULL,
+    NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW,
+    NT_BUILD_ERR_KIND_DUPLICATE_NAME,
+    NT_BUILD_ERR_KIND_TOO_MANY_REGIONS,
+    NT_BUILD_ERR_KIND_TOO_MANY_PAGES,
+    NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE,
+    NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW,
+    NT_BUILD_ERR_KIND_PAGES_EXHAUSTED,
+    NT_BUILD_ERR_KIND_UNFITTABLE,
+} nt_build_error_kind;
+
+/* Pure-data error detail (D-04). Names are COPIED into fixed buffers, never
+   pointers — sprite names are freed in pipeline_cleanup, a pointer would dangle. */
+typedef struct {
+    nt_build_error_kind kind;
+    char atlas[NT_BUILD_ERR_NAME_MAX];
+    char sprite[NT_BUILD_ERR_NAME_MAX];
+    uint32_t w, h;
+    uint32_t padding, margin, max_size;
+    uint32_t detail_a, detail_b; /* per-kind extras */
+} nt_build_error_t;
+
 /* Explicit stream layout -- game declares which glTF attributes to extract */
 typedef struct {
     const char *engine_name; /* e.g. "position", "uv0" */
@@ -142,6 +181,12 @@ typedef struct {
 
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
+
+/* --- Content-error channel (see nt_build_error_t above) ---
+ * get_errors exposes the sticky accumulator (add-order-stable); format renders
+ * one line on demand (D-05: not stored, keeps the struct pure data). */
+const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count);
+void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len);
 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
