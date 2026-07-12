@@ -18,9 +18,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
     return "leak:extensionSupportedGLX\n"
            "leak:nt_builder_decode_font\n" /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
            "leak:nt_builder_add_font\n"
-           "leak:nt_builder_finish_pack\n" /* shader error tests: longjmp leaks finish_pack internals */
-           "leak:vector_pack\n"            /* max-pages assert: longjmp skips vector_pack cleanup */
-           "leak:pipeline_tile_pack\n";    /* same test: longjmp skips pipeline_tile_pack cleanup */
+           "leak:nt_builder_finish_pack\n"; /* shader error tests: longjmp leaks finish_pack internals */
 }
 
 /* clang-format off */
@@ -5414,19 +5412,21 @@ void test_atlas_cache_corrupt_file_falls_back(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
 }
 
-/* Regression for BUG-2: exhausting ATLAS_MAX_PAGES must fire a loud
- * NT_BUILD_ASSERT, not a silent fallback. Generates enough oversized sprites
- * that the packer cannot fit even one per page across all ATLAS_MAX_PAGES (64)
- * pages, then verifies the assert fires via EXPECT_BUILD_ASSERT. */
+/* ROBUST-02: exhausting ATLAS_MAX_PAGES must be a graceful PAGES_EXHAUSTED error
+ * (pool joined, buffers freed), not an abort. Generates enough sprites that each
+ * fits one-per-page but the set overflows all ATLAS_MAX_PAGES (64) pages. The
+ * live-LSan no-leak proof for this path lives in test_atlas_unfittable. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_max_pages_exhaustion_asserts(void) {
+void test_atlas_max_pages_exhaustion_graceful(void) {
     (void)MKDIR(TMP_DIR);
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxpages.ntpack");
+    const char *path = TMP_DIR "/atlas_maxpages.ntpack";
+    (void)remove(path);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* Tiny max_size + sprite that nearly fills each page → one sprite per page.
-     * Need > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. Use RECT
-     * shape for simple AABB packing (no polygon mode). */
+    /* Tiny max_size + sprite that fills each page → one sprite per page. Need
+     * > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. RECT shape; 57×57
+     * fills a 64 page (footprint == max_size), so no second sprite fits. */
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = 64;
     opts.margin = 2;
@@ -5435,22 +5435,31 @@ void test_atlas_max_pages_exhaustion_asserts(void) {
 
     nt_builder_begin_atlas(ctx, "too_many", &opts);
 
-    /* 70 distinct sprites of 60x60 — each uses (60+padding)^2 = 62x62 of a
-     * 64x64 page, no room for a second sprite. Distinct red channels keep
-     * decoded_hash unique so dedup cannot collapse them. */
+    /* Distinct red channels keep decoded_hash unique so dedup cannot collapse. */
     enum { N_SPRITES = 70 };
     uint8_t *sprites[N_SPRITES];
     for (uint32_t i = 0; i < N_SPRITES; i++) {
-        sprites[i] = make_test_sprite(60, 60, (uint8_t)(i + 1), 50, 100, 255);
+        sprites[i] = make_test_sprite(57, 57, (uint8_t)(i + 1), 50, 100, 255);
         char name[32];
         (void)snprintf(name, sizeof(name), "sp_%u.png", i);
-        nt_builder_atlas_add_raw(ctx, sprites[i], 60, 60, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_builder_atlas_add_raw(ctx, sprites[i], 57, 57, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
     }
 
-    /* Pipeline allocates internally; longjmp from NT_BUILD_ASSERT can't free
-     * them. Suppress leak detection for this intentional assert-path test. */
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+    nt_builder_end_atlas(ctx); /* no abort — graceful accumulate + cleanup */
 
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    FILE *f = fopen(path, "rb");
+    TEST_ASSERT_NULL_MESSAGE(f, "no .ntpack must exist after a pages-exhausted build");
+    if (f) {
+        (void)fclose(f);
+    }
+
+    nt_builder_free_pack(ctx);
     for (uint32_t i = 0; i < N_SPRITES; i++) {
         free(sprites[i]);
     }
@@ -6000,7 +6009,7 @@ int main(void) {
     /* Atlas cache hardening + BUG-2 regression */
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
-    RUN_TEST(test_atlas_max_pages_exhaustion_asserts);
+    RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
 
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);

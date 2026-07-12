@@ -725,6 +725,14 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_transparent_trim WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Proves the graceful UNFITTABLE + PAGES_EXHAUSTED error paths are leak-free
+    # (ROBUST-02): runs under live LSan (no detect_leaks=0 masking) — its passing
+    # is the concrete no-leak/no-hung-pool proof for the pack-time failure paths.
+    add_executable(test_atlas_unfittable unit/test_atlas_unfittable.c)
+    target_link_libraries(test_atlas_unfittable PRIVATE nt_builder nt_log unity)
+    target_compile_definitions(test_atlas_unfittable PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_unfittable WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Packer determinism tripwire: fixed in-memory corpus keeps density and hull
     # metrics deterministic without timing assertions (bench parser is the probe).
     add_executable(test_atlas_pack_determinism
