@@ -1541,6 +1541,23 @@ static void pipeline_geometry(AtlasPipeline *p) {
 
 /* --- pipeline_tile_pack: sort sprites by area, place on atlas pages via tile-grid collision --- */
 
+/* Free the per-unique scratch pipeline_tile_pack allocates (incl. the override
+ * scratch hulls). Shared by the normal tail and the two graceful early-outs
+ * (unfittable pre-check, pages-exhausted) so every exit frees the same set. */
+static void tile_pack_free_scratch(AtlasPipeline *p, uint32_t *u_trim_w, uint32_t *u_trim_h, Point2D **u_hulls, uint32_t *u_hull_counts, bool *u_no_rotate) {
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        uint32_t oi = p->unique_indices[i];
+        if (u_hulls[i] != p->hull_vertices[oi]) {
+            free(u_hulls[i]);
+        }
+    }
+    free(u_trim_w);
+    free(u_trim_h);
+    free((void *)u_hulls);
+    free(u_hull_counts);
+    free(u_no_rotate);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_tile_pack(AtlasPipeline *p) {
     /* calloc so trailing padding in AtlasPlacement is deterministic — the struct
@@ -1600,9 +1617,46 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
+    /* ROBUST-01: reject any sprite that cannot fit an empty max_size page BEFORE
+     * packing, using the exact vector_pack fit test on the same hull + opts — so
+     * an unfittable sprite becomes a graceful UNFITTABLE error instead of tripping
+     * vector_pack's "empty page should accept placement" invariant. Collect every
+     * unfittable sprite (D-09), not just the first. */
+    bool any_unfittable = false;
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        if (vpack_sprite_fits_empty_page(u_hulls[i], u_hull_counts[i], p->opts)) {
+            continue;
+        }
+        uint32_t oi = p->unique_indices[i];
+        uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
+        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE, .w = p->trim_w[oi], .h = p->trim_h[oi], .padding = p->opts->padding, .margin = sprite_margin, .max_size = p->opts->max_size};
+        error_copy_name(e.atlas, p->state->name);
+        error_copy_name(e.sprite, p->sprites[oi].name);
+        nt_builder_push_error(p->ctx, &e);
+        any_unfittable = true;
+    }
+    if (any_unfittable) {
+        p->placement_count = 0;
+        tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_no_rotate);
+        return; /* end_atlas's post-tile_pack poison gate routes to cleanup; page_pixels stays NULL */
+    }
+
     NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
-    p->placement_count =
-        vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
+    bool pages_exhausted = false;
+    p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count,
+                                     &pages_exhausted);
+    if (pages_exhausted) {
+        /* ROBUST-02: ATLAS_MAX_PAGES exhausted — vector_pack already joined its
+         * worker pool and freed its buffers; report gracefully and bail. */
+        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, .max_size = p->opts->max_size, .detail_a = ATLAS_MAX_PAGES};
+        error_copy_name(e.atlas, p->state->name);
+        nt_builder_push_error(p->ctx, &e);
+        p->placement_count = 0;
+        /* vector_pack freed its pages; compose is skipped so page_pixels stays NULL
+         * and pipeline_cleanup's guard handles the (nonzero) page_count safely. */
+        tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_no_rotate);
+        return;
+    }
     pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
 
     /* Fill trim offsets and remap sprite_index back to original. */
@@ -1616,18 +1670,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placements[i].trimmed_h = p->trim_h[orig_idx];
     }
 
-    /* Free scratch hulls allocated for slice9 sprites */
-    for (uint32_t i = 0; i < p->unique_count; i++) {
-        uint32_t oi = p->unique_indices[i];
-        if (u_hulls[i] != p->hull_vertices[oi]) {
-            free(u_hulls[i]);
-        }
-    }
-    free(u_trim_w);
-    free(u_trim_h);
-    free((void *)u_hulls);
-    free(u_hull_counts);
-    free(u_no_rotate);
+    tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_no_rotate);
 }
 
 /* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */
@@ -2177,11 +2220,15 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free((void *)p->hull_vertices);
     free(p->placements);
 
-    /* Free remaining page pixels (any not transferred to entries) */
-    for (uint32_t pg = 0; pg < p->page_count; pg++) {
-        free(p->page_pixels[pg]);
+    /* Free remaining page pixels (any not transferred to entries). page_pixels is
+     * NULL when a poisoned atlas skipped compose — page_count is reset to 0 there,
+     * but guard anyway so cleanup never derefs a NULL page array. */
+    if (p->page_pixels) {
+        for (uint32_t pg = 0; pg < p->page_count; pg++) {
+            free(p->page_pixels[pg]);
+        }
+        free((void *)p->page_pixels);
     }
-    free((void *)p->page_pixels);
 
     /* Free atlas state. atlas_count is bumped by increment_kind_counter when
      * pipeline_register calls nt_builder_add_entry for the atlas metadata
@@ -2271,6 +2318,13 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         t0 = nt_time_now();
         pipeline_tile_pack(&p);
         bench_tile_pack = nt_time_now() - t0;
+
+        /* D-13 single-exit: an UNFITTABLE (pre-check) or PAGES_EXHAUSTED
+         * (vector_pack) content error skips compose/serialize and falls through
+         * to the one cleanup block. */
+        if (ctx->poisoned) {
+            goto cleanup;
+        }
 
         t0 = nt_time_now();
         pipeline_compose(&p);
