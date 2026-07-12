@@ -681,6 +681,11 @@ static const char *extract_filename(const char *path) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
+    /* D-10 between-atlas hard stop: leave active_atlas NULL so a poisoned pack
+     * opens no further atlases. */
+    if (ctx->poisoned) {
+        return;
+    }
     NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
     NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
 
@@ -2013,6 +2018,18 @@ static void pipeline_register(AtlasPipeline *p) {
     }
 }
 
+/* Free an atlas state's owned buffers. Used by the poison early-out in
+ * end_atlas, before any pipeline scratch is allocated. */
+static void atlas_state_free(NtBuildAtlasState *state) {
+    for (uint32_t i = 0; i < state->sprite_count; i++) {
+        free(state->sprites[i].rgba);
+        free(state->sprites[i].name);
+    }
+    free(state->sprites);
+    free(state->name);
+    free(state);
+}
+
 /* --- pipeline_cleanup: free all temporary allocations --- */
 
 static void pipeline_cleanup(AtlasPipeline *p) {
@@ -2024,12 +2041,16 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         p->sprites[i].name = NULL;
     }
 
-    /* Free hull vertices (duplicates share pointers via dedup_map) */
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] < 0) {
-            free(p->hull_vertices[i]);
+    /* Free hull vertices (duplicates share pointers via dedup_map).
+     * NULL-guarded: an early-poison exit skips dedup+geometry, so neither array
+     * exists yet. */
+    if (p->dedup_map && p->hull_vertices) {
+        for (uint32_t i = 0; i < p->sprite_count; i++) {
+            if (p->dedup_map[i] < 0) {
+                free(p->hull_vertices[i]);
+            }
+            p->hull_vertices[i] = NULL;
         }
-        p->hull_vertices[i] = NULL;
     }
 
     /* Free alpha planes */
@@ -2071,6 +2092,15 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");
 
     NtBuildAtlasState *state = ctx->active_atlas;
+
+    /* D-10: if this atlas was poisoned during its adds, skip the whole pipeline
+     * (sprites may be unpackable) and free the open atlas state. */
+    if (ctx->poisoned) {
+        atlas_state_free(state);
+        ctx->active_atlas = NULL;
+        return;
+    }
+
     NT_BUILD_ASSERT(state->sprite_count > 0 && "end_atlas: atlas has no sprites");
 
     /* Warn on non-premultiplied atlases. Bilinear filtering at sprite gaps
@@ -2095,6 +2125,12 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     pipeline_alpha_trim(&p);
     double bench_alpha_trim = nt_time_now() - t0;
+
+    /* D-13 single-exit: a content error during trim skips all heavy packing and
+     * falls through to the one cleanup block. */
+    if (ctx->poisoned) {
+        goto cleanup;
+    }
 
     pipeline_cache_check(&p);
 
@@ -2152,6 +2188,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
                 (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count);
 
+cleanup:
     pipeline_cleanup(&p);
 }
 // #endregion

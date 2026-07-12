@@ -492,9 +492,28 @@ static int parallel_encode_worker(void *arg) {
 
 /* NtEncodeResult array is heap-allocated in finish_pack to support large asset counts. */
 
+/* Map the first content error's kind to a coarse result (D-06). ROBUST-01
+ * requires the unfittable/limit family → NT_BUILD_ERR_LIMIT; names → DUPLICATE. */
+static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) {
+    if (ctx->error_count == 0) {
+        return NT_BUILD_ERR_LIMIT;
+    }
+    switch (ctx->errors[0].kind) {
+    case NT_BUILD_ERR_KIND_DUPLICATE_NAME:
+        return NT_BUILD_ERR_DUPLICATE;
+    default:
+        return NT_BUILD_ERR_LIMIT;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
+    /* D-08: a poisoned build writes no pack. Gate before the pending_count
+     * assert — a fully-failed atlas-only pack can have pending_count == 0. */
+    if (ctx->poisoned) {
+        return nt_builder_result_from_errors(ctx);
+    }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
     double t_encode_start = nt_time_now();
