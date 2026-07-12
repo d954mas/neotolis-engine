@@ -509,9 +509,11 @@ static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *c
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
-    /* D-08: a poisoned build writes no pack. Gate before the pending_count
+    /* A poisoned build writes no pack. Gate before the pending_count
      * assert — a fully-failed atlas-only pack can have pending_count == 0. */
     if (ctx->poisoned) {
+        /* Remove any pre-existing good pack: no .ntpack must survive a failed rebuild. */
+        (void)remove(ctx->output_path);
         return nt_builder_result_from_errors(ctx);
     }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");

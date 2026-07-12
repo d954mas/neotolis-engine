@@ -1604,6 +1604,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
             scratch[2] = (Point2D){(int32_t)u_trim_w[i], (int32_t)u_trim_h[i]};
             scratch[3] = (Point2D){0, (int32_t)u_trim_h[i]};
             u_hulls[i] = scratch;
+            u_hull_counts[i] = 4; /* scratch is a 4-vertex quad; keep count in sync or downstream reads OOB */
         }
     }
 

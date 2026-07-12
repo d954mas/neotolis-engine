@@ -53,13 +53,15 @@ typedef enum {
     NT_BUILD_ERR_DUPLICATE = 5,
 } nt_build_result_t;
 
-/* Content-error channel (game can override before including this header) */
+/* Content-error channel. NT_BUILD_MAX_ERRORS caps the internal opaque-context
+ * accumulator only (no public struct embeds it), so a game may override it. */
 #ifndef NT_BUILD_MAX_ERRORS
 #define NT_BUILD_MAX_ERRORS 256
 #endif
-#ifndef NT_BUILD_ERR_NAME_MAX
+/* ABI-locked: nt_build_error_t below embeds this and the record crosses the
+ * library boundary by value, so it must match the compiled library exactly.
+ * Never override it — a mismatch corrupts nt_builder_get_errors() indexing. */
 #define NT_BUILD_ERR_NAME_MAX 128
-#endif
 
 /* Closed set of content-dependent failure kinds. Compiler-checked switch,
    stable contract — never a hash (that idiom is for open sets like resource ids). */
