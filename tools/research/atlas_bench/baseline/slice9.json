@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "tool_version": "1.0.0",
+    "builder_version": 1,
+    "corpus": "assets/bench/slice9/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "concave",
+      "max_size": 2048,
+      "padding": 2,
+      "max_vertices": 8,
+      "allow_transform": true,
+      "alpha_threshold": 1,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "slice9",
+      "sprites": 12,
+      "unique": 0,
+      "pages": 1,
+      "region_count": 12,
+      "pack_ms": 20.0917,
+      "density_fill_frontier": 0.6202,
+      "density_fill_texture": 0.3912,
+      "hull_verts": {
+        "total": 72,
+        "min": 4,
+        "max": 8,
+        "mean": 6.0000
+      }
+    }
+  ]
+}

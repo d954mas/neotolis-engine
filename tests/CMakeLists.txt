@@ -460,6 +460,19 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 
+    # Parser stays independently testable without linking the benchmark executable.
+    add_executable(test_atlas_bench_parse
+        unit/test_atlas_bench_parse.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_bench_parse PRIVATE unity)
+    target_include_directories(test_atlas_bench_parse PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_bench_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_bench_parse)
+
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
@@ -705,6 +718,27 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
+    # Characterizes the builder's fail-loud policy for transparent sprites.
+    add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
+    target_link_libraries(test_atlas_transparent_trim PRIVATE nt_builder nt_log unity)
+    target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_transparent_trim WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # EXPECT_BUILD_ASSERT longjmps mid-pipeline; leaked allocations are expected.
+    set_tests_properties(test_atlas_transparent_trim PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
+
+    # Packer determinism tripwire: fixed in-memory corpus keeps density and hull
+    # metrics deterministic without timing assertions (bench parser is the probe).
+    add_executable(test_atlas_pack_determinism
+        unit/test_atlas_pack_determinism.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_pack_determinism PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_pack_determinism PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.

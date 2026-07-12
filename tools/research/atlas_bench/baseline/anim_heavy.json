@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "tool_version": "1.0.0",
+    "builder_version": 1,
+    "corpus": "assets/bench/anim_heavy/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "concave",
+      "max_size": 2048,
+      "padding": 2,
+      "max_vertices": 8,
+      "allow_transform": true,
+      "alpha_threshold": 1,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "anim_heavy",
+      "sprites": 30,
+      "unique": 0,
+      "pages": 1,
+      "region_count": 30,
+      "pack_ms": 40.2275,
+      "density_fill_frontier": 0.5877,
+      "density_fill_texture": 0.5471,
+      "hull_verts": {
+        "total": 240,
+        "min": 8,
+        "max": 8,
+        "mean": 8.0000
+      }
+    }
+  ]
+}

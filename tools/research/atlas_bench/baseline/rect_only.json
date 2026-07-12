@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "tool_version": "1.0.0",
+    "builder_version": 1,
+    "corpus": "assets/bench/rect_only/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "rect",
+      "max_size": 2048,
+      "padding": 2,
+      "max_vertices": 8,
+      "allow_transform": true,
+      "alpha_threshold": 1,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "rect_only",
+      "sprites": 32,
+      "unique": 0,
+      "pages": 1,
+      "region_count": 32,
+      "pack_ms": 59.3949,
+      "density_fill_frontier": 0.7412,
+      "density_fill_texture": 0.7239,
+      "hull_verts": {
+        "total": 128,
+        "min": 4,
+        "max": 4,
+        "mean": 4.0000
+      }
+    }
+  ]
+}

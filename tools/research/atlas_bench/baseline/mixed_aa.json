@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "tool_version": "1.0.0",
+    "builder_version": 1,
+    "corpus": "assets/sprites/bigatlas/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "concave",
+      "max_size": 4096,
+      "padding": 2,
+      "max_vertices": 8,
+      "allow_transform": true,
+      "alpha_threshold": 1,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "mixed_aa",
+      "sprites": 4812,
+      "unique": 0,
+      "pages": 1,
+      "region_count": 4812,
+      "pack_ms": 91220.9188,
+      "density_fill_frontier": 0.6313,
+      "density_fill_texture": 0.6304,
+      "hull_verts": {
+        "total": 37514,
+        "min": 4,
+        "max": 8,
+        "mean": 7.7959
+      }
+    }
+  ]
+}
