@@ -36,7 +36,12 @@ void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err) {
     if (ctx->error_count >= NT_BUILD_MAX_ERRORS) {
         ctx->errors_truncated = true;
         ctx->poisoned = true; /* poison even when the list is full */
-        return;
+        /* Keep the add-order prefix: an earlier error evicts the current tail
+         * (highest seq). A later/equal error stays outside the prefix — drop it. */
+        if (ctx->error_seq[NT_BUILD_MAX_ERRORS - 1] <= ctx->cur_error_seq) {
+            return;
+        }
+        ctx->error_count = NT_BUILD_MAX_ERRORS - 1; /* evict tail, fall through to stable insert */
     }
     /* Insert keeping error_seq[] non-decreasing, after equal-seq entries
      * (stable) — so errors[] stays add-sorted and errors[0] is the earliest
@@ -723,6 +728,22 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
     NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
     NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
+    /* Caller-supplied opts are validated before the poison no-op so a
+     * programmer error still traps on a poisoned pack. NULL opts is always
+     * valid (uses defaults). extrude>0 shape check is opts-only here. */
+    if (opts) {
+        NT_BUILD_ASSERT(opts->max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
+        NT_BUILD_ASSERT(opts->max_size > 0 && opts->max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
+        NT_BUILD_ASSERT(opts->padding <= opts->max_size && "begin_atlas: padding exceeds max_size");
+        NT_BUILD_ASSERT(opts->margin <= opts->max_size && "begin_atlas: margin exceeds max_size");
+        /* premultiplied alpha only meaningful for RGBA8 — no alpha channel otherwise. */
+        NT_BUILD_ASSERT((!opts->premultiplied || opts->format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
+        /* Simple AABB edge extrude needs a rectangular footprint; polygon
+         * packing inflates hulls, so an AABB extrude band could spill and
+         * collide. Polygon modes must use padding-only. */
+        NT_BUILD_ASSERT((opts->shape == NT_ATLAS_SHAPE_RECT || opts->extrude == 0) &&
+                        "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
+    }
     /* Between-atlas hard stop: after poison, open no further atlases
      * (active_atlas is NULL here). Programmer invariants above still fire. */
     if (ctx->poisoned) {
@@ -751,22 +772,6 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
         state->opts = nt_atlas_opts_defaults();
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */
-    NT_BUILD_ASSERT(state->opts.max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
-    NT_BUILD_ASSERT(state->opts.max_size > 0 && state->opts.max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
-    NT_BUILD_ASSERT(state->opts.padding <= state->opts.max_size && "begin_atlas: padding exceeds max_size");
-    NT_BUILD_ASSERT(state->opts.margin <= state->opts.max_size && "begin_atlas: margin exceeds max_size");
-    /* premultiplied alpha only meaningful for RGBA8. Setting it true with RGB8/RG8/R8
-     * is a caller bug — there's no alpha channel to multiply by. */
-    NT_BUILD_ASSERT((!state->opts.premultiplied || state->opts.format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
-
-    /* Simple AABB edge extrude is only safe when packing also reserves a
-     * rectangular footprint. Tight/polygon packing uses inflated sprite
-     * hulls, so writing a trim-AABB extrude band could spill outside the
-     * reserved area and collide with neighbors. This is a config error:
-     * polygon packing must use padding-only, or rect packing if AABB
-     * extrude is needed. */
-    NT_BUILD_ASSERT((state->opts.shape == NT_ATLAS_SHAPE_RECT || state->opts.extrude == 0) &&
-                    "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
 
     /* Initialize sprite array */
     state->sprite_capacity = 64;
@@ -786,6 +791,14 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
     return resolved;
 }
 
+/* Pure sprite-opts asserts — independent of atlas state, so they can run
+ * before the poison no-op (a poisoned pack must still trap caller bugs). */
+static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
+    NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
+    NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
+    NT_BUILD_ASSERT(sopts->max_vertices <= 16 && "max_vertices override must be <= 16");
+}
+
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
  * Slice9 borders auto-force RECT shape + no rotation. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -799,9 +812,6 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
-    NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
-    NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
-    NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
     /* Slice9 auto-force FIRST — sets shape=RECT before extrude check needs it. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
@@ -820,6 +830,9 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
+    /* Pure caller-arg validation runs before the poison no-op below. */
+    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
+    atlas_assert_sprite_opts(&sopts);
     /* A prior atlas poisoned the pack, so begin_atlas no-oped and left no
      * active atlas — make this add a no-op too instead of asserting. An OPEN
      * poisoned atlas still has active_atlas, so it keeps collecting. */
@@ -828,7 +841,6 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
 
-    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     NtBuildAtlasState *state = ctx->active_atlas;
 
     /* Stamp the add order now so a decode error below carries this add's seq. */
@@ -897,16 +909,17 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
+    /* Pure caller-arg validation runs before the poison no-op below. */
+    NT_BUILD_ASSERT(width > 0 && height > 0 && "atlas_add_raw: width and height must be > 0");
+    NT_BUILD_ASSERT((uint64_t)width * height <= (UINT32_MAX / 4) && "atlas_add_raw: width * height * 4 overflows uint32_t");
+    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
+    NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
+    atlas_assert_sprite_opts(&sopts);
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
-    NT_BUILD_ASSERT(width > 0 && height > 0 && "atlas_add_raw: width and height must be > 0");
-    NT_BUILD_ASSERT((uint64_t)width * height <= (UINT32_MAX / 4) && "atlas_add_raw: width * height * 4 overflows uint32_t");
-
-    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
-    NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
 
     NtBuildAtlasState *state = ctx->active_atlas;
 
@@ -963,6 +976,11 @@ static void atlas_glob_callback(const char *full_path, void *user) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
+    /* Pure caller-arg validation runs before the poison no-op below. */
+    if (opts) {
+        nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
+        atlas_assert_sprite_opts(&sopts);
+    }
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;

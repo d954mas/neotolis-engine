@@ -1991,6 +1991,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         .stats = stats,
     };
 
+    uint32_t placed_count = 0;
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
         /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
@@ -2001,6 +2002,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             *out_pages_exhausted = true;
             break;
         }
+        placed_count++;
     }
 
     // #region POT expansion
@@ -2065,7 +2067,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     }
     // #endregion
 
-    return sprite_count;
+    return placed_count;
 }
 
 /* --- Test-access wrapper (vpack internals remain static) ---

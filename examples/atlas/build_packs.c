@@ -63,7 +63,9 @@ static void report_atlas_errors(NtBuilderContext *ctx, nt_build_result_t r) {
     if (nt_builder_errors_truncated(ctx)) {
         (void)fprintf(stderr, "atlas error: list truncated at %d errors — more were dropped\n", NT_BUILD_MAX_ERRORS);
     }
-    if (n == 0) {
+    /* A stale-pack IO failure is distinct from content errors and must surface
+       even when the error list is non-empty. */
+    if (n == 0 || r == NT_BUILD_ERR_IO) {
         (void)fprintf(stderr, "Pack failed: %d\n", r);
     }
 }
@@ -150,7 +152,8 @@ int main(int argc, char *argv[]) {
     /* Finish and generate headers */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     if (r != NT_BUILD_OK) {
-        /* Library is always graceful; the frontend sets fail-fast policy. */
+        /* The atlas builder surfaces content errors via the error list; the
+           frontend sets fail-fast policy. */
         report_atlas_errors(ctx, r);
         nt_builder_free_pack(ctx);
         return 1;

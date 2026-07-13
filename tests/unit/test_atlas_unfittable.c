@@ -61,9 +61,9 @@ static uint8_t *make_transparent(uint32_t n) {
 }
 
 /* Filled opaque disc on a transparent background. A convex hull of a disc is a
- * many-sided polygon (> 4 vertices at max_vertices=8), which is what FIX-01
- * needs: the per-sprite margin override swaps in a 4-vertex scratch quad, so the
- * hull count must be resynced to 4 or downstream reads past the quad. */
+ * many-sided polygon (> 4 vertices at max_vertices=8): the per-sprite margin
+ * override swaps in a 4-vertex scratch quad, so the hull count must be resynced
+ * to 4 or downstream reads past the quad. */
 static uint8_t *make_disc(uint32_t n) {
     uint8_t *px = (uint8_t *)calloc((size_t)n * n * 4, 1);
     double c = (n - 1) / 2.0;
@@ -318,7 +318,7 @@ static bool has_error_kind(const nt_build_error_t *errs, uint32_t n, nt_build_er
     return false;
 }
 
-/* F1: a fully-transparent sprite, a duplicate-name pair, and an unfittable
+/* A fully-transparent sprite, a duplicate-name pair, and an unfittable
  * sprite in one atlas — the pre-pack validation pass reports ALL of
  * TRANSPARENT_AFTER_TRIM, DUPLICATE_NAME and UNFITTABLE, not just the first
  * poisoning error. */
@@ -360,7 +360,7 @@ void test_atlas_validate_reports_all_kinds(void) {
     free(giant);
 }
 
-/* F2: two byte-identical unfittable sprites with different names dedup to one
+/* Two byte-identical unfittable sprites with different names dedup to one
  * unique entry, but BOTH names must get their own UNFITTABLE error. */
 void test_atlas_unfittable_dedup_aliases(void) {
     (void)MKDIR(TMP_DIR);
@@ -397,7 +397,7 @@ void test_atlas_unfittable_dedup_aliases(void) {
     free(b);
 }
 
-/* F4: a transparent sprite A added BEFORE a corrupt-file sprite B — errors
+/* A transparent sprite A added BEFORE a corrupt-file sprite B — errors
  * publish in ADD order [A TRANSPARENT, B CORRUPT] (the reverse of discovery
  * order, since B's decode error is pushed at add-time and A's only in
  * end_atlas), and the coarse finish result derives from A (VALIDATION, not
@@ -442,6 +442,55 @@ void test_atlas_errors_stable_add_order(void) {
     (void)remove(bad_png);
 }
 
+/* Filling the error list must preserve the earliest-seq PREFIX. A transparent
+ * sprite A is added FIRST (seq 0) but its error only surfaces in end_atlas;
+ * meanwhile the list fills with corrupt-decode errors (seq 1..MAX). A's error
+ * must EVICT the highest-seq corrupt tail so errs[0] is its VALIDATION error,
+ * not a FORMAT corrupt. */
+void test_atlas_truncation_preserves_earliest(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_truncate_prefix.ntpack";
+    (void)remove(path);
+
+    const char *bad_png = TMP_DIR "/corrupt_fill.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_begin_atlas(ctx, "prefix", NULL);
+
+    /* A first (seq 0): survives decode, fails alpha-trim only inside end_atlas. */
+    uint8_t *clear = make_transparent(16);
+    nt_builder_atlas_add_raw(ctx, clear, 16, 16, &(nt_atlas_sprite_opts_t){.name = "aaa_first_clear.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    /* Fill the list to capacity with corrupt-decode errors (seq 1..MAX). The
+     * atlas stays open, so each corrupt add keeps pushing despite poison. */
+    for (uint32_t i = 0; i < NT_BUILD_MAX_ERRORS; i++) {
+        char nm[64];
+        (void)snprintf(nm, sizeof(nm), "corrupt_%04u.png", i);
+        nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = nm, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_TRUE_MESSAGE(nt_builder_errors_truncated(ctx), "list must be flagged truncated");
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(NT_BUILD_MAX_ERRORS, n);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind, "earliest-added (seq 0) must head the capped prefix");
+    TEST_ASSERT_EQUAL_STRING("aaa_first_clear.png", errs[0].sprite);
+
+    /* Coarse result derives from errs[0] → VALIDATION, not the corrupt FORMAT. */
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
+    free(clear);
+    (void)remove(bad_png);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -453,5 +502,6 @@ int main(void) {
     RUN_TEST(test_atlas_validate_reports_all_kinds);
     RUN_TEST(test_atlas_unfittable_dedup_aliases);
     RUN_TEST(test_atlas_errors_stable_add_order);
+    RUN_TEST(test_atlas_truncation_preserves_earliest);
     return UNITY_END();
 }

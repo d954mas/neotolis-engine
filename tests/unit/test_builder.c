@@ -5753,6 +5753,41 @@ void test_atlas_poison_open_nested_begin_asserts(void) {
     (void)remove(bad_png);
 }
 
+/* Poison a pack and close its atlas so poisoned && !active_atlas holds. */
+static NtBuilderContext *make_poisoned_closed_pack(const char *path) {
+    (void)remove(path);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    uint8_t *transparent = make_test_sprite(16, 16, 255, 0, 0, 0);
+    nt_builder_begin_atlas(ctx, "poison", NULL);
+    nt_builder_atlas_add_raw(ctx, transparent, 16, 16, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+    free(transparent);
+    return ctx;
+}
+
+/* Pure caller-argument/option validation runs BEFORE the between-atlas no-op,
+ * so a programmer error still traps on a poisoned pack (poisoned &&
+ * !active_atlas) instead of being silently swallowed. */
+void test_atlas_poisoned_arg_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    uint8_t px[4 * 4 * 4] = {0};
+
+    /* begin_atlas: invalid atlas opts (max_size == 0) still traps. */
+    NtBuilderContext *c1 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_begin.ntpack");
+    nt_atlas_opts_t bad_opts = nt_atlas_opts_defaults();
+    bad_opts.max_size = 0;
+    EXPECT_BUILD_ASSERT(c1, nt_builder_begin_atlas(c1, "x", &bad_opts));
+
+    /* atlas_add_raw: width 0 still traps. */
+    NtBuilderContext *c2 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_w0.ntpack");
+    EXPECT_BUILD_ASSERT(c2, nt_builder_atlas_add_raw(c2, px, 0, 4, &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
+
+    /* atlas_add_raw: NULL name (raw pixels need an explicit name) still traps. */
+    NtBuilderContext *c3 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_name.ntpack");
+    EXPECT_BUILD_ASSERT(c3, nt_builder_atlas_add_raw(c3, px, 4, 4, &(nt_atlas_sprite_opts_t){.name = NULL, .origin_x = 0.5F, .origin_y = 0.5F}));
+}
+
 /* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
  * NT_BUILD_ERR_DUPLICATE, no file written. */
 void test_atlas_duplicate_name_graceful(void) {
@@ -6052,6 +6087,7 @@ int main(void) {
     RUN_TEST(test_atlas_collects_all_errors_in_one_atlas);
     RUN_TEST(test_atlas_poison_stops_subsequent_atlases);
     RUN_TEST(test_atlas_poison_open_nested_begin_asserts);
+    RUN_TEST(test_atlas_poisoned_arg_asserts);
     RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);
