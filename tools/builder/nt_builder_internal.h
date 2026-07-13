@@ -66,6 +66,7 @@ typedef struct {
     uint8_t max_verts_override; /* 0 = atlas default */
     uint8_t margin_override;    /* 0 = atlas default */
     uint8_t extrude_override;   /* 0 = atlas default */
+    uint32_t add_seq;           /* per-add sequence for stable add-order error reporting */
 } NtAtlasSpriteInput;
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */
@@ -222,11 +223,20 @@ struct NtBuilderContext {
     uint32_t atlas_region_capacity;
 
     /* Content-error accumulator. poisoned = at least one error appended;
-     * gates finish_pack write and the between-atlas hard stop. */
+     * gates finish_pack write and the between-atlas hard stop. errors[] is kept
+     * sorted by error_seq (add order); error_seq is an INTERNAL parallel key so
+     * the public record size stays ABI-locked. */
     nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
+    uint32_t error_seq[NT_BUILD_MAX_ERRORS];
     uint32_t error_count;
     bool errors_truncated;
     bool poisoned;
+
+    /* Add-order sequencing: bumped once per atlas add* call; cur_error_seq is
+     * the key push_error stamps on the next error (a sprite's add_seq, or the
+     * counter value for atlas-level errors). */
+    uint32_t add_seq_counter;
+    uint32_t cur_error_seq;
 };
 
 /* Append a content error (sequential-call-only for add-order determinism).

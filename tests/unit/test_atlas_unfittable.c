@@ -308,6 +308,140 @@ void test_atlas_cross_stage_collect_all(void) {
     (void)remove(bad_png);
 }
 
+/* Scan an error list for a given kind. */
+static bool has_error_kind(const nt_build_error_t *errs, uint32_t n, nt_build_error_kind kind) {
+    for (uint32_t i = 0; i < n; i++) {
+        if (errs[i].kind == kind) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* F1: a fully-transparent sprite, a duplicate-name pair, and an unfittable
+ * sprite in one atlas — the pre-pack validation pass reports ALL of
+ * TRANSPARENT_AFTER_TRIM, DUPLICATE_NAME and UNFITTABLE, not just the first
+ * poisoning error. */
+void test_atlas_validate_reports_all_kinds(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_validate_all.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = boundary_opts();
+    nt_builder_begin_atlas(ctx, "mixed", &opts);
+
+    uint8_t *clear = make_transparent(16);
+    nt_builder_atlas_add_raw(ctx, clear, 16, 16, &(nt_atlas_sprite_opts_t){.name = "clear.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    /* Duplicate name, distinct pixels (distinct hashes → both unique). */
+    uint8_t *dup_a = make_opaque(16, 10);
+    nt_builder_atlas_add_raw(ctx, dup_a, 16, 16, &(nt_atlas_sprite_opts_t){.name = "dup.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    uint8_t *dup_b = make_opaque(16, 20);
+    nt_builder_atlas_add_raw(ctx, dup_b, 16, 16, &(nt_atlas_sprite_opts_t){.name = "dup.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    uint8_t *giant = make_opaque(80, 200); /* 80 > 57 boundary → unfittable */
+    nt_builder_atlas_add_raw(ctx, giant, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_TRUE_MESSAGE(has_error_kind(errs, n, NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM), "transparent sprite must be reported");
+    TEST_ASSERT_TRUE_MESSAGE(has_error_kind(errs, n, NT_BUILD_ERR_KIND_DUPLICATE_NAME), "duplicate name must be reported");
+    TEST_ASSERT_TRUE_MESSAGE(has_error_kind(errs, n, NT_BUILD_ERR_KIND_UNFITTABLE), "unfittable sprite must be reported");
+
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after a poisoned build");
+
+    nt_builder_free_pack(ctx);
+    free(clear);
+    free(dup_a);
+    free(dup_b);
+    free(giant);
+}
+
+/* F2: two byte-identical unfittable sprites with different names dedup to one
+ * unique entry, but BOTH names must get their own UNFITTABLE error. */
+void test_atlas_unfittable_dedup_aliases(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_unfittable_alias.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = boundary_opts();
+    nt_builder_begin_atlas(ctx, "twins", &opts);
+
+    /* Identical pixels (same red) → dedup collapses to one unique sprite. */
+    uint8_t *a = make_opaque(80, 200);
+    nt_builder_atlas_add_raw(ctx, a, 80, 80, &(nt_atlas_sprite_opts_t){.name = "big_a.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    uint8_t *b = make_opaque(80, 200);
+    nt_builder_atlas_add_raw(ctx, b, 80, 80, &(nt_atlas_sprite_opts_t){.name = "big_b.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, n, "both dedup aliases must report UNFITTABLE");
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_UNFITTABLE, errs[1].kind);
+    /* One error per name, in add order. */
+    TEST_ASSERT_EQUAL_STRING("big_a.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_STRING("big_b.png", errs[1].sprite);
+
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after an unfittable build");
+
+    nt_builder_free_pack(ctx);
+    free(a);
+    free(b);
+}
+
+/* F4: a transparent sprite A added BEFORE a corrupt-file sprite B — errors
+ * publish in ADD order [A TRANSPARENT, B CORRUPT] (the reverse of discovery
+ * order, since B's decode error is pushed at add-time and A's only in
+ * end_atlas), and the coarse finish result derives from A (VALIDATION, not
+ * FORMAT). */
+void test_atlas_errors_stable_add_order(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_add_order.ntpack";
+    (void)remove(path);
+
+    const char *bad_png = TMP_DIR "/corrupt_order.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_begin_atlas(ctx, "ordered", NULL);
+
+    /* A first: survives decode, fails alpha-trim only inside end_atlas. */
+    uint8_t *clear = make_transparent(16);
+    nt_builder_atlas_add_raw(ctx, clear, 16, 16, &(nt_atlas_sprite_opts_t){.name = "first_clear.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    /* B second: decode fails at add-time, error pushed immediately. */
+    nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = "second_corrupt.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(2, n);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind, "earliest-added offender (A) sorts first");
+    TEST_ASSERT_EQUAL_STRING("first_clear.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_CORRUPT_IMAGE, errs[1].kind);
+    TEST_ASSERT_EQUAL_STRING("second_corrupt.png", errs[1].sprite);
+
+    /* Coarse result derives from errs[0] (A) → VALIDATION, not B's FORMAT. */
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after a poisoned build");
+
+    nt_builder_free_pack(ctx);
+    free(clear);
+    (void)remove(bad_png);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -316,5 +450,8 @@ int main(void) {
     RUN_TEST(test_atlas_margin_override_hull_no_oob);
     RUN_TEST(test_atlas_poison_removes_stale_pack);
     RUN_TEST(test_atlas_cross_stage_collect_all);
+    RUN_TEST(test_atlas_validate_reports_all_kinds);
+    RUN_TEST(test_atlas_unfittable_dedup_aliases);
+    RUN_TEST(test_atlas_errors_stable_add_order);
     return UNITY_END();
 }
