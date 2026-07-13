@@ -93,16 +93,16 @@ Builder must check: references between assets, resource types, mesh/material/sha
 
 The builder distinguishes two failure classes:
 
-- **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly.
-- **Content-dependent failures of present, well-formed inputs** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension images, transparent-after-trim sprites, degenerate hulls, contour-vertex overflow, duplicate region names, size/page limits, and unfittable sprites.
+- **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, degenerate hulls, contour-vertex overflow, duplicate region names, size/page limits, and unfittable sprites.
 
-Content errors are collected into a sticky, add-order-stable accumulator on the context. One bad sprite does not abort the atlas — the remaining sprites in the same atlas are still validated so every bad sprite is reported at once, and a poisoned pack writes no `.ntpack`. Callers read the list after `finish_pack`:
+The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Atlas content errors are collected into a sticky, add-order-stable accumulator on the context. One bad sprite does not abort the atlas — the remaining sprites in the same atlas are still validated so every bad sprite is reported at once, and a poisoned pack writes no `.ntpack`. Callers read the list after `finish_pack`:
 
 - `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits).
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
 - `nt_build_error_format(err, buf, len)` — renders one actionable line on demand.
 
-This keeps the library always graceful so a GUI frontend survives a bad asset with an actionable message; a command-line frontend layers its own fail-fast policy on top by treating a non-`NT_BUILD_OK` result as fatal.
+This keeps the atlas builder graceful so a GUI frontend survives a bad sprite with an actionable message; a command-line frontend layers its own fail-fast policy on top by treating a non-`NT_BUILD_OK` result as fatal. Single-asset adds and missing files still crash-early.
 
 ## Asset ID codegen
 

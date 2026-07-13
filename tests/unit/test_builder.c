@@ -5718,6 +5718,41 @@ void test_atlas_poison_stops_subsequent_atlases(void) {
     free(good);
 }
 
+/* A poisoned but still-OPEN atlas must trip the nested-atlas assert on a
+ * fresh begin_atlas — poison suppresses only the between-atlas no-op, never
+ * the programmer invariant (else the nested atlas would silently no-op and
+ * later sprites land in the wrong atlas). */
+void test_atlas_poison_open_nested_begin_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_poison_open_nested.ntpack");
+
+    /* A garbage file stb_image cannot decode → CORRUPT_IMAGE (the file must
+     * exist, else atlas_add asserts on the read). */
+    const char *bad_png = TMP_DIR "/poison_open_bad.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_open_nested.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Open atlas A, then poison it WITHOUT closing: a corrupt-file decode
+     * failure pushes a content error but leaves active_atlas set. */
+    nt_builder_begin_atlas(ctx, "atlasA", NULL);
+    nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    uint32_t nerr = 0;
+    (void)nt_builder_get_errors(ctx, &nerr);
+    TEST_ASSERT_EQUAL_UINT32(1, nerr); /* poisoned, atlas still open */
+
+    /* Nested begin_atlas on the still-open poisoned atlas must ASSERT, not
+     * silently no-op. EXPECT_BUILD_ASSERT frees ctx after the longjmp. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "atlasB", NULL));
+
+    (void)remove(bad_png);
+}
+
 /* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
  * NT_BUILD_ERR_DUPLICATE, no file written. */
 void test_atlas_duplicate_name_graceful(void) {
@@ -6016,6 +6051,7 @@ int main(void) {
     RUN_TEST(test_atlas_slice9_invalid_borders_reports_error);
     RUN_TEST(test_atlas_collects_all_errors_in_one_atlas);
     RUN_TEST(test_atlas_poison_stops_subsequent_atlases);
+    RUN_TEST(test_atlas_poison_open_nested_begin_asserts);
     RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);

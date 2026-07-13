@@ -1816,10 +1816,10 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
  *   stats                — op counters (or_ops, test_ops, cache hits/misses,
  *                          page scans, etc.) and area totals. Reset at start.
  *
- * Returns: number of sprites placed. Always equals sprite_count unless
- * ATLAS_MAX_PAGES is exhausted (in which case remaining sprites are placed
- * at (margin, margin) on page 0 as a corrupt-safe fallback and an ERROR log
- * line is emitted).
+ * Returns: number of sprites placed. Equals sprite_count unless
+ * ATLAS_MAX_PAGES is exhausted, in which case it stops early, returns the
+ * partial count, and sets *out_pages_exhausted = true (no page-0 fallback;
+ * the caller reports PAGES_EXHAUSTED).
  *
  * Determinism: identical inputs produce identical placement (positions,
  * page counts, fill rates). NFP cache hit/miss counters jitter slightly in

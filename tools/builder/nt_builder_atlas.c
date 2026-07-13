@@ -51,15 +51,20 @@ static void push_content_error(NtBuilderContext *ctx, const char *atlas, const c
 }
 
 const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
+    NT_BUILD_ASSERT(ctx && "get_errors: ctx is NULL");
     if (out_count) {
         *out_count = ctx->error_count;
     }
     return ctx->errors;
 }
 
-bool nt_builder_errors_truncated(const NtBuilderContext *ctx) { return ctx->errors_truncated; }
+bool nt_builder_errors_truncated(const NtBuilderContext *ctx) {
+    NT_BUILD_ASSERT(ctx && "errors_truncated: ctx is NULL");
+    return ctx->errors_truncated;
+}
 
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
+    NT_BUILD_ASSERT(err && buf && "error_format: err and buf must be non-NULL");
     switch (err->kind) {
     case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
         (void)snprintf(buf, len, "sprite '%s': corrupt or undecodable image", err->sprite);
@@ -701,13 +706,13 @@ static const char *extract_filename(const char *path) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
-    /* Between-atlas hard stop: leave active_atlas NULL so a poisoned pack
-     * opens no further atlases. */
+    NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
+    NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
+    /* Between-atlas hard stop: after poison, open no further atlases
+     * (active_atlas is NULL here). Programmer invariants above still fire. */
     if (ctx->poisoned) {
         return;
     }
-    NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
-    NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
 
     NtBuildAtlasState *state = (NtBuildAtlasState *)calloc(1, sizeof(NtBuildAtlasState));
     NT_BUILD_ASSERT(state && "begin_atlas: alloc failed");
@@ -2078,8 +2083,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint16_t st = p->sprites[i].slice9_top;
         uint16_t sb = p->sprites[i].slice9_bottom;
         if (sl || sr || st || sb) {
-            /* Defense-in-depth: pipeline_alpha_trim already reports this (892/893),
-             * poisoning before serialize — kept graceful for direct-call safety. */
+            /* pipeline_alpha_trim already reports the slice9 case; this
+             * defense-in-depth re-check keeps direct pipeline_serialize calls safe. */
             if ((uint32_t)sl + (uint32_t)sr >= p->sprites[i].width || (uint32_t)st + (uint32_t)sb >= p->sprites[i].height) {
                 push_content_error(p->ctx, p->state->name, p->sprites[i].name, NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, p->sprites[i].width, p->sprites[i].height);
                 continue;

@@ -13,6 +13,7 @@
 #include "miniz.h"
 /* clang-format on */
 
+#include <errno.h>
 #include <stdatomic.h>
 
 #ifdef _WIN32
@@ -530,8 +531,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* A poisoned build writes no pack. Gate before the pending_count
      * assert — a fully-failed atlas-only pack can have pending_count == 0. */
     if (ctx->poisoned) {
-        /* Remove any pre-existing good pack: no .ntpack must survive a failed rebuild. */
-        (void)remove(ctx->output_path);
+        /* Remove any pre-existing good pack: no .ntpack must survive a failed rebuild.
+         * A stale pack we cannot delete would masquerade as this build's output. */
+        if (remove(ctx->output_path) != 0 && errno != ENOENT) {
+            return NT_BUILD_ERR_IO;
+        }
         return nt_builder_result_from_errors(ctx);
     }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
