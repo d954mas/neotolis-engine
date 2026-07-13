@@ -360,6 +360,44 @@ void test_atlas_validate_reports_all_kinds(void) {
     free(giant);
 }
 
+/* A per-sprite margin override BELOW the atlas margin is clamped up to the
+ * atlas value (raise-only), so an UNFITTABLE record must report the EFFECTIVE
+ * margin the packer used, not the smaller requested override. */
+void test_atlas_unfittable_reports_effective_margin(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_effective_margin.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 8;
+    opts.padding = 0;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    nt_builder_begin_atlas(ctx, "effmargin", &opts);
+
+    /* 50 + 2*8 (effective margin) = 66 > 64 → unfittable. The override of 1 is
+     * below the atlas margin, so the packer uses 8; the record must too. */
+    uint8_t *px = make_opaque(50, 200);
+    nt_builder_atlas_add_raw(ctx, px, 50, 50, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F, .margin = 1});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("wide.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(8, errs[0].margin, "record must report the effective (clamped-up) margin, not the below-atlas override");
+
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after an unfittable build");
+
+    nt_builder_free_pack(ctx);
+    free(px);
+}
+
 /* Two byte-identical unfittable sprites with different names dedup to one
  * unique entry, but BOTH names must get their own UNFITTABLE error. */
 void test_atlas_unfittable_dedup_aliases(void) {
@@ -500,6 +538,7 @@ int main(void) {
     RUN_TEST(test_atlas_poison_removes_stale_pack);
     RUN_TEST(test_atlas_cross_stage_collect_all);
     RUN_TEST(test_atlas_validate_reports_all_kinds);
+    RUN_TEST(test_atlas_unfittable_reports_effective_margin);
     RUN_TEST(test_atlas_unfittable_dedup_aliases);
     RUN_TEST(test_atlas_errors_stable_add_order);
     RUN_TEST(test_atlas_truncation_preserves_earliest);

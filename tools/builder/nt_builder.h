@@ -53,11 +53,11 @@ typedef enum {
     NT_BUILD_ERR_DUPLICATE = 5,
 } nt_build_result_t;
 
-/* Content-error channel. NT_BUILD_MAX_ERRORS caps the internal opaque-context
- * accumulator only (no public struct embeds it), so a game may override it. */
-#ifndef NT_BUILD_MAX_ERRORS
+/* Content-error channel. NT_BUILD_MAX_ERRORS is a fixed library-build-time
+ * constant sizing the internal opaque-context accumulator (no public struct
+ * embeds it). A consumer header-level #define has no effect on the compiled
+ * static library — change it here and rebuild the builder. */
 #define NT_BUILD_MAX_ERRORS 256
-#endif
 /* ABI-locked: nt_build_error_t below embeds this and the record crosses the
  * library boundary by value, so it must match the compiled library exactly.
  * Never override it — a mismatch corrupts nt_builder_get_errors() indexing. */
@@ -417,8 +417,8 @@ typedef struct {
     uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
     uint8_t max_vertices; /* 0 = atlas default */
-    uint8_t margin;       /* 0 = atlas default, overrides opts.margin for this sprite */
-    uint8_t extrude;      /* 0 = atlas default, overrides opts.extrude for this sprite (RECT only) */
+    uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
+    uint8_t extrude;      /* 0 = atlas default; raise-only — clamped up to the atlas extrude (RECT only) */
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

@@ -5779,13 +5779,54 @@ void test_atlas_poisoned_arg_asserts(void) {
     bad_opts.max_size = 0;
     EXPECT_BUILD_ASSERT(c1, nt_builder_begin_atlas(c1, "x", &bad_opts));
 
-    /* atlas_add_raw: width 0 still traps. */
-    NtBuilderContext *c2 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_w0.ntpack");
-    EXPECT_BUILD_ASSERT(c2, nt_builder_atlas_add_raw(c2, px, 0, 4, &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
-
-    /* atlas_add_raw: NULL name (raw pixels need an explicit name) still traps. */
+    /* atlas_add_raw: NULL name (raw pixels need an explicit name) still traps.
+     * (width==0 is NOT a caller-contract assert — it is a graceful content
+     * error, covered by test_atlas_add_raw_zero_dim_graceful.) */
     NtBuilderContext *c3 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_name.ntpack");
     EXPECT_BUILD_ASSERT(c3, nt_builder_atlas_add_raw(c3, px, 4, 4, &(nt_atlas_sprite_opts_t){.name = NULL, .origin_x = 0.5F, .origin_y = 0.5F}));
+
+    /* atlas_add_glob: opts->name != NULL is a caller-contract error that must
+     * trap even on a poisoned pack (asserts run before the poison no-op). */
+    NtBuilderContext *c4 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_glob.ntpack");
+    EXPECT_BUILD_ASSERT(c4, nt_builder_atlas_add_glob(c4, "*.png", &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
+}
+
+/* atlas_add_raw with width==0 on an OPEN atlas is a graceful content error
+ * (ZERO_DIM), not a caller-contract assert — matches file-based atlas_add. */
+void test_atlas_add_raw_zero_dim_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_raw_zero_dim.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_zero_dim.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t px[4 * 4 * 4] = {0};
+    nt_builder_begin_atlas(ctx, "rawzero", NULL);
+    nt_builder_atlas_add_raw(ctx, px, 0, 4, &(nt_atlas_sprite_opts_t){.name = "zero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
+}
+
+/* finish_pack with an atlas still open (end_atlas never called) is a lifecycle
+ * programmer error and must trap, whether or not the pack is poisoned. */
+void test_finish_pack_open_atlas_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/finish_open_atlas.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/finish_open_atlas.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 0, 128, 255, 255);
+    nt_builder_begin_atlas(ctx, "openatlas", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "s.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    free(s);
+    /* No end_atlas — finish_pack must trap. EXPECT_BUILD_ASSERT frees ctx. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 /* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
@@ -6088,6 +6129,8 @@ int main(void) {
     RUN_TEST(test_atlas_poison_stops_subsequent_atlases);
     RUN_TEST(test_atlas_poison_open_nested_begin_asserts);
     RUN_TEST(test_atlas_poisoned_arg_asserts);
+    RUN_TEST(test_atlas_add_raw_zero_dim_graceful);
+    RUN_TEST(test_finish_pack_open_atlas_asserts);
     RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);

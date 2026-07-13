@@ -856,31 +856,42 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
     free(resolved_path);
 
-    /* Decode PNG via stb_image (force RGBA) */
+    /* Determine region name. opts->name takes precedence; NULL falls back to
+     * basename of the source path. Needed early to name a decode error. */
+    const char *region_name = sopts.name ? sopts.name : extract_filename(path);
+
+    /* Preflight header dims before the full decode: a valid but oversized image
+     * fails stbi_load with a NULL alloc, which would masquerade as CORRUPT_IMAGE
+     * and lose the real IMAGE_TOO_LARGE classification. Content errors append and
+     * skip the sprite; the open atlas keeps decoding later adds. */
+    int iw = 0;
+    int ih = 0;
+    int ic = 0;
+    if (!stbi_info_from_memory(file_data, (int)file_size, &iw, &ih, &ic)) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
+        free(file_data);
+        return;
+    }
+    if (iw <= 0 || ih <= 0) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
+        free(file_data);
+        return;
+    }
+    if ((uint64_t)iw * (uint64_t)ih > (UINT32_MAX / 4)) {
+        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, (uint32_t)iw, (uint32_t)ih);
+        free(file_data);
+        return;
+    }
+
+    /* Decode PNG via stb_image (force RGBA). A NULL here is now a genuine decode
+     * failure — the header already passed the preflight above. */
     int w = 0;
     int h = 0;
     int channels = 0;
     uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
     free(file_data);
-
-    /* Determine region name. opts->name takes precedence; NULL falls back to
-     * basename of the source path. Needed early to name a decode error. */
-    const char *region_name = sopts.name ? sopts.name : extract_filename(path);
-
-    /* Content-dependent decode failures append a graceful error and skip the
-     * sprite; the open atlas keeps decoding later adds. */
     if (!pixels) {
         push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
-        return;
-    }
-    if (w <= 0 || h <= 0) {
-        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
-        free(pixels);
-        return;
-    }
-    if ((uint64_t)w * (uint64_t)h > (UINT32_MAX / 4)) {
-        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, (uint32_t)w, (uint32_t)h);
-        free(pixels);
         return;
     }
 
@@ -910,8 +921,6 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
     /* Pure caller-arg validation runs before the poison no-op below. */
-    NT_BUILD_ASSERT(width > 0 && height > 0 && "atlas_add_raw: width and height must be > 0");
-    NT_BUILD_ASSERT((uint64_t)width * height <= (UINT32_MAX / 4) && "atlas_add_raw: width * height * 4 overflows uint32_t");
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
     atlas_assert_sprite_opts(&sopts);
@@ -926,6 +935,17 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     /* Stamp the add order (raw adds never fail to decode, but keep the counter
      * in lockstep with atlas_add so seqs stay globally monotonic). */
     ctx->cur_error_seq = ctx->add_seq_counter++;
+
+    /* Zero/oversized dims are graceful content errors on the open atlas (same
+     * channel as atlas_add), not caller-contract asserts — matches the spec. */
+    if (width == 0 || height == 0) {
+        push_content_error(ctx, state->name, sopts.name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
+        return;
+    }
+    if ((uint64_t)width * height > (UINT32_MAX / 4)) {
+        push_content_error(ctx, state->name, sopts.name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, width, height);
+        return;
+    }
 
     /* Deep-copy RGBA pixels */
     uint32_t pixel_bytes = width * height * 4;
@@ -981,20 +1001,21 @@ void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const
         nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
         atlas_assert_sprite_opts(&sopts);
     }
-    /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
-    if (ctx->poisoned && !ctx->active_atlas) {
-        return;
-    }
-    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
     /* If opts is non-NULL, name MUST be NULL — a single name can't apply to
      * N matched files without hash collisions. Each file derives its own name
      * from its path. Per-file override requires calling glob_iterate + atlas_add
-     * manually (build_packs.c shows the pattern). */
+     * manually (build_packs.c shows the pattern). Caller-contract asserts run
+     * before the poison no-op so a poisoned pack still traps the programmer bug. */
     NT_BUILD_ASSERT((!opts || opts->name == NULL) && "atlas_add_glob: opts->name must be NULL (each file derives its name from path)");
     /* Validate finite origin values up front so failures point at the glob call site. */
     if (opts) {
         NT_BUILD_ASSERT(isfinite(opts->origin_x) && isfinite(opts->origin_y) && "atlas_add_glob: origin must be finite (no NaN/inf)");
     }
+    /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
+    if (ctx->poisoned && !ctx->active_atlas) {
+        return;
+    }
+    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
 
     AtlasGlobData data = {.ctx = ctx, .sprite_opts = opts, .match_count = 0};
     NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
@@ -1649,10 +1670,14 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (vpack_sprite_fits_empty_page(hull, hull_count, p->opts)) {
             continue;
         }
-        /* Effective margin/extrude match across dedup aliases (dedup requires
-         * equal overrides), so all aliases share these dims. */
+        /* Report the EFFECTIVE spacing the packer used: a per-sprite override
+         * only RAISES the atlas baseline (a smaller override is clamped up), so
+         * the record must not show a below-atlas request the fit never applied.
+         * These match across dedup aliases (dedup requires equal overrides). */
         uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
         uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
+        uint32_t effective_margin = sprite_margin > p->opts->margin ? sprite_margin : p->opts->margin;
+        uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
         /* Report the canonical sprite AND every dedup alias — each shares pixels
          * and dims but has its own name, so each gets its own UNFITTABLE. */
         for (uint32_t k = 0; k < p->sprite_count; k++) {
@@ -1664,34 +1689,36 @@ static void pipeline_validate(AtlasPipeline *p) {
                                   .w = p->trim_w[oi],
                                   .h = p->trim_h[oi],
                                   .padding = p->opts->padding,
-                                  .margin = sprite_margin,
+                                  .margin = effective_margin,
                                   .max_size = p->opts->max_size,
-                                  .detail_a = sprite_extrude};
+                                  .detail_a = effective_extrude};
             error_copy_name(e.atlas, p->state->name);
             error_copy_name(e.sprite, p->sprites[k].name);
             nt_builder_push_error(p->ctx, &e);
         }
     }
 
-    /* Duplicate region names produce ambiguous runtime name_hash lookups. O(n²)
-     * but n <= 65535 and offline. Report each offending sprite once (first
-     * earlier match), so N identical names don't flood N(N-1)/2 errors; the first
-     * occurrence is canonical and not reported. */
-    for (uint32_t j = 1; j < p->sprite_count; j++) {
-        for (uint32_t i = 0; i < j; i++) {
-            if (strcmp(p->sprites[i].name, p->sprites[j].name) == 0) {
-                p->ctx->cur_error_seq = p->sprites[j].add_seq;
-                push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
-                break;
-            }
-        }
-    }
-
-    /* Region-count cap: extreme content only (>65535 sprites). Atlas-level seq
-     * sorts it after this atlas's per-sprite errors. */
+    /* Region-count cap: extreme content only (>65535 sprites). Checked BEFORE the
+     * O(n²) duplicate-name scan — an over-cap atlas is already rejected, so the
+     * ~2.1B-strcmp scan would only add a GUI hang with no new diagnostic.
+     * Atlas-level seq sorts it after this atlas's per-sprite errors. */
     if (p->sprite_count > UINT16_MAX) {
         p->ctx->cur_error_seq = p->ctx->add_seq_counter;
         push_content_error(p->ctx, p->state->name, NULL, NT_BUILD_ERR_KIND_TOO_MANY_REGIONS, 0, 0);
+    } else {
+        /* Duplicate region names produce ambiguous runtime name_hash lookups. O(n²)
+         * but n <= 65535 and offline. Report each offending sprite once (first
+         * earlier match), so N identical names don't flood N(N-1)/2 errors; the first
+         * occurrence is canonical and not reported. */
+        for (uint32_t j = 1; j < p->sprite_count; j++) {
+            for (uint32_t i = 0; i < j; i++) {
+                if (strcmp(p->sprites[i].name, p->sprites[j].name) == 0) {
+                    p->ctx->cur_error_seq = p->sprites[j].add_seq;
+                    push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+                    break;
+                }
+            }
+        }
     }
 
     /* Per-sprite trim-dim limits (independent of packing): source dims must fit

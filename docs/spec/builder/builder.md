@@ -211,20 +211,21 @@ nt_builder_end_atlas(ctx);
 
 ### Pipeline
 
-`end_atlas` runs ten stages in order:
+`end_atlas` runs eleven stages in order:
 
 1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
-2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png) are excluded — they only affect the texture encode stage, which has its own cache.
+2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png) are excluded — they only affect the texture encode stage, which has its own cache. Skipped once poisoned — the result would be discarded.
 3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
 4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
-5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
-6. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
-7. **debug_png** — optional outline visualization (when `opts.debug_png`).
+5. **pipeline_validate** — non-mutating pre-pack checks that report every bad sprite in one pass: empty-page fit (each unique sprite plus its dedup aliases must fit an empty `max_size` page, using the exact `vector_pack` fit test), duplicate region names, and pre-pack metadata caps (region-count cap, per-sprite trim-dim limits). Depends only on trim dims / geometry hulls / names — never on packing — so it runs even when a survivor already poisoned the atlas.
+6. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
+7. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
 8. **cache_write** — persist placement+pages for next build.
-9. **serialize** — pack `NtAtlasHeader + texture_resource_ids + regions + vertices + indices` into one blob, register as `NT_ASSET_ATLAS`.
-10. **register** — add `NT_ASSET_TEXTURE` entries for each page texture, populate region codegen entries.
+9. **debug_png** — optional outline visualization (when `opts.debug_png`).
+10. **serialize** — pack `NtAtlasHeader + texture_resource_ids + regions + vertices + indices` into one blob, register as `NT_ASSET_ATLAS`.
+11. **register** — add `NT_ASSET_TEXTURE` entries for each page texture, populate region codegen entries.
 
-Stages 5–8 are skipped on cache hit; serialize/register always run.
+The **first poison gate** sits after `pipeline_validate`: any content error collected during trim, geometry or validate skips packing/compose/serialize/register, while the validation stages above still run so every bad sprite in the atlas is reported at once (not just the one that first poisoned). Stages 6–8 are additionally skipped on cache hit; debug_png, serialize and register still run when the atlas is unpoisoned.
 
 ### Vector packer
 
