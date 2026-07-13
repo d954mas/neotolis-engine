@@ -468,7 +468,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    enum { ATLAS_CACHE_KEY_VERSION = 10 };
+    enum { ATLAS_CACHE_KEY_VERSION = 11 };
 
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
@@ -1959,6 +1959,14 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
 
 /* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */
 
+/* Per-sprite margin above the atlas baseline. tile_pack grows the footprint by
+ * 2*extra on each axis; compose/serialize must shift content by `extra` so the
+ * surplus splits evenly left/top + right/bottom instead of piling on one edge. */
+static uint32_t sprite_extra_margin(const AtlasPipeline *p, uint32_t si) {
+    uint32_t sprite_margin = p->sprites[si].margin_override ? p->sprites[si].margin_override : p->opts->margin;
+    return sprite_margin > p->opts->margin ? sprite_margin - p->opts->margin : 0;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_compose(AtlasPipeline *p) {
     p->page_pixels = (uint8_t **)calloc(p->page_count, sizeof(uint8_t *));
@@ -1974,8 +1982,9 @@ static void pipeline_compose(AtlasPipeline *p) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
         uint32_t sprite_extrude = p->sprites[idx].extrude_override ? p->sprites[idx].extrude_override : p->opts->extrude;
-        uint32_t inner_x = pl->x + sprite_extrude;
-        uint32_t inner_y = pl->y + sprite_extrude;
+        uint32_t extra_margin = sprite_extra_margin(p, idx);
+        uint32_t inner_x = pl->x + sprite_extrude + extra_margin;
+        uint32_t inner_y = pl->y + sprite_extrude + extra_margin;
 
         blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform);
 
@@ -2005,8 +2014,9 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             }
             uint32_t si = p->placements[pi].sprite_index;
             uint32_t sprite_extrude = p->sprites[si].extrude_override ? p->sprites[si].extrude_override : p->opts->extrude;
-            uint32_t ix = p->placements[pi].x + sprite_extrude;
-            uint32_t iy = p->placements[pi].y + sprite_extrude;
+            uint32_t extra_margin = sprite_extra_margin(p, si);
+            uint32_t ix = p->placements[pi].x + sprite_extrude + extra_margin;
+            uint32_t iy = p->placements[pi].y + sprite_extrude + extra_margin;
 
             if (p->opts->shape != NT_ATLAS_SHAPE_RECT && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
                 debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].transform);
@@ -2221,8 +2231,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
         index_cursor += idx_count;
 
         uint32_t s_extrude = p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude;
-        uint32_t inner_x = pl->x + s_extrude;
-        uint32_t inner_y = pl->y + s_extrude;
+        uint32_t extra_margin = sprite_extra_margin(p, i);
+        uint32_t inner_x = pl->x + s_extrude + extra_margin;
+        uint32_t inner_y = pl->y + s_extrude + extra_margin;
         uint32_t atlas_w = p->page_w[pl->page];
         uint32_t atlas_h = p->page_h[pl->page];
 

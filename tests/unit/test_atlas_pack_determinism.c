@@ -14,7 +14,9 @@
 #endif
 
 /* clang-format off */
+#include "nt_atlas_format.h"
 #include "nt_builder.h"
+#include "nt_pack_format.h"
 #include "ntpack_parse.h"
 #include "unity.h"
 /* clang-format on */
@@ -189,9 +191,150 @@ void test_metrics_match_pinned_baseline(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabs(m.density_fill_frontier - PIN_DENSITY_FILL_FRONTIER) < PIN_DENSITY_TOL, "density_fill_frontier drifted from pinned baseline");
 }
 
+/* --- Per-sprite margin centering (B1 correctness gate) ---
+ * A per-sprite margin override raises THIS sprite's reserved footprint by
+ * 2*extra_margin on each axis (pipeline_tile_pack). The composed/serialized
+ * content must sit in the MIDDLE of that surplus — split extra_margin left/top +
+ * extra_margin right/bottom — not pile the whole surplus on the right/bottom. */
+
+/* Read region 0's min/max atlas UV from a single-sprite pack. Only the atlas
+ * blob's own fields are read (offsets guarded against the file size), so this is
+ * a self-contained reader independent of the aggregate bench parser. */
+static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < (long)sizeof(NtPackHeader)) {
+        (void)fclose(f);
+        return false;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return false;
+    }
+    bool ok = fread(buf, 1, (size_t)sz, f) == (size_t)sz;
+    (void)fclose(f);
+    if (!ok) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *hdr = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas = &entries[i];
+            break;
+        }
+    }
+    if (!atlas || (uint64_t)atlas->offset + atlas->size > (uint64_t)sz) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas->offset;
+    const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
+    uint32_t regions_off = (uint32_t)sizeof(NtAtlasHeader) + ((uint32_t)ah->page_count * (uint32_t)sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)(ablob + regions_off);
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+
+    uint16_t u0 = UINT16_MAX;
+    uint16_t u1 = 0;
+    uint16_t v0 = UINT16_MAX;
+    uint16_t v1 = 0;
+    uint32_t vstart = regions[0].vertex_start;
+    uint32_t nv = regions[0].vertex_count;
+    for (uint32_t j = 0; j < nv; j++) {
+        const NtAtlasVertex *p = &verts[vstart + j];
+        if (p->atlas_u < u0) {
+            u0 = p->atlas_u;
+        }
+        if (p->atlas_u > u1) {
+            u1 = p->atlas_u;
+        }
+        if (p->atlas_v < v0) {
+            v0 = p->atlas_v;
+        }
+        if (p->atlas_v > v1) {
+            v1 = p->atlas_v;
+        }
+    }
+    *umin = u0;
+    *umax = u1;
+    *vmin = v0;
+    *vmax = v1;
+    free(buf);
+    return true;
+}
+
+/* One solid RECT square with a per-sprite margin override, alone on a tight
+ * (non-POT) zero-margin page: the fix centers it, so its region UV span mirrors
+ * around the page midpoint (umin+umax == full-scale). Pre-fix the surplus piled
+ * on the right/bottom (umin == 0) and the sum fell far short. */
+void test_margin_override_content_centered(void) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/margin_center.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.margin = 0;
+    opts.extrude = 0;
+    opts.padding = 0;
+    opts.power_of_two = false; /* tight page → page edges hug the reserved footprint */
+    nt_builder_begin_atlas(ctx, "center", &opts);
+
+    enum { SQ = 20, MARGIN_OVERRIDE = 8 };
+    uint8_t *px = (uint8_t *)malloc((size_t)SQ * SQ * 4);
+    TEST_ASSERT_NOT_NULL(px);
+    for (size_t i = 0; i < (size_t)SQ * SQ; i++) {
+        px[(i * 4) + 0] = 200;
+        px[(i * 4) + 1] = 120;
+        px[(i * 4) + 2] = 40;
+        px[(i * 4) + 3] = 255;
+    }
+    nt_builder_atlas_add_raw(ctx, px, SQ, SQ, &(nt_atlas_sprite_opts_t){.name = "sq", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = MARGIN_OVERRIDE});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    (void)nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, n, "square with margin override must pack cleanly");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(px);
+
+    uint16_t umin = 0;
+    uint16_t umax = 0;
+    uint16_t vmin = 0;
+    uint16_t vmax = 0;
+    TEST_ASSERT_TRUE_MESSAGE(region0_uv_extents(path, &umin, &umax, &vmin, &vmax), "parse produced pack");
+
+    /* Centered ⇒ left inset (umin) == right inset (full-umax) ⇒ umin+umax == full.
+     * Tolerance absorbs UV quantization at the two content edges. */
+    const int32_t full = 65535;
+    const int32_t tol = 4;
+    TEST_ASSERT_INT_WITHIN_MESSAGE(tol, full, (int32_t)umin + (int32_t)umax, "content not horizontally centered in its margin cell");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(tol, full, (int32_t)vmin + (int32_t)vmax, "content not vertically centered in its margin cell");
+    /* The surplus must actually offset the content — guards against a degenerate
+     * origin-anchored region that would satisfy the sum only by both edges at 0. */
+    TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, umin, "left inset must be nonzero (margin surplus present)");
+    TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, vmin, "top inset must be nonzero (margin surplus present)");
+    (void)remove(path);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_metrics_stable_across_two_packs);
     RUN_TEST(test_metrics_match_pinned_baseline);
+    RUN_TEST(test_margin_override_content_centered);
     return UNITY_END();
 }
