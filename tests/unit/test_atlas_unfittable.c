@@ -697,13 +697,10 @@ void test_atlas_unfittable_reports_above_atlas_override(void) {
     free(px);
 }
 
-/* nt_build_error_format renders one actionable line per kind. The 6-%u UNFITTABLE
- * arm is easy to desync, so pin its field ordering, plus the two-name
- * DUPLICATE_NAME arm, by substring-checking pure-data records. */
-void test_build_error_format_records(void) {
+/* nt_build_error_format UNFITTABLE arm: the 6-%u field ordering is easy to
+ * desync — pin sprite, w×h, padding, margin, extrude(detail_a), max_size. */
+void test_build_error_format_unfittable(void) {
     char buf[256];
-
-    /* UNFITTABLE: sprite, w×h, padding, margin, extrude(detail_a), max_size. */
     nt_build_error_t unfit = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE, .w = 100, .h = 200, .padding = 3, .margin = 5, .max_size = 2048, .detail_a = 7};
     error_copy_test_name(unfit.sprite, "big.png");
     nt_build_error_format(&unfit, buf, sizeof(buf));
@@ -713,8 +710,11 @@ void test_build_error_format_records(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "margin 5"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "extrude 7"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "max_size 2048"));
+}
 
-    /* DUPLICATE_NAME: atlas + duplicate region name. */
+/* nt_build_error_format DUPLICATE_NAME arm: atlas + duplicate region name. */
+void test_build_error_format_duplicate_name(void) {
+    char buf[256];
     nt_build_error_t dup = {.kind = NT_BUILD_ERR_KIND_DUPLICATE_NAME};
     error_copy_test_name(dup.atlas, "myatlas");
     error_copy_test_name(dup.sprite, "dup.png");
@@ -741,6 +741,7 @@ int main(void) {
     RUN_TEST(test_atlas_valid_hull_override_reports_once);
     RUN_TEST(test_atlas_truncation_drops_later_seqs);
     RUN_TEST(test_atlas_unfittable_reports_above_atlas_override);
-    RUN_TEST(test_build_error_format_records);
+    RUN_TEST(test_build_error_format_unfittable);
+    RUN_TEST(test_build_error_format_duplicate_name);
     return UNITY_END();
 }
