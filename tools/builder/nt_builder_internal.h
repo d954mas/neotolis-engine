@@ -231,6 +231,9 @@ struct NtBuilderContext {
     uint32_t error_count;
     bool errors_truncated;
     bool poisoned;
+    /* A poisoned begin_atlas opens no real atlas but still tracks lifecycle
+     * balance, so nested begin / unmatched end / open-at-finish still trap. */
+    bool skipped_atlas_open;
 
     /* Add-order sequencing: bumped once per atlas add* call; cur_error_seq is
      * the key push_error stamps on the next error (a sprite's add_seq, or the

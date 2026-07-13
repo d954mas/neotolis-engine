@@ -724,6 +724,27 @@ void test_build_error_format_duplicate_name(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "duplicate"));
 }
 
+/* nt_build_error_format IMAGE_TOO_LARGE arm: an oversized-header reject leaves
+ * dims unwritten (0x0) — the message must omit the bogus "0x0", while a known
+ * area-overflow (real dims) keeps the WxH form. */
+void test_build_error_format_image_too_large(void) {
+    char buf[256];
+
+    /* Unknown dims (stbi_info reject): no "0x0". */
+    nt_build_error_t unknown = {.kind = NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, .w = 0, .h = 0};
+    error_copy_test_name(unknown.sprite, "huge.png");
+    nt_build_error_format(&unknown, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "huge.png"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "exceeds decode limit"));
+    TEST_ASSERT_NULL_MESSAGE(strstr(buf, "0x0"), "must not report bogus 0x0 dims");
+
+    /* Known dims (area overflow): keep the WxH form. */
+    nt_build_error_t known = {.kind = NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, .w = 40000, .h = 40000};
+    error_copy_test_name(known.sprite, "big.png");
+    nt_build_error_format(&known, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "40000x40000"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -743,5 +764,6 @@ int main(void) {
     RUN_TEST(test_atlas_unfittable_reports_above_atlas_override);
     RUN_TEST(test_build_error_format_unfittable);
     RUN_TEST(test_build_error_format_duplicate_name);
+    RUN_TEST(test_build_error_format_image_too_large);
     return UNITY_END();
 }

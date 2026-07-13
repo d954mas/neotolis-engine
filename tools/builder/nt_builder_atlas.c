@@ -91,7 +91,13 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
         (void)snprintf(buf, len, "sprite '%s': zero width or height", err->sprite);
         break;
     case NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE:
-        (void)snprintf(buf, len, "sprite '%s': image %ux%u exceeds decode limit", err->sprite, err->w, err->h);
+        /* stbi_info leaves dims unwritten on an oversized-header reject — omit the
+         * bogus 0x0 when either dimension is unknown. */
+        if (err->w == 0 || err->h == 0) {
+            (void)snprintf(buf, len, "sprite '%s': image exceeds decode limit (dimensions too large to read)", err->sprite);
+        } else {
+            (void)snprintf(buf, len, "sprite '%s': image %ux%u exceeds decode limit", err->sprite, err->w, err->h);
+        }
         break;
     case NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM:
         (void)snprintf(buf, len, "sprite '%s': fully transparent after trim", err->sprite);
@@ -461,7 +467,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * changes inside the atlas pipeline (blit/extrude/compose tweaks that
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
-    enum { ATLAS_CACHE_KEY_VERSION = 9 };
+    /* v10: the u_hull_counts OOB fix changed override-sprite compose output,
+     * so any pre-fix cache entry must miss and rebuild. */
+    enum { ATLAS_CACHE_KEY_VERSION = 10 };
 
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
@@ -727,7 +735,7 @@ static const char *extract_filename(const char *path) {
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
     NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
-    NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
+    NT_BUILD_ASSERT(!ctx->active_atlas && !ctx->skipped_atlas_open && "begin_atlas: nested atlas not allowed");
     /* Caller-supplied opts are validated before the poison no-op so a
      * programmer error still traps on a poisoned pack. NULL opts is always
      * valid (uses defaults). extrude>0 shape check is opts-only here. */
@@ -744,9 +752,11 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
         NT_BUILD_ASSERT((opts->shape == NT_ATLAS_SHAPE_RECT || opts->extrude == 0) &&
                         "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
     }
-    /* Between-atlas hard stop: after poison, open no further atlases
-     * (active_atlas is NULL here). Programmer invariants above still fire. */
+    /* Between-atlas hard stop: after poison, open no real atlas but track a
+     * logical skipped-atlas so its end/finish lifecycle still balances.
+     * Programmer invariants above still fire. */
     if (ctx->poisoned) {
+        ctx->skipped_atlas_open = true;
         return;
     }
 
@@ -829,6 +839,19 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     }
 }
 
+/* Classify a NULL from stb decode: stb sets stbi_failure_reason() to
+ * "outofmem" on allocation failure (an environment error → assert-early per
+ * AGENTS.md), "too large" on an oversized image, else corrupt content. */
+static nt_build_error_kind classify_stbi_null(const char *reason) {
+    if (reason && strstr(reason, "outofmem")) {
+        NT_BUILD_ASSERT(0 && "atlas_add: image decode out of memory");
+    }
+    if (reason && strstr(reason, "too large")) {
+        return NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE;
+    }
+    return NT_BUILD_ERR_KIND_CORRUPT_IMAGE;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
@@ -851,6 +874,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
      * validated above). An OPEN poisoned atlas still has active_atlas, so it keeps
      * collecting. */
     if (ctx->poisoned && !ctx->active_atlas) {
+        NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add: no active atlas (call begin_atlas first)");
         free(file_data);
         return;
     }
@@ -873,11 +897,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     int ih = 0;
     int ic = 0;
     if (!stbi_info_from_memory(file_data, (int)file_size, &iw, &ih, &ic)) {
-        /* A single dimension past STBI_MAX_DIMENSIONS (1<<24) makes stbi_info fail
-         * with the literal "too large" reason — classify it as oversized, not a
-         * generic decode failure. */
-        const char *reason = stbi_failure_reason();
-        nt_build_error_kind kind = (reason && strstr(reason, "too large")) ? NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE : NT_BUILD_ERR_KIND_CORRUPT_IMAGE;
+        nt_build_error_kind kind = classify_stbi_null(stbi_failure_reason());
         push_content_error(ctx, state->name, region_name, kind, 0, 0);
         free(file_data);
         return;
@@ -901,7 +921,8 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
     free(file_data);
     if (!pixels) {
-        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
+        nt_build_error_kind kind = classify_stbi_null(stbi_failure_reason());
+        push_content_error(ctx, state->name, region_name, kind, 0, 0);
         return;
     }
 
@@ -936,6 +957,7 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     atlas_assert_sprite_opts(&sopts);
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
+        NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add_raw: no active atlas (call begin_atlas first)");
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
@@ -1032,6 +1054,7 @@ void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const
 
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
+        NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add_glob: no active atlas");
         return;
     }
     /* Guards the non-poison path only — a legitimately-skipped (poisoned-closed)
@@ -1479,21 +1502,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
             // #endregion
 
             if (!convex_reason) {
-                /* Trace outer contour (CCW).
-                 *
-                 * Tight upper bound on contour length for a single-component
-                 * mask: P ≤ 2*N + 2, where N is the opaque-pixel count.
-                 * Derivation: total pixel edges = 4*N; let I be the count of
-                 * edges shared between two opaque pixels, then P = 4*N − 2*I.
-                 * A connected component has I ≥ N − 1 (minimum: spanning
-                 * tree), so P ≤ 4*N − 2*(N − 1) = 2*N + 2. Connectivity is
-                 * already guaranteed by the binary_count_components check
-                 * above, so this bound holds.
-                 *
-                 * The old bound 2*tw*th assumed N = tw*th (a solid fill),
-                 * but a solid shape is a rectangle with perimeter 2*(tw+th),
-                 * not 2*tw*th. The old formula overshoots by 1/(2*fill_ratio)
-                 * — 10-100× more memory than needed for real sprites. */
+                /* Contour vertex bound for a single connected component:
+                 * P <= 2*N + 2 for an N-pixel mask. */
                 uint32_t opaque_count = 0;
                 for (size_t bi = 0; bi < (size_t)tw * th; bi++) {
                     if (binary[bi]) {
@@ -2483,9 +2493,11 @@ static void pipeline_cleanup(AtlasPipeline *p) {
 void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
 
-    /* After poison, begin_atlas no-ops so subsequent atlases have no
-     * active state — make end a no-op too instead of asserting. */
+    /* After poison, begin_atlas opens a logical skipped atlas — a matching end
+     * closes it (balanced). An end with no open atlas at all is a lifecycle bug. */
     if (ctx->poisoned && !ctx->active_atlas) {
+        NT_BUILD_ASSERT(ctx->skipped_atlas_open && "end_atlas: no active atlas");
+        ctx->skipped_atlas_open = false;
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");

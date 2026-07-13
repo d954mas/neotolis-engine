@@ -5837,6 +5837,32 @@ void test_atlas_poisoned_arg_asserts(void) {
     EXPECT_BUILD_ASSERT(c4, nt_builder_atlas_add_glob(c4, "*.png", &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
 }
 
+/* After a poison, begin_atlas opens a logical skipped atlas; a second begin on
+ * that still-open skipped atlas is a nested begin and must TRAP. */
+void test_atlas_poison_skipped_nested_begin_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_poisoned_closed_pack(TMP_DIR "/poison_skip_nested.ntpack");
+    nt_builder_begin_atlas(ctx, "B", NULL); /* opens skipped atlas (no-op) */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "C", NULL));
+}
+
+/* An end_atlas with no open atlas at all (no begin after poison) is an
+ * unbalanced end and must TRAP, not silently no-op. */
+void test_atlas_poison_skipped_end_without_begin_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_poisoned_closed_pack(TMP_DIR "/poison_skip_end.ntpack");
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+}
+
+/* A skipped atlas left open (begin after poison, never ended) must TRAP at
+ * finish_pack — the lifecycle balance mirrors a real atlas. */
+void test_atlas_poison_skipped_finish_open_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_poisoned_closed_pack(TMP_DIR "/poison_skip_finish.ntpack");
+    nt_builder_begin_atlas(ctx, "B", NULL); /* opens skipped atlas, never ended */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+}
+
 /* atlas_add_raw with width==0 on an OPEN atlas is a graceful content error
  * (ZERO_DIM), not a caller-contract assert — matches file-based atlas_add. */
 void test_atlas_add_raw_zero_dim_graceful(void) {
@@ -6234,6 +6260,9 @@ int main(void) {
     RUN_TEST(test_atlas_poison_stops_subsequent_atlases);
     RUN_TEST(test_atlas_poison_open_nested_begin_asserts);
     RUN_TEST(test_atlas_poisoned_arg_asserts);
+    RUN_TEST(test_atlas_poison_skipped_nested_begin_asserts);
+    RUN_TEST(test_atlas_poison_skipped_end_without_begin_asserts);
+    RUN_TEST(test_atlas_poison_skipped_finish_open_asserts);
     RUN_TEST(test_atlas_add_raw_zero_dim_graceful);
     RUN_TEST(test_atlas_add_raw_zero_height_graceful);
     RUN_TEST(test_finish_pack_open_atlas_asserts);

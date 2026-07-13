@@ -530,7 +530,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
     /* Lifecycle invariant: an atlas left open means end_atlas was never called,
      * so its survivors were never validated. Trap regardless of poison state. */
-    NT_BUILD_ASSERT(!ctx->active_atlas && "finish_pack: active atlas not ended — call end_atlas first");
+    NT_BUILD_ASSERT(!ctx->active_atlas && !ctx->skipped_atlas_open && "finish_pack: active atlas not ended — call end_atlas first");
     /* A poisoned build writes no pack. Gate before the pending_count
      * assert — a fully-failed atlas-only pack can have pending_count == 0. */
     if (ctx->poisoned) {

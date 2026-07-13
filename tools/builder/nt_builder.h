@@ -418,9 +418,10 @@ typedef struct {
     uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
     uint8_t max_vertices; /* 0 = atlas default */
     uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
-    /* 0 = atlas default. Sets THIS sprite's actual edge bleed (RECT only; any
-     * value, may be below the atlas default — a smaller value gives a smaller
-     * bleed). The packing footprint reserves room for max(this, atlas extrude). */
+    /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed
+     * (RECT only) and may be smaller OR larger than the atlas extrude. A zero
+     * bleed cannot be expressed per-sprite (0 means inherit). The packing
+     * footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
 } nt_atlas_sprite_opts_t;
 

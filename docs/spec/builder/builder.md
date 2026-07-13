@@ -297,13 +297,13 @@ typedef struct {
     uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
     uint8_t max_vertices; /* 0 = atlas default, max 16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
-    uint8_t extrude;      /* 0 = atlas default; this sprite's actual edge bleed (RECT only, any value) */
+    uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
 } nt_atlas_sprite_opts_t;
 ```
 
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
-- `extrude` sets **this sprite's actual edge bleed** (RECT only; any value, and it *may be below* the atlas default — a smaller override gives a smaller bleed). Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
+- `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
