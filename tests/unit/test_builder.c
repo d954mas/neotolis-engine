@@ -2,6 +2,7 @@
    TEST_ASSERT_EQUAL aborts via longjmp before any uninitialized access. */
 // NOLINTBEGIN(clang-analyzer-unix.Stream,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -4600,6 +4601,90 @@ void test_atlas_add_glob_empty_asserts_after_poison(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_glob(ctx, TMP_DIR "/no_such_dir_xyz/*.png", NULL));
 }
 
+/* Poison + close a pack, then a *skipped* begin_atlas whose opts carry an
+ * invalid pixels_per_unit must still TRAP — a skipped atlas never reaches the
+ * pipeline, so the scale is validated at begin, not late in serialize. */
+static void atlas_poison_pack(NtBuilderContext *ctx) {
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    nt_builder_begin_atlas(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255); /* unfittable → poisons + closes */
+    nt_builder_atlas_add_raw(ctx, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+    free(px);
+}
+
+void test_atlas_begin_bad_ppu_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_ppu.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.pixels_per_unit = 0.0F; /* 0 is invalid regardless of poison/skip */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
+void test_atlas_begin_nan_ppu_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_ppu_nan.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.pixels_per_unit = NAN;
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
+/* A skipped add must still validate the atlas-shape-dependent sprite cross-field
+ * contract: slice9 on a non-RECT sprite shape traps even though the pack is
+ * poisoned and the add otherwise no-ops. */
+void test_atlas_add_raw_slice9_nonrect_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_slice9.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_builder_begin_atlas(ctx, "skipped", NULL); /* opens a skipped atlas */
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    /* slice9 border + non-RECT sprite shape → cross-field trap */
+    EXPECT_BUILD_ASSERT(
+        ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .shape = NT_ATLAS_SPRITE_SHAPE_CONVEX}));
+    free(s);
+}
+
+/* A skipped add with per-sprite extrude > 0 on a non-RECT effective shape (the
+ * stored skipped-atlas shape defaults to CONCAVE_CONTOUR) must trap. */
+void test_atlas_add_raw_extrude_nonrect_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_extrude.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_builder_begin_atlas(ctx, "skipped", NULL); /* skipped atlas, default shape = CONCAVE_CONTOUR */
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .extrude = 2}));
+    free(s);
+}
+
+/* A skipped add with VALID sprite opts must cleanly no-op (balanced lifecycle) —
+ * no trap. The pack stays poisoned and end_atlas still balances. */
+void test_atlas_add_raw_valid_opts_noops_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_valid_noop.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_builder_begin_atlas(ctx, "skipped", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    /* No slice9, no extrude → cross-field is a no-op; add cleanly skips. */
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ok.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    free(s);
+    nt_builder_end_atlas(ctx); /* skipped lifecycle still balances */
+    uint32_t err_count = 0;
+    (void)nt_builder_get_errors(ctx, &err_count);
+    TEST_ASSERT_TRUE(err_count > 0); /* pack stays poisoned; the valid add just no-oped */
+    nt_builder_free_pack(ctx);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_round_trip_basic(void) {
     (void)MKDIR(TMP_DIR);
@@ -6227,6 +6312,11 @@ int main(void) {
     RUN_TEST(test_atlas_shape_concave_rejects_extrude);
     RUN_TEST(test_atlas_add_missing_file_asserts_after_poison);
     RUN_TEST(test_atlas_add_glob_empty_asserts_after_poison);
+    RUN_TEST(test_atlas_begin_bad_ppu_asserts_after_poison);
+    RUN_TEST(test_atlas_begin_nan_ppu_asserts_after_poison);
+    RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_poison);
+    RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_poison);
+    RUN_TEST(test_atlas_add_raw_valid_opts_noops_after_poison);
 
     /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);

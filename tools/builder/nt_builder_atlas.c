@@ -467,8 +467,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * changes inside the atlas pipeline (blit/extrude/compose tweaks that
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
-    /* v10: the u_hull_counts OOB fix changed override-sprite compose output,
-     * so any pre-fix cache entry must miss and rebuild. */
+    /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
     enum { ATLAS_CACHE_KEY_VERSION = 10 };
 
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
@@ -751,12 +750,19 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
          * collide. Polygon modes must use padding-only. */
         NT_BUILD_ASSERT((opts->shape == NT_ATLAS_SHAPE_RECT || opts->extrude == 0) &&
                         "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
+        /* Validated here (not only late in pipeline_serialize) so a skipped atlas,
+         * which never reaches the pipeline, cannot swallow a 0/NaN scale. */
+        NT_BUILD_ASSERT(opts->pixels_per_unit > 0.0F && isfinite(opts->pixels_per_unit) && "begin_atlas: pixels_per_unit must be > 0 and finite");
     }
     /* Between-atlas hard stop: after poison, open no real atlas but track a
      * logical skipped-atlas so its end/finish lifecycle still balances.
      * Programmer invariants above still fire. */
     if (ctx->poisoned) {
         ctx->skipped_atlas_open = true;
+        /* Capture the resolved opts so skipped adds can still validate the
+         * atlas-shape-dependent sprite cross-field contract. */
+        ctx->skipped_atlas_opts = opts ? *opts : nt_atlas_opts_defaults();
+        ctx->skipped_atlas_opts.compress = NULL;
         return;
     }
 
@@ -809,9 +815,27 @@ static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->max_vertices <= 16 && "max_vertices override must be <= 16");
 }
 
+/* Atlas-shape-dependent sprite cross-field asserts (slice9→RECT, extrude>0→RECT
+ * effective shape). Runs on the normal add path AND on a skipped add so a
+ * poisoned pack still traps the caller bug. Pure asserts — no mutation. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT macro expansions inflate the count
+static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
+    /* Slice9 auto-forces RECT — check its precondition before the extrude check. */
+    bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
+    uint8_t effective_override = sopts->shape;
+    if (has_slice9) {
+        NT_BUILD_ASSERT((sopts->shape == 0 || sopts->shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "slice9 sprite must use RECT shape");
+        NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "slice9 sprite must not allow rotation");
+        effective_override = NT_ATLAS_SPRITE_SHAPE_RECT;
+    }
+    if (sopts->extrude > 0) {
+        uint8_t effective_shape = effective_override ? effective_override : (uint8_t)atlas_opts->shape;
+        NT_BUILD_ASSERT((effective_shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires effective shape == RECT");
+    }
+}
+
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
  * Slice9 borders auto-force RECT shape + no rotation. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
@@ -822,20 +846,12 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
-    /* These shape asserts need the effective atlas shape, so they run only for an
-     * active atlas (this fn is unreachable on a poisoned-skipped atlas). */
-    /* Slice9 auto-force FIRST — sets shape=RECT before extrude check needs it. */
+    atlas_assert_sprite_cross_field(sopts, atlas_opts);
+    /* Slice9 auto-force: RECT shape + no rotation. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
-        NT_BUILD_ASSERT((sprite->shape_override == 0 || sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) && "slice9 sprite must use RECT shape");
-        NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "slice9 sprite must not allow rotation");
         sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
         sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
-    }
-    /* Per-sprite extrude > 0 requires effective shape == RECT. */
-    if (sprite->extrude_override > 0) {
-        uint8_t effective_shape = sprite->shape_override ? sprite->shape_override : (uint8_t)atlas_opts->shape;
-        NT_BUILD_ASSERT((effective_shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires effective shape == RECT");
     }
 }
 
@@ -875,6 +891,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
      * collecting. */
     if (ctx->poisoned && !ctx->active_atlas) {
         NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add: no active atlas (call begin_atlas first)");
+        atlas_assert_sprite_cross_field(&sopts, &ctx->skipped_atlas_opts);
         free(file_data);
         return;
     }
@@ -958,6 +975,7 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add_raw: no active atlas (call begin_atlas first)");
+        atlas_assert_sprite_cross_field(&sopts, &ctx->skipped_atlas_opts);
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
@@ -2345,6 +2363,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
      * 4 bytes are negligible, and keeps the round-trip tests symmetric. The
      * resource_id must mirror nt_builder_add_entry's hashing exactly: the
      * normalized atlas state name. */
+    /* Redundant with the begin_atlas gate — kept as a defensive final check. */
     NT_BUILD_ASSERT(p->opts->pixels_per_unit > 0.0F && isfinite(p->opts->pixels_per_unit));
     char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
     NT_BUILD_ASSERT(atlas_norm_path);

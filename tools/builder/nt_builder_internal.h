@@ -234,6 +234,9 @@ struct NtBuilderContext {
     /* A poisoned begin_atlas opens no real atlas but still tracks lifecycle
      * balance, so nested begin / unmatched end / open-at-finish still trap. */
     bool skipped_atlas_open;
+    /* Resolved atlas opts captured by a skipped begin_atlas so skipped adds can
+     * still validate the atlas-shape-dependent sprite cross-field contract. */
+    nt_atlas_opts_t skipped_atlas_opts;
 
     /* Add-order sequencing: bumped once per atlas add* call; cur_error_seq is
      * the key push_error stamps on the next error (a sprite's add_seq, or the
