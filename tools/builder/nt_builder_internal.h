@@ -409,6 +409,19 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
     }
 }
 
+/* Derive the generated .h path for a pack, honoring an explicit header_dir.
+ * header_dir non-NULL -> "<header_dir>/<stem>.h"; else replace the pack extension.
+ * Shared by codegen (write) and finish_pack (remove on poison). */
+static inline void nt_builder_derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
+    if (header_dir) {
+        char stem[256];
+        nt_builder_pack_stem(pack_path, stem, sizeof(stem));
+        (void)snprintf(header_path, size, "%s/%s.h", header_dir, stem);
+    } else {
+        nt_builder_pack_to_header_path(pack_path, header_path, size);
+    }
+}
+
 /* Deferred entry addition (shared between add_* and scene_mesh) */
 void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size, uint64_t decoded_hash);
 

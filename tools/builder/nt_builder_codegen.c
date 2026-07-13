@@ -66,16 +66,7 @@ static int sort_entry_cmp(const void *a, const void *b) { return strcmp(((const 
 
 /* --- Header path derivation --- */
 
-static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
-    if (header_dir) {
-        /* Extract pack filename stem, put .h in header_dir */
-        char stem[256];
-        nt_builder_pack_stem(pack_path, stem, sizeof(stem));
-        (void)snprintf(header_path, size, "%s/%s.h", header_dir, stem);
-    } else {
-        nt_builder_pack_to_header_path(pack_path, header_path, size);
-    }
-}
+static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) { nt_builder_derive_header_path(pack_path, header_dir, header_path, size); }
 
 /* --- Include guard derivation --- */
 

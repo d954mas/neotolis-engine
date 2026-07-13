@@ -529,6 +529,79 @@ void test_atlas_truncation_preserves_earliest(void) {
     (void)remove(bad_png);
 }
 
+/* A raw sprite whose width*height overflows the 4-byte RGBA size guard surfaces
+ * as one graceful IMAGE_TOO_LARGE (the guard fires before any allocation), not a
+ * corrupt/oom trap. Pins the oversized classification + coarse LIMIT result. */
+void test_atlas_add_raw_oversized_image_too_large(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_oversized.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = boundary_opts();
+    nt_builder_begin_atlas(ctx, "huge", &opts);
+
+    /* 70000*70000*4 overflows UINT32_MAX/4 → guarded before alloc, so the single
+     * dummy byte is never dereferenced. */
+    uint8_t dummy = 0;
+    nt_builder_atlas_add_raw(ctx, &dummy, 70000, 70000, &(nt_atlas_sprite_opts_t){.name = "huge.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("huge.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_UINT32(70000, errs[0].w);
+    TEST_ASSERT_EQUAL_UINT32(70000, errs[0].h);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after an oversized build");
+
+    nt_builder_free_pack(ctx);
+}
+
+/* The fit-loop NULL-hull guard (A6) must not over-skip: a CONVEX-shape sprite
+ * with a valid hull and a raise-margin override that pushes its scratch quad past
+ * max_size must still report EXACTLY ONE UNFITTABLE (not zero, not a duplicate).
+ * A genuine NULL-hull survivor (DEGENERATE_HULL / CONTOUR_VERTEX_OVERFLOW) is not
+ * constructible from sprite pixel content — pixel-corner convex hulls are always
+ * a >=4-vertex box for any non-empty mask — so the memcpy(NULL,0) / double-report
+ * half of the guard is defensive; this pins the reachable half. */
+void test_atlas_valid_hull_override_reports_once(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_valid_hull_override.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = boundary_opts(); /* max_size 64, margin 2 */
+    nt_builder_begin_atlas(ctx, "override", &opts);
+
+    /* A disc has a real many-sided convex hull. margin override 60 (>> atlas 2)
+     * builds a scratch quad wider than 64 → unfittable. The guard must keep this
+     * legitimate override sprite and report it once. */
+    uint8_t *disc = make_disc(40);
+    nt_builder_atlas_add_raw(ctx, disc, 40, 40,
+                             &(nt_atlas_sprite_opts_t){.name = "disc.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_CONVEX, .max_vertices = 8, .margin = 60});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, n, "valid-hull override sprite reported once, not skipped, not doubled");
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("disc.png", errs[0].sprite);
+
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after a poisoned build");
+
+    nt_builder_free_pack(ctx);
+    free(disc);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -542,5 +615,7 @@ int main(void) {
     RUN_TEST(test_atlas_unfittable_dedup_aliases);
     RUN_TEST(test_atlas_errors_stable_add_order);
     RUN_TEST(test_atlas_truncation_preserves_earliest);
+    RUN_TEST(test_atlas_add_raw_oversized_image_too_large);
+    RUN_TEST(test_atlas_valid_hull_override_reports_once);
     return UNITY_END();
 }

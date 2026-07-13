@@ -812,6 +812,8 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
+    /* These shape asserts need the effective atlas shape, so they run only for an
+     * active atlas (this fn is unreachable on a poisoned-skipped atlas). */
     /* Slice9 auto-force FIRST — sets shape=RECT before extrude check needs it. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
@@ -833,10 +835,23 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     /* Pure caller-arg validation runs before the poison no-op below. */
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     atlas_assert_sprite_opts(&sopts);
-    /* A prior atlas poisoned the pack, so begin_atlas no-oped and left no
-     * active atlas — make this add a no-op too instead of asserting. An OPEN
-     * poisoned atlas still has active_atlas, so it keeps collecting. */
+
+    /* Read the file + assert it exists BEFORE the poison no-op: a missing/unreadable
+     * file is an env/programmer error that must always trap, even on a skipped atlas.
+     * The extra read on the poisoned-skip path is accepted (rare cold path). */
+    char *resolved_path = nt_builder_find_file(path, NULL, ctx);
+    const char *read_path = resolved_path ? resolved_path : path;
+    uint32_t file_size = 0;
+    uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
+    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
+    free(resolved_path);
+
+    /* A prior atlas poisoned the pack, so begin_atlas no-oped and left no active
+     * atlas — make this add a no-op too instead of asserting (the file is already
+     * validated above). An OPEN poisoned atlas still has active_atlas, so it keeps
+     * collecting. */
     if (ctx->poisoned && !ctx->active_atlas) {
+        free(file_data);
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
@@ -845,16 +860,6 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 
     /* Stamp the add order now so a decode error below carries this add's seq. */
     ctx->cur_error_seq = ctx->add_seq_counter++;
-
-    /* Resolve file path via asset roots */
-    char *resolved_path = nt_builder_find_file(path, NULL, ctx);
-    const char *read_path = resolved_path ? resolved_path : path;
-
-    /* Read file */
-    uint32_t file_size = 0;
-    uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
-    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
-    free(resolved_path);
 
     /* Determine region name. opts->name takes precedence; NULL falls back to
      * basename of the source path. Needed early to name a decode error. */
@@ -868,7 +873,12 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     int ih = 0;
     int ic = 0;
     if (!stbi_info_from_memory(file_data, (int)file_size, &iw, &ih, &ic)) {
-        push_content_error(ctx, state->name, region_name, NT_BUILD_ERR_KIND_CORRUPT_IMAGE, 0, 0);
+        /* A single dimension past STBI_MAX_DIMENSIONS (1<<24) makes stbi_info fail
+         * with the literal "too large" reason — classify it as oversized, not a
+         * generic decode failure. */
+        const char *reason = stbi_failure_reason();
+        nt_build_error_kind kind = (reason && strstr(reason, "too large")) ? NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE : NT_BUILD_ERR_KIND_CORRUPT_IMAGE;
+        push_content_error(ctx, state->name, region_name, kind, 0, 0);
         free(file_data);
         return;
     }
@@ -1011,15 +1021,22 @@ void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const
     if (opts) {
         NT_BUILD_ASSERT(isfinite(opts->origin_x) && isfinite(opts->origin_y) && "atlas_add_glob: origin must be finite (no NaN/inf)");
     }
+
+    /* Run the glob + validate the pattern (overflow / no-match are env/programmer
+     * errors) BEFORE the poison no-op: a bad pattern must trap even on a skipped
+     * atlas. Each matched atlas_add individually no-ops when poisoned, so files are
+     * counted (match_count) but not added. */
+    AtlasGlobData data = {.ctx = ctx, .sprite_opts = opts, .match_count = 0};
+    NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
+    NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
+
     /* No-op after a prior atlas poisoned the pack (see nt_builder_atlas_add). */
     if (ctx->poisoned && !ctx->active_atlas) {
         return;
     }
+    /* Guards the non-poison path only — a legitimately-skipped (poisoned-closed)
+     * glob already returned above. */
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
-
-    AtlasGlobData data = {.ctx = ctx, .sprite_opts = opts, .match_count = 0};
-    NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
-    NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
 }
 // #endregion
 
@@ -1651,16 +1668,51 @@ static void atlas_fit_hull(const AtlasPipeline *p, uint32_t oi, Point2D quad[4],
     }
 }
 
+/* Sort key for O(n) duplicate-name detection: primary hash asc, tie-break index
+ * asc so an equal-hash run is scanned oldest-first (canonical = smallest index). */
+typedef struct {
+    uint64_t hash;
+    uint32_t index;
+} NameHashEntry;
+
+static int name_hash_cmp(const void *a, const void *b) {
+    const NameHashEntry *ea = (const NameHashEntry *)a;
+    const NameHashEntry *eb = (const NameHashEntry *)b;
+    if (ea->hash < eb->hash) {
+        return -1;
+    }
+    if (ea->hash > eb->hash) {
+        return 1;
+    }
+    if (ea->index < eb->index) {
+        return -1;
+    }
+    if (ea->index > eb->index) {
+        return 1;
+    }
+    return 0;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_validate(AtlasPipeline *p) {
     /* Empty-page fit: reject any unique sprite that cannot fit an empty max_size
      * page, using the exact vector_pack fit test — an unfittable sprite becomes a
      * graceful UNFITTABLE instead of tripping vector_pack's placement invariant. */
+    /* Pass 1: flag each unfittable UNIQUE sprite. O(unique). */
+    bool *unfittable = (bool *)calloc(p->sprite_count, sizeof(bool));
+    NT_BUILD_ASSERT(unfittable && "pipeline_validate: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         /* A sprite that failed alpha_trim has no hull (already reported); skip it
          * so the fit test never dereferences a NULL/degenerate hull. */
         if (p->trim_w[oi] == 0 || p->trim_h[oi] == 0) {
+            continue;
+        }
+        /* A geometry-failed survivor (DEGENERATE_HULL / CONTOUR_VERTEX_OVERFLOW)
+         * has no hull and is already reported; skip it so the fit test never
+         * memcpy's a NULL hull and the scratch-quad override path can't resurrect
+         * it as a duplicate UNFITTABLE. */
+        if (p->hull_vertices[oi] == NULL) {
             continue;
         }
         Point2D quad[4];
@@ -1670,55 +1722,77 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (vpack_sprite_fits_empty_page(hull, hull_count, p->opts)) {
             continue;
         }
-        /* Report the EFFECTIVE spacing the packer used: a per-sprite override
-         * only RAISES the atlas baseline (a smaller override is clamped up), so
-         * the record must not show a below-atlas request the fit never applied.
-         * These match across dedup aliases (dedup requires equal overrides). */
-        uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-        uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
+        unfittable[oi] = true;
+    }
+    /* Pass 2: report the canonical sprite AND every dedup alias, in add order.
+     * dedup_map stores the fully-resolved canonical (no chain walk). O(n). */
+    for (uint32_t k = 0; k < p->sprite_count; k++) {
+        uint32_t c = p->dedup_map[k] < 0 ? k : (uint32_t)p->dedup_map[k];
+        if (!unfittable[c]) {
+            continue;
+        }
+        /* Report the EFFECTIVE spacing the packer used: a per-sprite override only
+         * RAISES the atlas baseline (a smaller override is clamped up), so the
+         * record must not show a below-atlas request the fit never applied. These
+         * match across dedup aliases (dedup requires equal overrides). */
+        uint32_t sprite_margin = p->sprites[c].margin_override ? p->sprites[c].margin_override : p->opts->margin;
+        uint32_t sprite_extrude = p->sprites[c].extrude_override ? p->sprites[c].extrude_override : p->opts->extrude;
         uint32_t effective_margin = sprite_margin > p->opts->margin ? sprite_margin : p->opts->margin;
         uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
-        /* Report the canonical sprite AND every dedup alias — each shares pixels
-         * and dims but has its own name, so each gets its own UNFITTABLE. */
-        for (uint32_t k = 0; k < p->sprite_count; k++) {
-            if (k != oi && p->dedup_map[k] != (int32_t)oi) {
-                continue;
-            }
-            p->ctx->cur_error_seq = p->sprites[k].add_seq;
-            nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE,
-                                  .w = p->trim_w[oi],
-                                  .h = p->trim_h[oi],
-                                  .padding = p->opts->padding,
-                                  .margin = effective_margin,
-                                  .max_size = p->opts->max_size,
-                                  .detail_a = effective_extrude};
-            error_copy_name(e.atlas, p->state->name);
-            error_copy_name(e.sprite, p->sprites[k].name);
-            nt_builder_push_error(p->ctx, &e);
-        }
+        p->ctx->cur_error_seq = p->sprites[k].add_seq;
+        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE,
+                              .w = p->trim_w[c],
+                              .h = p->trim_h[c],
+                              .padding = p->opts->padding,
+                              .margin = effective_margin,
+                              .max_size = p->opts->max_size,
+                              .detail_a = effective_extrude};
+        error_copy_name(e.atlas, p->state->name);
+        error_copy_name(e.sprite, p->sprites[k].name);
+        nt_builder_push_error(p->ctx, &e);
     }
+    free(unfittable);
 
     /* Region-count cap: extreme content only (>65535 sprites). Checked BEFORE the
-     * O(n²) duplicate-name scan — an over-cap atlas is already rejected, so the
-     * ~2.1B-strcmp scan would only add a GUI hang with no new diagnostic.
-     * Atlas-level seq sorts it after this atlas's per-sprite errors. */
+     * duplicate-name scan — an over-cap atlas is already rejected, so the scan
+     * would only add work with no new diagnostic. Atlas-level seq sorts it after
+     * this atlas's per-sprite errors. */
     if (p->sprite_count > UINT16_MAX) {
         p->ctx->cur_error_seq = p->ctx->add_seq_counter;
         push_content_error(p->ctx, p->state->name, NULL, NT_BUILD_ERR_KIND_TOO_MANY_REGIONS, 0, 0);
-    } else {
-        /* Duplicate region names produce ambiguous runtime name_hash lookups. O(n²)
-         * but n <= 65535 and offline. Report each offending sprite once (first
-         * earlier match), so N identical names don't flood N(N-1)/2 errors; the first
-         * occurrence is canonical and not reported. */
-        for (uint32_t j = 1; j < p->sprite_count; j++) {
-            for (uint32_t i = 0; i < j; i++) {
-                if (strcmp(p->sprites[i].name, p->sprites[j].name) == 0) {
-                    p->ctx->cur_error_seq = p->sprites[j].add_seq;
-                    push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+    } else if (p->sprite_count > 0) {
+        /* Duplicate region names produce ambiguous runtime name_hash lookups.
+         * Hash-sort names to detect collisions in amortized O(n) — a valid
+         * 65535-region atlas would otherwise hang on ~2.1B strcmp. strcmp confirms
+         * only on a hash collision. Report each offending sprite once; the first
+         * (smallest-index) occurrence of a name is canonical and not reported. */
+        NameHashEntry *ents = (NameHashEntry *)malloc(p->sprite_count * sizeof(NameHashEntry));
+        bool *is_dup = (bool *)calloc(p->sprite_count, sizeof(bool));
+        NT_BUILD_ASSERT(ents && is_dup && "pipeline_validate: alloc failed");
+        for (uint32_t i = 0; i < p->sprite_count; i++) {
+            ents[i].hash = nt_hash64_str(p->sprites[i].name).value;
+            ents[i].index = i;
+        }
+        qsort(ents, p->sprite_count, sizeof(NameHashEntry), name_hash_cmp);
+        /* Within each equal-hash run (sorted by index asc), a sprite is a duplicate
+         * if an earlier-index entry shares its exact name. */
+        for (uint32_t a = 1; a < p->sprite_count; a++) {
+            for (uint32_t b = a; b > 0 && ents[b - 1].hash == ents[a].hash; b--) {
+                if (strcmp(p->sprites[ents[b - 1].index].name, p->sprites[ents[a].index].name) == 0) {
+                    is_dup[ents[a].index] = true;
                     break;
                 }
             }
         }
+        /* Report in add order so seqs and truncation behavior stay deterministic. */
+        for (uint32_t j = 0; j < p->sprite_count; j++) {
+            if (is_dup[j]) {
+                p->ctx->cur_error_seq = p->sprites[j].add_seq;
+                push_content_error(p->ctx, p->state->name, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+            }
+        }
+        free(ents);
+        free(is_dup);
     }
 
     /* Per-sprite trim-dim limits (independent of packing): source dims must fit

@@ -539,6 +539,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (remove(ctx->output_path) != 0 && errno != ENOENT) {
             return NT_BUILD_ERR_IO;
         }
+        /* Also remove the stale generated header so a failed rebuild leaves neither
+         * the pack nor an asset-ID header pointing at assets that were never built. */
+        char header_path[1024];
+        nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
+        if (remove(header_path) != 0 && errno != ENOENT) {
+            return NT_BUILD_ERR_IO;
+        }
         return nt_builder_result_from_errors(ctx);
     }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");

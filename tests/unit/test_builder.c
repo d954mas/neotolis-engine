@@ -4559,6 +4559,47 @@ void test_atlas_shape_concave_rejects_extrude(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
 }
 
+/* Poison a closed pack, then a missing-file atlas_add must still TRAP — a
+ * missing/unreadable file is an env error the graceful channel never swallows,
+ * even on a skipped atlas. */
+void test_atlas_add_missing_file_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_missing.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    nt_builder_begin_atlas(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255); /* 80 > fit boundary → unfittable, poisons + closes */
+    nt_builder_atlas_add_raw(ctx, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+    free(px);
+    /* Poisoned, no active atlas. A missing file must trap, not silently no-op. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add(ctx, TMP_DIR "/does_not_exist_xyz.png", &(nt_atlas_sprite_opts_t){.name = "nope.png", .origin_x = 0.5F, .origin_y = 0.5F}));
+}
+
+/* Poison a closed pack, then an atlas_add_glob whose pattern matches nothing must
+ * still TRAP on "no files matched" — the pattern is a programmer error validated
+ * regardless of poison. */
+void test_atlas_add_glob_empty_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_glob.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    nt_builder_begin_atlas(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255);
+    nt_builder_atlas_add_raw(ctx, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+    free(px);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_glob(ctx, TMP_DIR "/no_such_dir_xyz/*.png", NULL));
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_round_trip_basic(void) {
     (void)MKDIR(TMP_DIR);
@@ -6096,6 +6137,8 @@ int main(void) {
     RUN_TEST(test_extrude_edges_preserve_hole);
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
     RUN_TEST(test_atlas_shape_concave_rejects_extrude);
+    RUN_TEST(test_atlas_add_missing_file_asserts_after_poison);
+    RUN_TEST(test_atlas_add_glob_empty_asserts_after_poison);
 
     /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);
