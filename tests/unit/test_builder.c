@@ -5675,6 +5675,11 @@ void test_atlas_slice9_invalid_borders_reports_error(void) {
     TEST_ASSERT_EQUAL_STRING("bad_s9.png", errs[0].sprite);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
 
+    /* No .ntpack written on a poisoned build. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_slice9_invalid.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
     nt_builder_free_pack(ctx);
     free(s);
 }
@@ -5851,6 +5856,33 @@ void test_atlas_add_raw_zero_dim_graceful(void) {
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errs[0].kind);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
 
+    /* No .ntpack written on a poisoned build. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_raw_zero_dim.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+}
+
+/* Symmetric to the width==0 case: atlas_add_raw with height==0 on an OPEN atlas
+ * is a graceful ZERO_DIM content error, not a caller-contract assert. */
+void test_atlas_add_raw_zero_height_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_raw_zero_height.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_zero_height.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t px[4 * 4 * 4] = {0};
+    nt_builder_begin_atlas(ctx, "rawzeroh", NULL);
+    nt_builder_atlas_add_raw(ctx, px, 4, 0, &(nt_atlas_sprite_opts_t){.name = "zeroh.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
     nt_builder_free_pack(ctx);
 }
 
@@ -5868,6 +5900,36 @@ void test_finish_pack_open_atlas_asserts(void) {
     free(s);
     /* No end_atlas — finish_pack must trap. EXPECT_BUILD_ASSERT frees ctx. */
     EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+}
+
+/* finish_pack on a POISONED but still-OPEN atlas must also trap — the
+ * !active_atlas lifecycle assert fires regardless of poison, so a refactor that
+ * gated it behind !poisoned would silently write nothing instead of trapping. */
+void test_finish_pack_poisoned_open_atlas_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/finish_poison_open.ntpack");
+
+    /* A garbage file stb_image cannot decode → CORRUPT_IMAGE poisons at add-time
+     * while the atlas stays open (the file must exist, else atlas_add asserts). */
+    const char *bad_png = TMP_DIR "/finish_poison_bad.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/finish_poison_open.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_builder_begin_atlas(ctx, "openpoison", NULL);
+    nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    uint32_t nerr = 0;
+    (void)nt_builder_get_errors(ctx, &nerr);
+    TEST_ASSERT_EQUAL_UINT32(1, nerr); /* poisoned, atlas still open */
+
+    /* No end_atlas — finish_pack must trap even though the pack is poisoned. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    (void)remove(bad_png);
 }
 
 /* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
@@ -6173,7 +6235,9 @@ int main(void) {
     RUN_TEST(test_atlas_poison_open_nested_begin_asserts);
     RUN_TEST(test_atlas_poisoned_arg_asserts);
     RUN_TEST(test_atlas_add_raw_zero_dim_graceful);
+    RUN_TEST(test_atlas_add_raw_zero_height_graceful);
     RUN_TEST(test_finish_pack_open_atlas_asserts);
+    RUN_TEST(test_finish_pack_poisoned_open_atlas_asserts);
     RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);

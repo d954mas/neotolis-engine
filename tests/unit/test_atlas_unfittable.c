@@ -45,6 +45,9 @@ static uint8_t *make_opaque(uint32_t n, uint8_t red) {
     return px;
 }
 
+/* Copy a name into a fixed NT_BUILD_ERR_NAME_MAX record buffer for format tests. */
+static void error_copy_test_name(char *dst, const char *src) { (void)snprintf(dst, NT_BUILD_ERR_NAME_MAX, "%s", src); }
+
 static bool file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
     if (f) {
@@ -125,7 +128,7 @@ void test_atlas_unfittable_sprite(void) {
     TEST_ASSERT_EQUAL_UINT32(2, errs[0].margin);
     TEST_ASSERT_EQUAL_UINT32(64, errs[0].max_size);
 
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_builder_finish_pack(ctx)); /* UNFITTABLE → coarse LIMIT */
     TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after an unfittable build");
 
     nt_builder_free_pack(ctx);
@@ -194,7 +197,7 @@ void test_atlas_pages_exhausted_graceful(void) {
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, errs[0].kind);
     TEST_ASSERT_EQUAL_STRING("toomany", errs[0].atlas);
 
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_builder_finish_pack(ctx)); /* PAGES_EXHAUSTED → coarse LIMIT */
     TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after a pages-exhausted build");
 
     nt_builder_free_pack(ctx);
@@ -299,7 +302,8 @@ void test_atlas_cross_stage_collect_all(void) {
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[1].kind);
     TEST_ASSERT_EQUAL_STRING("clear.png", errs[1].sprite);
 
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    /* Coarse result derives from errs[0] (CORRUPT_IMAGE) → FORMAT. */
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_FORMAT, nt_builder_finish_pack(ctx));
     TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after a poisoned build");
 
     nt_builder_free_pack(ctx);
@@ -602,6 +606,124 @@ void test_atlas_valid_hull_override_reports_once(void) {
     free(disc);
 }
 
+/* When the error list is FULL, an error with a seq >= the current tail's seq is
+ * DROPPED (it belongs outside the earliest-seq prefix) — the sibling of the
+ * evict-tail branch. Fill to capacity with monotonically-increasing-seq corrupt
+ * adds, then add more: the later ones drop and errs[0]/errs[last] stay the
+ * earliest-added prefix. */
+void test_atlas_truncation_drops_later_seqs(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_truncate_drop.ntpack";
+    (void)remove(path);
+
+    const char *bad_png = TMP_DIR "/corrupt_drop.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_begin_atlas(ctx, "drop", NULL);
+
+    /* Fill exactly to capacity: seq 0..MAX-1, names corrupt_0000..corrupt_(MAX-1). */
+    for (uint32_t i = 0; i < NT_BUILD_MAX_ERRORS; i++) {
+        char nm[64];
+        (void)snprintf(nm, sizeof(nm), "corrupt_%04u.png", i);
+        nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = nm, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+    /* Additional corrupt adds carry higher seqs than the tail → each is DROPPED. */
+    for (uint32_t i = 0; i < 8; i++) {
+        char nm[64];
+        (void)snprintf(nm, sizeof(nm), "zzz_late_%04u.png", i);
+        nt_builder_atlas_add(ctx, bad_png, &(nt_atlas_sprite_opts_t){.name = nm, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_TRUE_MESSAGE(nt_builder_errors_truncated(ctx), "list must be flagged truncated");
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(NT_BUILD_MAX_ERRORS, n);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("corrupt_0000.png", errs[0].sprite, "earliest-added heads the prefix");
+    /* The tail slot keeps the last in-prefix add, not any dropped later error. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(errs[NT_BUILD_MAX_ERRORS - 1].sprite, "corrupt_", 8), "later-seq adds must be dropped, not overwrite the tail");
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_FORMAT, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
+    (void)remove(bad_png);
+}
+
+/* A per-sprite margin AND extrude override ABOVE the atlas baseline must carry
+ * through to the UNFITTABLE record verbatim (both are the effective max the
+ * packer reserved). The complement of the below-atlas clamp-up case. */
+void test_atlas_unfittable_reports_above_atlas_override(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_above_override.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 0;
+    opts.extrude = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    nt_builder_begin_atlas(ctx, "aboveovr", &opts);
+
+    /* margin override 20 (> atlas 2): 50 + 2*20 = 90 > 64 → unfittable. extrude
+     * override 10 (> atlas 2) is the effective bleed the record must report. A
+     * per-sprite extrude override needs an explicit RECT sprite shape (the atlas
+     * RECT default doesn't satisfy the sprite-shape assert — different enum). */
+    uint8_t *px = make_opaque(50, 200);
+    nt_builder_atlas_add_raw(ctx, px, 50, 50, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = 20, .extrude = 10});
+
+    nt_builder_end_atlas(ctx);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("wide.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(20, errs[0].margin, "above-atlas margin override carries through");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(10, errs[0].detail_a, "above-atlas extrude override carries through");
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_builder_finish_pack(ctx));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "no .ntpack must exist after an unfittable build");
+
+    nt_builder_free_pack(ctx);
+    free(px);
+}
+
+/* nt_build_error_format renders one actionable line per kind. The 6-%u UNFITTABLE
+ * arm is easy to desync, so pin its field ordering, plus the two-name
+ * DUPLICATE_NAME arm, by substring-checking pure-data records. */
+void test_build_error_format_records(void) {
+    char buf[256];
+
+    /* UNFITTABLE: sprite, w×h, padding, margin, extrude(detail_a), max_size. */
+    nt_build_error_t unfit = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE, .w = 100, .h = 200, .padding = 3, .margin = 5, .max_size = 2048, .detail_a = 7};
+    error_copy_test_name(unfit.sprite, "big.png");
+    nt_build_error_format(&unfit, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "big.png"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "100x200"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "padding 3"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "margin 5"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "extrude 7"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "max_size 2048"));
+
+    /* DUPLICATE_NAME: atlas + duplicate region name. */
+    nt_build_error_t dup = {.kind = NT_BUILD_ERR_KIND_DUPLICATE_NAME};
+    error_copy_test_name(dup.atlas, "myatlas");
+    error_copy_test_name(dup.sprite, "dup.png");
+    nt_build_error_format(&dup, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "myatlas"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "dup.png"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "duplicate"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -617,5 +739,8 @@ int main(void) {
     RUN_TEST(test_atlas_truncation_preserves_earliest);
     RUN_TEST(test_atlas_add_raw_oversized_image_too_large);
     RUN_TEST(test_atlas_valid_hull_override_reports_once);
+    RUN_TEST(test_atlas_truncation_drops_later_seqs);
+    RUN_TEST(test_atlas_unfittable_reports_above_atlas_override);
+    RUN_TEST(test_build_error_format_records);
     return UNITY_END();
 }
