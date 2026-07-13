@@ -94,15 +94,17 @@ Builder must check: references between assets, resource types, mesh/material/sha
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, degenerate hulls, contour-vertex overflow, duplicate region names, size/page limits, and unfittable sprites.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, degenerate hulls, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites.
 
-The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Atlas content errors are collected into a sticky, add-order-stable accumulator on the context. One bad sprite does not abort the atlas — the remaining sprites in the same atlas are still validated so every bad sprite is reported at once, and a poisoned pack writes no `.ntpack`. Callers read the list after `finish_pack`:
+The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Atlas content errors are collected into a sticky, add-order-stable accumulator on the context. One bad sprite does not abort the atlas — the remaining sprites in the same atlas are still validated so every bad sprite is reported at once, and a poisoned pack writes no `.ntpack`. A single-dimension-oversized image file (a PNG whose width or height exceeds the decoder's `STBI_MAX_DIMENSIONS`) is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE` — the atlas builder disambiguates the decode reject via the decoder's failure reason. Callers read the list after `finish_pack`:
 
 - `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits).
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
 - `nt_build_error_format(err, buf, len)` — renders one actionable line on demand.
 
 This keeps the atlas builder graceful so a GUI frontend survives a bad sprite with an actionable message; a command-line frontend layers its own fail-fast policy on top by treating a non-`NT_BUILD_OK` result as fatal. Single-asset adds and missing files still crash-early.
+
+The "report every bad sprite at once" guarantee is **per-atlas**. Once a pack is poisoned, `begin_atlas` no-ops for every subsequent atlas — a multi-atlas pack therefore surfaces only the first failing atlas's errors, and the frontend re-runs the build after fixing them to see the next atlas's diagnostics. This between-atlas hard stop is intended: it avoids validating downstream atlases whose inputs may depend on the poisoned one, and keeps the error list bounded to one atlas's worth of actionable content.
 
 ## Asset ID codegen
 
@@ -294,10 +296,14 @@ typedef struct {
     uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
     uint8_t max_vertices; /* 0 = atlas default, max 16 */
-    uint8_t margin;       /* 0 = atlas default, per-sprite packing margin */
-    uint8_t extrude;      /* 0 = atlas default, requires shape = RECT */
+    uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
+    uint8_t extrude;      /* 0 = atlas default; this sprite's actual edge bleed (RECT only, any value) */
 } nt_atlas_sprite_opts_t;
 ```
+
+**Margin vs. extrude override semantics:**
+- `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
+- `extrude` sets **this sprite's actual edge bleed** (RECT only; any value, and it *may be below* the atlas default — a smaller override gives a smaller bleed). Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
