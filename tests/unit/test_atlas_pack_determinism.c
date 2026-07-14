@@ -322,7 +322,8 @@ static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *
         free(buf);
         return false;
     }
-    uint64_t page0_id = *(const uint64_t *)(ablob + sizeof(NtAtlasHeader));
+    uint64_t page0_id;
+    memcpy(&page0_id, ablob + sizeof(NtAtlasHeader), sizeof(page0_id));
 
     const NtAssetEntry *tex = NULL;
     for (uint16_t i = 0; i < hdr->asset_count; i++) {
