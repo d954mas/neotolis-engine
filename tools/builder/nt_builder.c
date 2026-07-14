@@ -532,6 +532,19 @@ nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
 
 static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) { return nt_builder_result_from_error(ctx->error_count ? &ctx->errors[0] : NULL); }
 
+nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx) {
+    NT_BUILD_ASSERT(ctx && "invalidate_outputs called with NULL context");
+    if (remove(ctx->output_path) != 0 && errno != ENOENT) {
+        return NT_BUILD_ERR_IO;
+    }
+    char header_path[NT_BUILD_HEADER_PATH_MAX];
+    nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
+    if (remove(header_path) != 0 && errno != ENOENT) {
+        return NT_BUILD_ERR_IO;
+    }
+    return NT_BUILD_OK;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
@@ -540,17 +553,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* A failed build writes no pack. Gate before the pending_count
      * assert — a fully-failed atlas-only pack can have pending_count == 0. */
     if (ctx->failed) {
-        /* Remove any pre-existing good pack: no .ntpack must survive a failed rebuild.
-         * A stale pack we cannot delete would masquerade as this build's output. */
-        if (remove(ctx->output_path) != 0 && errno != ENOENT) {
-            return NT_BUILD_ERR_IO;
-        }
-        /* Also remove the stale generated header so a failed rebuild leaves neither
-         * the pack nor an asset-ID header pointing at assets that were never built. */
-        char header_path[NT_BUILD_HEADER_PATH_MAX];
-        nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
-        if (remove(header_path) != 0 && errno != ENOENT) {
-            return NT_BUILD_ERR_IO;
+        nt_build_result_t invalidate_result = nt_builder_invalidate_outputs(ctx);
+        if (invalidate_result != NT_BUILD_OK) {
+            return invalidate_result;
         }
         return nt_builder_result_from_errors(ctx);
     }

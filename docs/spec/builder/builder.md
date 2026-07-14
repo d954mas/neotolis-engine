@@ -102,7 +102,7 @@ The graceful channel is scoped to the atlas builder — it lets a batch of sprit
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
 - `nt_build_error_format(err, buf, len)` — renders one actionable line on demand.
 
-This keeps the atlas builder graceful so a GUI frontend survives bad sprites with actionable messages; a command-line frontend can fail fast on a non-`NT_BUILD_OK` result. Single-asset adds and missing files still crash early.
+This keeps the atlas builder graceful so a GUI frontend survives bad sprites with actionable messages; a command-line frontend can fail fast on a non-`NT_BUILD_OK` result. Before a failed commit returns, it attempts to remove any pre-existing `.ntpack` and generated header; an invalidation failure returns `NT_BUILD_ERR_IO` while the committed diagnostics remain readable. `nt_builder_finish_pack` repeats this invalidation idempotently for aggregate failure. Single-asset adds and missing files still crash early.
 
 The "report bad sprites together" guarantee is **per transaction**. A later atlas transaction always runs, even after an earlier failed commit. Its own commit returns its own result, so it may return `NT_BUILD_OK`; `nt_builder_finish_pack` still reports the aggregate pack failure and writes no `.ntpack`. Errors from multiple failed transactions are appended in commit order, with add order preserved inside each transaction.
 
@@ -306,7 +306,7 @@ typedef struct {
 
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
-- `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
+- `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.

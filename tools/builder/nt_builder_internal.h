@@ -238,6 +238,7 @@ struct NtBuilderContext {
 };
 
 nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error);
+nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);

@@ -420,8 +420,9 @@ typedef struct {
     uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
     /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed
      * (RECT only) and may be smaller OR larger than the atlas extrude. A zero
-     * bleed cannot be expressed per-sprite (0 means inherit). The packing
-     * footprint reserves room for max(this, atlas extrude). */
+     * bleed cannot be expressed per-sprite (0 means inherit). Effective extrude,
+     * whether inherited or overridden, requires the effective shape to be RECT.
+     * The packing footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
 } nt_atlas_sprite_opts_t;
 
@@ -484,6 +485,8 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * resources, or publishes none and appends its content errors to the pack.
  * The handle is invalid after commit. A later atlas transaction still runs;
  * nt_builder_finish_pack reports the aggregate failure of committed atlases.
+ * A failed commit attempts to remove stale pack/header outputs before returning;
+ * failure to remove either is reported as NT_BUILD_ERR_IO.
  * Configure cache and worker threads before begin; changing either while an
  * atlas transaction is open asserts. Non-atlas add_* calls may interleave. */
 NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);

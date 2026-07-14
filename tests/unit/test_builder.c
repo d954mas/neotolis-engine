@@ -4816,6 +4816,21 @@ void test_atlas_add_raw_extrude_convex_default_asserts(void) {
     free(s);
 }
 
+/* Atlas-level extrude is inherited when the sprite override is zero, so a
+ * non-RECT sprite override must still trap. */
+void test_atlas_add_raw_inherited_extrude_nonrect_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_inherited_extrude_nonrect.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.extrude = 2;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "inherited", &opts);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_CONVEX}));
+    free(s);
+}
+
 /* Page format validation runs before a later transaction accepts inputs. */
 void test_atlas_begin_bad_format_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -6831,6 +6846,7 @@ int main(void) {
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_valid_opts_commits_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_extrude_convex_default_asserts);
+    RUN_TEST(test_atlas_add_raw_inherited_extrude_nonrect_asserts);
     RUN_TEST(test_atlas_begin_bad_format_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_bad_shape_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);

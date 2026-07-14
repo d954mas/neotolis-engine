@@ -266,6 +266,37 @@ void test_atlas_failed_rebuild_removes_stale_pack(void) {
     free(px);
 }
 
+/* A fail-fast caller may free the pack immediately after commit, so stale
+ * pack and header outputs must already be gone when the failed commit returns. */
+void test_atlas_failed_commit_invalidates_stale_outputs(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_stale_early.ntpack";
+    const char *header_path = TMP_DIR "/atlas_stale_early.h";
+
+    FILE *pack_sentinel = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(pack_sentinel);
+    (void)fwrite("STALE", 1, 5, pack_sentinel);
+    (void)fclose(pack_sentinel);
+    FILE *header_sentinel = fopen(header_path, "wb");
+    TEST_ASSERT_NOT_NULL(header_sentinel);
+    (void)fwrite("STALE", 1, 5, header_sentinel);
+    (void)fclose(header_sentinel);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = boundary_opts();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "toobig", &opts);
+    uint8_t *px = make_opaque(80, 200);
+    nt_atlas_add_raw(atlas, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_atlas_commit(atlas));
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(path), "failed commit must invalidate a stale .ntpack before returning");
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(header_path), "failed commit must invalidate a stale generated header before returning");
+
+    nt_builder_free_pack(ctx);
+    free(px);
+}
+
 /* One atlas with a corrupt-image sprite, a transparent-after-trim sprite, and a
  * good sprite: the pre-packing validation stages still run on the survivors even
  * after the corrupt image fails, so BOTH the corrupt-image
@@ -753,6 +784,7 @@ int main(void) {
     RUN_TEST(test_atlas_pages_exhausted_graceful);
     RUN_TEST(test_atlas_margin_override_hull_no_oob);
     RUN_TEST(test_atlas_failed_rebuild_removes_stale_pack);
+    RUN_TEST(test_atlas_failed_commit_invalidates_stale_outputs);
     RUN_TEST(test_atlas_cross_stage_collect_all);
     RUN_TEST(test_atlas_validate_reports_all_kinds);
     RUN_TEST(test_atlas_unfittable_reports_effective_margin);

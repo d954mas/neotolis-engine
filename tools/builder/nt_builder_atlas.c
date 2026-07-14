@@ -82,7 +82,9 @@ static nt_build_result_t atlas_merge_errors(NtAtlasBuild *atlas) {
         ctx->errors_truncated = true;
     }
     ctx->failed = true;
-    return nt_builder_result_from_error(atlas->error_count ? &atlas->errors[0] : NULL);
+    nt_build_result_t result = nt_builder_result_from_error(atlas->error_count ? &atlas->errors[0] : NULL);
+    nt_build_result_t invalidate_result = nt_builder_invalidate_outputs(ctx);
+    return invalidate_result == NT_BUILD_OK ? result : invalidate_result;
 }
 
 const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
@@ -858,12 +860,13 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
         NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "slice9 sprite must not allow rotation");
         effective_override = NT_ATLAS_SPRITE_SHAPE_RECT;
     }
-    if (sopts->extrude > 0) {
+    uint32_t effective_extrude = sopts->extrude ? sopts->extrude : atlas_opts->extrude;
+    if (effective_extrude > 0) {
         /* effective_override is sprite-shape domain (RECT=1); atlas_opts->shape is
          * atlas-shape domain (RECT=0). Judge each in its own enum space — mixing
          * them let a RECT atlas default fail and a CONVEX atlas default pass. */
         bool effective_is_rect = effective_override ? (effective_override == NT_ATLAS_SPRITE_SHAPE_RECT) : (atlas_opts->shape == NT_ATLAS_SHAPE_RECT);
-        NT_BUILD_ASSERT(effective_is_rect && "per-sprite extrude > 0 requires effective shape == RECT");
+        NT_BUILD_ASSERT(effective_is_rect && "effective extrude > 0 requires effective shape == RECT");
     }
 }
 
