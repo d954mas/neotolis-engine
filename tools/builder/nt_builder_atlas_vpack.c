@@ -1753,12 +1753,8 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     return true;
 }
 
-/* Mirrors the empty-page fit math in vpack_place_one_sprite (inflate by
- * extrude+padding/2, then the per-axis min_cand/max_cand page bound). A square
- * max_size page makes the check orientation-independent: a sprite fits some
- * orientation iff BOTH axes of the identity inflated AABB fit, so one identity
- * test is definitive. Uses the same hull + atlas opts vector_pack sees, keeping
- * the "empty page should accept placement" invariant unreachable for content. */
+/* Keep this predicate identical to vpack_place_one_sprite's empty-page bounds.
+ * Square pages make identity-AABB fit orientation-independent. */
 bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(hull_count <= VPACK_PLACED_MAX_VERTS && "vpack_sprite_fits_empty_page: hull exceeds inflate buffer");
     float dilate = (float)opts->extrude + ((float)opts->padding * 0.5F);

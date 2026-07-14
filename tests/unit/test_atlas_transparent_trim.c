@@ -57,7 +57,7 @@ void test_transparent_after_trim_reports_error(void) {
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind);
     TEST_ASSERT_EQUAL_STRING("ghost.png", errs[0].sprite);
 
     /* Poisoned build: non-OK code, and NO .ntpack written. */

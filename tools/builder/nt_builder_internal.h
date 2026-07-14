@@ -90,7 +90,6 @@ struct NtAtlasBuild {
     uint32_t error_seq[NT_BUILD_MAX_ERRORS];
     uint32_t error_count;
     uint32_t add_seq_counter;
-    uint32_t cur_error_seq;
     bool errors_truncated;
     bool failed;
 };
@@ -235,6 +234,7 @@ struct NtBuilderContext {
     uint32_t error_count;
     bool errors_truncated;
     bool failed;
+    bool atlas_cache_hit;
 };
 
 nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error);
@@ -429,6 +429,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
+char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
 /* Glob callback type is public (nt_builder.h). The iteration function itself
  * is also declared in nt_builder.h; do not re-declare here. */

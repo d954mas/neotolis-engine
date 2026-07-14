@@ -11,6 +11,7 @@
 /* clang-format on */
 
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -32,13 +33,13 @@ static void error_copy_name(char *dst, const char *src) {
     (void)snprintf(dst, NT_BUILD_ERR_NAME_MAX, "%s", src);
 }
 
-static void atlas_push_error(NtAtlasBuild *atlas, const nt_build_error_t *err) {
+static void atlas_push_error(NtAtlasBuild *atlas, uint32_t seq, const nt_build_error_t *err) {
     if (atlas->error_count >= NT_BUILD_MAX_ERRORS) {
         atlas->errors_truncated = true;
         atlas->failed = true;
         /* Keep the add-order prefix: an earlier error evicts the current tail
          * (highest seq). A later/equal error stays outside the prefix — drop it. */
-        if (atlas->error_seq[NT_BUILD_MAX_ERRORS - 1] <= atlas->cur_error_seq) {
+        if (atlas->error_seq[NT_BUILD_MAX_ERRORS - 1] <= seq) {
             return;
         }
         atlas->error_count = NT_BUILD_MAX_ERRORS - 1;
@@ -46,7 +47,6 @@ static void atlas_push_error(NtAtlasBuild *atlas, const nt_build_error_t *err) {
     /* Insert keeping error_seq[] non-decreasing, after equal-seq entries
      * (stable) — so errors[] stays add-sorted and errors[0] is the earliest
      * offender. O(n) shift on the failure path only, n <= NT_BUILD_MAX_ERRORS. */
-    uint32_t seq = atlas->cur_error_seq;
     uint32_t pos = atlas->error_count;
     while (pos > 0 && atlas->error_seq[pos - 1] > seq) {
         atlas->errors[pos] = atlas->errors[pos - 1];
@@ -60,12 +60,12 @@ static void atlas_push_error(NtAtlasBuild *atlas, const nt_build_error_t *err) {
 }
 
 /* Fill atlas+sprite names and append a content error.
- * sprite may be NULL for atlas-level caps (region/page count). */
-static void push_content_error(NtAtlasBuild *atlas, const char *sprite, nt_build_error_kind kind, uint32_t w, uint32_t h) {
+ * sprite may be NULL for atlas-level errors. */
+static void push_content_error(NtAtlasBuild *atlas, uint32_t seq, const char *sprite, nt_build_error_kind kind, uint32_t w, uint32_t h) {
     nt_build_error_t e = {.kind = kind, .w = w, .h = h};
     error_copy_name(e.atlas, atlas->name);
     error_copy_name(e.sprite, sprite);
-    atlas_push_error(atlas, &e);
+    atlas_push_error(atlas, seq, &e);
 }
 
 static nt_build_result_t atlas_merge_errors(NtAtlasBuild *atlas) {
@@ -87,19 +87,6 @@ static nt_build_result_t atlas_merge_errors(NtAtlasBuild *atlas) {
     return invalidate_result == NT_BUILD_OK ? result : invalidate_result;
 }
 
-const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
-    NT_BUILD_ASSERT(ctx && "get_errors: ctx is NULL");
-    if (out_count) {
-        *out_count = ctx->error_count;
-    }
-    return ctx->errors;
-}
-
-bool nt_builder_errors_truncated(const NtBuilderContext *ctx) {
-    NT_BUILD_ASSERT(ctx && "errors_truncated: ctx is NULL");
-    return ctx->errors_truncated;
-}
-
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
     NT_BUILD_ASSERT(err && buf && "error_format: err and buf must be non-NULL");
     switch (err->kind) {
@@ -118,37 +105,34 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
             (void)snprintf(buf, len, "atlas '%s', sprite '%s': image %ux%u exceeds decode limit", err->atlas, err->sprite, err->w, err->h);
         }
         break;
-    case NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM:
+    case NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': fully transparent after trim", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_SLICE9_TOO_BIG:
+    case NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': slice9 borders (%u) >= source extent (%u)", err->atlas, err->sprite, err->detail_a, err->detail_b);
         break;
-    case NT_BUILD_ERR_KIND_DEGENERATE_HULL:
+    case NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': degenerate hull (no usable outline)", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW:
+    case NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': contour exceeds vertex budget", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_DUPLICATE_NAME:
+    case NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME:
         (void)snprintf(buf, len, "atlas '%s': duplicate region name '%s'", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_TOO_MANY_REGIONS:
+    case NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS:
         (void)snprintf(buf, len, "atlas '%s': region count exceeds 65535", err->atlas);
         break;
-    case NT_BUILD_ERR_KIND_TOO_MANY_PAGES:
-        (void)snprintf(buf, len, "atlas '%s': page count exceeds 65535", err->atlas);
-        break;
-    case NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE:
+    case NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u exceeds 65535px", err->atlas, err->sprite, err->w, err->h);
         break;
-    case NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW:
+    case NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': trim offset overflow", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_PAGES_EXHAUSTED:
+    case NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED:
         (void)snprintf(buf, len, "atlas '%s': ran out of pages (max_size=%u)", err->atlas, err->max_size);
         break;
-    case NT_BUILD_ERR_KIND_UNFITTABLE:
+    case NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u + padding %u + margin %u + extrude %u does not fit an empty page of max_size %u", err->atlas, err->sprite, err->w, err->h,
                        err->padding, err->margin, err->detail_a, err->max_size);
         break;
@@ -170,20 +154,18 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  * -- Pipeline (nt_atlas_commit) ---------------------------------------
  *
  *  pipeline_alpha_trim     Extract alpha plane, find tight bounding box
- *  pipeline_cache_check    Hash inputs, return early on cache hit
+ *  pipeline_cache_check    Hash inputs, load cached placement/pages
  *  pipeline_dedup          Detect duplicate sprites (hash + pixels)
  *  pipeline_geometry       Polygon outline -> simplify -> inflate (convex hull or concave contour)
  *  pipeline_validate       Non-mutating pre-pack checks (fit, dup names, caps) — reports all bad sprites
  *  --- skip on cache hit ---
  *  pipeline_tile_pack      Place sprites via vector_pack (NFP/Minkowski)
  *  pipeline_compose        Blit trimmed pixels + extrude edges
- *  pipeline_debug_png      Optional outline visualization
- *  pipeline_cache_write    Store result for next build
  *  --- always ---
  *  pipeline_serialize      Compute atlas UVs, write binary blob
- *  pipeline_stage_outputs  Stage atlas pages and codegen regions
- *  pipeline_preflight      Validate capacities and resource IDs
- *  pipeline_publish        Transfer the complete batch to the pack
+ *  pipeline_cache_write    Store result for next build
+ *  pipeline_debug_png      Optional outline visualization
+ *  pipeline_publish_outputs Register atlas, pages, metadata and regions
  *  pipeline_cleanup        Free all temporary allocations
  *
  * -- File layout ------------------------------------------------------
@@ -891,15 +873,16 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     }
 }
 
-/* Classify a NULL from stb decode: stb sets stbi_failure_reason() to
- * "outofmem" on allocation failure (an environment error → assert-early per
- * AGENTS.md), "too large" on an oversized image, else corrupt content. */
+/* OOM is fatal; recognized size failures remain actionable content errors. */
 static nt_build_error_kind classify_stbi_null(const char *reason) {
     if (reason && strstr(reason, "outofmem")) {
         NT_BUILD_ASSERT(0 && "atlas_add: image decode out of memory");
     }
     if (reason && strstr(reason, "too large")) {
         return NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE;
+    }
+    if (reason && (strstr(reason, "0-pixel image") || strstr(reason, "0 width"))) {
+        return NT_BUILD_ERR_KIND_ZERO_DIM;
     }
     return NT_BUILD_ERR_KIND_CORRUPT_IMAGE;
 }
@@ -912,55 +895,28 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     /* Caller arguments are validated before content decoding. */
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     atlas_assert_sprite_opts(&sopts);
+    NtAtlasBuild *state = atlas;
+
+    /* Programmer errors take precedence over content errors. */
+    atlas_assert_sprite_cross_field(&sopts, &state->opts);
+
+    uint32_t add_seq = state->add_seq_counter++;
+    const char *region_name = sopts.name ? sopts.name : extract_filename(path);
 
     /* Missing or unreadable files are environment errors, not content errors. */
     char *resolved_path = nt_builder_find_file(path, NULL, ctx);
     const char *read_path = resolved_path ? resolved_path : path;
     uint32_t file_size = 0;
-    uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
-    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
+    bool file_too_large = false;
+    uint8_t *file_data = (uint8_t *)nt_builder_read_file_bounded(read_path, INT_MAX, &file_size, &file_too_large);
     free(resolved_path);
-
-    NtAtlasBuild *state = atlas;
-
-    /* Caller-contract cross-field check runs BEFORE the content/dim/decode checks
-     * so a programmer bug (extrude/slice9 vs non-RECT shape) always traps and is
-     * never masked by a graceful content error. */
-    atlas_assert_sprite_cross_field(&sopts, &state->opts);
-
-    /* Stamp the add order now so a decode error below carries this add's seq. */
-    state->cur_error_seq = state->add_seq_counter++;
-
-    /* Determine region name. opts->name takes precedence; NULL falls back to
-     * basename of the source path. Needed early to name a decode error. */
-    const char *region_name = sopts.name ? sopts.name : extract_filename(path);
-
-    /* Preflight header dims before the full decode: a valid but oversized image
-     * fails stbi_load with a NULL alloc, which would masquerade as CORRUPT_IMAGE
-     * and lose the real IMAGE_TOO_LARGE classification. Content errors append and
-     * skip the sprite; the open atlas keeps decoding later adds. */
-    int iw = 0;
-    int ih = 0;
-    int ic = 0;
-    if (!stbi_info_from_memory(file_data, (int)file_size, &iw, &ih, &ic)) {
-        nt_build_error_kind kind = classify_stbi_null(stbi_failure_reason());
-        push_content_error(state, region_name, kind, 0, 0);
-        free(file_data);
+    if (file_too_large) {
+        push_content_error(state, add_seq, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, 0, 0);
         return;
     }
-    if (iw <= 0 || ih <= 0) {
-        push_content_error(state, region_name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
-        free(file_data);
-        return;
-    }
-    if ((uint64_t)iw * (uint64_t)ih > (UINT32_MAX / 4)) {
-        push_content_error(state, region_name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, (uint32_t)iw, (uint32_t)ih);
-        free(file_data);
-        return;
-    }
+    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
 
-    /* Decode PNG via stb_image (force RGBA). A NULL here is now a genuine decode
-     * failure — the header already passed the preflight above. */
+    /* Decode once so a recognized format's failure reason is not overwritten. */
     int w = 0;
     int h = 0;
     int channels = 0;
@@ -968,7 +924,12 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     free(file_data);
     if (!pixels) {
         nt_build_error_kind kind = classify_stbi_null(stbi_failure_reason());
-        push_content_error(state, region_name, kind, 0, 0);
+        push_content_error(state, add_seq, region_name, kind, 0, 0);
+        return;
+    }
+    if (w <= 0 || h <= 0) {
+        stbi_image_free(pixels);
+        push_content_error(state, add_seq, region_name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
         return;
     }
 
@@ -990,7 +951,7 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
-    sprite->add_seq = state->cur_error_seq;
+    sprite->add_seq = add_seq;
     atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
@@ -1010,16 +971,16 @@ void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t 
 
     /* Stamp the add order (raw adds never fail to decode, but keep the counter
      * in lockstep with atlas_add so seqs stay globally monotonic). */
-    state->cur_error_seq = state->add_seq_counter++;
+    uint32_t add_seq = state->add_seq_counter++;
 
     /* Zero/oversized dims are graceful content errors on the open atlas (same
      * channel as atlas_add), not caller-contract asserts — matches the spec. */
     if (width == 0 || height == 0) {
-        push_content_error(state, sopts.name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
+        push_content_error(state, add_seq, sopts.name, NT_BUILD_ERR_KIND_ZERO_DIM, 0, 0);
         return;
     }
     if ((uint64_t)width * height > (UINT32_MAX / 4)) {
-        push_content_error(state, sopts.name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, width, height);
+        push_content_error(state, add_seq, sopts.name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, width, height);
         return;
     }
 
@@ -1047,7 +1008,7 @@ void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t 
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
-    sprite->add_seq = state->cur_error_seq;
+    sprite->add_seq = add_seq;
     atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
@@ -1120,96 +1081,21 @@ typedef struct {
     AtlasPlacement *placements;
     uint8_t **page_pixels;
 
-    /* Complete commit batch, owned here until pipeline_publish. */
-    NtAtlasRegionCodegen *staged_regions;
+    uint8_t *atlas_blob;
+    uint32_t atlas_blob_size;
+    uint64_t atlas_blob_hash;
 
     /* Packing statistics (per-call, no static globals) */
     PackStats stats;
-    NtBuildMetaEntry staged_meta;
-    NtBuildEntry staged_entries[ATLAS_MAX_PAGES + 1];
     uint32_t sprite_count;
     uint32_t unique_count;
     uint32_t placement_count;
     uint32_t page_count;
-    uint32_t staged_entry_count;
-    uint32_t staged_region_count;
     uint32_t thread_count;
     uint32_t page_w[ATLAS_MAX_PAGES];
     uint32_t page_h[ATLAS_MAX_PAGES];
     bool cache_hit;
-    bool has_staged_meta;
 } AtlasPipeline;
-
-static void pipeline_stage_entry(AtlasPipeline *p, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size, uint64_t decoded_hash) {
-    NT_BUILD_ASSERT(p->staged_entry_count < ATLAS_MAX_PAGES + 1 && "atlas stage entry limit reached");
-    NtBuildEntry *entry = &p->staged_entries[p->staged_entry_count++];
-    entry->kind = kind;
-    entry->data = data;
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc) — ownership transfers at publish; pipeline cleanup owns it until then
-    entry->decoded_data = decoded_data;
-    entry->decoded_size = decoded_size;
-    entry->decoded_hash = decoded_hash;
-    entry->dedup_original = -1;
-    entry->path = nt_builder_normalize_path(path);
-    NT_BUILD_ASSERT(entry->path && "atlas stage normalize_path failed");
-    entry->resource_id = nt_hash64_str(entry->path).value;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — assert expansions dominate a bounded preflight loop
-static void pipeline_preflight(AtlasPipeline *p) {
-    NtBuilderContext *ctx = p->ctx;
-    NT_BUILD_ASSERT(ctx->pending_count + p->staged_entry_count <= NT_BUILD_MAX_ASSETS && "atlas commit exceeds pack asset limit");
-    if (p->has_staged_meta) {
-        NT_BUILD_ASSERT(ctx->meta_count < NT_BUILD_MAX_META_ENTRIES && "atlas commit exceeds metadata limit");
-    }
-
-    for (uint32_t i = 0; i < p->staged_entry_count; i++) {
-        const NtBuildEntry *candidate = &p->staged_entries[i];
-        for (uint32_t existing = 0; existing < ctx->pending_count; existing++) {
-            if (ctx->pending[existing].resource_id == candidate->resource_id) {
-                NT_LOG_ERROR("duplicate resource_id 0x%016llX  existing: %s  new:      %s", (unsigned long long)candidate->resource_id, ctx->pending[existing].path, candidate->path);
-                NT_BUILD_ASSERT(0 && "duplicate resource_id in same pack");
-            }
-        }
-        for (uint32_t staged = 0; staged < i; staged++) {
-            NT_BUILD_ASSERT(p->staged_entries[staged].resource_id != candidate->resource_id && "duplicate resource_id inside atlas commit");
-        }
-    }
-
-    uint32_t required_regions = ctx->atlas_region_count + p->staged_region_count;
-    if (required_regions > ctx->atlas_region_capacity) {
-        uint32_t new_capacity = ctx->atlas_region_capacity ? ctx->atlas_region_capacity : 64;
-        while (new_capacity < required_regions) {
-            new_capacity *= 2;
-        }
-        NtAtlasRegionCodegen *regions = (NtAtlasRegionCodegen *)realloc(ctx->atlas_regions, (size_t)new_capacity * sizeof(NtAtlasRegionCodegen));
-        NT_BUILD_ASSERT(regions && "atlas commit region reserve failed");
-        ctx->atlas_regions = regions;
-        ctx->atlas_region_capacity = new_capacity;
-    }
-}
-
-static void pipeline_publish(AtlasPipeline *p) {
-    NtBuilderContext *ctx = p->ctx;
-    for (uint32_t i = 0; i < p->staged_entry_count; i++) {
-        ctx->pending[ctx->pending_count++] = p->staged_entries[i];
-        memset(&p->staged_entries[i], 0, sizeof(NtBuildEntry));
-    }
-    if (p->has_staged_meta) {
-        ctx->meta_pending[ctx->meta_count++] = p->staged_meta;
-        p->has_staged_meta = false;
-    }
-    for (uint32_t i = 0; i < p->staged_region_count; i++) {
-        ctx->atlas_regions[ctx->atlas_region_count++] = p->staged_regions[i];
-        p->staged_regions[i].path = NULL;
-    }
-}
-
-static void pipeline_transfer_page_ownership(AtlasPipeline *p) {
-    for (uint32_t page = 0; page < p->page_count; page++) {
-        p->page_pixels[page] = NULL;
-    }
-}
 
 /* --- pipeline_alpha_trim: extract alpha planes + find tight bounding box --- */
 
@@ -1223,15 +1109,14 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
     NT_BUILD_ASSERT(p->trim_x && p->trim_y && p->trim_w && p->trim_h && p->alpha_planes && "pipeline_alpha_trim: alloc failed");
 
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        p->state->cur_error_seq = p->sprites[i].add_seq;
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
         bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
         if (!has_pixels) {
             /* Accumulate and keep validating the rest of this atlas. */
-            nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
+            nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
             error_copy_name(e.atlas, p->state->name);
             error_copy_name(e.sprite, p->sprites[i].name);
-            atlas_push_error(p->state, &e);
+            atlas_push_error(p->state, p->sprites[i].add_seq, &e);
             continue;
         }
         /* Slice9 requires untrimmed source rect — runtime asserts trim_offset == 0 */
@@ -1239,19 +1124,19 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
         if (has_s9) {
             uint32_t lr = (uint32_t)p->sprites[i].slice9_left + (uint32_t)p->sprites[i].slice9_right;
             uint32_t tb = (uint32_t)p->sprites[i].slice9_top + (uint32_t)p->sprites[i].slice9_bottom;
-            /* Report once here; the serialize re-check is defense-in-depth. */
+            /* Reject before serialization. */
             if (lr >= p->sprites[i].width) {
-                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = lr, .detail_b = p->sprites[i].width};
+                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = lr, .detail_b = p->sprites[i].width};
                 error_copy_name(e.atlas, p->state->name);
                 error_copy_name(e.sprite, p->sprites[i].name);
-                atlas_push_error(p->state, &e);
+                atlas_push_error(p->state, p->sprites[i].add_seq, &e);
                 continue;
             }
             if (tb >= p->sprites[i].height) {
-                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = tb, .detail_b = p->sprites[i].height};
+                nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, .w = p->sprites[i].width, .h = p->sprites[i].height, .detail_a = tb, .detail_b = p->sprites[i].height};
                 error_copy_name(e.atlas, p->state->name);
                 error_copy_name(e.sprite, p->sprites[i].name);
-                atlas_push_error(p->state, &e);
+                atlas_push_error(p->state, p->sprites[i].add_seq, &e);
                 continue;
             }
             p->trim_x[i] = 0;
@@ -1270,6 +1155,7 @@ static void pipeline_cache_check(AtlasPipeline *p) {
     if (p->ctx->cache_dir) {
         p->cache_hit = atlas_cache_read(p->ctx->cache_dir, p->state->cache_key, p->sprite_count, &p->placements, &p->placement_count, p->page_w, p->page_h, &p->page_count, &p->page_pixels);
         if (p->cache_hit) {
+            p->ctx->atlas_cache_hit = true;
             NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
         }
     }
@@ -1501,7 +1387,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
 
     for (uint32_t ui = 0; ui < p->unique_count; ui++) {
         uint32_t idx = p->unique_indices[ui];
-        p->state->cur_error_seq = p->sprites[idx].add_seq;
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
@@ -1568,7 +1453,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 free(binary);
                 if (!p->hull_vertices[idx]) {
                     /* Empty mask / degenerate hull — graceful error, skip sprite. */
-                    push_content_error(p->state, p->sprites[idx].name, NT_BUILD_ERR_KIND_DEGENERATE_HULL, tw, th);
+                    push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
                 }
                 continue;
             }
@@ -1631,7 +1516,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     free(contour);
                     free(binary_source);
                     free(binary);
-                    push_content_error(p->state, p->sprites[idx].name, NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW, tw, th);
+                    push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, tw, th);
                     continue;
                 }
 
@@ -1738,7 +1623,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary_source, tw, th, effective_max_verts, &p->vertex_counts[idx]);
                 if (!p->hull_vertices[idx]) {
                     /* Even the convex fallback found no usable outline — graceful error. */
-                    push_content_error(p->state, p->sprites[idx].name, NT_BUILD_ERR_KIND_DEGENERATE_HULL, tw, th);
+                    push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
                 }
             }
             free(binary_source);
@@ -1756,18 +1641,9 @@ static void pipeline_geometry(AtlasPipeline *p) {
     }
 }
 
-/* --- pipeline_validate: non-mutating pre-pack checks that report every bad
- * sprite at once ------------------------------------------------------------
- *
- * Runs after geometry, before the first output gate. Everything here depends
- * only on trim dims / geometry hulls / names — never on packing — so it can run
- * after earlier content errors. Packing-dependent caps
- * (PAGES_EXHAUSTED, TOO_MANY_PAGES) stay in tile_pack / serialize. */
+/* Collect independent content errors before packing or publication. */
 
-/* Build the empty-page fit-test hull for a unique sprite: its geometry hull, or
- * a scratch quad expanded to cover a per-sprite margin/extrude override — this
- * mirrors the packing footprint pipeline_tile_pack builds so the fit verdict
- * matches. quad must hold 4 Point2D (used only for the override case). */
+/* Match the packing footprint, including larger per-sprite overrides. */
 static void atlas_fit_hull(const AtlasPipeline *p, uint32_t oi, Point2D quad[4], const Point2D **out_hull, uint32_t *out_count) {
     uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
     uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
@@ -1815,10 +1691,7 @@ static int name_hash_cmp(const void *a, const void *b) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_validate(AtlasPipeline *p) {
-    /* Empty-page fit: reject any unique sprite that cannot fit an empty max_size
-     * page, using the exact vector_pack fit test — an unfittable sprite becomes a
-     * graceful UNFITTABLE instead of tripping vector_pack's placement invariant. */
-    /* Pass 1: flag each unfittable UNIQUE sprite. O(unique). */
+    /* Match vector_pack's empty-page fit test before entering the packer. */
     bool *unfittable = (bool *)calloc(p->sprite_count, sizeof(bool));
     NT_BUILD_ASSERT(unfittable && "pipeline_validate: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
@@ -1828,10 +1701,7 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (p->trim_w[oi] == 0 || p->trim_h[oi] == 0) {
             continue;
         }
-        /* A geometry-failed survivor (DEGENERATE_HULL / CONTOUR_VERTEX_OVERFLOW)
-         * has no hull and is already reported; skip it so the fit test never
-         * memcpy's a NULL hull and the scratch-quad override path can't resurrect
-         * it as a duplicate UNFITTABLE. */
+        /* Geometry failures have no hull and already carry their own error. */
         if (p->hull_vertices[oi] == NULL) {
             continue;
         }
@@ -1844,23 +1714,18 @@ static void pipeline_validate(AtlasPipeline *p) {
         }
         unfittable[oi] = true;
     }
-    /* Pass 2: report the canonical sprite AND every dedup alias, in add order.
-     * dedup_map stores the fully-resolved canonical (no chain walk). O(n). */
+    /* Report canonical sprites and dedup aliases in add order. */
     for (uint32_t k = 0; k < p->sprite_count; k++) {
         uint32_t c = p->dedup_map[k] < 0 ? k : (uint32_t)p->dedup_map[k];
         if (!unfittable[c]) {
             continue;
         }
-        /* Report the EFFECTIVE spacing the packer used: a per-sprite override only
-         * RAISES the atlas baseline (a smaller override is clamped up), so the
-         * record must not show a below-atlas request the fit never applied. These
-         * match across dedup aliases (dedup requires equal overrides). */
+        /* Report the spacing actually reserved by the packer. */
         uint32_t sprite_margin = p->sprites[c].margin_override ? p->sprites[c].margin_override : p->opts->margin;
         uint32_t sprite_extrude = p->sprites[c].extrude_override ? p->sprites[c].extrude_override : p->opts->extrude;
         uint32_t effective_margin = sprite_margin > p->opts->margin ? sprite_margin : p->opts->margin;
         uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
-        p->state->cur_error_seq = p->sprites[k].add_seq;
-        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_UNFITTABLE,
+        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE,
                               .w = p->trim_w[c],
                               .h = p->trim_h[c],
                               .padding = p->opts->padding,
@@ -1869,23 +1734,16 @@ static void pipeline_validate(AtlasPipeline *p) {
                               .detail_a = effective_extrude};
         error_copy_name(e.atlas, p->state->name);
         error_copy_name(e.sprite, p->sprites[k].name);
-        atlas_push_error(p->state, &e);
+        atlas_push_error(p->state, p->sprites[k].add_seq, &e);
     }
     free(unfittable);
 
-    /* Region-count cap: extreme content only (>65535 sprites). Checked BEFORE the
-     * duplicate-name scan — an over-cap atlas is already rejected, so the scan
-     * would only add work with no new diagnostic. Atlas-level seq sorts it after
-     * this atlas's per-sprite errors. */
+    /* Region cap and duplicate names are independent content errors. */
     if (p->sprite_count > UINT16_MAX) {
-        p->state->cur_error_seq = p->state->add_seq_counter;
-        push_content_error(p->state, NULL, NT_BUILD_ERR_KIND_TOO_MANY_REGIONS, 0, 0);
-    } else if (p->sprite_count > 0) {
-        /* Duplicate region names produce ambiguous runtime name_hash lookups.
-         * Hash-sort names to detect collisions in amortized O(n) — a valid
-         * 65535-region atlas would otherwise hang on ~2.1B strcmp. strcmp confirms
-         * only on a hash collision. Report each offending sprite once; the first
-         * (smallest-index) occurrence of a name is canonical and not reported. */
+        push_content_error(p->state, p->state->add_seq_counter, NULL, NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, 0, 0);
+    }
+    if (p->sprite_count > 0) {
+        /* Hash-sort names, then confirm collisions with strcmp. */
         NameHashEntry *ents = (NameHashEntry *)malloc(p->sprite_count * sizeof(NameHashEntry));
         bool *is_dup = (bool *)calloc(p->sprite_count, sizeof(bool));
         NT_BUILD_ASSERT(ents && is_dup && "pipeline_validate: alloc failed");
@@ -1894,8 +1752,7 @@ static void pipeline_validate(AtlasPipeline *p) {
             ents[i].index = i;
         }
         qsort(ents, p->sprite_count, sizeof(NameHashEntry), name_hash_cmp);
-        /* Within each equal-hash run (sorted by index asc), a sprite is a duplicate
-         * if an earlier-index entry shares its exact name. */
+        /* The earliest exact name in each equal-hash run is canonical. */
         for (uint32_t a = 1; a < p->sprite_count; a++) {
             for (uint32_t b = a; b > 0 && ents[b - 1].hash == ents[a].hash; b--) {
                 if (strcmp(p->sprites[ents[b - 1].index].name, p->sprites[ents[a].index].name) == 0) {
@@ -1904,11 +1761,10 @@ static void pipeline_validate(AtlasPipeline *p) {
                 }
             }
         }
-        /* Report in add order so seqs and truncation behavior stay deterministic. */
+        /* Report in add order so truncation stays deterministic. */
         for (uint32_t j = 0; j < p->sprite_count; j++) {
             if (is_dup[j]) {
-                p->state->cur_error_seq = p->sprites[j].add_seq;
-                push_content_error(p->state, p->sprites[j].name, NT_BUILD_ERR_KIND_DUPLICATE_NAME, 0, 0);
+                push_content_error(p->state, p->sprites[j].add_seq, p->sprites[j].name, NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, 0, 0);
             }
         }
         free(ents);
@@ -1922,14 +1778,13 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (p->trim_w[i] == 0 || p->trim_h[i] == 0) {
             continue;
         }
-        p->state->cur_error_seq = p->sprites[i].add_seq;
         if (p->sprites[i].width > UINT16_MAX || p->sprites[i].height > UINT16_MAX) {
-            push_content_error(p->state, p->sprites[i].name, NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE, p->sprites[i].width, p->sprites[i].height);
+            push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, p->sprites[i].width, p->sprites[i].height);
             continue;
         }
         int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
         if (p->trim_x[i] > INT16_MAX || trim_offset_y_up < INT16_MIN || trim_offset_y_up > INT16_MAX) {
-            push_content_error(p->state, p->sprites[i].name, NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW, 0, 0);
+            push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, 0, 0);
         }
     }
 }
@@ -2023,10 +1878,9 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     if (pages_exhausted) {
         /* ATLAS_MAX_PAGES exhausted — vector_pack already joined its worker pool
          * and freed its buffers; report gracefully and bail. */
-        p->state->cur_error_seq = p->state->add_seq_counter;
-        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, .max_size = p->opts->max_size, .detail_a = ATLAS_MAX_PAGES};
+        nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, .max_size = p->opts->max_size, .detail_a = ATLAS_MAX_PAGES};
         error_copy_name(e.atlas, p->state->name);
-        atlas_push_error(p->state, &e);
+        atlas_push_error(p->state, p->state->add_seq_counter, &e);
         p->placement_count = 0;
         /* vector_pack freed its pages; compose is skipped so page_pixels stays NULL
          * and pipeline_cleanup's guard handles the (nonzero) page_count safely. */
@@ -2246,14 +2100,6 @@ static void pipeline_serialize(AtlasPipeline *p) {
     NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
     hdr->magic = NT_ATLAS_MAGIC;
     hdr->version = NT_ATLAS_VERSION;
-    /* Page-count cap needs the packed page_count, so it stays here (region count
-     * is checked pre-pack in pipeline_validate). Extreme content only (>65535
-     * pages). Push and proceed — a failed transaction never publishes the blob.
-     * Atlas-level seq sorts it after this atlas's sprite errors. */
-    if (p->page_count > UINT16_MAX) {
-        p->state->cur_error_seq = p->state->add_seq_counter;
-        push_content_error(p->state, NULL, NT_BUILD_ERR_KIND_TOO_MANY_PAGES, 0, 0);
-    }
     hdr->region_count = (uint16_t)p->sprite_count;
     hdr->page_count = (uint16_t)p->page_count;
     hdr->_pad = 0;
@@ -2431,15 +2277,6 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint16_t sr = p->sprites[i].slice9_right;
         uint16_t st = p->sprites[i].slice9_top;
         uint16_t sb = p->sprites[i].slice9_bottom;
-        if (sl || sr || st || sb) {
-            /* pipeline_alpha_trim already reports the slice9 case; this
-             * defense-in-depth re-check keeps direct pipeline_serialize calls safe. */
-            if ((uint32_t)sl + (uint32_t)sr >= p->sprites[i].width || (uint32_t)st + (uint32_t)sb >= p->sprites[i].height) {
-                p->state->cur_error_seq = p->sprites[i].add_seq;
-                push_content_error(p->state, p->sprites[i].name, NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, p->sprites[i].width, p->sprites[i].height);
-                continue;
-            }
-        }
         reg->_pad0 = 0;
         reg->slice9_lrtb[0] = sl;
         reg->slice9_lrtb[1] = sr;
@@ -2453,45 +2290,14 @@ static void pipeline_serialize(AtlasPipeline *p) {
     free(sprite_idx_count);
     free(sprite_flags);
 
-    if (p->state->failed) {
-        free(blob);
-        free(placement_lookup);
-        return;
-    }
-
-    uint64_t blob_hash = nt_hash64(blob, blob_size).value;
-    pipeline_stage_entry(p, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
-
-    // #region pixels_per_unit metadata
-    /* Write pixels_per_unit as a 4-byte resource metadata blob keyed by
-     * hash64_str("pixels_per_unit"). Atlas binary format (v5) is unchanged —
-     * runtime reads this via nt_atlas_get_pixels_per_unit and bakes 1/ppu
-     * into cached_pos so HD packs render at the same on-screen size as SD
-     * packs sharing the same Transform.
-     *
-     * Written unconditionally (even when value == 1.0F) — uniform code path,
-     * 4 bytes are negligible, and keeps the round-trip tests symmetric. The
-     * resource_id must mirror nt_builder_add_entry's hashing exactly: the
-     * normalized atlas state name. */
-    /* Redundant with nt_atlas_begin validation. */
-    NT_BUILD_ASSERT(p->opts->pixels_per_unit > 0.0F && isfinite(p->opts->pixels_per_unit));
-    char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
-    NT_BUILD_ASSERT(atlas_norm_path);
-    const uint64_t atlas_resource_id = nt_hash64_str(atlas_norm_path).value;
-    free(atlas_norm_path);
-    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
-    const float ppu = p->opts->pixels_per_unit;
-    p->staged_meta.resource_id = atlas_resource_id;
-    p->staged_meta.kind = kind_ppu;
-    p->staged_meta.size = sizeof(float);
-    memcpy(p->staged_meta.data, &ppu, sizeof(float));
-    p->has_staged_meta = true;
-    // #endregion
+    p->atlas_blob = blob;
+    p->atlas_blob_size = blob_size;
+    p->atlas_blob_hash = nt_hash64(blob, blob_size).value;
 
     free(placement_lookup);
 }
 
-/* --- pipeline_stage_outputs: prepare page entries + codegen info --- */
+/* --- pipeline_publish_outputs: publish atlas, pages, metadata and codegen --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — bounded formatting and allocation asserts expand into branches
 static char *atlas_page_normalized_path(const char *atlas_name, uint32_t page) {
@@ -2523,16 +2329,20 @@ static char *atlas_region_path(const char *atlas_name, const char *sprite_name) 
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — registers N page textures and N region codegen entries in one pass; splitting would just shuffle locals
-static void pipeline_stage_outputs(AtlasPipeline *p) {
+static void pipeline_publish_outputs(AtlasPipeline *p) {
+    NtBuilderContext *ctx = p->ctx;
+    nt_builder_add_entry(ctx, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, p->atlas_blob, p->atlas_blob_size, p->atlas_blob_hash);
+    p->atlas_blob = NULL;
+
     for (uint32_t pg = 0; pg < p->page_count; pg++) {
         char *tex_path = atlas_page_normalized_path(p->state->name, pg);
 
         size_t pixel_bytes = (size_t)p->page_w[pg] * p->page_h[pg] * 4;
-        NT_BUILD_ASSERT(pixel_bytes <= UINT32_MAX && "pipeline_stage_outputs: page too large for nt_hash64 length");
+        NT_BUILD_ASSERT(pixel_bytes <= UINT32_MAX && "pipeline_publish_outputs: page too large for nt_hash64 length");
         uint64_t tex_hash = nt_hash64(p->page_pixels[pg], (uint32_t)pixel_bytes).value;
 
         NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-        NT_BUILD_ASSERT(td && "pipeline_stage_outputs: alloc failed");
+        NT_BUILD_ASSERT(td && "pipeline_publish_outputs: alloc failed");
         td->width = p->page_w[pg];
         td->height = p->page_h[pg];
         td->opts.format = p->opts->format;
@@ -2550,13 +2360,29 @@ static void pipeline_stage_outputs(AtlasPipeline *p) {
             td->compress = p->state->compress;
             td->has_compress = true;
         }
-        pipeline_stage_entry(p, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], (uint32_t)pixel_bytes, tex_hash);
+        nt_builder_add_entry(ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], (uint32_t)pixel_bytes, tex_hash);
+        p->page_pixels[pg] = NULL;
         free(tex_path);
     }
 
-    p->staged_regions = (NtAtlasRegionCodegen *)calloc(p->sprite_count, sizeof(NtAtlasRegionCodegen));
-    NT_BUILD_ASSERT(p->staged_regions && "atlas stage regions alloc failed");
-    p->staged_region_count = p->sprite_count;
+    char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
+    NT_BUILD_ASSERT(atlas_norm_path && "atlas metadata path normalization failed");
+    uint64_t atlas_resource_id = nt_hash64_str(atlas_norm_path).value;
+    free(atlas_norm_path);
+    uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
+    nt_builder_add_meta(ctx, atlas_resource_id, kind_ppu, &p->opts->pixels_per_unit, sizeof(p->opts->pixels_per_unit));
+
+    uint32_t required_regions = ctx->atlas_region_count + p->sprite_count;
+    if (required_regions > ctx->atlas_region_capacity) {
+        uint32_t new_capacity = ctx->atlas_region_capacity ? ctx->atlas_region_capacity : 64;
+        while (new_capacity < required_regions) {
+            new_capacity *= 2;
+        }
+        NtAtlasRegionCodegen *regions = (NtAtlasRegionCodegen *)realloc(ctx->atlas_regions, (size_t)new_capacity * sizeof(NtAtlasRegionCodegen));
+        NT_BUILD_ASSERT(regions && "atlas region reserve failed");
+        ctx->atlas_regions = regions;
+        ctx->atlas_region_capacity = new_capacity;
+    }
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         /* path includes atlas prefix for unique C identifiers in codegen
          * (ASSET_ATLAS_REGION_SPINEBOY_HEAD_PNG), but resource_id hashes only
@@ -2564,23 +2390,12 @@ static void pipeline_stage_outputs(AtlasPipeline *p) {
          * by name_hash, not by the full atlas/sprite path. */
         char *region_path = atlas_region_path(p->state->name, p->sprites[i].name);
 
-        NtAtlasRegionCodegen *reg = &p->staged_regions[i];
+        NtAtlasRegionCodegen *reg = &ctx->atlas_regions[ctx->atlas_region_count++];
         reg->path = nt_builder_normalize_path(region_path);
         free(region_path);
-        NT_BUILD_ASSERT(reg->path && "atlas stage region path failed");
+        NT_BUILD_ASSERT(reg->path && "atlas region path failed");
         reg->resource_id = nt_hash64_str(p->sprites[i].name).value;
     }
-}
-
-/* Free a transaction before any pipeline scratch has been allocated. */
-static void atlas_state_free(NtAtlasBuild *state) {
-    for (uint32_t i = 0; i < state->sprite_count; i++) {
-        free(state->sprites[i].rgba);
-        free(state->sprites[i].name);
-    }
-    free(state->sprites);
-    free(state->name);
-    free(state);
 }
 
 /* --- pipeline_cleanup: free all temporary allocations --- */
@@ -2605,8 +2420,10 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     }
 
     /* Free alpha planes */
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        free(p->alpha_planes[i]);
+    if (p->alpha_planes) {
+        for (uint32_t i = 0; i < p->sprite_count; i++) {
+            free(p->alpha_planes[i]);
+        }
     }
     free((void *)p->alpha_planes);
 
@@ -2627,20 +2444,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         }
         free((void *)p->page_pixels);
     }
-
-    for (uint32_t i = 0; i < p->staged_entry_count; i++) {
-        NtBuildEntry *entry = &p->staged_entries[i];
-        free(entry->path);
-        free(entry->rename_key);
-        free(entry->data);
-        if (entry->kind == NT_BUILD_ASSET_ATLAS) {
-            free(entry->decoded_data);
-        }
-    }
-    for (uint32_t i = 0; i < p->staged_region_count; i++) {
-        free(p->staged_regions[i].path);
-    }
-    free(p->staged_regions);
+    free(p->atlas_blob);
 
     /* Published entry counters already include the atlas metadata blob. */
     free(p->state->sprites);
@@ -2652,17 +2456,23 @@ static void pipeline_cleanup(AtlasPipeline *p) {
 /* --- nt_atlas_commit: orchestrator — calls pipeline steps in order --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — linear sequence of pipeline_* stage calls with shared cleanup; "high" complexity reflects stage count, not control-flow depth
-static nt_build_result_t atlas_commit_impl(NtBuilderContext *ctx) {
-    NT_BUILD_ASSERT(ctx && "atlas_commit: ctx is NULL");
-    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_commit: no active atlas");
-
-    NtAtlasBuild *state = ctx->active_atlas;
+nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
+    NT_BUILD_ASSERT(atlas && atlas->ctx && atlas->ctx->active_atlas == atlas && "atlas_commit: invalid atlas handle");
+    NT_BUILD_ASSERT(atlas->add_seq_counter > 0 && "atlas_commit: atlas has no sprites");
+    NtBuilderContext *ctx = atlas->ctx;
+    NtAtlasBuild *state = atlas;
+    AtlasPipeline p = {0};
+    p.ctx = ctx;
+    p.state = state;
+    p.sprite_count = state->sprite_count;
+    p.sprites = state->sprites;
+    p.opts = &state->opts;
+    p.thread_count = ctx->thread_count;
 
     /* Validate surviving sprites even when earlier inputs had content errors. */
     if (state->failed && state->sprite_count == 0) {
         nt_build_result_t result = atlas_merge_errors(state);
-        atlas_state_free(state);
-        ctx->active_atlas = NULL;
+        pipeline_cleanup(&p);
         return result;
     }
 
@@ -2675,14 +2485,6 @@ static nt_build_result_t atlas_commit_impl(NtBuilderContext *ctx) {
     if (!state->opts.premultiplied) {
         NT_LOG_WARN("atlas '%s': premultiplied=false — bilinear filter will cause dark fringes at sprite edges. Use only with NEAREST filter or fully opaque sprites.", state->name);
     }
-
-    AtlasPipeline p = {0};
-    p.ctx = ctx;
-    p.state = state;
-    p.sprite_count = state->sprite_count;
-    p.sprites = state->sprites;
-    p.opts = &state->opts;
-    p.thread_count = ctx->thread_count;
 
     NT_LOG_INFO("  atlas_commit: %u sprites, starting pipeline...", p.sprite_count);
     double t0 = nt_time_now();
@@ -2740,11 +2542,6 @@ static nt_build_result_t atlas_commit_impl(NtBuilderContext *ctx) {
 
     t0 = nt_time_now();
     pipeline_serialize(&p);
-    if (state->failed) {
-        goto cleanup;
-    }
-    pipeline_stage_outputs(&p);
-    pipeline_preflight(&p);
     double bench_serialize = nt_time_now() - t0;
 
     if (!p.cache_hit) {
@@ -2753,8 +2550,7 @@ static nt_build_result_t atlas_commit_impl(NtBuilderContext *ctx) {
     t0 = nt_time_now();
     pipeline_debug_png(&p);
     bench_debug_png = nt_time_now() - t0;
-    pipeline_transfer_page_ownership(&p);
-    pipeline_publish(&p);
+    pipeline_publish_outputs(&p);
 
     double bench_total = nt_time_now() - t_total;
     p.stats.used_area = 0;
@@ -2778,12 +2574,6 @@ cleanup:;
     nt_build_result_t result = state->failed ? atlas_merge_errors(state) : NT_BUILD_OK;
     pipeline_cleanup(&p);
     return result;
-}
-
-nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
-    NT_BUILD_ASSERT(atlas && atlas->ctx && atlas->ctx->active_atlas == atlas && "atlas_commit: invalid atlas handle");
-    NT_BUILD_ASSERT(atlas->add_seq_counter > 0 && "atlas_commit: atlas has no sprites");
-    return atlas_commit_impl(atlas->ctx);
 }
 
 // #endregion

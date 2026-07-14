@@ -96,7 +96,9 @@ The builder distinguishes two failure classes:
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
 - **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, degenerate hulls, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites.
 
-The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
+`NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
+
+The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, and `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
 
 - `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits).
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
@@ -211,7 +213,7 @@ nt_atlas_add(atlas, "assets/sprites/hero/portrait.png",
 nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 ```
 
-`nt_atlas_begin` returns an opaque atlas transaction. Subsequent `nt_atlas_add*` calls feed sprites into that handle. `nt_atlas_commit` runs the full pipeline and atomically publishes the complete atlas batch; after it returns, the handle is invalid. Nested atlas transactions are not allowed.
+`nt_atlas_begin` returns an opaque atlas transaction. Subsequent `nt_atlas_add*` calls feed sprites into that handle. `nt_atlas_commit` runs the full pipeline and publishes the atlas batch only after all recoverable validation has succeeded; after it returns, the handle is invalid. Nested atlas transactions are not allowed.
 
 ### Pipeline
 
@@ -224,12 +226,11 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 5. **pipeline_validate** — non-mutating pre-pack checks that report every bad sprite in one pass: empty-page fit, duplicate region names, region-count cap, and per-sprite trim-dimension limits. It still runs on surviving sprites after earlier content errors.
 6. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
 7. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
-8. **serialize/stage** — build the atlas blob, page texture entries, metadata, and region codegen in transaction-owned storage.
-9. **preflight** — validate all pack capacities and resource IDs, and reserve dynamic region storage before the first pack mutation.
-10. **cache_write/debug_png** — persist optional successful-build artifacts after all recoverable work and preflight have succeeded.
-11. **publish** — transfer the complete staged batch into the pack without allocation or recoverable failure.
+8. **serialize** — build the atlas blob in transaction-owned storage.
+9. **cache_write/debug_png** — persist optional successful-build artifacts after all recoverable work has succeeded.
+10. **publish** — register the atlas blob, page textures, metadata, and region codegen in the pack. Capacity, allocation, and resource-ID failures assert and terminate the build; they are not recoverable rollback paths.
 
-Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize, preflight, and publish the same complete batch.
+Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish the same output.
 
 ### Vector packer
 
@@ -325,7 +326,7 @@ Separate from the per-asset [builder cache](#builder-cache) because atlas placem
 
 **Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
-**Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, preflight, and publish still run.
+**Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 
 **Invalidation:** any change to source pixels, opts, or `ATLAS_CACHE_KEY_VERSION` produces a fresh key. The version constant is bumped when the packer's behavior changes in a way that would silently produce different output.
 

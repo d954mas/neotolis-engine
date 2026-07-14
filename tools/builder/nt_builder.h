@@ -11,9 +11,9 @@
 #include "nt_mesh_format.h"    /* nt_stream_type_t */
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
 
-/* Always-on assert for builder (never compiled out by NDEBUG).
-   A failed assert means the build is broken -- pack would be invalid.
-   Hookable handler for tests (setjmp/longjmp pattern, same as NT_ASSERT). */
+/* Always-on fatal assert for builder (never compiled out by NDEBUG).
+ * The test hook may non-locally observe a failure; the builder context is not
+ * reusable afterward. A returning handler is still followed by abort(). */
 typedef void (*nt_build_assert_handler_t)(const char *expr, const char *file, int line);
 extern nt_build_assert_handler_t nt_build_assert_handler;
 
@@ -70,17 +70,16 @@ typedef enum {
     NT_BUILD_ERR_KIND_CORRUPT_IMAGE,
     NT_BUILD_ERR_KIND_ZERO_DIM,
     NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE,
-    NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM,
-    NT_BUILD_ERR_KIND_SLICE9_TOO_BIG,
-    NT_BUILD_ERR_KIND_DEGENERATE_HULL,
-    NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW,
-    NT_BUILD_ERR_KIND_DUPLICATE_NAME,
-    NT_BUILD_ERR_KIND_TOO_MANY_REGIONS,
-    NT_BUILD_ERR_KIND_TOO_MANY_PAGES,
-    NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE,
-    NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW,
-    NT_BUILD_ERR_KIND_PAGES_EXHAUSTED,
-    NT_BUILD_ERR_KIND_UNFITTABLE,
+    NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM,
+    NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG,
+    NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL,
+    NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW,
+    NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME,
+    NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS,
+    NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE,
+    NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW,
+    NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED,
+    NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE,
 } nt_build_error_kind;
 
 /* Pure-data error detail. Names are COPIED into fixed buffers, never
@@ -481,8 +480,9 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * defaults (centre pivot, name from path). See nt_atlas_sprite_opts_t above
  * for field semantics and the zero-init footgun warning.
  *
- * nt_atlas_commit is terminal: it builds and atomically publishes all atlas
- * resources, or publishes none and appends its content errors to the pack.
+ * nt_atlas_commit is terminal: recoverable content errors publish nothing and
+ * are appended to the pack. After validation, publication failures assert and
+ * terminate the process; the interrupted context has no rollback guarantee.
  * The handle is invalid after commit. A later atlas transaction still runs;
  * nt_builder_finish_pack reports the aggregate failure of committed atlases.
  * A failed commit attempts to remove stale pack/header outputs before returning;

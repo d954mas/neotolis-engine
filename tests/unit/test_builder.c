@@ -44,9 +44,10 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 
 static jmp_buf s_build_assert_jmp;
 static NtBuilderContext *s_build_assert_ctx; /* freed after longjmp to avoid ASAN leaks */
+static const char *s_build_assert_expr;
 
 static void test_build_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_build_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_build_assert_jmp, 1);
@@ -66,6 +67,25 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
         nt_build_assert_handler = NULL;                                                                                                                                                                \
         nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
         s_build_assert_ctx = NULL;                                                                                                                                                                     \
+    } while (0)
+
+#define EXPECT_BUILD_ASSERT_MATCH(ctx, code, expected)                                                                                                                                                 \
+    do {                                                                                                                                                                                               \
+        s_build_assert_ctx = (ctx);                                                                                                                                                                    \
+        s_build_assert_expr = NULL;                                                                                                                                                                    \
+        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
+        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
+            code;                                                                                                                                                                                      \
+            nt_build_assert_handler = NULL;                                                                                                                                                            \
+            nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                  \
+            s_build_assert_ctx = NULL;                                                                                                                                                                 \
+            TEST_FAIL_MESSAGE("Expected NT_BUILD_ASSERT to fire");                                                                                                                                     \
+        }                                                                                                                                                                                              \
+        nt_build_assert_handler = NULL;                                                                                                                                                                \
+        bool assert_matches = s_build_assert_expr && strstr(s_build_assert_expr, (expected));                                                                                                          \
+        nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
+        s_build_assert_ctx = NULL;                                                                                                                                                                     \
+        TEST_ASSERT_TRUE_MESSAGE(assert_matches, "NT_BUILD_ASSERT reason did not match");                                                                                                              \
     } while (0)
 
 /* --- Temp directory for test output --- */
@@ -265,6 +285,28 @@ void test_hash_different_strings_differ(void) {
     nt_hash64_t h1 = nt_builder_normalize_and_hash("a");
     nt_hash64_t h2 = nt_builder_normalize_and_hash("b");
     TEST_ASSERT_TRUE(h1.value != h2.value);
+}
+
+void test_read_file_bounded_rejects_before_read(void) {
+    const char *path = TMP_DIR "/bounded_read.bin";
+    static const char contents[] = "0123456789abcdef";
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL(sizeof(contents) - 1, fwrite(contents, 1, sizeof(contents) - 1, file));
+    TEST_ASSERT_EQUAL(0, fclose(file));
+
+    uint32_t size = 0;
+    bool too_large = false;
+    char *data = nt_builder_read_file_bounded(path, 8, &size, &too_large);
+    TEST_ASSERT_NULL(data);
+    TEST_ASSERT_TRUE(too_large);
+
+    data = nt_builder_read_file_bounded(path, (uint32_t)(sizeof(contents) - 1), &size, &too_large);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_FALSE(too_large);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(contents) - 1, size);
+    TEST_ASSERT_EQUAL_MEMORY(contents, data, sizeof(contents) - 1);
+    free(data);
 }
 
 /* --- Pack writer core tests --- */
@@ -4701,7 +4743,8 @@ void test_atlas_add_missing_file_asserts_after_failed_pack(void) {
     (void)nt_atlas_commit(atlas_build_4677);
     free(px);
     NtAtlasBuild *atlas_build_4685 = nt_atlas_begin(ctx, "next", NULL);
-    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add(atlas_build_4685, TMP_DIR "/does_not_exist_xyz.png", &(nt_atlas_sprite_opts_t){.name = "nope.png", .origin_x = 0.5F, .origin_y = 0.5F}));
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add(atlas_build_4685, TMP_DIR "/does_not_exist_xyz.png", &(nt_atlas_sprite_opts_t){.name = "nope.png", .origin_x = 0.5F, .origin_y = 0.5F}),
+                              "atlas_add: failed to read file");
 }
 
 /* A later transaction still rejects a glob pattern that matches nothing. */
@@ -4720,7 +4763,7 @@ void test_atlas_add_glob_empty_asserts_after_failed_pack(void) {
     (void)nt_atlas_commit(atlas_build_4701);
     free(px);
     NtAtlasBuild *atlas_build_4709 = nt_atlas_begin(ctx, "next", NULL);
-    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_glob(atlas_build_4709, TMP_DIR "/no_such_dir_xyz/*.png", NULL));
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_glob(atlas_build_4709, TMP_DIR "/no_such_dir_xyz/*.png", NULL), "atlas_add_glob: no files matched pattern");
 }
 
 /* Commit one content-invalid transaction and leave the pack failed. */
@@ -4735,6 +4778,36 @@ static void atlas_fail_pack(NtBuilderContext *ctx) {
     nt_atlas_add_raw(atlas_build_4722, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
     (void)nt_atlas_commit(atlas_build_4722);
     free(px);
+}
+
+/* File and glob adds remain executable after an earlier failed transaction. */
+void test_atlas_file_and_glob_commit_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *file_path = TMP_DIR "/poison_valid_file.png";
+    const char *glob_path = TMP_DIR "/poison_valid_glob_a.png";
+    write_test_png(file_path);
+    write_test_png(glob_path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_valid_file_glob.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+
+    NtAtlasBuild *file_atlas = nt_atlas_begin(ctx, "file", NULL);
+    nt_atlas_add(file_atlas, file_path, NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(file_atlas));
+
+    NtAtlasBuild *glob_atlas = nt_atlas_begin(ctx, "glob", NULL);
+    nt_atlas_add_glob(glob_atlas, TMP_DIR "/poison_valid_glob_*.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(glob_atlas));
+    TEST_ASSERT_EQUAL_UINT32(4, ctx->pending_count);
+
+    uint32_t error_count = 0;
+    (void)nt_builder_get_errors(ctx, &error_count);
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
+
+    nt_builder_free_pack(ctx);
+    (void)remove(file_path);
+    (void)remove(glob_path);
 }
 
 void test_atlas_begin_bad_ppu_asserts_after_failed_pack(void) {
@@ -5840,6 +5913,7 @@ void test_atlas_cache_hit_rebuild_is_byte_identical(void) {
         NtAtlasBuild *atlas = nt_atlas_begin(ctx, "cache_hit", NULL);
         nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+        TEST_ASSERT_EQUAL(pass != 0, ctx->atlas_cache_hit);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
@@ -6007,7 +6081,7 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_PAGES_EXHAUSTED, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, errs[0].kind);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
 
     FILE *f = fopen(path, "rb");
@@ -6188,7 +6262,7 @@ void test_atlas_slice9_invalid_borders_reports_error(void) {
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_SLICE9_TOO_BIG, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, errs[0].kind);
     TEST_ASSERT_EQUAL_STRING("bad_s9.png", errs[0].sprite);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
 
@@ -6226,7 +6300,7 @@ void test_atlas_collects_all_errors_in_one_atlas(void) {
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(3, n); /* all three reported, not just the first */
     /* add-order-stable: errors listed in the order sprites were added. */
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind);
     TEST_ASSERT_EQUAL_STRING("one.png", errs[0].sprite);
     TEST_ASSERT_EQUAL_STRING("two.png", errs[1].sprite);
     TEST_ASSERT_EQUAL_STRING("three.png", errs[2].sprite);
@@ -6276,7 +6350,7 @@ void test_atlas_failed_pack_builds_subsequent_atlas(void) {
     uint32_t after_b = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &after_b);
     TEST_ASSERT_EQUAL_UINT32(1, after_b);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind);
     TEST_ASSERT_EQUAL_STRING("bad.png", errs[0].sprite);
 
     /* finish_pack returns A's coarse code, writes no file. */
@@ -6310,7 +6384,7 @@ void test_atlas_failed_commits_append_errors_in_commit_order(void) {
     TEST_ASSERT_EQUAL_UINT32(2, count);
     TEST_ASSERT_EQUAL_STRING("atlasA", errors[0].atlas);
     TEST_ASSERT_EQUAL_STRING("first.png", errors[0].sprite);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM, errors[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errors[0].kind);
     TEST_ASSERT_EQUAL_STRING("atlasB", errors[1].atlas);
     TEST_ASSERT_EQUAL_STRING("second.png", errors[1].sprite);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errors[1].kind);
@@ -6346,7 +6420,7 @@ void test_atlas_error_format_identifies_failed_transaction(void) {
     nt_builder_free_pack(ctx);
 }
 
-void test_atlas_commit_preflights_all_resource_ids_before_publish(void) {
+void test_atlas_commit_duplicate_resource_id_asserts(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_atomic_collision.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     const uint8_t existing = 7;
@@ -6356,20 +6430,7 @@ void test_atlas_commit_preflights_all_resource_ids_before_publish(void) {
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "collision", NULL);
     nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
 
-    nt_build_assert_handler = test_build_assert_handler;
-    if (setjmp(s_build_assert_jmp) == 0) {
-        (void)nt_atlas_commit(atlas);
-        nt_build_assert_handler = NULL;
-        nt_builder_free_pack(ctx);
-        free(sprite);
-        TEST_FAIL_MESSAGE("Expected duplicate atlas page resource_id to assert");
-    }
-    nt_build_assert_handler = NULL;
-
-    TEST_ASSERT_EQUAL_UINT32(1, ctx->pending_count);
-    TEST_ASSERT_EQUAL_UINT32(0, ctx->meta_count);
-    TEST_ASSERT_EQUAL_UINT32(0, ctx->atlas_region_count);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_commit(atlas), "duplicate resource_id");
     free(sprite);
 }
 
@@ -6585,7 +6646,7 @@ void test_atlas_duplicate_name_graceful(void) {
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_DUPLICATE_NAME, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, errs[0].kind);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, nt_builder_finish_pack(ctx));
 
     uint32_t fsz = 0;
@@ -6676,6 +6737,7 @@ int main(void) {
     RUN_TEST(test_hash_known_value);
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
+    RUN_TEST(test_read_file_bounded_rejects_before_read);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);
@@ -6845,6 +6907,7 @@ int main(void) {
     RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_valid_opts_commits_after_failed_pack);
+    RUN_TEST(test_atlas_file_and_glob_commit_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_extrude_convex_default_asserts);
     RUN_TEST(test_atlas_add_raw_inherited_extrude_nonrect_asserts);
     RUN_TEST(test_atlas_begin_bad_format_asserts_after_failed_pack);
@@ -6895,7 +6958,7 @@ int main(void) {
     RUN_TEST(test_atlas_failed_pack_builds_subsequent_atlas);
     RUN_TEST(test_atlas_failed_commits_append_errors_in_commit_order);
     RUN_TEST(test_atlas_error_format_identifies_failed_transaction);
-    RUN_TEST(test_atlas_commit_preflights_all_resource_ids_before_publish);
+    RUN_TEST(test_atlas_commit_duplicate_resource_id_asserts);
     RUN_TEST(test_atlas_pack_config_is_fixed_while_open);
     RUN_TEST(test_atlas_local_error_open_nested_begin_asserts);
     RUN_TEST(test_atlas_failed_pack_arg_asserts);

@@ -509,20 +509,19 @@ nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
     case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
         return NT_BUILD_ERR_FORMAT;
     case NT_BUILD_ERR_KIND_ZERO_DIM:
-    case NT_BUILD_ERR_KIND_TRANSPARENT_AFTER_TRIM:
-    case NT_BUILD_ERR_KIND_SLICE9_TOO_BIG:
-    case NT_BUILD_ERR_KIND_DEGENERATE_HULL:
+    case NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM:
+    case NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG:
+    case NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL:
         return NT_BUILD_ERR_VALIDATION;
     case NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE:
-    case NT_BUILD_ERR_KIND_CONTOUR_VERTEX_OVERFLOW:
-    case NT_BUILD_ERR_KIND_TOO_MANY_REGIONS:
-    case NT_BUILD_ERR_KIND_TOO_MANY_PAGES:
-    case NT_BUILD_ERR_KIND_SPRITE_TOO_LARGE:
-    case NT_BUILD_ERR_KIND_TRIM_OFFSET_OVERFLOW:
-    case NT_BUILD_ERR_KIND_PAGES_EXHAUSTED:
-    case NT_BUILD_ERR_KIND_UNFITTABLE:
+    case NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW:
+    case NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS:
+    case NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE:
+    case NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW:
+    case NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED:
+    case NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE:
         return NT_BUILD_ERR_LIMIT;
-    case NT_BUILD_ERR_KIND_DUPLICATE_NAME:
+    case NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME:
         return NT_BUILD_ERR_DUPLICATE;
     case NT_BUILD_ERR_KIND_NONE:
     default:
@@ -532,17 +531,31 @@ nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
 
 static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) { return nt_builder_result_from_error(ctx->error_count ? &ctx->errors[0] : NULL); }
 
+const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
+    NT_BUILD_ASSERT(ctx && "get_errors: ctx is NULL");
+    if (out_count) {
+        *out_count = ctx->error_count;
+    }
+    return ctx->errors;
+}
+
+bool nt_builder_errors_truncated(const NtBuilderContext *ctx) {
+    NT_BUILD_ASSERT(ctx && "errors_truncated: ctx is NULL");
+    return ctx->errors_truncated;
+}
+
 nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "invalidate_outputs called with NULL context");
+    nt_build_result_t result = NT_BUILD_OK;
     if (remove(ctx->output_path) != 0 && errno != ENOENT) {
-        return NT_BUILD_ERR_IO;
+        result = NT_BUILD_ERR_IO;
     }
     char header_path[NT_BUILD_HEADER_PATH_MAX];
     nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
     if (remove(header_path) != 0 && errno != ENOENT) {
-        return NT_BUILD_ERR_IO;
+        result = NT_BUILD_ERR_IO;
     }
-    return NT_BUILD_OK;
+    return result;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
