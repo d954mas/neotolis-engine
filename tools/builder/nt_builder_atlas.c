@@ -730,36 +730,63 @@ static const char *extract_filename(const char *path) {
 
 /* --- Atlas API --- */
 
+/* Full atlas-opts domain validation — enum membership + cross-field contracts
+ * determinable from opts alone. Runs in begin_atlas BEFORE the poison gate so a
+ * skipped atlas traps the same caller bug the packing path would; it also fails
+ * the normal path earlier than encode. Mirrors the encode-time asserts (format,
+ * premultiplied, Basis format compat) and adds the sampler/mipmap contracts the
+ * page-texture header bytes are baked from. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT expansions inflate the count
+static void atlas_assert_opts(const nt_atlas_opts_t *opts) {
+    // #region scalar + shape/extrude
+    /* Lower bound 3: hull_simplify reduces to max_vertices AFTER the <3 hull
+     * guard, so max_vertices 1|2 yields a degenerate (line/point) polygon. */
+    NT_BUILD_ASSERT(opts->max_vertices >= 3 && opts->max_vertices <= 16 && "begin_atlas: max_vertices must be 3..16 (convex polygon needs >= 3 verts; NFP buffer limit nA+nB <= 32)");
+    NT_BUILD_ASSERT(opts->max_size > 0 && opts->max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
+    NT_BUILD_ASSERT(opts->padding <= opts->max_size && "begin_atlas: padding exceeds max_size");
+    NT_BUILD_ASSERT(opts->margin <= opts->max_size && "begin_atlas: margin exceeds max_size");
+    /* unsigned cast catches a negative value cast into the enum too. */
+    NT_BUILD_ASSERT((unsigned)opts->shape <= (unsigned)NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "begin_atlas: opts.shape out of range");
+    /* Simple AABB edge extrude needs a rectangular footprint; polygon packing
+     * inflates hulls, so an AABB extrude band could spill and collide. */
+    NT_BUILD_ASSERT((opts->shape == NT_ATLAS_SHAPE_RECT || opts->extrude == 0) &&
+                    "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
+    /* Validated here (not only late in pipeline_serialize) so a skipped atlas
+     * cannot swallow a 0/NaN scale. */
+    NT_BUILD_ASSERT(opts->pixels_per_unit > 0.0F && isfinite(opts->pixels_per_unit) && "begin_atlas: pixels_per_unit must be > 0 and finite");
+    // #endregion
+    // #region format + compression cross-fields
+    /* format == 0 is the "use default" (RGBA8) sentinel normalized at encode. */
+    NT_BUILD_ASSERT((opts->format == 0 || nt_texture_pixel_format_valid(opts->format)) && "begin_atlas: opts.format is not a valid nt_texture_pixel_format_t");
+    /* premultiplied alpha only meaningful for RGBA8 — no alpha channel otherwise. */
+    NT_BUILD_ASSERT((!opts->premultiplied || opts->format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
+    /* Basis block compression has no RG8/R8 equivalent (mirrors the encode-time
+     * assert the skipped path never reaches). */
+    NT_BUILD_ASSERT((opts->compress == NULL || opts->format == 0 || opts->format == NT_TEXTURE_FORMAT_RGBA8 || opts->format == NT_TEXTURE_FORMAT_RGB8) &&
+                    "begin_atlas: Basis compression requires RGBA8 or RGB8 format");
+    // #endregion
+    // #region sampler defaults (baked verbatim into the page-texture header)
+    NT_BUILD_ASSERT((unsigned)opts->filter_min <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR && "begin_atlas: opts.filter_min out of range");
+    NT_BUILD_ASSERT((unsigned)opts->filter_mag <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR && "begin_atlas: opts.filter_mag must be NEAREST or LINEAR (GL has no mipmap magnification)");
+    NT_BUILD_ASSERT((unsigned)opts->wrap_u <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "begin_atlas: opts.wrap_u out of range");
+    NT_BUILD_ASSERT((unsigned)opts->wrap_v <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "begin_atlas: opts.wrap_v out of range");
+    /* RAW mipmap min-filter needs the mip chain gen_mipmaps builds; Basis packs
+     * carry their own mips, so this cross-field is RAW-only. */
+    bool filter_min_uses_mips = opts->filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
+    NT_BUILD_ASSERT((opts->compress != NULL || !filter_min_uses_mips || opts->gen_mipmaps) &&
+                    "begin_atlas: filter_min selects a mipmap variant but gen_mipmaps is false (RAW pages build no mip chain)");
+    // #endregion
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
     NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
     NT_BUILD_ASSERT(!ctx->active_atlas && !ctx->skipped_atlas_open && "begin_atlas: nested atlas not allowed");
-    /* Caller-supplied opts are validated before the poison no-op so a
-     * programmer error still traps on a poisoned pack. NULL opts is always
-     * valid (uses defaults). extrude>0 shape check is opts-only here. */
+    /* Caller-supplied opts are validated before the poison no-op so a programmer
+     * error still traps on a poisoned pack. NULL opts uses defaults (always valid). */
     if (opts) {
-        /* Lower bound 3: hull_simplify reduces to max_vertices AFTER the <3 hull
-         * guard, so max_vertices 1|2 yields a degenerate (line/point) polygon. */
-        NT_BUILD_ASSERT(opts->max_vertices >= 3 && opts->max_vertices <= 16 && "begin_atlas: max_vertices must be 3..16 (convex polygon needs >= 3 verts; NFP buffer limit nA+nB <= 32)");
-        NT_BUILD_ASSERT(opts->max_size > 0 && opts->max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
-        NT_BUILD_ASSERT(opts->padding <= opts->max_size && "begin_atlas: padding exceeds max_size");
-        NT_BUILD_ASSERT(opts->margin <= opts->max_size && "begin_atlas: margin exceeds max_size");
-        /* premultiplied alpha only meaningful for RGBA8 — no alpha channel otherwise. */
-        NT_BUILD_ASSERT((!opts->premultiplied || opts->format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
-        /* Validate the full opts domain here (not only late at encode/pack) so a
-         * skipped atlas, which never reaches those stages, still traps a caller
-         * bug. format == 0 is the "use default" sentinel normalized at encode. */
-        NT_BUILD_ASSERT((opts->format == 0 || nt_texture_pixel_format_valid(opts->format)) && "begin_atlas: opts.format is not a valid nt_texture_pixel_format_t");
-        NT_BUILD_ASSERT(opts->shape <= NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "begin_atlas: opts.shape out of range");
-        /* Simple AABB edge extrude needs a rectangular footprint; polygon
-         * packing inflates hulls, so an AABB extrude band could spill and
-         * collide. Polygon modes must use padding-only. */
-        NT_BUILD_ASSERT((opts->shape == NT_ATLAS_SHAPE_RECT || opts->extrude == 0) &&
-                        "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
-        /* Validated here (not only late in pipeline_serialize) so a skipped atlas,
-         * which never reaches the pipeline, cannot swallow a 0/NaN scale. */
-        NT_BUILD_ASSERT(opts->pixels_per_unit > 0.0F && isfinite(opts->pixels_per_unit) && "begin_atlas: pixels_per_unit must be > 0 and finite");
+        atlas_assert_opts(opts);
     }
     /* Between-atlas hard stop: after poison, open no real atlas but track a
      * logical skipped-atlas so its end/finish lifecycle still balances.

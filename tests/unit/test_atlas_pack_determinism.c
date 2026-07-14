@@ -376,9 +376,9 @@ static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *
 }
 
 /* One solid RECT square with a per-sprite margin override, alone on a tight
- * (non-POT) zero-margin page: the fix centers it, so its region UV span mirrors
- * around the page midpoint (umin+umax == full-scale). Pre-fix the surplus piled
- * on the right/bottom (umin == 0) and the sum fell far short. */
+ * (non-POT) zero-margin page: the margin surplus centers the content, so its
+ * region UV span mirrors around the page midpoint (umin+umax == full-scale). A
+ * degenerate origin-anchored region would leave umin == 0 and the sum short. */
 void test_margin_override_content_centered(void) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");

@@ -4754,6 +4754,34 @@ void test_atlas_add_raw_max_vertices_override_too_low_asserts(void) {
     free(s);
 }
 
+/* Basis compression has no RG8/R8 equivalent — begin_atlas must trap the
+ * compress+format cross-field before the poison gate (a skipped atlas never
+ * reaches the encode-time assert that would otherwise catch it). */
+void test_atlas_begin_compress_bad_format_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_compress.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t comp = nt_tex_compress_etc1s_lowest();
+    bad.compress = &comp;
+    bad.premultiplied = false;         /* let the compress+format check fire, not premultiplied */
+    bad.format = NT_TEXTURE_FORMAT_R8; /* R8 has no Basis equivalent */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
+/* filter_mag must be NEAREST or LINEAR (GL has no mipmap magnification) — a
+ * mipmap variant is a caller bug the skipped-path validator must trap. */
+void test_atlas_begin_bad_filter_mag_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_filtermag.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR; /* mipmap variant invalid for mag */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
 /* An empty skipped atlas (begin + end, zero adds) must trap the empty-atlas
  * invariant just like the packing path — the caller-visible contract is
  * unchanged whether or not the pack is poisoned. */
@@ -5993,14 +6021,19 @@ void test_atlas_poisoned_arg_asserts(void) {
     EXPECT_BUILD_ASSERT(c1, nt_builder_begin_atlas(c1, "x", &bad_opts));
 
     /* atlas_add_raw: NULL name (raw pixels need an explicit name) still traps.
-     * (width==0 is NOT a caller-contract assert — it is a graceful content
-     * error, covered by test_atlas_add_raw_zero_dim_graceful.) */
+     * Open a real skipped atlas first so the add exercises the skipped-add path
+     * and the arg assert isn't masked by the "no atlas open" guard. (width==0 is
+     * NOT a caller-contract assert — it is a graceful content error, covered by
+     * test_atlas_add_raw_zero_dim_graceful.) */
     NtBuilderContext *c3 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_name.ntpack");
+    nt_builder_begin_atlas(c3, "skipped", NULL);
     EXPECT_BUILD_ASSERT(c3, nt_builder_atlas_add_raw(c3, px, 4, 4, &(nt_atlas_sprite_opts_t){.name = NULL, .origin_x = 0.5F, .origin_y = 0.5F}));
 
     /* atlas_add_glob: opts->name != NULL is a caller-contract error that must
-     * trap even on a poisoned pack (asserts run before the poison no-op). */
+     * trap even on a poisoned pack (asserts run before the poison no-op). Open a
+     * skipped atlas first for the same reason as above. */
     NtBuilderContext *c4 = make_poisoned_closed_pack(TMP_DIR "/poison_arg_glob.ntpack");
+    nt_builder_begin_atlas(c4, "skipped", NULL);
     EXPECT_BUILD_ASSERT(c4, nt_builder_atlas_add_glob(c4, "*.png", &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
 }
 
@@ -6404,6 +6437,8 @@ int main(void) {
     RUN_TEST(test_atlas_begin_bad_shape_asserts_after_poison);
     RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);
     RUN_TEST(test_atlas_add_raw_max_vertices_override_too_low_asserts);
+    RUN_TEST(test_atlas_begin_compress_bad_format_asserts_after_poison);
+    RUN_TEST(test_atlas_begin_bad_filter_mag_asserts_after_poison);
     RUN_TEST(test_atlas_empty_skipped_atlas_asserts);
 
     /* Atlas round-trip tests */

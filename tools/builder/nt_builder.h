@@ -314,7 +314,7 @@ typedef struct {
     uint32_t extrude; /* AABB edge pixel duplication count. Default 0. Must stay 0 unless shape == NT_ATLAS_SHAPE_RECT — the packer reserves space for the silhouette envelope, not for an extrude band
                          outside it. */
     uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1) */
-    uint8_t max_vertices;    /* max polygon vertices per region (default: 8; hard cap 16 — downstream stack arrays limit to 32) */
+    uint8_t max_vertices;    /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
     nt_atlas_shape_t shape;  /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;    /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
                               * false = identity only. Matches the transform field on AtlasPlacement /
@@ -416,7 +416,7 @@ typedef struct {
     /* Per-sprite overrides (0 = use atlas default). */
     uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
-    uint8_t max_vertices; /* 0 = atlas default */
+    uint8_t max_vertices; /* 0 = atlas default, else 3..16 */
     uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
     /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed
      * (RECT only) and may be smaller OR larger than the atlas extrude. A zero
