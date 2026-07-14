@@ -745,6 +745,11 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
         NT_BUILD_ASSERT(opts->margin <= opts->max_size && "begin_atlas: margin exceeds max_size");
         /* premultiplied alpha only meaningful for RGBA8 — no alpha channel otherwise. */
         NT_BUILD_ASSERT((!opts->premultiplied || opts->format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
+        /* Validate the full opts domain here (not only late at encode/pack) so a
+         * skipped atlas, which never reaches those stages, still traps a caller
+         * bug. format == 0 is the "use default" sentinel normalized at encode. */
+        NT_BUILD_ASSERT((opts->format == 0 || nt_texture_pixel_format_valid(opts->format)) && "begin_atlas: opts.format is not a valid nt_texture_pixel_format_t");
+        NT_BUILD_ASSERT(opts->shape <= NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "begin_atlas: opts.shape out of range");
         /* Simple AABB edge extrude needs a rectangular footprint; polygon
          * packing inflates hulls, so an AABB extrude band could spill and
          * collide. Polygon modes must use padding-only. */
@@ -759,6 +764,7 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
      * Programmer invariants above still fire. */
     if (ctx->poisoned) {
         ctx->skipped_atlas_open = true;
+        ctx->skipped_atlas_add_count = 0;
         /* Capture the resolved opts so skipped adds can still validate the
          * atlas-shape-dependent sprite cross-field contract. */
         ctx->skipped_atlas_opts = opts ? *opts : nt_atlas_opts_defaults();
@@ -829,14 +835,18 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
         effective_override = NT_ATLAS_SPRITE_SHAPE_RECT;
     }
     if (sopts->extrude > 0) {
-        uint8_t effective_shape = effective_override ? effective_override : (uint8_t)atlas_opts->shape;
-        NT_BUILD_ASSERT((effective_shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires effective shape == RECT");
+        /* effective_override is sprite-shape domain (RECT=1); atlas_opts->shape is
+         * atlas-shape domain (RECT=0). Judge each in its own enum space — mixing
+         * them let a RECT atlas default fail and a CONVEX atlas default pass. */
+        bool effective_is_rect = effective_override ? (effective_override == NT_ATLAS_SPRITE_SHAPE_RECT) : (atlas_opts->shape == NT_ATLAS_SHAPE_RECT);
+        NT_BUILD_ASSERT(effective_is_rect && "per-sprite extrude > 0 requires effective shape == RECT");
     }
 }
 
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
- * Slice9 borders auto-force RECT shape + no rotation. */
-static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
+ * Slice9 borders auto-force RECT shape + no rotation. The cross-field contract
+ * is asserted earlier on the add path (before content checks), not here. */
+static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
     sprite->slice9_top = sopts->slice9_top;
@@ -846,7 +856,6 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
-    atlas_assert_sprite_cross_field(sopts, atlas_opts);
     /* Slice9 auto-force: RECT shape + no rotation. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
@@ -892,12 +901,18 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     if (ctx->poisoned && !ctx->active_atlas) {
         NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add: no active atlas (call begin_atlas first)");
         atlas_assert_sprite_cross_field(&sopts, &ctx->skipped_atlas_opts);
+        ctx->skipped_atlas_add_count++;
         free(file_data);
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
 
     NtBuildAtlasState *state = ctx->active_atlas;
+
+    /* Caller-contract cross-field check runs BEFORE the content/dim/decode checks
+     * so a programmer bug (extrude/slice9 vs non-RECT shape) always traps and is
+     * never masked by a graceful content error — matches the skipped-atlas order. */
+    atlas_assert_sprite_cross_field(&sopts, &state->opts);
 
     /* Stamp the add order now so a decode error below carries this add's seq. */
     ctx->cur_error_seq = ctx->add_seq_counter++;
@@ -962,7 +977,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
     sprite->add_seq = ctx->cur_error_seq;
-    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
+    atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -976,11 +991,17 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     if (ctx->poisoned && !ctx->active_atlas) {
         NT_BUILD_ASSERT(ctx->skipped_atlas_open && "atlas_add_raw: no active atlas (call begin_atlas first)");
         atlas_assert_sprite_cross_field(&sopts, &ctx->skipped_atlas_opts);
+        ctx->skipped_atlas_add_count++;
         return;
     }
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
 
     NtBuildAtlasState *state = ctx->active_atlas;
+
+    /* Caller-contract cross-field check runs BEFORE the dim checks so a programmer
+     * bug (extrude/slice9 vs non-RECT shape) always traps and is never masked by a
+     * graceful ZERO_DIM/TOO_LARGE content error — matches the skipped-atlas order. */
+    atlas_assert_sprite_cross_field(&sopts, &state->opts);
 
     /* Stamp the add order (raw adds never fail to decode, but keep the counter
      * in lockstep with atlas_add so seqs stay globally monotonic). */
@@ -1022,7 +1043,7 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
     sprite->add_seq = ctx->cur_error_seq;
-    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
+    atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
 /* --- Glob callback for atlas --- */
@@ -2527,6 +2548,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
      * closes it (balanced). An end with no open atlas at all is a lifecycle bug. */
     if (ctx->poisoned && !ctx->active_atlas) {
         NT_BUILD_ASSERT(ctx->skipped_atlas_open && "end_atlas: no active atlas");
+        /* Empty-atlas invariant: the packing path asserts sprite_count > 0 below,
+         * so a skipped atlas with zero adds must trap the same caller bug. */
+        NT_BUILD_ASSERT(ctx->skipped_atlas_add_count > 0 && "end_atlas: atlas has no sprites");
         ctx->skipped_atlas_open = false;
         return;
     }

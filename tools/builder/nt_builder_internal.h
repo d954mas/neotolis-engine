@@ -217,6 +217,11 @@ struct NtBuilderContext {
     /* Parallel encoding: thread count (0 = single-threaded) */
     uint32_t thread_count;
 
+    /* Adds made against the current skipped atlas — end_atlas asserts > 0 so an
+     * empty skipped atlas traps like the packing path (empty-atlas invariant).
+     * Placed here (not next to skipped_atlas_open) to fill layout padding. */
+    uint32_t skipped_atlas_add_count;
+
     /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
     NtAtlasRegionCodegen *atlas_regions;
     uint32_t atlas_region_count;

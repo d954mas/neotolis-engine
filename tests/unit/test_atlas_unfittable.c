@@ -674,11 +674,11 @@ void test_atlas_unfittable_reports_above_atlas_override(void) {
     nt_builder_begin_atlas(ctx, "aboveovr", &opts);
 
     /* margin override 20 (> atlas 2): 50 + 2*20 = 90 > 64 → unfittable. extrude
-     * override 10 (> atlas 2) is the effective bleed the record must report. A
-     * per-sprite extrude override needs an explicit RECT sprite shape (the atlas
-     * RECT default doesn't satisfy the sprite-shape assert — different enum). */
+     * override 10 (> atlas 2) is the effective bleed the record must report. The
+     * sprite uses the atlas RECT default (no shape override) — the effective shape
+     * is RECT, so the per-sprite extrude must not trap the cross-field assert. */
     uint8_t *px = make_opaque(50, 200);
-    nt_builder_atlas_add_raw(ctx, px, 50, 50, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = 20, .extrude = 10});
+    nt_builder_atlas_add_raw(ctx, px, 50, 50, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F, .margin = 20, .extrude = 10});
 
     nt_builder_end_atlas(ctx);
 

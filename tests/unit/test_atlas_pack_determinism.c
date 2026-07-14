@@ -273,6 +273,108 @@ static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax,
     return true;
 }
 
+/* Decode page 0's RAW RGBA texture and return the opaque content's inclusive
+ * pixel bounding box plus the page dims. Lets a test verify the COMPOSED pixels,
+ * not only the serialized UV — a compose that dropped the centering offset is
+ * invisible to a UV-only check. RAW (uncompressed) pages only. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *out_maxx, uint32_t *out_miny, uint32_t *out_maxy, uint32_t *out_w, uint32_t *out_h) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < (long)sizeof(NtPackHeader)) {
+        (void)fclose(f);
+        return false;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return false;
+    }
+    bool ok = fread(buf, 1, (size_t)sz, f) == (size_t)sz;
+    (void)fclose(f);
+    if (!ok) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *hdr = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas = &entries[i];
+            break;
+        }
+    }
+    if (!atlas || (uint64_t)atlas->offset + atlas->size > (uint64_t)sz || atlas->size < sizeof(NtAtlasHeader) + sizeof(uint64_t)) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas->offset;
+    const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
+    if (ah->page_count == 0) {
+        free(buf);
+        return false;
+    }
+    uint64_t page0_id = *(const uint64_t *)(ablob + sizeof(NtAtlasHeader));
+
+    const NtAssetEntry *tex = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE && entries[i].resource_id == page0_id) {
+            tex = &entries[i];
+            break;
+        }
+    }
+    if (!tex || (uint64_t)tex->offset + tex->size > (uint64_t)sz || tex->size < sizeof(NtTextureAssetHeader)) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *tblob = buf + tex->offset;
+    const NtTextureAssetHeader *th = (const NtTextureAssetHeader *)tblob;
+    uint32_t w = th->width;
+    uint32_t h = th->height;
+    if (th->compression != 0 || (uint64_t)sizeof(NtTextureAssetHeader) + (uint64_t)w * h * 4 > tex->size) {
+        free(buf); /* RAW only + guard the pixel span */
+        return false;
+    }
+    const uint8_t *px = tblob + sizeof(NtTextureAssetHeader);
+
+    uint32_t minx = w;
+    uint32_t maxx = 0;
+    uint32_t miny = h;
+    uint32_t maxy = 0;
+    bool any = false;
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            if (px[((size_t)((y * w) + x) * 4) + 3] >= 128) { /* opaque = alpha >= mid */
+                any = true;
+                minx = x < minx ? x : minx;
+                maxx = x > maxx ? x : maxx;
+                miny = y < miny ? y : miny;
+                maxy = y > maxy ? y : maxy;
+            }
+        }
+    }
+    free(buf);
+    if (!any) {
+        return false;
+    }
+    *out_minx = minx;
+    *out_maxx = maxx;
+    *out_miny = miny;
+    *out_maxy = maxy;
+    *out_w = w;
+    *out_h = h;
+    return true;
+}
+
 /* One solid RECT square with a per-sprite margin override, alone on a tight
  * (non-POT) zero-margin page: the fix centers it, so its region UV span mirrors
  * around the page midpoint (umin+umax == full-scale). Pre-fix the surplus piled
@@ -328,6 +430,30 @@ void test_margin_override_content_centered(void) {
      * origin-anchored region that would satisfy the sum only by both edges at 0. */
     TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, umin, "left inset must be nonzero (margin surplus present)");
     TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, vmin, "top inset must be nonzero (margin surplus present)");
+
+    /* Composed-pixel proof, independent of the serialized UV: decode page 0 and
+     * confirm the opaque content bbox is itself centered in the page. A compose
+     * that dropped the centering offset would place content at the origin here,
+     * invisible to the UV-only checks above. */
+    uint32_t cx0 = 0;
+    uint32_t cx1 = 0;
+    uint32_t cy0 = 0;
+    uint32_t cy1 = 0;
+    uint32_t pw = 0;
+    uint32_t ph = 0;
+    TEST_ASSERT_TRUE_MESSAGE(page0_opaque_bounds(path, &cx0, &cx1, &cy0, &cy1, &pw, &ph), "decode page 0 pixels");
+    uint32_t left = cx0;
+    uint32_t right = pw - 1 - cx1;
+    uint32_t top = cy0;
+    uint32_t bottom = ph - 1 - cy1;
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)left, (int32_t)right, "composed content not horizontally centered in page pixels");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)top, (int32_t)bottom, "composed content not vertically centered in page pixels");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, left, "left pixel inset must be nonzero (margin surplus present)");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, top, "top pixel inset must be nonzero (margin surplus present)");
+    /* And the serialized UV must point AT those opaque pixels: umin/vmin map back
+     * to the content's top-left pixel within a texel (guards a stale-UV compose). */
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)cx0, (int32_t)((uint64_t)umin * pw / 65535), "region umin does not map to the opaque content left edge");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)cy0, (int32_t)((uint64_t)vmin * ph / 65535), "region vmin does not map to the opaque content top edge");
     (void)remove(path);
 }
 

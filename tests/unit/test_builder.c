@@ -4577,7 +4577,10 @@ void test_atlas_add_missing_file_asserts_after_poison(void) {
     nt_builder_atlas_add_raw(ctx, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
     free(px);
-    /* Poisoned, no active atlas. A missing file must trap, not silently no-op. */
+    /* Open a real skipped atlas so the add exercises the skipped-add path — a
+     * missing file must trap on the file-read assert, not on the "no atlas open"
+     * guard (which would still fire and mask a removed file-read validation). */
+    nt_builder_begin_atlas(ctx, "skipped", NULL);
     EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add(ctx, TMP_DIR "/does_not_exist_xyz.png", &(nt_atlas_sprite_opts_t){.name = "nope.png", .origin_x = 0.5F, .origin_y = 0.5F}));
 }
 
@@ -4598,6 +4601,10 @@ void test_atlas_add_glob_empty_asserts_after_poison(void) {
     nt_builder_atlas_add_raw(ctx, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
     free(px);
+    /* Open a real skipped atlas so the glob exercises the skipped path — a pattern
+     * that matches nothing must trap on the "no files matched" assert, not on the
+     * "no atlas open" guard. */
+    nt_builder_begin_atlas(ctx, "skipped", NULL);
     EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_glob(ctx, TMP_DIR "/no_such_dir_xyz/*.png", NULL));
 }
 
@@ -4683,6 +4690,57 @@ void test_atlas_add_raw_valid_opts_noops_after_poison(void) {
     (void)nt_builder_get_errors(ctx, &err_count);
     TEST_ASSERT_TRUE(err_count > 0); /* pack stays poisoned; the valid add just no-oped */
     nt_builder_free_pack(ctx);
+}
+
+/* Per-sprite extrude > 0 on a CONVEX atlas with a default sprite shape has an
+ * effective CONVEX shape → must trap. Guards the enum-domain fix: atlas CONVEX
+ * (value 1) must not be mistaken for the sprite RECT override (also value 1). */
+void test_atlas_add_raw_extrude_convex_default_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_extrude_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    nt_builder_begin_atlas(ctx, "convex", &opts);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .extrude = 2}));
+    free(s);
+}
+
+/* A skipped begin_atlas must validate the full opts domain (format/shape), not
+ * only the fields checked before this branch existed — a skipped atlas never
+ * reaches the encode-time format assert, so begin is the only trap point. */
+void test_atlas_begin_bad_format_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_fmt.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.premultiplied = false;                  /* isolate the format assert from the premultiplied check */
+    bad.format = (nt_texture_pixel_format_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
+void test_atlas_begin_bad_shape_asserts_after_poison(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_shape.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.shape = (nt_atlas_shape_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
+}
+
+/* An empty skipped atlas (begin + end, zero adds) must trap the empty-atlas
+ * invariant just like the packing path — the caller-visible contract is
+ * unchanged whether or not the pack is poisoned. */
+void test_atlas_empty_skipped_atlas_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_empty_skipped.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_poison_pack(ctx);
+    nt_builder_begin_atlas(ctx, "skipped", NULL); /* skipped atlas, zero adds */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -5738,7 +5796,8 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
     free(buf);
 }
 
-/* Test: invalid slice9 borders (l+r >= width) triggers NT_BUILD_ASSERT. */
+/* Test: invalid slice9 borders (l+r >= width) route to the graceful error channel
+ * as SLICE9_TOO_BIG (a content-dependent failure), not NT_BUILD_ASSERT. */
 void test_atlas_slice9_invalid_borders_reports_error(void) {
     (void)MKDIR(TMP_DIR);
     (void)remove(TMP_DIR "/atlas_slice9_invalid.ntpack");
@@ -6317,6 +6376,10 @@ int main(void) {
     RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_poison);
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_poison);
     RUN_TEST(test_atlas_add_raw_valid_opts_noops_after_poison);
+    RUN_TEST(test_atlas_add_raw_extrude_convex_default_asserts);
+    RUN_TEST(test_atlas_begin_bad_format_asserts_after_poison);
+    RUN_TEST(test_atlas_begin_bad_shape_asserts_after_poison);
+    RUN_TEST(test_atlas_empty_skipped_atlas_asserts);
 
     /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);
