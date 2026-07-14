@@ -2763,7 +2763,7 @@ static nt_build_result_t atlas_commit_impl(NtBuilderContext *ctx) {
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
                 (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count);
 
-cleanup:
+cleanup:;
     nt_build_result_t result = state->failed ? atlas_merge_errors(state) : NT_BUILD_OK;
     pipeline_cleanup(&p);
     return result;
