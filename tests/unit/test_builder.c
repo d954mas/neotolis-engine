@@ -5618,6 +5618,79 @@ static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out
     return buf;
 }
 
+static bool atlas_page0_resource_resolves(const char *pack_path) {
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    if (!buf || file_size < sizeof(NtPackHeader)) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    if (!atlas_entry || atlas_entry->size < sizeof(NtAtlasHeader) + sizeof(uint64_t) || (uint64_t)atlas_entry->offset + atlas_entry->size > file_size) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *atlas = (const NtAtlasHeader *)ablob;
+    if (atlas->page_count == 0) {
+        free(buf);
+        return false;
+    }
+
+    uint64_t page0_id = 0;
+    memcpy(&page0_id, ablob + sizeof(NtAtlasHeader), sizeof(page0_id));
+    bool found = false;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE && entries[i].resource_id == page0_id) {
+            found = true;
+            break;
+        }
+    }
+    free(buf);
+    return found;
+}
+
+void test_atlas_long_name_page_resource_resolves(void) {
+    const char *pack_path = TMP_DIR "/atlas_long_name.ntpack";
+    (void)MKDIR(TMP_DIR);
+    (void)remove(pack_path);
+
+    char atlas_name[600] = {0};
+    size_t name_len = 0;
+    for (uint32_t i = 0; i < 110; i++) {
+        const char segment[] = "x/../";
+        for (size_t j = 0; j < sizeof(segment) - 1; j++) {
+            atlas_name[name_len++] = segment[j];
+        }
+    }
+    const char suffix[] = "atlas";
+    for (size_t i = 0; i < sizeof(suffix); i++) {
+        atlas_name[name_len++] = suffix[i];
+    }
+    TEST_ASSERT_TRUE(strlen(atlas_name) > 512);
+
+    uint8_t *sprite = make_test_sprite(16, 16, 255, 128, 0, 255);
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, NULL);
+    nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(sprite);
+
+    TEST_ASSERT_TRUE_MESSAGE(atlas_page0_resource_resolves(pack_path), "atlas page ID must resolve to the published texture resource");
+}
+
 /* Default sprite opts: NULL opts == centre pivot (0.5, 0.5). */
 void test_atlas_sprite_opts_default_origin_is_centre(void) {
     (void)MKDIR(TMP_DIR);
@@ -5736,6 +5809,40 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
  * output. This test catches that by counting atlas_*.bin files in an isolated
  * cache directory: two different keys → two files. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_hit_rebuild_is_byte_identical(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_hit1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_hit2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_hit_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    uint8_t *sprite = make_test_sprite(16, 16, 100, 150, 200, 255);
+    const char *packs[] = {pack1, pack2};
+    for (uint32_t pass = 0; pass < 2; pass++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(packs[pass]);
+        nt_builder_set_cache_dir(ctx, cache);
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "cache_hit", NULL);
+        nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        nt_builder_free_pack(ctx);
+        TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+    }
+    free(sprite);
+
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = read_file_bytes(pack1, &size1);
+    uint8_t *data2 = read_file_bytes(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
 void test_atlas_cache_invalidates_on_opts_change(void) {
     const char *pack1 = TMP_DIR "/atlas_cache_opts1.ntpack";
     const char *pack2 = TMP_DIR "/atlas_cache_opts2.ntpack";
@@ -6193,6 +6300,33 @@ void test_atlas_failed_commits_append_errors_in_commit_order(void) {
     TEST_ASSERT_EQUAL_STRING("second.png", errors[1].sprite);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errors[1].kind);
     TEST_ASSERT_EQUAL_UINT32(0, ctx->pending_count);
+
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_error_format_identifies_failed_transaction(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_error_transaction.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    uint8_t transparent[4] = {255, 0, 0, 0};
+
+    NtAtlasBuild *atlas_a = nt_atlas_begin(ctx, "atlasA", NULL);
+    nt_atlas_add_raw(atlas_a, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = "icon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_a));
+
+    NtAtlasBuild *atlas_b = nt_atlas_begin(ctx, "atlasB", NULL);
+    nt_atlas_add_raw(atlas_b, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = "icon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_b));
+
+    uint32_t count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &count);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    char first[256];
+    char second[256];
+    nt_build_error_format(&errors[0], first, sizeof(first));
+    nt_build_error_format(&errors[1], second, sizeof(second));
+    TEST_ASSERT_NOT_NULL(strstr(first, "atlasA"));
+    TEST_ASSERT_NOT_NULL(strstr(second, "atlasB"));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(first, second));
 
     nt_builder_free_pack(ctx);
 }
@@ -6722,6 +6856,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
     RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
+    RUN_TEST(test_atlas_long_name_page_resource_resolves);
 
     /* Atlas sprite opts + origin (Point 2 follow-up) */
     RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);
@@ -6731,6 +6866,7 @@ int main(void) {
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     /* Atlas cache hardening + BUG-2 regression */
+    RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
@@ -6742,6 +6878,7 @@ int main(void) {
     RUN_TEST(test_atlas_collects_all_errors_in_one_atlas);
     RUN_TEST(test_atlas_failed_pack_builds_subsequent_atlas);
     RUN_TEST(test_atlas_failed_commits_append_errors_in_commit_order);
+    RUN_TEST(test_atlas_error_format_identifies_failed_transaction);
     RUN_TEST(test_atlas_commit_preflights_all_resource_ids_before_publish);
     RUN_TEST(test_atlas_pack_config_is_fixed_while_open);
     RUN_TEST(test_atlas_local_error_open_nested_begin_asserts);
