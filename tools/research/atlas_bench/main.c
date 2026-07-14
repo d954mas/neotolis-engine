@@ -16,7 +16,7 @@
 #define BENCH_MAX_VERTICES 8
 
 typedef struct {
-    NtBuilderContext *ctx;
+    NtAtlasBuild *atlas;
     uint32_t count;
     uint32_t limit; /* 0 = unlimited */
 } bench_add_data_t;
@@ -26,7 +26,7 @@ static void bench_add_callback(const char *path, void *user) {
     if (d->limit > 0 && d->count >= d->limit) {
         return;
     }
-    nt_builder_atlas_add(d->ctx, path, NULL); /* NULL = default centre pivot, name from path */
+    nt_atlas_add(d->atlas, path, NULL); /* NULL = default centre pivot, name from path */
     d->count++;
 }
 
@@ -100,8 +100,8 @@ int main(int argc, char *argv[]) {
     opts.max_size = max_size;
     opts.max_vertices = BENCH_MAX_VERTICES;
 
-    nt_builder_begin_atlas(ctx, atlas_name, &opts);
-    bench_add_data_t add = {ctx, 0, max_sprites};
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
+    bench_add_data_t add = {atlas, 0, max_sprites};
     (void)nt_builder_glob_iterate(corpus_glob, bench_add_callback, &add);
     if (add.count == 0) {
         /* Empty corpora would produce meaningless metrics. */
@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     const double t0 = nt_time_now();
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
     const double pack_ms = (nt_time_now() - t0) * 1000.0;
     const nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);

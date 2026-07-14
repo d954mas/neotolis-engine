@@ -125,7 +125,7 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
     }
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    nt_builder_begin_atlas(ctx, "det_corpus", &opts);
+    NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
     uint8_t *bufs[CORPUS_COUNT] = {0};
     for (int i = 0; i < CORPUS_COUNT; ++i) {
@@ -134,10 +134,10 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
         TEST_ASSERT_NOT_NULL(bufs[i]);
         gen_sprite(bufs[i], s);
         /* raw sprites require an explicit name (no path to derive one from). */
-        nt_builder_atlas_add_raw(ctx, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
     }
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas_build_128);
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
 
@@ -393,7 +393,7 @@ void test_margin_override_content_centered(void) {
     opts.extrude = 0;
     opts.padding = 0;
     opts.power_of_two = false; /* tight page → page edges hug the reserved footprint */
-    nt_builder_begin_atlas(ctx, "center", &opts);
+    NtAtlasBuild *atlas_build_396 = nt_atlas_begin(ctx, "center", &opts);
 
     enum { SQ = 20, MARGIN_OVERRIDE = 8 };
     uint8_t *px = (uint8_t *)malloc((size_t)SQ * SQ * 4);
@@ -404,8 +404,8 @@ void test_margin_override_content_centered(void) {
         px[(i * 4) + 2] = 40;
         px[(i * 4) + 3] = 255;
     }
-    nt_builder_atlas_add_raw(ctx, px, SQ, SQ, &(nt_atlas_sprite_opts_t){.name = "sq", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = MARGIN_OVERRIDE});
-    nt_builder_end_atlas(ctx);
+    nt_atlas_add_raw(atlas_build_396, px, SQ, SQ, &(nt_atlas_sprite_opts_t){.name = "sq", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = MARGIN_OVERRIDE});
+    (void)nt_atlas_commit(atlas_build_396);
 
     uint32_t n = 0;
     (void)nt_builder_get_errors(ctx, &n);

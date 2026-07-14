@@ -253,7 +253,7 @@ static void write_register_labels(FILE *f, const char *func_prefix, const Codege
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
-    char header_path[512];
+    char header_path[NT_BUILD_HEADER_PATH_MAX];
     derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
 
     char guard[256];

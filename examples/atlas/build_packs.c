@@ -36,7 +36,7 @@ static const char *pack_path(const char *dir, const char *name) {
 
 /* Glob callback that adds sprites with an optional count limit */
 typedef struct {
-    NtBuilderContext *ctx;
+    NtAtlasBuild *atlas;
     uint32_t count;
     uint32_t limit; /* 0 = unlimited */
 } LimitedAddData;
@@ -46,7 +46,7 @@ static void limited_add_callback(const char *path, void *user) {
     if (d->limit > 0 && d->count >= d->limit) {
         return;
     }
-    nt_builder_atlas_add(d->ctx, path, NULL); /* NULL opts = defaults (centre pivot, name from path) */
+    nt_atlas_add(d->atlas, path, NULL); /* NULL opts = defaults (centre pivot, name from path) */
     d->count++;
 }
 
@@ -139,15 +139,15 @@ int main(int argc, char *argv[]) {
     }
     (void)printf("atlas=%s max=%u shape=%s max_sprites=%u\n", atlas_name, opts.max_size, shape_name, max_sprites);
 
-    nt_builder_begin_atlas(ctx, atlas_name, &opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     if (max_sprites > 0) {
-        LimitedAddData data = {ctx, 0, max_sprites};
+        LimitedAddData data = {atlas, 0, max_sprites};
         (void)nt_builder_glob_iterate(glob_pattern, limited_add_callback, &data);
         (void)printf("Added %u sprites (limited to %u)\n", data.count, max_sprites);
     } else {
-        nt_builder_atlas_add_glob(ctx, glob_pattern, NULL); /* NULL = default centre pivot for every matched file */
+        nt_atlas_add_glob(atlas, glob_pattern, NULL); /* NULL = default centre pivot for every matched file */
     }
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
 
     /* Finish and generate headers */
     nt_build_result_t r = nt_builder_finish_pack(ctx);

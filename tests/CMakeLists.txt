@@ -725,12 +725,8 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_transparent_trim PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_transparent_trim WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Runs under live LSan (no detect_leaks=0 masking) — its passing proves the
-    # graceful error paths it exercises are leak-free / no-hung-pool: UNFITTABLE,
-    # PAGES_EXHAUSTED, dedup-alias fan-out, error-list truncation, oversized image,
-    # and error_format. The duplicate-name / slice9 / degenerate-hull cleanup paths
-    # are covered in test_builder, which masks leaks (detect_leaks=0) because its
-    # EXPECT_BUILD_ASSERT cases longjmp mid-pipeline and leak by design.
+    # Live LSan covers graceful atlas errors and worker-pool cleanup.
+    # Assert-heavy builder tests disable leak detection because longjmp skips cleanup.
     add_executable(test_atlas_unfittable unit/test_atlas_unfittable.c)
     target_link_libraries(test_atlas_unfittable PRIVATE nt_builder nt_log unity)
     target_compile_definitions(test_atlas_unfittable PRIVATE _CRT_SECURE_NO_WARNINGS)

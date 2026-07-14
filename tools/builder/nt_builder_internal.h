@@ -75,8 +75,9 @@ typedef struct {
     uint64_t resource_id; /* nt_hash64 of path */
 } NtAtlasRegionCodegen;
 
-/* Atlas build state (active between begin_atlas / end_atlas) */
-typedef struct {
+/* Atlas build state (active between begin and commit). */
+struct NtAtlasBuild {
+    NtBuilderContext *ctx;           /* owner pack */
     char *name;                      /* atlas name for resource_id (owned) */
     nt_atlas_opts_t opts;            /* copy of user opts (compress ptr zeroed, use has_compress) */
     nt_tex_compress_opts_t compress; /* Basis compression settings */
@@ -85,7 +86,14 @@ typedef struct {
     uint32_t sprite_count;
     uint32_t sprite_capacity;
     uint64_t cache_key; /* computed atlas cache key */
-} NtBuildAtlasState;
+    nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
+    uint32_t error_seq[NT_BUILD_MAX_ERRORS];
+    uint32_t error_count;
+    uint32_t add_seq_counter;
+    uint32_t cur_error_seq;
+    bool errors_truncated;
+    bool failed;
+};
 
 /* Metadata accumulation limit */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -179,8 +187,8 @@ struct NtBuilderContext {
     uint32_t font_count;
     uint32_t atlas_count;
 
-    /* Atlas: active atlas state (non-NULL between begin_atlas/end_atlas) */
-    NtBuildAtlasState *active_atlas;
+    /* Atlas transaction currently collecting inputs. */
+    NtAtlasBuild *active_atlas;
 
     /* Deduplication stats */
     uint32_t dedup_count;
@@ -217,48 +225,26 @@ struct NtBuilderContext {
     /* Parallel encoding: thread count (0 = single-threaded) */
     uint32_t thread_count;
 
-    /* Adds made against the current skipped atlas — end_atlas asserts > 0 so an
-     * empty skipped atlas traps like the packing path (empty-atlas invariant).
-     * Placed here (not next to skipped_atlas_open) to fill layout padding. */
-    uint32_t skipped_atlas_add_count;
-
-    /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
+    /* Atlas region codegen entries (heap, populated by commit, consumed by codegen) */
     NtAtlasRegionCodegen *atlas_regions;
     uint32_t atlas_region_count;
     uint32_t atlas_region_capacity;
 
-    /* Content-error accumulator. poisoned = at least one error appended;
-     * gates finish_pack write and the between-atlas hard stop. errors[] is kept
-     * sorted by error_seq (add order); error_seq is an INTERNAL parallel key so
-     * the public record size stays ABI-locked. */
+    /* Committed atlas errors; any error makes final pack output invalid. */
     nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
-    uint32_t error_seq[NT_BUILD_MAX_ERRORS];
     uint32_t error_count;
     bool errors_truncated;
-    bool poisoned;
-    /* A poisoned begin_atlas opens no real atlas but still tracks lifecycle
-     * balance, so nested begin / unmatched end / open-at-finish still trap. */
-    bool skipped_atlas_open;
-    /* Resolved atlas opts captured by a skipped begin_atlas so skipped adds can
-     * still validate the atlas-shape-dependent sprite cross-field contract. */
-    nt_atlas_opts_t skipped_atlas_opts;
-
-    /* Add-order sequencing: bumped once per atlas add* call; cur_error_seq is
-     * the key push_error stamps on the next error (a sprite's add_seq, or the
-     * counter value for atlas-level errors). */
-    uint32_t add_seq_counter;
-    uint32_t cur_error_seq;
+    bool failed;
 };
 
-/* Append a content error (sequential-call-only for add-order determinism).
- * Always sets ctx->poisoned; truncates past NT_BUILD_MAX_ERRORS. */
-void nt_builder_push_error(NtBuilderContext *ctx, const nt_build_error_t *err);
+nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal decode functions -- called from add_* (eager decode) */
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts);
 nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
@@ -422,7 +408,8 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
 
 /* Derive the generated .h path for a pack, honoring an explicit header_dir.
  * header_dir non-NULL -> "<header_dir>/<stem>.h"; else replace the pack extension.
- * Shared by codegen (write) and finish_pack (remove on poison). */
+ * Shared by codegen and failed-build cleanup. */
+#define NT_BUILD_HEADER_PATH_MAX 1024
 static inline void nt_builder_derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
     if (header_dir) {
         char stem[256];

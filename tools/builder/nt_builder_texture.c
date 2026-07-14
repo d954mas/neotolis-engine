@@ -9,8 +9,45 @@
 #pragma clang diagnostic pop
 /* clang-format on */
 
+#include <math.h>
+
 /* No mapping needed -- builder and runtime share nt_texture_pixel_format_t.
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts) {
+    nt_tex_opts_t resolved = opts ? *opts : nt_tex_opts_defaults();
+    nt_texture_pixel_format_t format = resolved.format ? resolved.format : NT_TEXTURE_FORMAT_RGBA8;
+
+    NT_BUILD_ASSERT(nt_texture_pixel_format_valid(format) && "texture opts: invalid format");
+    NT_BUILD_ASSERT((!resolved.premultiplied || format == NT_TEXTURE_FORMAT_RGBA8) && "texture opts: premultiplied=true requires RGBA8");
+    NT_BUILD_ASSERT((unsigned)resolved.filter_min <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR && "texture opts: filter_min out of range");
+    NT_BUILD_ASSERT((unsigned)resolved.filter_mag <= (unsigned)NT_TEXTURE_DEFAULT_FILTER_LINEAR && "texture opts: filter_mag must be NEAREST or LINEAR");
+    NT_BUILD_ASSERT((unsigned)resolved.wrap_u <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_u out of range");
+    NT_BUILD_ASSERT((unsigned)resolved.wrap_v <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_v out of range");
+
+    bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
+    NT_BUILD_ASSERT((compress_opts || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: RAW mipmap filter requires gen_mipmaps=true");
+
+    if (compress_opts) {
+        NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8) && "texture opts: Basis compression requires RGBA8 or RGB8");
+        NT_BUILD_ASSERT((compress_opts->mode == NT_TEX_COMPRESS_ETC1S || compress_opts->mode == NT_TEX_COMPRESS_UASTC) && "texture opts: compression mode out of range");
+        if (compress_opts->mode == NT_TEX_COMPRESS_ETC1S) {
+            NT_BUILD_ASSERT((compress_opts->quality >= 1 && compress_opts->quality <= 255) && "texture opts: ETC1S quality must be 1..255");
+            NT_BUILD_ASSERT((isfinite(compress_opts->selector_rdo_quality) && compress_opts->selector_rdo_quality >= 0.0F && compress_opts->selector_rdo_quality <= 1.0e10F) &&
+                            "texture opts: ETC1S selector RDO must be finite and in 0..1e10");
+            NT_BUILD_ASSERT((isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.0F && compress_opts->endpoint_rdo_quality <= 1.0e10F) &&
+                            "texture opts: ETC1S endpoint RDO must be finite and in 0..1e10");
+        } else {
+            NT_BUILD_ASSERT(compress_opts->quality <= 4 && "texture opts: UASTC quality must be 0..4");
+            NT_BUILD_ASSERT((compress_opts->endpoint_rdo_quality == 0.0F ||
+                             (isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.001F && compress_opts->endpoint_rdo_quality <= 50.0F)) &&
+                            "texture opts: UASTC endpoint RDO must be 0 or in 0.001..50");
+        }
+    }
+
+    return format;
+}
 
 /* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
  * Returns resized buffer (caller frees) or NULL if no resize needed.
@@ -47,6 +84,7 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
     if (target_channels >= 4) {
         return NULL; /* no strip needed */
     }
+    NT_BUILD_ASSERT(rgba && pixel_count > 0 && target_channels > 0 && "strip_channels: invalid args");
     uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * target_channels);
     if (!out) {
         return NULL;
@@ -166,15 +204,13 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
                                                    nt_asset_type_t *out_type, uint16_t *out_version) {
-    nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
-    NT_BUILD_ASSERT(nt_texture_pixel_format_valid(fmt) && "texture encode: invalid packed-asset format");
+    nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, NULL);
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
 
     /* Premultiply RGB * A before strip. Only RGBA8 has a meaningful alpha
      * channel; for other formats premultiplied=true is a caller bug. */
     bool premul = opts && opts->premultiplied;
-    NT_BUILD_ASSERT((!premul || fmt == NT_TEXTURE_FORMAT_RGBA8) && "texture encode: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
 
     uint8_t *premul_buf = NULL;
     const uint8_t *source = rgba_pixels;
@@ -241,11 +277,8 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
                                                               uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
-    nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
-
-    /* Basis Universal encodes RGB or RGBA blocks -- RG8/R8 have no Basis equivalent.
-     * Use RGB8 for 2/1-channel textures (normals, specular) with Basis compression. */
-    NT_BUILD_ASSERT((fmt == NT_TEXTURE_FORMAT_RGBA8 || fmt == NT_TEXTURE_FORMAT_RGB8) && "Basis compression requires RGBA8 or RGB8 format (RG8/R8 have no Basis equivalent)");
+    NT_BUILD_ASSERT(compress_opts && "texture encode: compression opts are NULL");
+    nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, compress_opts);
 
     /* Determine alpha from format */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
@@ -255,7 +288,6 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
      * pixels) avoids wasting bits on "invisible" RGB and prevents dark fringes
      * after decode. Only meaningful when format has an alpha channel. */
     bool premul = opts && opts->premultiplied;
-    NT_BUILD_ASSERT((!premul || has_alpha) && "texture encode: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
 
     uint8_t *premul_buf = NULL;
     const uint8_t *source = rgba_pixels;

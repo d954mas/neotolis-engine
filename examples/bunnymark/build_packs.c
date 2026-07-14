@@ -110,19 +110,19 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
 
-    nt_builder_begin_atlas(ctx, "bunnies", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "bunnies", &atlas_opts);
 
     /* Centre pivot for all sprites (default origin reset on set_region). */
     nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
     /* sprite_opts is centre pivot by default — origin_x=origin_y=0.5 */
 
-    nt_builder_atlas_add(ctx, "examples/bunnymark/raw/sd/bunny_red.png", &sprite_opts);
-    nt_builder_atlas_add(ctx, "examples/bunnymark/raw/sd/bunny_green.png", &sprite_opts);
-    nt_builder_atlas_add(ctx, "examples/bunnymark/raw/sd/bunny_blue.png", &sprite_opts);
-    nt_builder_atlas_add(ctx, "examples/bunnymark/raw/sd/bunny_yellow.png", &sprite_opts);
-    nt_builder_atlas_add(ctx, "examples/bunnymark/raw/sd/bunny_purple.png", &sprite_opts);
+    nt_atlas_add(atlas, "examples/bunnymark/raw/sd/bunny_red.png", &sprite_opts);
+    nt_atlas_add(atlas, "examples/bunnymark/raw/sd/bunny_green.png", &sprite_opts);
+    nt_atlas_add(atlas, "examples/bunnymark/raw/sd/bunny_blue.png", &sprite_opts);
+    nt_atlas_add(atlas, "examples/bunnymark/raw/sd/bunny_yellow.png", &sprite_opts);
+    nt_atlas_add(atlas, "examples/bunnymark/raw/sd/bunny_purple.png", &sprite_opts);
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
     (void)printf("  Atlas 'bunnies' added: 5 sprites (RECT, ppu=1.0)\n");
     // #endregion
 
@@ -189,14 +189,14 @@ int main(int argc, char *argv[]) {
     hd_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     hd_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
 
-    nt_builder_begin_atlas(ctx_hd, "bunnies", &hd_opts);
+    NtAtlasBuild *hd_atlas = nt_atlas_begin(ctx_hd, "bunnies", &hd_opts);
     /* atlas_add_glob picks up whatever 5 PNGs the user dropped in raw/hd/.
      * The user is expected to use the same 5 names (bunny_red.png …) so the
      * region name_hashes match SD — atlas merge keeps the region indices
      * stable on stack. atlas_add_glob requires opts->name == NULL
      * (each matched file derives its own name from basename). */
-    nt_builder_atlas_add_glob(ctx_hd, "examples/bunnymark/raw/hd/*.png", NULL);
-    nt_builder_end_atlas(ctx_hd);
+    nt_atlas_add_glob(hd_atlas, "examples/bunnymark/raw/hd/*.png", NULL);
+    (void)nt_atlas_commit(hd_atlas);
     (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=17.0)\n");
 
     nt_build_result_t r_hd = nt_builder_finish_pack(ctx_hd);

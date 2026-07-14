@@ -183,10 +183,11 @@ typedef struct {
 
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
+typedef struct NtAtlasBuild NtAtlasBuild;
 
 /* --- Content-error channel (see nt_build_error_t above) ---
- * get_errors exposes the sticky accumulator (add-order-stable); format renders
- * one line on demand (not stored, keeps the struct pure data).
+ * get_errors exposes errors from failed atlas commits. Commit order is stable;
+ * add order is stable within each transaction. format renders one line on demand.
  *
  * The returned pointer is a BORROWED, READ-ONLY view into the context: the
  * caller must NOT free it, and it is valid only until nt_builder_free_pack()
@@ -204,7 +205,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len);
 typedef struct nt_tex_compress_opts_t nt_tex_compress_opts_t;
 
 typedef struct {
-    nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    nt_texture_pixel_format_t format;       /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
     uint32_t max_size;                      /* 0 = no resize, otherwise max(w,h) clamped to this */
     const nt_tex_compress_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
     bool premultiplied;                     /* true = RGB premultiplied by alpha before encoding.
@@ -252,8 +253,8 @@ typedef enum {
 struct nt_tex_compress_opts_t {
     nt_tex_compress_mode_t mode; /* ETC1S or UASTC */
     uint32_t quality;            /* ETC1S: 1-255 (higher=better), UASTC: 0-4 (pack level) */
-    float endpoint_rdo_quality;  /* ETC1S: endpoint RDO threshold (0.0 = disabled). UASTC: RDO lambda (0.0 = disabled) */
-    float selector_rdo_quality;  /* ETC1S: selector RDO threshold (0.0 = disabled). UASTC: ignored */
+    float endpoint_rdo_quality;  /* ETC1S: 0..1e10. UASTC: 0 (off) or 0.001..50 */
+    float selector_rdo_quality;  /* ETC1S: 0..1e10. UASTC: ignored and canonicalized to 0 */
 };
 
 /* --- Compression presets (5 levels: lowest → highest) --- */
@@ -286,7 +287,7 @@ static inline nt_tex_compress_opts_t nt_tex_compress_uastc_default(void) { retur
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F}; }
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .endpoint_rdo_quality = 0.0F}; }
 
-/* --- Atlas options (begin_atlas configuration) --- */
+/* --- Atlas options (nt_atlas_begin configuration) --- */
 
 /* Per-sprite silhouette mode for the atlas packer.
  *
@@ -307,32 +308,31 @@ typedef enum {
 
 typedef struct {
     const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
-    nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    nt_texture_pixel_format_t format;       /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
     uint32_t max_size;                      /* max atlas page dimension (default: 2048) */
     uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                        /* atlas edge margin (default: 0) */
-    uint32_t extrude; /* AABB edge pixel duplication count. Default 0. Must stay 0 unless shape == NT_ATLAS_SHAPE_RECT — the packer reserves space for the silhouette envelope, not for an extrude band
-                         outside it. */
-    uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1) */
-    uint8_t max_vertices;    /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
-    nt_atlas_shape_t shape;  /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    bool allow_transform;    /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
-                              * false = identity only. Matches the transform field on AtlasPlacement /
-                              * NtAtlasRegion (default: true) */
-    bool power_of_two;       /* round atlas dims to POT (default: true) */
-    bool debug_png;          /* write debug atlas page PNGs (default: false) */
-    bool premultiplied;      /* true (default) = premultiply RGB by alpha during page encoding.
-                              * Required for correct bilinear filtering at sprite gaps.
-                              * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
-                              * Setting false is supported but emits a warning — valid only for
-                              * NEAREST-filtered or fully opaque atlases. */
-    float pixels_per_unit;   /* Atlas-level scale: source pixels per world unit.
-                              * 1.0F = 1 source pixel per unit (default). Combined with the runtime
-                              * cached_pos bake (ipu = 1 / pixels_per_unit), an HD pack with 3× source
-                              * pixels renders at the same on-screen size as the matching SD pack
-                              * sharing the same Transform. Stored as a 4-byte resource metadata blob
-                              * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
-                              * unchanged. Must be positive and finite. */
+    uint32_t extrude;                       /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
+    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1) */
+    uint8_t max_vertices;                   /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
+    nt_atlas_shape_t shape;                 /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
+    bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
+                                             * false = identity only. Matches the transform field on AtlasPlacement /
+                                             * NtAtlasRegion (default: true) */
+    bool power_of_two;                      /* round atlas dims to POT (default: true) */
+    bool debug_png;                         /* write debug atlas page PNGs (default: false) */
+    bool premultiplied;                     /* true (default) = premultiply RGB by alpha during page encoding.
+                                             * Required for correct bilinear filtering at sprite gaps.
+                                             * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
+                                             * Setting false is supported but emits a warning — valid only for
+                                             * NEAREST-filtered or fully opaque atlases. */
+    float pixels_per_unit;                  /* Atlas-level scale: source pixels per world unit.
+                                             * 1.0F = 1 source pixel per unit (default). Combined with the runtime
+                                             * cached_pos bake (ipu = 1 / pixels_per_unit), an HD pack with 3× source
+                                             * pixels renders at the same on-screen size as the matching SD pack
+                                             * sharing the same Transform. Stored as a 4-byte resource metadata blob
+                                             * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
+                                             * unchanged. Must be positive and finite. */
     /* Default sampler state baked into the atlas page texture's V3 header
      * (NtTextureAssetHeader.default_*). The activator creates a sampler from
      * these and binds it alongside the texture; materials may override per
@@ -370,7 +370,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
     };
 }
 
-/* --- Atlas sprite options (per-sprite, passed to atlas_add/add_raw/add_glob) --- */
+/* --- Atlas sprite options (per-sprite, passed to nt_atlas_add*) --- */
 
 /* Per-sprite shape/rotation overrides (0 = use atlas default). */
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
@@ -378,7 +378,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
 #define NT_ATLAS_SPRITE_ROTATE_NO 1
 
-/* Per-sprite opts struct for atlas_add / atlas_add_raw / atlas_add_glob.
+/* Per-sprite opts struct for nt_atlas_add / nt_atlas_add_raw / nt_atlas_add_glob.
  *
  * Common pattern: construct via nt_atlas_sprite_opts_defaults() and override
  * the fields you care about. Designated-initialiser compound literals
@@ -390,9 +390,9 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
  * shape=RECT and allow_rotate=NO at geometry/pack time. */
 typedef struct {
     /* Optional region name.
-     *   atlas_add:      NULL = derive from file path (basename with extension)
-     *   atlas_add_raw:  required (NT_BUILD_ASSERT — no path to derive from)
-     *   atlas_add_glob: MUST be NULL — each matched file derives its own name
+     *   nt_atlas_add:      NULL = derive from file path (basename with extension)
+     *   nt_atlas_add_raw:  required (NT_BUILD_ASSERT — no path to derive from)
+     *   nt_atlas_add_glob: MUST be NULL — each matched file derives its own name
      *                   (asserts otherwise to prevent name collisions across the glob) */
     const char *name;
 
@@ -473,17 +473,24 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
 
-/* --- Atlas API (begin/add/end pattern) ---
+/* --- Atlas API ---
  *
- * atlas_add / atlas_add_raw / atlas_add_glob accept an nt_atlas_sprite_opts_t*
+ * nt_atlas_add / nt_atlas_add_raw / nt_atlas_add_glob accept an nt_atlas_sprite_opts_t*
  * for per-sprite settings (name override, pivot point). Pass NULL to use
  * defaults (centre pivot, name from path). See nt_atlas_sprite_opts_t above
- * for field semantics and the zero-init footgun warning. */
-void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);
-void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts);
-void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts);
-void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts);
-void nt_builder_end_atlas(NtBuilderContext *ctx);
+ * for field semantics and the zero-init footgun warning.
+ *
+ * nt_atlas_commit is terminal: it builds and atomically publishes all atlas
+ * resources, or publishes none and appends its content errors to the pack.
+ * The handle is invalid after commit. A later atlas transaction still runs;
+ * nt_builder_finish_pack reports the aggregate failure of committed atlases.
+ * Configure cache and worker threads before begin; changing either while an
+ * atlas transaction is open asserts. Non-atlas add_* calls may interleave. */
+NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);
+void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_opts_t *opts);
+void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts);
+void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_sprite_opts_t *opts);
+nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas);
 
 /* --- Glob utility (exposed for custom add loops) --- */
 typedef void (*nt_builder_glob_callback_fn)(const char *full_path, void *user);

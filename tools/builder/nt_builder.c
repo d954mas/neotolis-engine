@@ -230,7 +230,7 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
         free(ctx->atlas_regions[i].path);
     }
     free(ctx->atlas_regions);
-    /* Free partial atlas state if begin_atlas was called but end_atlas never ran
+    /* Free partial atlas state if nt_atlas_begin was called but commit never ran
      * (e.g. NT_BUILD_ASSERT fired mid-pipeline, longjmp in tests). */
     if (ctx->active_atlas) {
         for (uint32_t i = 0; i < ctx->active_atlas->sprite_count; i++) {
@@ -264,11 +264,13 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
 
 void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count) {
     NT_BUILD_ASSERT(ctx && "set_threads called with NULL context");
+    NT_BUILD_ASSERT(!ctx->active_atlas && "set_threads: atlas transaction is open");
     ctx->thread_count = thread_count;
 }
 
 void nt_builder_set_threads_auto(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "set_threads_auto called with NULL context");
+    NT_BUILD_ASSERT(!ctx->active_atlas && "set_threads_auto: atlas transaction is open");
     uint32_t threads = 0;
 #ifdef _WIN32
     SYSTEM_INFO si;
@@ -324,6 +326,9 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_TEXTURE: {
         const NtBuildTextureData *ta = (const NtBuildTextureData *)a->data;
         const NtBuildTextureData *tb = (const NtBuildTextureData *)b->data;
+        if (ta->width != tb->width || ta->height != tb->height) {
+            return false;
+        }
         /* max_size is NOT compared here — it's applied during decode (resize),
          * so different max_size → different decoded pixels → different hash.
          * Only encode-affecting options need comparison. */
@@ -496,11 +501,11 @@ static int parallel_encode_worker(void *arg) {
 /* Map the first content error's kind to a coarse result. The unfittable/limit
  * family stays NT_BUILD_ERR_LIMIT; names → DUPLICATE; format/validation keep
  * their own categories so a caller can switch on the coarse result. */
-static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) {
-    if (ctx->error_count == 0) {
+nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
+    if (!error) {
         return NT_BUILD_ERR_LIMIT;
     }
-    switch (ctx->errors[0].kind) {
+    switch (error->kind) {
     case NT_BUILD_ERR_KIND_CORRUPT_IMAGE:
         return NT_BUILD_ERR_FORMAT;
     case NT_BUILD_ERR_KIND_ZERO_DIM:
@@ -525,15 +530,16 @@ static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *c
     }
 }
 
+static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) { return nt_builder_result_from_error(ctx->error_count ? &ctx->errors[0] : NULL); }
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
-    /* Lifecycle invariant: an atlas left open means end_atlas was never called,
-     * so its survivors were never validated. Trap regardless of poison state. */
-    NT_BUILD_ASSERT(!ctx->active_atlas && !ctx->skipped_atlas_open && "finish_pack: active atlas not ended — call end_atlas first");
-    /* A poisoned build writes no pack. Gate before the pending_count
+    /* An open atlas has not validated or published its resources. */
+    NT_BUILD_ASSERT(!ctx->active_atlas && "finish_pack: active atlas not committed");
+    /* A failed build writes no pack. Gate before the pending_count
      * assert — a fully-failed atlas-only pack can have pending_count == 0. */
-    if (ctx->poisoned) {
+    if (ctx->failed) {
         /* Remove any pre-existing good pack: no .ntpack must survive a failed rebuild.
          * A stale pack we cannot delete would masquerade as this build's output. */
         if (remove(ctx->output_path) != 0 && errno != ENOENT) {
@@ -541,7 +547,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         /* Also remove the stale generated header so a failed rebuild leaves neither
          * the pack nor an asset-ID header pointing at assets that were never built. */
-        char header_path[1024];
+        char header_path[NT_BUILD_HEADER_PATH_MAX];
         nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
         if (remove(header_path) != 0 && errno != ENOENT) {
             return NT_BUILD_ERR_IO;
@@ -1233,7 +1239,7 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *ou
     return pixels;
 }
 
-static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
+static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_tex_opts_t *opts, nt_texture_pixel_format_t effective_format) {
     NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;
@@ -1249,8 +1255,13 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
         if (opts->compress) {
             td->has_compress = true;
             td->compress = *opts->compress;
+            td->opts.gen_mipmaps = true;
+            if (td->compress.mode == NT_TEX_COMPRESS_UASTC) {
+                td->compress.selector_rdo_quality = 0.0F;
+            }
         }
     }
+    td->opts.format = effective_format;
     return td;
 }
 
@@ -1301,6 +1312,7 @@ void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "invalid add_texture args");
+    nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts, opts ? opts->compress : NULL);
 
     /* Resolve actual file path via asset roots */
     char *resolved_path = nt_builder_find_file(path, NULL, ctx);
@@ -1328,7 +1340,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
     free(pixels);
 
-    NtBuildTextureData *td = make_texture_data(w, h, opts);
+    NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
     td->source_path = stored_path;
     nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
 }
@@ -1385,6 +1397,7 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
 
 void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory args");
+    nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts, opts ? opts->compress : NULL);
 
     uint8_t *pixels = NULL;
     uint32_t w = 0;
@@ -1396,7 +1409,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
     free(pixels);
 
-    NtBuildTextureData *td = make_texture_data(w, h, opts);
+    NtBuildTextureData *td = make_texture_data(w, h, opts, effective_format);
     td->source_data = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(td->source_data && "add_texture_from_memory: source copy alloc failed");
     memcpy(td->source_data, data, size);
@@ -1409,6 +1422,7 @@ void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *da
 
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw args");
+    nt_texture_pixel_format_t effective_format = nt_builder_assert_texture_opts(opts, opts ? opts->compress : NULL);
 
     uint8_t *pixels = NULL;
     uint32_t w = 0;
@@ -1418,7 +1432,7 @@ void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixel
 
     /* Hash and keep decoded_data -- can't re-derive from source */
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts), pixels, w * h * 4, hash);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts, effective_format), pixels, w * h * 4, hash);
 }
 
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {

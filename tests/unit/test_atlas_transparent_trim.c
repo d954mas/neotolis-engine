@@ -33,7 +33,7 @@ void setUp(void) {}
 void tearDown(void) {}
 
 /* A fully-transparent sprite must produce a graceful TRANSPARENT_AFTER_TRIM
- * error: end_atlas does not abort, finish_pack writes no pack, and the whole
+ * error: commit reports validation failure, finish_pack writes no pack, and the whole
  * error path is leak-free (this test runs under live LSan). */
 void test_transparent_after_trim_reports_error(void) {
     (void)MKDIR(TMP_DIR);
@@ -43,16 +43,16 @@ void test_transparent_after_trim_reports_error(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    nt_builder_begin_atlas(ctx, "transparent", &opts);
+    NtAtlasBuild *atlas_build_46 = nt_atlas_begin(ctx, "transparent", &opts);
 
     /* 32x32 RGBA, all bytes 0 → alpha 0 everywhere → empty mask after trim. */
     uint8_t *pixels = (uint8_t *)calloc((size_t)32 * 32 * 4, 1);
     TEST_ASSERT_NOT_NULL(pixels);
     /* raw sprites require an explicit name (no path to derive one from). */
-    nt_builder_atlas_add_raw(ctx, pixels, 32, 32, &(nt_atlas_sprite_opts_t){.name = "ghost.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_46, pixels, 32, 32, &(nt_atlas_sprite_opts_t){.name = "ghost.png", .origin_x = 0.5F, .origin_y = 0.5F});
 
     /* No abort — the pipeline accumulates the error and cleans up. */
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas_build_46);
 
     uint32_t n = 0;
     const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
