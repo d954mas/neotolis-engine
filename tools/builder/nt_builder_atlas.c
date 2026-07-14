@@ -739,7 +739,9 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
      * programmer error still traps on a poisoned pack. NULL opts is always
      * valid (uses defaults). extrude>0 shape check is opts-only here. */
     if (opts) {
-        NT_BUILD_ASSERT(opts->max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
+        /* Lower bound 3: hull_simplify reduces to max_vertices AFTER the <3 hull
+         * guard, so max_vertices 1|2 yields a degenerate (line/point) polygon. */
+        NT_BUILD_ASSERT(opts->max_vertices >= 3 && opts->max_vertices <= 16 && "begin_atlas: max_vertices must be 3..16 (convex polygon needs >= 3 verts; NFP buffer limit nA+nB <= 32)");
         NT_BUILD_ASSERT(opts->max_size > 0 && opts->max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
         NT_BUILD_ASSERT(opts->padding <= opts->max_size && "begin_atlas: padding exceeds max_size");
         NT_BUILD_ASSERT(opts->margin <= opts->max_size && "begin_atlas: margin exceeds max_size");
@@ -818,7 +820,8 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
 static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
-    NT_BUILD_ASSERT(sopts->max_vertices <= 16 && "max_vertices override must be <= 16");
+    /* 0 = atlas default; otherwise 3..16 (see begin_atlas: <3 degenerates the hull). */
+    NT_BUILD_ASSERT((sopts->max_vertices == 0 || (sopts->max_vertices >= 3 && sopts->max_vertices <= 16)) && "max_vertices override must be 0 (atlas default) or 3..16");
 }
 
 /* Atlas-shape-dependent sprite cross-field asserts (slice9→RECT, extrude>0→RECT

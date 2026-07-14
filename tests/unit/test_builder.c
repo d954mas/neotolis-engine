@@ -4731,6 +4731,29 @@ void test_atlas_begin_bad_shape_asserts_after_poison(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "skipped", &bad));
 }
 
+/* Atlas max_vertices below 3 degenerates the simplified hull (hull_simplify
+ * reduces past the <3 guard) — begin_atlas must trap it. */
+void test_atlas_begin_max_vertices_too_low_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxv_low.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_vertices = 2; /* < 3 */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "lowv", &opts));
+}
+
+/* A per-sprite max_vertices override of 0 means "atlas default"; any other value
+ * below 3 is the same degenerate-hull caller bug and must trap. */
+void test_atlas_add_raw_max_vertices_override_too_low_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxv_ovr_low.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_begin_atlas(ctx, "ovr", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "v.png", .origin_x = 0.5F, .origin_y = 0.5F, .max_vertices = 1}));
+    free(s);
+}
+
 /* An empty skipped atlas (begin + end, zero adds) must trap the empty-atlas
  * invariant just like the packing path — the caller-visible contract is
  * unchanged whether or not the pack is poisoned. */
@@ -6379,6 +6402,8 @@ int main(void) {
     RUN_TEST(test_atlas_add_raw_extrude_convex_default_asserts);
     RUN_TEST(test_atlas_begin_bad_format_asserts_after_poison);
     RUN_TEST(test_atlas_begin_bad_shape_asserts_after_poison);
+    RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);
+    RUN_TEST(test_atlas_add_raw_max_vertices_override_too_low_asserts);
     RUN_TEST(test_atlas_empty_skipped_atlas_asserts);
 
     /* Atlas round-trip tests */
