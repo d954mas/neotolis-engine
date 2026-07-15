@@ -34,9 +34,12 @@ bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t threshold,
 /* Andrew's monotone chain convex hull. out must hold at least 2*n points. */
 uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out);
 
-/* Min-area vertex removal simplification of a convex polygon.
- * Result still contains the original polygon (every removal grows area). */
+/* Min-area vertex removal simplification of a convex polygon. */
 uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out);
+
+/* Reduce a CCW convex polygon while keeping every prior point enclosed.
+ * Returns 0 when no finite, non-degenerate enclosing reduction exists. */
+uint32_t hull_simplify_covering(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out);
 
 /* Greedy perpendicular-distance simplification. Always produces exactly
  * min(n, max_vertices) vertices. out_max_dev returns the largest seen

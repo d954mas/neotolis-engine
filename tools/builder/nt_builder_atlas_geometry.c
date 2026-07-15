@@ -142,10 +142,7 @@ uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out) {
     return k;
 }
 /* --- Convex hull simplification: min-area vertex removal --- */
-/* Iteratively remove the vertex whose removal adds the smallest triangle area.
- * For convex polygons, removing a vertex always makes the polygon LARGER —
- * the edge between neighbors passes OUTSIDE the removed vertex.
- * Result is guaranteed to fully contain the original hull. */
+/* Iteratively remove the vertex with the smallest adjacent triangle area. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
@@ -210,6 +207,176 @@ uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, P
     }
 
     free(keep);
+    return count;
+}
+
+static bool covering_line_intersection(Point2D a, Point2D b, Point2D c, Point2D d, double *out_x, double *out_y) {
+    double ab_x = (double)a.x - (double)b.x;
+    double ab_y = (double)a.y - (double)b.y;
+    double cd_x = (double)c.x - (double)d.x;
+    double cd_y = (double)c.y - (double)d.y;
+    double det = (ab_x * cd_y) - (ab_y * cd_x);
+    if (!isfinite(det) || fabs(det) <= 1e-12) {
+        return false;
+    }
+    double ab_cross = ((double)a.x * (double)b.y) - ((double)a.y * (double)b.x);
+    double cd_cross = ((double)c.x * (double)d.y) - ((double)c.y * (double)d.x);
+    double x = ((ab_cross * cd_x) - (ab_x * cd_cross)) / det;
+    double y = ((ab_cross * cd_y) - (ab_y * cd_cross)) / det;
+    if (!isfinite(x) || !isfinite(y) || x < (double)INT32_MIN || x > (double)INT32_MAX || y < (double)INT32_MIN || y > (double)INT32_MAX) {
+        return false;
+    }
+    *out_x = x;
+    *out_y = y;
+    return true;
+}
+
+static void covering_replace_edge(const Point2D *poly, const uint32_t *source_indices, uint32_t count, uint32_t edge, Point2D replacement, Point2D *out, uint32_t *out_source_indices) {
+    uint32_t next = (edge + 1) % count;
+    uint32_t after = (next + 1) % count;
+    out[0] = replacement;
+    out_source_indices[0] = source_indices[edge] < source_indices[next] ? source_indices[edge] : source_indices[next];
+    for (uint32_t dst = 1, src = after; dst < count - 1; dst++, src = (src + 1) % count) {
+        out[dst] = poly[src];
+        out_source_indices[dst] = source_indices[src];
+    }
+}
+
+static bool covering_is_strict_convex(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1) % count];
+        Point2D c = poly[(i + 2) % count];
+        double cross = (((double)b.x - (double)a.x) * ((double)c.y - (double)b.y)) - (((double)b.y - (double)a.y) * ((double)c.x - (double)b.x));
+        if (!(cross > 0.0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool covering_encloses(const Point2D *poly, uint32_t poly_count, const Point2D *points, uint32_t point_count) {
+    for (uint32_t edge = 0; edge < poly_count; edge++) {
+        Point2D a = poly[edge];
+        Point2D b = poly[(edge + 1) % poly_count];
+        double dx = (double)b.x - (double)a.x;
+        double dy = (double)b.y - (double)a.y;
+        for (uint32_t i = 0; i < point_count; i++) {
+            double px = (double)points[i].x - (double)a.x;
+            double py = (double)points[i].y - (double)a.y;
+            if ((dx * py) - (dy * px) < -1e-9) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+uint32_t hull_simplify_covering(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
+    if (!hull || !out || n < 3 || max_vertices < 3) {
+        return 0;
+    }
+    if (n <= max_vertices) {
+        memcpy(out, hull, (size_t)n * sizeof(Point2D));
+        return n;
+    }
+
+    Point2D *current = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    Point2D *scratch = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    uint32_t *current_sources = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+    uint32_t *scratch_sources = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+    NT_BUILD_ASSERT(current && scratch && current_sources && scratch_sources && "hull_simplify_covering: alloc failed");
+    memcpy(current, hull, (size_t)n * sizeof(Point2D));
+    for (uint32_t i = 0; i < n; i++) {
+        current_sources[i] = i;
+    }
+
+    uint32_t count = n;
+    while (count > max_vertices) {
+        bool found = false;
+        double best_error = HUGE_VAL;
+        uint32_t best_source = UINT32_MAX;
+        uint32_t best_edge = 0;
+        Point2D best_point = {0};
+
+        for (uint32_t edge = 0; edge < count; edge++) {
+            uint32_t prev = (edge + count - 1) % count;
+            uint32_t next = (edge + 1) % count;
+            uint32_t after = (next + 1) % count;
+            double ix = 0.0;
+            double iy = 0.0;
+            if (!covering_line_intersection(current[prev], current[edge], current[next], current[after], &ix, &iy)) {
+                continue;
+            }
+
+            double edge_dx = (double)current[next].x - (double)current[edge].x;
+            double edge_dy = (double)current[next].y - (double)current[edge].y;
+            double edge_len = sqrt((edge_dx * edge_dx) + (edge_dy * edge_dy));
+            if (!(edge_len > 0.0)) {
+                continue;
+            }
+            double error = fabs((((ix - (double)current[edge].x) * edge_dy) - ((iy - (double)current[edge].y) * edge_dx)) / edge_len);
+
+            double rounded_x[2] = {floor(ix), ceil(ix)};
+            double rounded_y[2] = {floor(iy), ceil(iy)};
+            bool rounded_found = false;
+            double rounded_error = HUGE_VAL;
+            Point2D rounded_point = {0};
+            for (uint32_t yi = 0; yi < 2; yi++) {
+                for (uint32_t xi = 0; xi < 2; xi++) {
+                    Point2D candidate = {(int32_t)rounded_x[xi], (int32_t)rounded_y[yi]};
+                    covering_replace_edge(current, current_sources, count, edge, candidate, scratch, scratch_sources);
+                    if (!covering_is_strict_convex(scratch, count - 1) || !covering_encloses(scratch, count - 1, current, count)) {
+                        continue;
+                    }
+                    double rx = (double)candidate.x - ix;
+                    double ry = (double)candidate.y - iy;
+                    double rounding = (rx * rx) + (ry * ry);
+                    if (!rounded_found || rounding < rounded_error) {
+                        rounded_found = true;
+                        rounded_error = rounding;
+                        rounded_point = candidate;
+                    }
+                }
+            }
+            if (!rounded_found) {
+                continue;
+            }
+
+            uint32_t source = current_sources[edge] < current_sources[next] ? current_sources[edge] : current_sources[next];
+            if (!found || error < best_error || (error == best_error && source < best_source)) {
+                found = true;
+                best_error = error;
+                best_source = source;
+                best_edge = edge;
+                best_point = rounded_point;
+            }
+        }
+
+        if (!found) {
+            free(scratch_sources);
+            free(current_sources);
+            free(scratch);
+            free(current);
+            return 0;
+        }
+
+        covering_replace_edge(current, current_sources, count, best_edge, best_point, scratch, scratch_sources);
+        Point2D *point_swap = current;
+        current = scratch;
+        scratch = point_swap;
+        uint32_t *source_swap = current_sources;
+        current_sources = scratch_sources;
+        scratch_sources = source_swap;
+        count--;
+    }
+
+    memcpy(out, current, (size_t)count * sizeof(Point2D));
+    free(scratch_sources);
+    free(current_sources);
+    free(scratch);
+    free(current);
     return count;
 }
 

@@ -156,6 +156,47 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
  * avoids raw double-bit comparison flagging benign last-ULP noise as regression. */
 static int64_t density_fixed(double d) { return llround(d * 1000000.0); }
 
+static bool files_are_identical(const char *a_path, const char *b_path) {
+    FILE *a = fopen(a_path, "rb");
+    FILE *b = fopen(b_path, "rb");
+    if (!a || !b) {
+        if (a) {
+            (void)fclose(a);
+        }
+        if (b) {
+            (void)fclose(b);
+        }
+        return false;
+    }
+
+    bool equal = true;
+    uint8_t a_buf[4096];
+    uint8_t b_buf[4096];
+    for (;;) {
+        size_t a_size = fread(a_buf, 1, sizeof(a_buf), a);
+        size_t b_size = fread(b_buf, 1, sizeof(b_buf), b);
+        if (a_size != b_size || memcmp(a_buf, b_buf, a_size) != 0) {
+            equal = false;
+            break;
+        }
+        if (a_size < sizeof(a_buf)) {
+            equal = feof(a) != 0 && feof(b) != 0;
+            break;
+        }
+    }
+
+    (void)fclose(a);
+    (void)fclose(b);
+    return equal;
+}
+
+void test_default_pack_matches_legacy_golden(void) {
+    nt_bench_atlas_metrics_t metrics;
+    const char *actual = TMP_DIR "/det_corpus_legacy_check.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(actual, &metrics), "pack/parse failed");
+    TEST_ASSERT_TRUE_MESSAGE(files_are_identical(actual, "tests/fixtures/atlas_default_legacy.ntpack"), "default atlas bytes drifted from legacy golden");
+}
+
 /* Two in-process packs of the SAME corpus at default opts must produce identical
  * region/page/vertex/hull counts and a bit-stable density. */
 void test_metrics_stable_across_two_packs(void) {
@@ -447,6 +488,7 @@ void test_margin_override_content_centered(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_default_pack_matches_legacy_golden);
     RUN_TEST(test_metrics_stable_across_two_packs);
     RUN_TEST(test_metrics_match_pinned_baseline);
     RUN_TEST(test_margin_override_content_centered);

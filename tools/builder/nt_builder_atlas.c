@@ -1455,16 +1455,32 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
 
             if (effective_shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
-                /* Convex hull mode: skip morphological closing, contour trace, and
-                 * the 4-strategy concave pipeline. The convex hull of opaque pixels
-                 * trivially contains disjoint components and every opaque pixel, so
-                 * none of that machinery is needed. */
+                /* Preserve legacy output unless its budget reduction loses coverage. */
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, effective_max_verts, &p->vertex_counts[idx]);
-                free(binary);
                 if (!p->hull_vertices[idx]) {
                     /* Empty mask / degenerate hull — graceful error, skip sprite. */
                     push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
+                } else if (polygon_max_outside_pixel_distance(p->hull_vertices[idx], p->vertex_counts[idx], binary, tw, th) > 0.0) {
+                    uint32_t raw_count = 0;
+                    Point2D *raw = binary_build_convex_polygon(binary, tw, th, UINT32_MAX, &raw_count);
+                    Point2D *covering = raw ? (Point2D *)malloc((size_t)raw_count * sizeof(Point2D)) : NULL;
+                    NT_BUILD_ASSERT(!raw || covering);
+                    uint32_t covering_count = raw ? hull_simplify_covering(raw, raw_count, effective_max_verts, covering) : 0;
+                    bool covering_ok = covering_count >= 3 && covering_count <= effective_max_verts && polygon_max_outside_pixel_distance(covering, covering_count, binary, tw, th) <= 0.0;
+                    free(raw);
+                    if (covering_ok) {
+                        free(p->hull_vertices[idx]);
+                        p->hull_vertices[idx] = covering;
+                        p->vertex_counts[idx] = covering_count;
+                    } else {
+                        free(covering);
+                        free(p->hull_vertices[idx]);
+                        p->hull_vertices[idx] = NULL;
+                        p->vertex_counts[idx] = 0;
+                        push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
+                    }
                 }
+                free(binary);
                 continue;
             }
 

@@ -5373,6 +5373,70 @@ void test_atlas_shape_convex_hull_produces_polygon(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_convex_budget_preserves_all_retained_pixels(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_convex_budget_coverage.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    enum { W = 16, H = 16, BUDGET = 4 };
+    const Point2D source_hull[] = {
+        {3, 0}, {12, 0}, {16, 5}, {16, 11}, {10, 16}, {2, 16}, {0, 12}, {0, 4},
+    };
+    uint8_t *rgba = make_test_sprite(W, H, 255, 255, 255, 0);
+    uint8_t binary[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            if (point_in_polygon_f(source_hull, (uint32_t)(sizeof(source_hull) / sizeof(source_hull[0])), (double)x + 0.5, (double)y + 0.5)) {
+                binary[(y * W) + x] = 1;
+                rgba[((((size_t)y * W) + x) * 4) + 3] = 255;
+            }
+        }
+    }
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    opts.max_vertices = BUDGET;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "convex", &opts);
+    nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "asymmetric_octagon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(rgba);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(path, &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+    const NtAtlasRegion *region = (const NtAtlasRegion *)(ablob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
+    const NtAtlasVertex *vertices = (const NtAtlasVertex *)(ablob + header->vertex_offset);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(BUDGET, region->vertex_count);
+
+    Point2D emitted[16];
+    for (uint32_t i = 0; i < region->vertex_count; i++) {
+        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
+        emitted[i].x = vertex->local_x;
+        emitted[i].y = H - vertex->local_y;
+    }
+    double max_outside = polygon_max_outside_pixel_distance(emitted, region->vertex_count, binary, W, H);
+    TEST_ASSERT_TRUE_MESSAGE(max_outside <= 0.0, "convex vertex budget dropped a retained pixel");
+
+    free(buf);
+    (void)remove(path);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_detection(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_dedup.ntpack");
@@ -6991,6 +7055,7 @@ int main(void) {
     RUN_TEST(test_atlas_round_trip_vertices);
     RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
     RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
+    RUN_TEST(test_convex_budget_preserves_all_retained_pixels);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
