@@ -193,6 +193,7 @@ nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* atlas-level: packer, format
 opts.max_size = 2048;
 opts.max_vertices = 8;
 opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+opts.tracer_tolerance = 2.0F; /* measured starting point for anti-aliased art */
 
 NtAtlasBuild *atlas = nt_atlas_begin(ctx, "hero", &opts);
 
@@ -221,10 +222,10 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 
 `nt_atlas_commit` runs these stages in order:
 
-1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
-2. **cache_check** — compute atlas-level cache key (per-sprite pixel hash, source dimensions, origins, overrides, pack-affecting opts, and version), then try loading cached placement and pages. The key is add-order-sensitive because cached placements reference sprite indices. Post-pack fields are excluded because the texture encode stage has its own cache.
+1. **alpha_trim** — resolve the per-sprite `alpha_threshold` (a zero override inherits the atlas value), extract the alpha plane, and find the tight retained-pixel bbox (rejects fully transparent inputs).
+2. **cache_check** — compute atlas-level cache key (per-sprite pixel hash, source dimensions, origins, raw overrides, pack-affecting opts, and version), then try loading cached placement and pages. The key is add-order-sensitive because cached placements reference sprite indices. Post-pack fields are excluded because the texture encode stage has its own cache.
 3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
-4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
+4. **geometry** — for each unique sprite, build the binary mask from the same effective alpha threshold and select the shape-specific geometry path. `RECT` emits the trim AABB. `CONVEX_HULL` starts from the opaque-pixel convex hull. `CONCAVE_CONTOUR` performs morphological closing when needed, traces the boundary, and evaluates concave simplifiers. Polygon candidates share coverage, fidelity, vertex-budget, and deterministic-selection checks described below.
 5. **pipeline_validate** — non-mutating pre-pack checks that report every bad sprite in one pass: empty-page fit, duplicate region names, region-count cap, and per-sprite trim-dimension limits. It still runs on surviving sprites after earlier content errors.
 6. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
 7. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
@@ -232,7 +233,7 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 9. **cache_write/debug_png** — persist optional successful-build artifacts after all recoverable work has succeeded.
 10. **publish** — register the atlas blob, page textures, metadata, and region codegen in the pack. Capacity, allocation, and resource-ID failures assert and terminate the build; they are not recoverable rollback paths.
 
-Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish the same output.
+Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish the same output. Before a polygon candidate is accepted, every retained pixel centre must be inside or on its boundary; simplification may never trade coverage for fewer vertices.
 
 ### Vector packer
 
@@ -263,6 +264,7 @@ typedef struct {
     uint32_t margin;                        /* atlas edge margin (default 0) */
     uint32_t extrude;                       /* AABB edge duplication (default 0; <= max_size; RECT only when non-zero) */
     uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
+    float tracer_tolerance;                 /* pixel-domain fidelity tolerance (default 0.0F = legacy; RECT ignores it) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;                   /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
@@ -278,10 +280,20 @@ typedef struct {
 - `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified to `max_vertices`. Skips morphological closing, contour tracing, RDP, and the 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
 - `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs RDP plus a multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull), Clipper2-inflates the chosen polygon, and post-verifies pixel coverage. Internally falls back to `binary_build_convex_polygon` for degenerate inputs (disjoint components that morphological closing cannot merge, degenerate contours, Clipper2 inflate failure). Densest packing, highest cost.
 
+**Threshold, tolerance, and compatibility contract:**
+
+- `alpha_threshold` defines retained pixels for both trimming and geometry. A pixel is retained when `alpha >= effective_alpha_threshold`; per-sprite `0` inherits the atlas value. Anti-aliased fringe pixels therefore participate when their alpha reaches the configured threshold.
+- `tracer_tolerance` is a non-negative pixel-domain upper bound on boundary error. Per-sprite `0.0F` inherits the atlas value. `RECT` ignores tolerance but still uses the effective threshold for its trim AABB.
+- At the default `0.0F`, the established zero-tolerance path remains byte-identical. Concave candidates keep the legacy area-first strategy order. Convex hulls keep the legacy reduction unless that result is proven to lose retained-pixel coverage, in which case only the covering reducer correction is used.
+- At positive tolerance, convex and concave modes evaluate feasible vertex counts from 3 through `max_vertices`. Feasibility requires exact retained-pixel coverage, boundary error no greater than the tolerance, a valid simple polygon, and the vertex budget. Candidate selection is deterministic and count-first, then final polygon area, generator order, and stable vertex coordinates/order.
+- Convex and concave modes keep separate source geometry and simplifiers: convex starts from the opaque-pixel convex hull, while concave starts from its cleaned traced boundary. Both use the same final coverage, fidelity, and deterministic-selection contract. When no lower-count candidate is feasible, the max-budget covering path is retained rather than accepting pixel loss.
+- These controls affect builder geometry and atlas cache identity only. They do not change the runtime API or the on-disk atlas format.
+
 **Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format` is a hard assert.
 
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.
+- `tracer_tolerance` must be finite and non-negative at atlas and per-sprite boundaries. NaN, infinity, and negative values are caller bugs and assert; signed zero is canonicalized to positive zero.
 - `3 ≤ max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`; below 3 the simplified hull degenerates to a line/point. The per-sprite override is `0` (atlas default) or `3..16`.
 - Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
 - Per-atlas `vertex_start` / `index_start` are `uint32_t`.
@@ -299,6 +311,8 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
+    float tracer_tolerance;  /* 0 = atlas default; finite, non-negative; RECT ignores it */
+    uint8_t alpha_threshold; /* 0 = atlas default */
     uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
     uint8_t max_vertices; /* 0 = atlas default, max 16 */
@@ -310,6 +324,23 @@ typedef struct {
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.
+
+**Measured tolerance guidance (`mixed_aa`, native release):**
+
+The benchmark corpus contains 4,812 anti-aliased sprites. Every row below produced one page and an exact repeat pack hash. `pack_ms` is recorded for diagnostics only: it is wall-clock timing from one local run and is not an acceptance threshold.
+
+| Tolerance (px) | Hull vertices total | Mean | Texture fill | Pack bytes | Pack ms | Pack SHA-256 |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0.00 | 37,514 | 7.7959 | 0.6304 | 67,557,296 | 26,630.61 | `d10a415f7e46dc45b6555b685199d05c4d3cdf1e0dcb978ea69e90eb79cb387d` |
+| 0.50 | 35,856 | 7.4514 | 0.6610 | 67,545,688 | 38,271.51 | `1bea6f863a8d73597fcc49e4c135fc61c01dddf11507cd0de1d2a86a17a889cf` |
+| 1.00 | 30,574 | 6.3537 | 0.6608 | 67,512,468 | 28,343.48 | `a03eb0af151f46693ca61a5dcd3fb115ac9666ae218d9f89e2b50972b8fdaeff` |
+| 1.25 | 30,530 | 6.3446 | 0.6606 | 67,512,244 | 28,586.01 | `965308910685dc0b3fc8d4a5b8c4d6f393c0cb87415390ded6802a3e301f951c` |
+| 1.50 | 29,778 | 6.1883 | 0.6577 | 67,508,464 | 29,275.34 | `7056d3b1809625140186316ff437cd462bd388ac18e633fd5b62d31651b42c65` |
+| 1.75 | 28,602 | 5.9439 | 0.6577 | 67,501,128 | 28,740.19 | `b182f1878db103b278af0f98da7ca08876499b8394262f7f0043c729ebf6e803` |
+| 2.00 | 26,208 | 5.4464 | 0.6578 | 67,485,656 | 24,405.38 | `f6f9343f695e0d8f1f336c5b3797a5d2cba7ba3e72d4e8cbb957a6ee217d2c8a` |
+| 3.00 | 25,014 | 5.1983 | 0.6571 | 67,477,384 | 22,003.98 | `857859bb6848354e4cc5c00cf113222f1c4fa52501d0bb3369e17e675487b1c2` |
+
+For similar anti-aliased art, `2.0F` is the measured practical starting point: versus zero it reduces mean vertices by 30.1% and raises texture fill by 0.0274 absolute. `1.0F` to `1.5F` preserves a tighter silhouette when fidelity matters more; `3.0F` reduces mean vertices only another 4.6% from `2.0F` and slightly lowers fill. The API default remains `0.0F` for byte-compatible existing builds.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
@@ -326,10 +357,10 @@ typedef struct {
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 13. Pack options include atlas `alpha_threshold` and `tracer_tolerance`; raw per-sprite identity includes both overrides even when they currently resolve to an inherited value. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 
-**Invalidation:** any change to source pixels, opts, or `ATLAS_CACHE_KEY_VERSION` produces a fresh key. The version constant is bumped when the packer's behavior changes in a way that would silently produce different output.
+**Invalidation:** any change to source pixels, raw pack-affecting overrides, pack opts, or `ATLAS_CACHE_KEY_VERSION` produces a fresh key. The version constant is bumped when the packer's behavior changes in a way that would silently produce different output. Leaving every new control at its default preserves the established zero-tolerance bytes.
 
 **Failure mode:** atomic temp+rename writes; read/write failures fall through to a fresh build, never break it.
