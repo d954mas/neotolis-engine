@@ -5940,6 +5940,133 @@ static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf) {
     return NULL;
 }
 
+static void build_concave_tolerance_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float tolerance, uint8_t max_vertices, const char *name) {
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    opts.tracer_tolerance = tolerance;
+    opts.max_vertices = max_vertices;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "concave", &opts);
+    nt_atlas_add_raw(atlas, rgba, width, height, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+}
+
+static uint32_t atlas_region_y_down_points(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]) {
+    for (uint32_t i = 0; i < region->vertex_count; i++) {
+        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
+        out[i].x = vertex->local_x;
+        out[i].y = (int32_t)trim_height - vertex->local_y;
+    }
+    return region->vertex_count;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_concave_positive_tolerance_is_count_first(void) {
+    (void)MKDIR(TMP_DIR);
+    enum { W = 28, H = 20, BUDGET = 8 };
+    uint8_t rgba[W * H * 4] = {0};
+    uint8_t binary[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        uint32_t edge = y + ((y >= 7 && y <= 10) ? 1U : 0U);
+        for (uint32_t x = 0; x < W; x++) {
+            uint8_t alpha = 0;
+            if (x >= edge + 3) {
+                alpha = 255;
+            } else if (x >= edge) {
+                alpha = (uint8_t)(64U + ((x - edge) * 64U));
+            }
+            size_t pixel = ((size_t)y * W) + x;
+            rgba[(pixel * 4) + 0] = 30;
+            rgba[(pixel * 4) + 1] = 180;
+            rgba[(pixel * 4) + 2] = 220;
+            rgba[(pixel * 4) + 3] = alpha;
+            binary[pixel] = alpha > 0 ? 1 : 0;
+        }
+    }
+
+    const char *positive_path = TMP_DIR "/concave_tolerance_positive.ntpack";
+    build_concave_tolerance_fixture(positive_path, rgba, W, H, 1.5F, BUDGET, "aa_notch");
+
+    const NtAtlasRegion *positive_regions = NULL;
+    uint32_t positive_region_count = 0;
+    uint8_t *positive_pack = read_atlas_blob(positive_path, &positive_regions, &positive_region_count);
+    TEST_ASSERT_NOT_NULL(positive_pack);
+    TEST_ASSERT_EQUAL_UINT32(1, positive_region_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, positive_regions[0].vertex_count);
+
+    Point2D emitted[16];
+    const NtAtlasVertex *positive_vertices = atlas_blob_vertices(positive_pack);
+    uint32_t emitted_count = atlas_region_y_down_points(&positive_regions[0], positive_vertices, H, emitted);
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
+
+    Point2D contour[(W * H * 2) + 2];
+    Point2D clean[(W * H * 2) + 2];
+    bool overflow = false;
+    uint32_t contour_count = trace_contour(binary, W, H, contour, (W * H * 2) + 2, &overflow);
+    TEST_ASSERT_FALSE(overflow);
+    uint32_t clean_count = remove_collinear(contour, contour_count, clean);
+    TEST_ASSERT_TRUE(polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count) <= 1.5);
+
+    free(positive_pack);
+    (void)remove(positive_path);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_concave_positive_budget_fallback_keeps_real_corner(void) {
+    (void)MKDIR(TMP_DIR);
+    enum { W = 12, H = 12, BUDGET = 5 };
+    uint8_t rgba[W * H * 4] = {0};
+    uint8_t binary[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            bool opaque = !(x >= 6 && x < 8 && y < 7);
+            size_t pixel = ((size_t)y * W) + x;
+            rgba[(pixel * 4) + 0] = 220;
+            rgba[(pixel * 4) + 1] = 90;
+            rgba[(pixel * 4) + 2] = 40;
+            rgba[(pixel * 4) + 3] = opaque ? 255 : 0;
+            binary[pixel] = opaque ? 1 : 0;
+        }
+    }
+
+    const char *path = TMP_DIR "/concave_tolerance_budget.ntpack";
+    build_concave_tolerance_fixture(path, rgba, W, H, 0.1F, BUDGET, "deep_notch");
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(pack);
+    TEST_ASSERT_EQUAL_UINT32(1, region_count);
+    TEST_ASSERT_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
+
+    Point2D emitted[16];
+    uint32_t emitted_count = atlas_region_y_down_points(&regions[0], atlas_blob_vertices(pack), H, emitted);
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
+
+    Point2D contour[(W * H * 2) + 2];
+    Point2D clean[(W * H * 2) + 2];
+    bool overflow = false;
+    uint32_t contour_count = trace_contour(binary, W, H, contour, (W * H * 2) + 2, &overflow);
+    TEST_ASSERT_FALSE(overflow);
+    uint32_t clean_count = remove_collinear(contour, contour_count, clean);
+    double fidelity = polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count);
+    TEST_ASSERT_TRUE(fidelity > 0.1);
+
+    bool retained_notch_corner = false;
+    for (uint32_t i = 0; i < emitted_count; i++) {
+        if (emitted[i].x == 6 && emitted[i].y == 0) {
+            retained_notch_corner = true;
+        }
+    }
+    TEST_ASSERT_TRUE(retained_notch_corner);
+
+    free(pack);
+    (void)remove(path);
+}
+
 static const NtAtlasRegion *find_atlas_region(const NtAtlasRegion *regions, uint32_t count, const char *name) {
     uint64_t name_hash = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < count; i++) {
@@ -7424,6 +7551,8 @@ int main(void) {
     /* Atlas cache hardening + BUG-2 regression */
     RUN_TEST(test_atlas_cache_identity_includes_geometry_controls);
     RUN_TEST(test_atlas_cache_signed_zero_tolerance_is_identical);
+    RUN_TEST(test_concave_positive_tolerance_is_count_first);
+    RUN_TEST(test_concave_positive_budget_fallback_keeps_real_corner);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);

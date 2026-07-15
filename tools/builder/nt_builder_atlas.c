@@ -1302,9 +1302,16 @@ typedef struct {
     Point2D *poly;      /* heap-allocated, caller frees if not adopted */
     uint32_t count;     /* vertex count */
     double inflate_amt; /* required Clipper2 inflate amount (pixels) */
-    double est_area;    /* scoring key — lower is better */
-    bool valid;         /* false = strategy declined / produced degenerate output */
+    double fidelity_error;
+    uint32_t generator_ordinal;
+    double est_area; /* scoring key — lower is better */
+    bool valid;      /* false = strategy declined / produced degenerate output */
 } GeometryCandidate;
+
+typedef struct {
+    Point2D poly[16];
+    uint32_t count;
+} GeometrySeenPolygon;
 
 static double geometry_estimate_inflated_area(const Point2D *poly, uint32_t count, double inflate_amt) {
     double perim = 0.0;
@@ -1329,6 +1336,118 @@ static void geometry_maybe_adopt(GeometryCandidate *current, GeometryCandidate c
     } else {
         free(candidate.poly);
     }
+}
+
+static void geometry_candidate_discard(GeometryCandidate *candidate) {
+    free(candidate->poly);
+    *candidate = (GeometryCandidate){0};
+}
+
+static bool geometry_candidate_better_positive(const GeometryCandidate *candidate, const GeometryCandidate *current) {
+    if (!current->valid || candidate->count != current->count) {
+        return !current->valid || candidate->count < current->count;
+    }
+    if (candidate->est_area != current->est_area) {
+        return candidate->est_area < current->est_area;
+    }
+    if (candidate->generator_ordinal != current->generator_ordinal) {
+        return candidate->generator_ordinal < current->generator_ordinal;
+    }
+    for (uint32_t i = 0; i < candidate->count; i++) {
+        if (candidate->poly[i].x != current->poly[i].x) {
+            return candidate->poly[i].x < current->poly[i].x;
+        }
+        if (candidate->poly[i].y != current->poly[i].y) {
+            return candidate->poly[i].y < current->poly[i].y;
+        }
+    }
+    return false;
+}
+
+static bool geometry_reduce_to_budget(Point2D **poly, uint32_t *count, uint32_t max_vertices) {
+    if (*count <= max_vertices) {
+        return true;
+    }
+    Point2D *reduced = (Point2D *)malloc((size_t)*count * sizeof(Point2D));
+    NT_BUILD_ASSERT(reduced && "geometry_reduce_to_budget: alloc failed");
+    double ignored_error = 0.0;
+    uint32_t reduced_count = hull_simplify_perp(*poly, *count, max_vertices, reduced, &ignored_error);
+    free(*poly);
+    *poly = reduced;
+    *count = reduced_count;
+    return reduced_count >= 3 && reduced_count <= max_vertices;
+}
+
+static bool geometry_inflate_candidate(Point2D **poly, uint32_t *count, double amount, uint32_t max_vertices) {
+    int32_t *source_xy = (int32_t *)malloc((size_t)*count * 2 * sizeof(int32_t));
+    NT_BUILD_ASSERT(source_xy && "geometry_inflate_candidate: alloc failed");
+    for (uint32_t i = 0; i < *count; i++) {
+        source_xy[(size_t)i * 2] = (*poly)[i].x;
+        source_xy[((size_t)i * 2) + 1] = (*poly)[i].y;
+    }
+
+    int32_t *inflated_xy = NULL;
+    uint32_t inflated_count = nt_clipper2_inflate(source_xy, *count, amount, &inflated_xy);
+    free(source_xy);
+    if (inflated_count < 3 || !inflated_xy) {
+        free(inflated_xy);
+        return false;
+    }
+
+    Point2D *inflated = (Point2D *)malloc((size_t)inflated_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(inflated && "geometry_inflate_candidate: alloc failed");
+    for (uint32_t i = 0; i < inflated_count; i++) {
+        inflated[i] = (Point2D){inflated_xy[(size_t)i * 2], inflated_xy[((size_t)i * 2) + 1]};
+    }
+    free(inflated_xy);
+    free(*poly);
+    *poly = inflated;
+    *count = inflated_count;
+    return geometry_reduce_to_budget(poly, count, max_vertices);
+}
+
+static bool geometry_finalize_candidate(GeometryCandidate *candidate, const Point2D *reference, uint32_t reference_count, const uint8_t *binary_source, uint32_t tw, uint32_t th,
+                                        uint32_t max_vertices) {
+    if (!candidate->valid || candidate->count < 3 || candidate->count > max_vertices) {
+        geometry_candidate_discard(candidate);
+        return false;
+    }
+
+    double outside = polygon_max_outside_pixel_distance(candidate->poly, candidate->count, binary_source, tw, th);
+    if (outside > 0.0 && !geometry_inflate_candidate(&candidate->poly, &candidate->count, outside, max_vertices)) {
+        geometry_candidate_discard(candidate);
+        return false;
+    }
+    outside = polygon_max_outside_pixel_distance(candidate->poly, candidate->count, binary_source, tw, th);
+    if (outside > 0.0 && !geometry_inflate_candidate(&candidate->poly, &candidate->count, outside + 1.0, max_vertices)) {
+        geometry_candidate_discard(candidate);
+        return false;
+    }
+    if (polygon_max_outside_pixel_distance(candidate->poly, candidate->count, binary_source, tw, th) > 0.0) {
+        geometry_candidate_discard(candidate);
+        return false;
+    }
+
+    candidate->fidelity_error = polygon_max_boundary_distance(reference, reference_count, candidate->poly, candidate->count);
+    candidate->est_area = geometry_estimate_inflated_area(candidate->poly, candidate->count, 0.0);
+    candidate->inflate_amt = 0.0;
+    return true;
+}
+
+static bool geometry_seen_add(GeometrySeenPolygon *seen, uint32_t *seen_count, const GeometryCandidate *candidate) {
+    if (candidate->count > 16) {
+        return false;
+    }
+    for (uint32_t i = 0; i < *seen_count; i++) {
+        if (seen[i].count == candidate->count && memcmp(seen[i].poly, candidate->poly, (size_t)candidate->count * sizeof(Point2D)) == 0) {
+            return false;
+        }
+    }
+    NT_BUILD_ASSERT(*seen_count < 64 && "positive geometry candidate bound exceeded");
+    seen[*seen_count].count = candidate->count;
+    memcpy(seen[*seen_count].poly, candidate->poly, (size_t)candidate->count * sizeof(Point2D));
+    (*seen_count)++;
+    return true;
 }
 
 /* Strategy 1: Ramer-Douglas-Peucker with epsilon growth + bisection to hit target.
@@ -1433,6 +1552,57 @@ static GeometryCandidate strategy_convex(const uint8_t *binary_source, uint32_t 
     result.est_area = geometry_estimate_inflated_area(poly, count, result.inflate_amt);
     result.valid = true;
     return result;
+}
+
+static void geometry_consider_positive(GeometryCandidate *best, GeometryCandidate candidate, uint32_t target, uint32_t generator_ordinal, GeometrySeenPolygon *seen, uint32_t *seen_count,
+                                       const Point2D *reference, uint32_t reference_count, const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t max_vertices, double tolerance) {
+    candidate.generator_ordinal = generator_ordinal;
+    if (!candidate.valid || candidate.count > target || !geometry_seen_add(seen, seen_count, &candidate)) {
+        geometry_candidate_discard(&candidate);
+        return;
+    }
+    if (!geometry_finalize_candidate(&candidate, reference, reference_count, binary_source, tw, th, max_vertices) || candidate.fidelity_error > tolerance) {
+        geometry_candidate_discard(&candidate);
+        return;
+    }
+    if (geometry_candidate_better_positive(&candidate, best)) {
+        geometry_candidate_discard(best);
+        *best = candidate;
+    } else {
+        geometry_candidate_discard(&candidate);
+    }
+}
+
+static GeometryCandidate geometry_select_positive_concave(const Point2D *clean, uint32_t clean_count, const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t max_vertices, double tolerance) {
+    GeometryCandidate fallback = strategy_perp(clean, clean_count, max_vertices, binary_source, tw, th);
+    fallback.generator_ordinal = 1;
+    (void)geometry_finalize_candidate(&fallback, clean, clean_count, binary_source, tw, th, max_vertices);
+
+    GeometryCandidate best = {0};
+    GeometrySeenPolygon seen[64] = {0};
+    uint32_t seen_count = 0;
+    for (uint32_t target = 3; target <= max_vertices; target++) {
+        geometry_consider_positive(&best, strategy_rdp(clean, clean_count, target), target, 0, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
+        geometry_consider_positive(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th), target, 1, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices,
+                                   tolerance);
+        if (target >= 4) {
+            geometry_consider_positive(&best, strategy_rect(tw, th), target, 2, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
+        }
+        geometry_consider_positive(&best, strategy_convex(binary_source, tw, th, target), target, 3, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
+    }
+
+    if (best.valid) {
+        geometry_candidate_discard(&fallback);
+        return best;
+    }
+    if (fallback.valid) {
+        return fallback;
+    }
+
+    GeometryCandidate rect = strategy_rect(tw, th);
+    rect.generator_ordinal = 2;
+    (void)geometry_finalize_candidate(&rect, clean, clean_count, binary_source, tw, th, max_vertices);
+    return rect;
 }
 
 /* --- pipeline_geometry: contour trace + simplification + inflation per unique sprite --- */
@@ -1591,91 +1761,102 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     uint32_t clean_count = remove_collinear(contour, contour_count, clean);
                     free(contour);
 
-                    /* Run 4 simplification strategies, keep lowest estimated
-                     * final inflated area. Each strategy returns a candidate
-                     * polygon + required inflate amount; geometry_maybe_adopt
-                     * handles ownership (frees the loser each step). */
-                    uint32_t target = effective_max_verts;
-                    GeometryCandidate best = strategy_rdp(clean, clean_count, target);
-                    geometry_maybe_adopt(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th));
-                    geometry_maybe_adopt(&best, strategy_rect(tw, th));
-                    geometry_maybe_adopt(&best, strategy_convex(binary_source, tw, th, target));
-                    NT_BUILD_ASSERT(best.valid && "pipeline_geometry: RDP baseline should never be invalid");
-
-                    Point2D *simplified = best.poly;
-                    uint32_t simp_count = best.count;
-                    double inflate_amt = best.inflate_amt;
-
-                    free(clean);
-                    int32_t *simp_xy = (int32_t *)malloc((size_t)simp_count * 2 * sizeof(int32_t));
-                    NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
-                    for (size_t v = 0; v < simp_count; v++) {
-                        simp_xy[v * 2] = simplified[v].x;
-                        simp_xy[(v * 2) + 1] = simplified[v].y;
-                    }
-                    free(simplified);
-
-                    int32_t *inflated_xy = NULL;
-                    uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
-                    free(simp_xy);
-
-                    /* Trust Clipper2 — only fail on obvious degenerate output (too few vertices). */
-                    bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
-
-                    if (sane_result) {
-                        /* If Clipper2 produced too many vertices (edge splits at concave corners),
-                         * apply RDP again to get under max_vertices. */
-                        Point2D *result = (Point2D *)malloc((size_t)inf_count * sizeof(Point2D));
-                        NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
-                        for (size_t v = 0; v < inf_count; v++) {
-                            result[v].x = inflated_xy[v * 2];
-                            result[v].y = inflated_xy[(v * 2) + 1];
-                        }
-                        free(inflated_xy);
-
-                        uint32_t final_target = effective_max_verts;
-                        if (inf_count > final_target) {
-                            Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
-                            NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
-                            double eps2 = 1.0;
-                            uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
-                            while (red_count > final_target && eps2 < 100.0) {
-                                eps2 *= 1.5;
-                                red_count = rdp_simplify(result, inf_count, eps2, reduced);
-                            }
-                            free(result);
-                            result = reduced;
-                            inf_count = red_count;
-                        }
-                        if (inf_count <= effective_max_verts) {
-                            /* Post-verify: every opaque pixel center must lie inside the
-                             * final polygon. Secondary RDP can cut vertices and shrink the
-                             * polygon; if that leaves any opaque pixel outside, fall back
-                             * to the trim bounding rectangle (guaranteed correct). */
-                            double post_max = polygon_max_outside_pixel_distance(result, inf_count, binary_source, tw, th);
-                            if (post_max <= 0.0) {
-                                p->hull_vertices[idx] = result;
-                                p->vertex_counts[idx] = inf_count;
-                            } else {
-                                /* Polygon lost pixels — fall back to trim bbox (4 verts,
-                                 * trivially contains everything). */
-                                free(result);
-                                p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-                                NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
-                                p->hull_vertices[idx][0] = (Point2D){0, 0};
-                                p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-                                p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-                                p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-                                p->vertex_counts[idx] = 4;
-                            }
+                    if (geometry_opts->tracer_tolerance > 0.0F) {
+                        GeometryCandidate best = geometry_select_positive_concave(clean, clean_count, binary_source, tw, th, effective_max_verts, (double)geometry_opts->tracer_tolerance);
+                        free(clean);
+                        if (best.valid) {
+                            p->hull_vertices[idx] = best.poly;
+                            p->vertex_counts[idx] = best.count;
                         } else {
-                            free(result);
-                            convex_reason = "inflate simplification exceeded max_vertices";
+                            convex_reason = "positive tolerance finalization failed";
                         }
                     } else {
-                        /* Clipper2 inflate failed — fallback to rect */
-                        free(inflated_xy);
-                        convex_reason = "Clipper2 inflate failed";
+                        /* Run 4 simplification strategies, keep lowest estimated
+                         * final inflated area. Each strategy returns a candidate
+                         * polygon + required inflate amount; geometry_maybe_adopt
+                         * handles ownership (frees the loser each step). */
+                        uint32_t target = effective_max_verts;
+                        GeometryCandidate best = strategy_rdp(clean, clean_count, target);
+                        geometry_maybe_adopt(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th));
+                        geometry_maybe_adopt(&best, strategy_rect(tw, th));
+                        geometry_maybe_adopt(&best, strategy_convex(binary_source, tw, th, target));
+                        NT_BUILD_ASSERT(best.valid && "pipeline_geometry: RDP baseline should never be invalid");
+
+                        Point2D *simplified = best.poly;
+                        uint32_t simp_count = best.count;
+                        double inflate_amt = best.inflate_amt;
+
+                        free(clean);
+                        int32_t *simp_xy = (int32_t *)malloc((size_t)simp_count * 2 * sizeof(int32_t));
+                        NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
+                        for (size_t v = 0; v < simp_count; v++) {
+                            simp_xy[v * 2] = simplified[v].x;
+                            simp_xy[(v * 2) + 1] = simplified[v].y;
+                        }
+                        free(simplified);
+
+                        int32_t *inflated_xy = NULL;
+                        uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
+                        free(simp_xy);
+
+                        /* Trust Clipper2 — only fail on obvious degenerate output (too few vertices). */
+                        bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
+
+                        if (sane_result) {
+                            /* If Clipper2 produced too many vertices (edge splits at concave corners),
+                             * apply RDP again to get under max_vertices. */
+                            Point2D *result = (Point2D *)malloc((size_t)inf_count * sizeof(Point2D));
+                            NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
+                            for (size_t v = 0; v < inf_count; v++) {
+                                result[v].x = inflated_xy[v * 2];
+                                result[v].y = inflated_xy[(v * 2) + 1];
+                            }
+                            free(inflated_xy);
+
+                            uint32_t final_target = effective_max_verts;
+                            if (inf_count > final_target) {
+                                Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                                NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
+                                double eps2 = 1.0;
+                                uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                                while (red_count > final_target && eps2 < 100.0) {
+                                    eps2 *= 1.5;
+                                    red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                                }
+                                free(result);
+                                result = reduced;
+                                inf_count = red_count;
+                            }
+                            if (inf_count <= effective_max_verts) {
+                                /* Post-verify: every opaque pixel center must lie inside the
+                                 * final polygon. Secondary RDP can cut vertices and shrink the
+                                 * polygon; if that leaves any opaque pixel outside, fall back
+                                 * to the trim bounding rectangle (guaranteed correct). */
+                                double post_max = polygon_max_outside_pixel_distance(result, inf_count, binary_source, tw, th);
+                                if (post_max <= 0.0) {
+                                    p->hull_vertices[idx] = result;
+                                    p->vertex_counts[idx] = inf_count;
+                                } else {
+                                    /* Polygon lost pixels — fall back to trim bbox (4 verts,
+                                     * trivially contains everything). */
+                                    free(result);
+                                    p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+                                    NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+                                    p->hull_vertices[idx][0] = (Point2D){0, 0};
+                                    p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+                                    p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+                                    p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+                                    p->vertex_counts[idx] = 4;
+                                }
+                            } else {
+                                free(result);
+                                convex_reason = "inflate simplification exceeded max_vertices";
+                            }
+                        } else {
+                            /* Clipper2 inflate failed — fallback to rect */
+                            free(inflated_xy);
+                            convex_reason = "Clipper2 inflate failed";
+                        }
                     }
                 }
             }
