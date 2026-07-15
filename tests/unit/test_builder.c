@@ -4344,6 +4344,31 @@ void test_rdp_simplify_reduction(void) {
     TEST_ASSERT_EQUAL_UINT32(4, n);
 }
 
+void test_hull_simplify_covering_keeps_earliest_equal_error_pair(void) {
+    const Point2D hull[8] = {
+        {3, 0}, {7, 0}, {10, 3}, {10, 7}, {7, 10}, {3, 10}, {0, 7}, {0, 3},
+    };
+    const Point2D expected[7] = {
+        {5, -2}, {10, 3}, {10, 7}, {7, 10}, {3, 10}, {0, 7}, {0, 3},
+    };
+    Point2D first[8];
+    Point2D second[8];
+
+    TEST_ASSERT_EQUAL_UINT32(7, hull_simplify_covering(hull, 8, 7, first));
+    TEST_ASSERT_EQUAL_UINT32(7, hull_simplify_covering(hull, 8, 7, second));
+    TEST_ASSERT_EQUAL_MEMORY(expected, first, sizeof(expected));
+    TEST_ASSERT_EQUAL_MEMORY(first, second, sizeof(expected));
+}
+
+void test_hull_simplify_covering_rejects_parallel_and_degenerate_edges(void) {
+    const Point2D square[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    const Point2D repeated[4] = {{0, 0}, {4, 0}, {4, 0}, {0, 4}};
+    Point2D out[4];
+
+    TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(square, 4, 3, out));
+    TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(repeated, 4, 3, out));
+}
+
 /* fan_triangulate: 4 vertices produces 2 triangles */
 void test_fan_triangulate_quad(void) {
     uint16_t indices[32];
@@ -5376,6 +5401,7 @@ void test_atlas_shape_convex_hull_produces_polygon(void) {
 void test_convex_budget_preserves_all_retained_pixels(void) {
     (void)MKDIR(TMP_DIR);
     const char *path = TMP_DIR "/atlas_convex_budget_coverage.ntpack";
+    const char *repeat_path = TMP_DIR "/atlas_convex_budget_coverage_repeat.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -5402,11 +5428,24 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
+
+    NtBuilderContext *repeat_ctx = nt_builder_start_pack(repeat_path);
+    TEST_ASSERT_NOT_NULL(repeat_ctx);
+    NtAtlasBuild *repeat_atlas = nt_atlas_begin(repeat_ctx, "convex", &opts);
+    nt_atlas_add_raw(repeat_atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "asymmetric_octagon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(repeat_atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(repeat_ctx));
+    nt_builder_free_pack(repeat_ctx);
     free(rgba);
 
     uint32_t file_size = 0;
     uint8_t *buf = read_file_bytes(path, &file_size);
     TEST_ASSERT_NOT_NULL(buf);
+    uint32_t repeat_file_size = 0;
+    uint8_t *repeat_buf = read_file_bytes(repeat_path, &repeat_file_size);
+    TEST_ASSERT_NOT_NULL(repeat_buf);
+    TEST_ASSERT_EQUAL_UINT32(file_size, repeat_file_size);
+    TEST_ASSERT_EQUAL_MEMORY(buf, repeat_buf, file_size);
     const NtPackHeader *pack = (const NtPackHeader *)buf;
     const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
     const NtAssetEntry *atlas_entry = NULL;
@@ -5432,6 +5471,71 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     double max_outside = polygon_max_outside_pixel_distance(emitted, region->vertex_count, binary, W, H);
     TEST_ASSERT_TRUE_MESSAGE(max_outside <= 0.0, "convex vertex budget dropped a retained pixel");
 
+    free(repeat_buf);
+    free(buf);
+    (void)remove(path);
+    (void)remove(repeat_path);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_convex_covering_gate_preserves_correct_legacy_vertices(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/atlas_convex_legacy_vertices.ntpack";
+    enum { W = 16, H = 16, BUDGET = 4 };
+    const Point2D source_hull[3] = {{0, 0}, {17, 0}, {0, 17}};
+    uint8_t binary[W * H] = {0};
+    uint8_t *rgba = make_test_sprite(W, H, 255, 255, 255, 0);
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            if (point_in_polygon_f(source_hull, 3, (double)x + 0.5, (double)y + 0.5)) {
+                binary[(y * W) + x] = 1;
+                rgba[((((size_t)y * W) + x) * 4) + 3] = 255;
+            }
+        }
+    }
+
+    uint32_t legacy_count = 0;
+    Point2D *legacy = binary_build_convex_polygon(binary, W, H, BUDGET, &legacy_count);
+    TEST_ASSERT_NOT_NULL(legacy);
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(legacy, legacy_count, binary, W, H) <= 0.0);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    opts.max_vertices = BUDGET;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "convex", &opts);
+    nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(rgba);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(path, &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+    const NtAtlasRegion *region = (const NtAtlasRegion *)(ablob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
+    const NtAtlasVertex *vertices = (const NtAtlasVertex *)(ablob + header->vertex_offset);
+    TEST_ASSERT_EQUAL_UINT32(legacy_count, region->vertex_count);
+    for (uint32_t i = 0; i < legacy_count; i++) {
+        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
+        TEST_ASSERT_EQUAL_INT32(legacy[i].x, vertex->local_x);
+        TEST_ASSERT_EQUAL_INT32(legacy[i].y, H - vertex->local_y);
+    }
+
+    free(legacy);
     free(buf);
     (void)remove(path);
 }
@@ -7013,6 +7117,8 @@ int main(void) {
     RUN_TEST(test_convex_hull_collinear);
     RUN_TEST(test_rdp_simplify_no_reduction);
     RUN_TEST(test_rdp_simplify_reduction);
+    RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
+    RUN_TEST(test_hull_simplify_covering_rejects_parallel_and_degenerate_edges);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
@@ -7056,6 +7162,7 @@ int main(void) {
     RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
     RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
     RUN_TEST(test_convex_budget_preserves_all_retained_pixels);
+    RUN_TEST(test_convex_covering_gate_preserves_correct_legacy_vertices);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
