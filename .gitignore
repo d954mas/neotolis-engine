@@ -49,6 +49,9 @@ package-lock.json
 # GSD planning
 .planning/
 
+# Serena local agent tooling
+.serena/
+
 #codex branch diff
 branch_diff.patch
 diff.txt
