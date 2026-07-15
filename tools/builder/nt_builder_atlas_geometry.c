@@ -535,8 +535,7 @@ bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
  * Used to determine the minimum Clipper2 inflate amount needed so the inflated
  * polygon fully encloses every opaque pixel center (stricter than the clean
  * contour vertices, which sit at integer pixel corners and miss +0.5 offsets). */
-/* Distance from point (cx,cy) to the nearest polygon edge. */
-static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) {
+static double polygon_point_edge_distance_sq(const Point2D *poly, uint32_t poly_count, double cx, double cy) {
     double min_d_sq = 1e30;
     for (uint32_t i = 0; i < poly_count; i++) {
         uint32_t j = (i + 1) % poly_count;
@@ -562,7 +561,170 @@ static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_cou
             min_d_sq = d_sq;
         }
     }
-    return sqrt(min_d_sq);
+    return min_d_sq;
+}
+
+/* Distance from point (cx,cy) to the nearest polygon edge. */
+static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) { return sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy)); }
+
+typedef struct {
+    double a;
+    double b;
+    double c;
+    double begin;
+    double end;
+} BoundaryDistancePiece;
+
+static void boundary_piece_set_endpoint(BoundaryDistancePiece *piece, Point2D reference_start, Point2D reference_end, Point2D endpoint) {
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ox = (double)reference_start.x - (double)endpoint.x;
+    double oy = (double)reference_start.y - (double)endpoint.y;
+    piece->a = (vx * vx) + (vy * vy);
+    piece->b = 2.0 * ((ox * vx) + (oy * vy));
+    piece->c = (ox * ox) + (oy * oy);
+}
+
+static void boundary_piece_set_line(BoundaryDistancePiece *piece, Point2D reference_start, Point2D reference_end, Point2D edge_start, Point2D edge_end) {
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ex = (double)edge_end.x - (double)edge_start.x;
+    double ey = (double)edge_end.y - (double)edge_start.y;
+    double ox = (double)reference_start.x - (double)edge_start.x;
+    double oy = (double)reference_start.y - (double)edge_start.y;
+    double edge_len_sq = (ex * ex) + (ey * ey);
+    double cross_start = (ox * ey) - (oy * ex);
+    double cross_step = (vx * ey) - (vy * ex);
+    piece->a = (cross_step * cross_step) / edge_len_sq;
+    piece->b = (2.0 * cross_start * cross_step) / edge_len_sq;
+    piece->c = (cross_start * cross_start) / edge_len_sq;
+}
+
+static uint32_t boundary_edge_pieces(Point2D reference_start, Point2D reference_end, Point2D edge_start, Point2D edge_end, BoundaryDistancePiece *pieces) {
+    double ex = (double)edge_end.x - (double)edge_start.x;
+    double ey = (double)edge_end.y - (double)edge_start.y;
+    double edge_len_sq = (ex * ex) + (ey * ey);
+    if (edge_len_sq == 0.0) {
+        pieces[0].begin = 0.0;
+        pieces[0].end = 1.0;
+        boundary_piece_set_endpoint(&pieces[0], reference_start, reference_end, edge_start);
+        return 1;
+    }
+
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ox = (double)reference_start.x - (double)edge_start.x;
+    double oy = (double)reference_start.y - (double)edge_start.y;
+    double projection_start = ((ox * ex) + (oy * ey)) / edge_len_sq;
+    double projection_step = ((vx * ex) + (vy * ey)) / edge_len_sq;
+    double cuts[4] = {0.0, 1.0, 0.0, 0.0};
+    uint32_t cut_count = 2;
+    if (projection_step != 0.0) {
+        double zero_crossing = -projection_start / projection_step;
+        double one_crossing = (1.0 - projection_start) / projection_step;
+        if (zero_crossing > 0.0 && zero_crossing < 1.0) {
+            cuts[cut_count++] = zero_crossing;
+        }
+        if (one_crossing > 0.0 && one_crossing < 1.0) {
+            cuts[cut_count++] = one_crossing;
+        }
+    }
+    for (uint32_t i = 1; i < cut_count; i++) {
+        double key = cuts[i];
+        uint32_t j = i;
+        while (j > 0 && cuts[j - 1] > key) {
+            cuts[j] = cuts[j - 1];
+            j--;
+        }
+        cuts[j] = key;
+    }
+
+    uint32_t piece_count = 0;
+    for (uint32_t i = 0; i + 1 < cut_count; i++) {
+        if (cuts[i + 1] <= cuts[i]) {
+            continue;
+        }
+        BoundaryDistancePiece *piece = &pieces[piece_count++];
+        piece->begin = cuts[i];
+        piece->end = cuts[i + 1];
+        double midpoint = (piece->begin + piece->end) * 0.5;
+        double projection = projection_start + (projection_step * midpoint);
+        if (projection <= 0.0) {
+            boundary_piece_set_endpoint(piece, reference_start, reference_end, edge_start);
+        } else if (projection >= 1.0) {
+            boundary_piece_set_endpoint(piece, reference_start, reference_end, edge_end);
+        } else {
+            boundary_piece_set_line(piece, reference_start, reference_end, edge_start, edge_end);
+        }
+    }
+    return piece_count;
+}
+
+static void boundary_consider_t(const Point2D *candidate, uint32_t candidate_count, Point2D start, Point2D end, double t, double *max_distance_sq) {
+    double x = (double)start.x + (t * ((double)end.x - (double)start.x));
+    double y = (double)start.y + (t * ((double)end.y - (double)start.y));
+    double distance_sq = polygon_point_edge_distance_sq(candidate, candidate_count, x, y);
+    if (distance_sq > *max_distance_sq) {
+        *max_distance_sq = distance_sq;
+    }
+}
+
+static void boundary_consider_piece_intersections(const BoundaryDistancePiece *lhs, const BoundaryDistancePiece *rhs, const Point2D *candidate, uint32_t candidate_count, Point2D start, Point2D end,
+                                                  double *max_distance_sq) {
+    double begin = lhs->begin > rhs->begin ? lhs->begin : rhs->begin;
+    double finish = lhs->end < rhs->end ? lhs->end : rhs->end;
+    if (finish < begin) {
+        return;
+    }
+    double a = lhs->a - rhs->a;
+    double b = lhs->b - rhs->b;
+    double c = lhs->c - rhs->c;
+    if (fabs(a) < 1e-12) {
+        if (fabs(b) < 1e-12) {
+            return;
+        }
+        double root = -c / b;
+        if (root >= begin && root <= finish) {
+            boundary_consider_t(candidate, candidate_count, start, end, root, max_distance_sq);
+        }
+        return;
+    }
+    double discriminant = (b * b) - (4.0 * a * c);
+    if (discriminant < 0.0) {
+        return;
+    }
+    double root_span = sqrt(discriminant);
+    double roots[2] = {(-b - root_span) / (2.0 * a), (-b + root_span) / (2.0 * a)};
+    for (uint32_t i = 0; i < 2; i++) {
+        if (roots[i] >= begin && roots[i] <= finish) {
+            boundary_consider_t(candidate, candidate_count, start, end, roots[i], max_distance_sq);
+        }
+    }
+}
+
+double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count) {
+    enum { MAX_CANDIDATE_VERTICES = 16, MAX_DISTANCE_PIECES = MAX_CANDIDATE_VERTICES * 3 };
+    NT_BUILD_ASSERT(reference && candidate && reference_count >= 3 && candidate_count >= 3 && candidate_count <= MAX_CANDIDATE_VERTICES);
+    double max_distance_sq = 0.0;
+    for (uint32_t reference_index = 0; reference_index < reference_count; reference_index++) {
+        Point2D start = reference[reference_index];
+        Point2D end = reference[(reference_index + 1) % reference_count];
+        BoundaryDistancePiece pieces[MAX_DISTANCE_PIECES];
+        uint32_t piece_count = 0;
+        for (uint32_t candidate_index = 0; candidate_index < candidate_count; candidate_index++) {
+            Point2D edge_start = candidate[candidate_index];
+            Point2D edge_end = candidate[(candidate_index + 1) % candidate_count];
+            piece_count += boundary_edge_pieces(start, end, edge_start, edge_end, &pieces[piece_count]);
+        }
+        for (uint32_t i = 0; i < piece_count; i++) {
+            boundary_consider_t(candidate, candidate_count, start, end, pieces[i].begin, &max_distance_sq);
+            boundary_consider_t(candidate, candidate_count, start, end, pieces[i].end, &max_distance_sq);
+            for (uint32_t j = i + 1; j < piece_count; j++) {
+                boundary_consider_piece_intersections(&pieces[i], &pieces[j], candidate, candidate_count, start, end, &max_distance_sq);
+            }
+        }
+    }
+    return sqrt(max_distance_sq);
 }
 
 /* Scanline inside/outside classification — computes per-row x-intersections

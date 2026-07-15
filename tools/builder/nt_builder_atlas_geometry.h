@@ -78,6 +78,10 @@ bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);
  * on polygon boundaries. */
 bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py);
 
+/* Directed Hausdorff distance from the full reference boundary to the
+ * candidate boundary. Both polygons are closed implicitly. */
+double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count);
+
 /* Max distance from any opaque pixel center outside the polygon to the
  * polygon boundary. Returns 0 if every opaque pixel center is inside. */
 double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th);

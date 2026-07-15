@@ -4369,6 +4369,42 @@ void test_hull_simplify_covering_rejects_parallel_and_degenerate_edges(void) {
     TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(repeated, 4, 3, out));
 }
 
+void test_polygon_boundary_distance_rejects_oversized_container(void) {
+    const Point2D reference[8] = {
+        {0, 0}, {8, 0}, {8, 8}, {5, 8}, {5, 3}, {3, 3}, {3, 8}, {0, 8},
+    };
+    const Point2D container[4] = {{0, 0}, {8, 0}, {8, 8}, {0, 8}};
+    uint8_t binary[8 * 8] = {0};
+    for (uint32_t y = 0; y < 8; y++) {
+        for (uint32_t x = 0; x < 8; x++) {
+            binary[(y * 8) + x] = point_in_polygon_f(reference, 8, (double)x + 0.5, (double)y + 0.5) ? 1 : 0;
+        }
+    }
+
+    TEST_ASSERT_TRUE(fabs(polygon_max_boundary_distance(reference, 8, reference, 8)) < 1e-12);
+    TEST_ASSERT_TRUE(fabs(polygon_max_boundary_distance(reference, 8, container, 4) - 3.0) < 1e-12);
+    TEST_ASSERT_TRUE(fabs(polygon_max_outside_pixel_distance(container, 4, binary, 8, 8)) < 1e-12);
+}
+
+void test_perp_removal_keeps_real_corner_and_stable_ties(void) {
+    const Point2D stair_and_corner[10] = {
+        {0, 0}, {2, 0}, {4, 1}, {6, 0}, {8, 0}, {8, 8}, {5, 8}, {4, 4}, {3, 8}, {0, 8},
+    };
+    const Point2D expected[5] = {{0, 0}, {8, 0}, {8, 8}, {4, 4}, {0, 8}};
+    const Point2D equal_error[6] = {{0, 0}, {2, 0}, {4, 0}, {6, 0}, {6, 6}, {0, 6}};
+    const Point2D expected_equal_error[5] = {{0, 0}, {4, 0}, {6, 0}, {6, 6}, {0, 6}};
+    Point2D out[10];
+    double max_dev = 0.0;
+
+    TEST_ASSERT_EQUAL_UINT32(5, hull_simplify_perp(stair_and_corner, 10, 5, out, &max_dev));
+    TEST_ASSERT_EQUAL_MEMORY(expected, out, sizeof(expected));
+    TEST_ASSERT_TRUE(max_dev < 2.2);
+
+    TEST_ASSERT_EQUAL_UINT32(5, hull_simplify_perp(equal_error, 6, 5, out, &max_dev));
+    TEST_ASSERT_EQUAL_MEMORY(expected_equal_error, out, sizeof(expected_equal_error));
+    TEST_ASSERT_TRUE(fabs(max_dev) < 1e-12);
+}
+
 /* fan_triangulate: 4 vertices produces 2 triangles */
 void test_fan_triangulate_quad(void) {
     uint16_t indices[32];
@@ -7321,6 +7357,8 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
     RUN_TEST(test_hull_simplify_covering_rejects_parallel_and_degenerate_edges);
+    RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
+    RUN_TEST(test_perp_removal_keeps_real_corner_and_stable_ties);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
