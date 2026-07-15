@@ -37,6 +37,7 @@ typedef struct {
     uint32_t opts_max_vertices;
     int opts_allow_transform; /* bool */
     uint32_t opts_alpha_threshold;
+    float opts_tracer_tolerance;
     int opts_power_of_two; /* bool */
     uint64_t cache_hits;
     uint64_t cache_misses;

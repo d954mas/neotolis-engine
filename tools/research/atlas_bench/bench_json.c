@@ -68,6 +68,7 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
     (void)fprintf(f, "      \"max_vertices\": %u,\n", run->opts_max_vertices);
     (void)fprintf(f, "      \"allow_transform\": %s,\n", run->opts_allow_transform ? "true" : "false");
     (void)fprintf(f, "      \"alpha_threshold\": %u,\n", run->opts_alpha_threshold);
+    (void)fprintf(f, "      \"tracer_tolerance\": %.9g,\n", (double)run->opts_tracer_tolerance);
     (void)fprintf(f, "      \"power_of_two\": %s\n", run->opts_power_of_two ? "true" : "false");
     (void)fputs("    },\n", f);
     (void)fprintf(f, "    \"cache_hits\": %llu,\n", (unsigned long long)run->cache_hits);

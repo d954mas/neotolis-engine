@@ -8,6 +8,8 @@
 #include "ntpack_parse.h"
 #include "time/nt_time.h"
 
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,9 +45,23 @@ static const char *shape_to_name(nt_atlas_shape_t shape) {
     }
 }
 
+static bool parse_tracer_tolerance(const char *text, float *out_value) {
+    if (text == NULL || text[0] == '\0' || out_value == NULL) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    float value = strtof(text, &end);
+    if (errno == ERANGE || end == text || *end != '\0' || !isfinite(value) || value < 0.0F) {
+        return false;
+    }
+    *out_value = (value == 0.0F) ? 0.0F : value;
+    return true;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 6) {
-        (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites]\n");
+        (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites] [--tracer-tolerance <px>]\n");
         return 1;
     }
     const char *out_json = argv[1];
@@ -53,7 +69,22 @@ int main(int argc, char *argv[]) {
     const char *atlas_name = argv[3];
     const char *shape_arg = argv[4];
     const uint32_t max_size = (uint32_t)strtoul(argv[5], NULL, 10);
-    const uint32_t max_sprites = (argc >= 7) ? (uint32_t)strtoul(argv[6], NULL, 10) : 0U;
+    uint32_t max_sprites = 0U;
+    int next_arg = 6;
+    if (next_arg < argc && strncmp(argv[next_arg], "--", 2) != 0) {
+        max_sprites = (uint32_t)strtoul(argv[next_arg], NULL, 10);
+        next_arg++;
+    }
+    float tracer_tolerance = 0.0F;
+    bool tracer_tolerance_seen = false;
+    while (next_arg < argc) {
+        if (strcmp(argv[next_arg], "--tracer-tolerance") != 0 || tracer_tolerance_seen || next_arg + 1 >= argc || !parse_tracer_tolerance(argv[next_arg + 1], &tracer_tolerance)) {
+            (void)fprintf(stderr, "atlas_bench: bad argument near '%s'\n", argv[next_arg]);
+            return 1;
+        }
+        tracer_tolerance_seen = true;
+        next_arg += 2;
+    }
 
     nt_atlas_shape_t shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     if (strcmp(shape_arg, "rect") == 0) {
@@ -99,6 +130,7 @@ int main(int argc, char *argv[]) {
     opts.shape = shape;
     opts.max_size = max_size;
     opts.max_vertices = BENCH_MAX_VERTICES;
+    opts.tracer_tolerance = tracer_tolerance;
 
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     bench_add_data_t add = {atlas, 0, max_sprites};
@@ -154,6 +186,7 @@ int main(int argc, char *argv[]) {
     run.opts_max_vertices = opts.max_vertices;
     run.opts_allow_transform = opts.allow_transform ? 1 : 0;
     run.opts_alpha_threshold = opts.alpha_threshold;
+    run.opts_tracer_tolerance = opts.tracer_tolerance;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;
     /* The pack format does not expose dedup or cache counters. */
     run.cache_hits = 0;
