@@ -1605,6 +1605,74 @@ static GeometryCandidate geometry_select_positive_concave(const Point2D *clean, 
     return rect;
 }
 
+static GeometryCandidate geometry_convex_reduction_candidate(const Point2D *reference, uint32_t reference_count, uint32_t target) {
+    GeometryCandidate result = {0};
+    Point2D *poly = (Point2D *)malloc((size_t)reference_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "geometry_convex_reduction_candidate: alloc failed");
+    double ignored_error = 0.0;
+    uint32_t count = hull_simplify_perp(reference, reference_count, target, poly, &ignored_error);
+    if (count < 3 || polygon_area_pixels(poly, count) == 0) {
+        free(poly);
+        return result;
+    }
+    result.poly = poly;
+    result.count = count;
+    result.valid = true;
+    return result;
+}
+
+static GeometryCandidate geometry_convex_covering_fallback(const Point2D *reference, uint32_t reference_count, uint32_t max_vertices) {
+    GeometryCandidate result = {0};
+    Point2D *poly = (Point2D *)malloc((size_t)reference_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "geometry_convex_covering_fallback: alloc failed");
+    uint32_t count = reference_count;
+    if (reference_count <= max_vertices) {
+        memcpy(poly, reference, (size_t)reference_count * sizeof(Point2D));
+    } else {
+        count = hull_simplify_covering(reference, reference_count, max_vertices, poly);
+    }
+    if (count < 3 || count > max_vertices || polygon_area_pixels(poly, count) == 0) {
+        free(poly);
+        return result;
+    }
+    result.poly = poly;
+    result.count = count;
+    result.valid = true;
+    return result;
+}
+
+static GeometryCandidate geometry_build_convex_positive(const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t max_vertices, double tolerance) {
+    uint32_t reference_count = 0;
+    Point2D *reference = binary_build_convex_polygon(binary_source, tw, th, UINT32_MAX, &reference_count);
+    if (!reference || reference_count < 3) {
+        free(reference);
+        return (GeometryCandidate){0};
+    }
+
+    GeometryCandidate fallback = geometry_convex_reduction_candidate(reference, reference_count, max_vertices);
+    fallback.generator_ordinal = 0;
+    if (!geometry_finalize_candidate(&fallback, reference, reference_count, binary_source, tw, th, max_vertices)) {
+        fallback = geometry_convex_covering_fallback(reference, reference_count, max_vertices);
+        fallback.generator_ordinal = 1;
+        (void)geometry_finalize_candidate(&fallback, reference, reference_count, binary_source, tw, th, max_vertices);
+    }
+
+    GeometryCandidate best = {0};
+    GeometrySeenPolygon seen[16] = {0};
+    uint32_t seen_count = 0;
+    for (uint32_t target = 3; target <= max_vertices; target++) {
+        geometry_consider_positive(&best, geometry_convex_reduction_candidate(reference, reference_count, target), target, 0, seen, &seen_count, reference, reference_count, binary_source, tw, th,
+                                   max_vertices, tolerance);
+    }
+    free(reference);
+
+    if (best.valid) {
+        geometry_candidate_discard(&fallback);
+        return best;
+    }
+    return fallback;
+}
+
 /* --- pipeline_geometry: contour trace + simplification + inflation per unique sprite --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1660,6 +1728,17 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
 
             if (effective_shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
+                if (geometry_opts->tracer_tolerance > 0.0F) {
+                    GeometryCandidate best = geometry_build_convex_positive(binary, tw, th, effective_max_verts, (double)geometry_opts->tracer_tolerance);
+                    if (best.valid) {
+                        p->hull_vertices[idx] = best.poly;
+                        p->vertex_counts[idx] = best.count;
+                    } else {
+                        push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
+                    }
+                    free(binary);
+                    continue;
+                }
                 /* Preserve legacy output unless its budget reduction loses coverage. */
                 p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, effective_max_verts, &p->vertex_counts[idx]);
                 if (!p->hull_vertices[idx]) {
