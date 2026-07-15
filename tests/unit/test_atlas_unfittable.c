@@ -1,9 +1,4 @@
-/* Unfittable-sprite acceptance: an unfittable sprite and an ATLAS_MAX_PAGES-
- * exhausting set both produce graceful errors (no abort), write no .ntpack, and
- * leave no leaked buffer / hung worker pool. This target runs under LIVE LSan (no
- * detect_leaks=0 masking) — its passing is the concrete proof for the pack-time
- * failure paths. A boundary-fit case proves the UNFITTABLE pre-check is no
- * stricter than the real vector_pack fit test. */
+/* Live-LSan coverage for graceful atlas failure paths. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,11 +55,19 @@ static bool file_exists(const char *path) {
     return false;
 }
 
-static void write_oversized_png_header(const char *path) {
-    static const uint8_t png[] = {
+static void write_oversized_png_header(const char *path, uint32_t width, uint32_t height) {
+    uint8_t png[] = {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x01,
         0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     };
+    png[16] = (uint8_t)(width >> 24U);
+    png[17] = (uint8_t)(width >> 16U);
+    png[18] = (uint8_t)(width >> 8U);
+    png[19] = (uint8_t)width;
+    png[20] = (uint8_t)(height >> 24U);
+    png[21] = (uint8_t)(height >> 16U);
+    png[22] = (uint8_t)(height >> 8U);
+    png[23] = (uint8_t)height;
     FILE *f = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(f);
     TEST_ASSERT_EQUAL_size_t(sizeof(png), fwrite(png, 1, sizeof(png), f));
@@ -166,8 +169,7 @@ void test_atlas_unfittable_sprite(void) {
     free(px);
 }
 
-/* A sprite sized exactly at the largest footprint that still fits max_size packs
- * successfully — proves the pre-check is no stricter than vector_pack (A1). */
+/* Boundary equality must match vector_pack's real fit predicate. */
 void test_atlas_unfittable_boundary_fits(void) {
     (void)MKDIR(TMP_DIR);
     const char *path = TMP_DIR "/atlas_boundary_fits.ntpack";
@@ -357,6 +359,17 @@ void test_atlas_failed_commit_attempts_both_stale_outputs(void) {
 
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_IO, nt_atlas_commit(atlas));
     TEST_ASSERT_FALSE_MESSAGE(file_exists(header_path), "failed pack cleanup must still remove the stale header");
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("giant.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_IO, nt_builder_finish_pack(ctx));
+    errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("giant.png", errs[0].sprite);
+    TEST_ASSERT_FALSE_MESSAGE(file_exists(header_path), "finish retry must not recreate the stale header");
 
     nt_builder_free_pack(ctx);
     free(px);
@@ -623,6 +636,7 @@ void test_atlas_truncation_preserves_earliest(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_BUILD_MAX_ERRORS, n);
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind, "earliest-added (seq 0) must head the capped prefix");
     TEST_ASSERT_EQUAL_STRING("aaa_first_clear.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_STRING("corrupt_0254.png", errs[NT_BUILD_MAX_ERRORS - 1].sprite);
 
     /* Coarse result derives from errs[0] → VALIDATION, not the corrupt FORMAT. */
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
@@ -632,9 +646,7 @@ void test_atlas_truncation_preserves_earliest(void) {
     (void)remove(bad_png);
 }
 
-/* A raw sprite whose width*height overflows the 4-byte RGBA size guard surfaces
- * as one graceful IMAGE_TOO_LARGE (the guard fires before any allocation), not a
- * corrupt/oom trap. Pins the oversized classification + coarse LIMIT result. */
+/* Area overflow is classified before allocation. */
 void test_atlas_add_raw_oversized_image_too_large(void) {
     (void)MKDIR(TMP_DIR);
     const char *path = TMP_DIR "/atlas_oversized.ntpack";
@@ -645,10 +657,8 @@ void test_atlas_add_raw_oversized_image_too_large(void) {
     nt_atlas_opts_t opts = boundary_opts();
     NtAtlasBuild *atlas_build_547 = nt_atlas_begin(ctx, "huge", &opts);
 
-    /* 70000*70000*4 overflows UINT32_MAX/4 → guarded before alloc, so the single
-     * dummy byte is never dereferenced. */
-    uint8_t dummy = 0;
-    nt_atlas_add_raw(atlas_build_547, &dummy, 70000, 70000, &(nt_atlas_sprite_opts_t){.name = "huge.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    /* Oversized dimensions are classified before non-empty spans require pixels. */
+    nt_atlas_add_raw(atlas_build_547, NULL, 70000, 70000, &(nt_atlas_sprite_opts_t){.name = "huge.png", .origin_x = 0.5F, .origin_y = 0.5F});
 
     (void)nt_atlas_commit(atlas_build_547);
 
@@ -666,6 +676,52 @@ void test_atlas_add_raw_oversized_image_too_large(void) {
     nt_builder_free_pack(ctx);
 }
 
+void test_atlas_add_raw_serialization_dimension_graceful(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_wide.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "wide", NULL);
+    nt_atlas_add_raw(atlas, NULL, UINT16_MAX + 1U, 1, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_atlas_commit(atlas));
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, errs[0].kind);
+    TEST_ASSERT_EQUAL_UINT32(UINT16_MAX + 1U, errs[0].w);
+    TEST_ASSERT_EQUAL_UINT32(1, errs[0].h);
+
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_mid_pipeline_errors_lsan(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_mid_pipeline_errors.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "mid", NULL);
+
+    uint8_t slice9[8 * 8 * 4] = {0};
+    for (size_t i = 0; i < 8U * 8U; i++) {
+        slice9[(i * 4) + 3] = 255;
+    }
+    nt_atlas_add_raw(atlas, slice9, 8, 8, &(nt_atlas_sprite_opts_t){.name = "slice9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4});
+
+    const uint32_t trim_width = 40000;
+    uint8_t *trim = (uint8_t *)calloc((size_t)trim_width * 4, 1);
+    TEST_ASSERT_NOT_NULL(trim);
+    trim[((size_t)35000 * 4) + 3] = 255;
+    nt_atlas_add_raw(atlas, trim, trim_width, 1, &(nt_atlas_sprite_opts_t){.name = "trim.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas));
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(2, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, errs[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, errs[1].kind);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
+    free(trim);
+}
+
 /* File and glob decoding classify oversized headers as image limits. */
 void test_atlas_add_file_and_glob_oversized_image_too_large(void) {
     (void)MKDIR(TMP_DIR);
@@ -673,8 +729,8 @@ void test_atlas_add_file_and_glob_oversized_image_too_large(void) {
     const char *direct_path = TMP_DIR "/oversized_direct.png";
     const char *glob_path = TMP_DIR "/oversized_glob_a.png";
     (void)remove(path);
-    write_oversized_png_header(direct_path);
-    write_oversized_png_header(glob_path);
+    write_oversized_png_header(direct_path, UINT32_C(0x01000001), 1);
+    write_oversized_png_header(glob_path, 1, UINT32_C(0x01000001));
 
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -791,13 +847,7 @@ void test_atlas_over_region_cap_still_reports_duplicate_names(void) {
     nt_builder_free_pack(ctx);
 }
 
-/* The fit-loop NULL-hull guard (A6) must not over-skip: a CONVEX-shape sprite
- * with a valid hull and a raise-margin override that pushes its scratch quad past
- * max_size must still report EXACTLY ONE UNFITTABLE (not zero, not a duplicate).
- * A genuine NULL-hull survivor (DEGENERATE_HULL / CONTOUR_VERTEX_OVERFLOW) is not
- * constructible from sprite pixel content — pixel-corner convex hulls are always
- * a >=4-vertex box for any non-empty mask — so the memcpy(NULL,0) / double-report
- * half of the guard is defensive; this pins the reachable half. */
+/* A valid hull must not be skipped by the defensive NULL-hull guard. */
 void test_atlas_valid_hull_override_reports_once(void) {
     (void)MKDIR(TMP_DIR);
     const char *path = TMP_DIR "/atlas_valid_hull_override.ntpack";
@@ -871,7 +921,7 @@ void test_atlas_truncation_drops_later_seqs(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_BUILD_MAX_ERRORS, n);
     TEST_ASSERT_EQUAL_STRING_MESSAGE("corrupt_0000.png", errs[0].sprite, "earliest-added heads the prefix");
     /* The tail slot keeps the last in-prefix add, not any dropped later error. */
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(errs[NT_BUILD_MAX_ERRORS - 1].sprite, "corrupt_", 8), "later-seq adds must be dropped, not overwrite the tail");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("corrupt_0255.png", errs[NT_BUILD_MAX_ERRORS - 1].sprite, "later-seq adds must be dropped, not overwrite the tail");
 
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_FORMAT, nt_builder_finish_pack(ctx));
 
@@ -921,31 +971,36 @@ void test_atlas_unfittable_reports_above_atlas_override(void) {
     free(px);
 }
 
-/* nt_build_error_format UNFITTABLE arm: the 6-%u field ordering is easy to
- * desync — pin sprite, w×h, padding, margin, extrude(detail_a), max_size. */
-void test_build_error_format_unfittable(void) {
-    char buf[256];
-    nt_build_error_t unfit = {.kind = NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, .w = 100, .h = 200, .padding = 3, .margin = 5, .max_size = 2048, .detail_a = 7};
-    error_copy_test_name(unfit.sprite, "big.png");
-    nt_build_error_format(&unfit, buf, sizeof(buf));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "big.png"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "100x200"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "padding 3"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "margin 5"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "extrude 7"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "max_size 2048"));
-}
+void test_build_error_format_matrix(void) {
+    typedef struct {
+        nt_build_error_kind kind;
+        const char *expected;
+    } FormatCase;
+    static const FormatCase cases[] = {
+        {NT_BUILD_ERR_KIND_CORRUPT_IMAGE, "atlas 'atlas', sprite 'sprite.png': corrupt or undecodable image"},
+        {NT_BUILD_ERR_KIND_ZERO_DIM, "atlas 'atlas', sprite 'sprite.png': zero width or height"},
+        {NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, "atlas 'atlas', sprite 'sprite.png': image 123x456 exceeds decode limit"},
+        {NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, "atlas 'atlas', sprite 'sprite.png': fully transparent after trim"},
+        {NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, "atlas 'atlas', sprite 'sprite.png': slice9 borders (7) >= source extent (9)"},
+        {NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, "atlas 'atlas', sprite 'sprite.png': degenerate hull (no usable outline)"},
+        {NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, "atlas 'atlas', sprite 'sprite.png': contour exceeds vertex budget"},
+        {NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, "atlas 'atlas': duplicate region name 'sprite.png'"},
+        {NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, "atlas 'atlas': region count exceeds 65535"},
+        {NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, "atlas 'atlas', sprite 'sprite.png': 123x456 exceeds 65535px"},
+        {NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, "atlas 'atlas', sprite 'sprite.png': trim offset overflow"},
+        {NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, "atlas 'atlas': ran out of pages (max_size=2048)"},
+        {NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, "atlas 'atlas', sprite 'sprite.png': 123x456 + padding 3 + margin 5 + extrude 7 does not fit an empty page of max_size 2048"},
+        {NT_BUILD_ERR_KIND_NONE, "no error"},
+    };
 
-/* nt_build_error_format DUPLICATE_NAME arm: atlas + duplicate region name. */
-void test_build_error_format_duplicate_name(void) {
     char buf[256];
-    nt_build_error_t dup = {.kind = NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME};
-    error_copy_test_name(dup.atlas, "myatlas");
-    error_copy_test_name(dup.sprite, "dup.png");
-    nt_build_error_format(&dup, buf, sizeof(buf));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "myatlas"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "dup.png"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "duplicate"));
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        nt_build_error_t err = {.kind = cases[i].kind, .w = 123, .h = 456, .padding = 3, .margin = 5, .max_size = 2048, .detail_a = 7, .detail_b = 9};
+        error_copy_test_name(err.atlas, "atlas");
+        error_copy_test_name(err.sprite, "sprite.png");
+        nt_build_error_format(&err, buf, sizeof(buf));
+        TEST_ASSERT_EQUAL_STRING(cases[i].expected, buf);
+    }
 }
 
 /* nt_build_error_format IMAGE_TOO_LARGE arm: an oversized-header reject leaves
@@ -969,6 +1024,17 @@ void test_build_error_format_image_too_large(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "40000x40000"));
 }
 
+/* Freeing an unfinished transaction releases all atlas-owned allocations. */
+void test_atlas_free_pack_cleans_open_transaction(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_open_free.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "open", NULL);
+    const uint8_t pixel[4] = {1, 2, 3, 255};
+    nt_atlas_add_raw(atlas, pixel, 1, 1, &(nt_atlas_sprite_opts_t){.name = "pixel.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    nt_builder_free_pack(ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -985,6 +1051,8 @@ int main(void) {
     RUN_TEST(test_atlas_errors_stable_add_order);
     RUN_TEST(test_atlas_truncation_preserves_earliest);
     RUN_TEST(test_atlas_add_raw_oversized_image_too_large);
+    RUN_TEST(test_atlas_add_raw_serialization_dimension_graceful);
+    RUN_TEST(test_atlas_mid_pipeline_errors_lsan);
     RUN_TEST(test_atlas_add_file_and_glob_oversized_image_too_large);
     RUN_TEST(test_atlas_add_file_and_glob_zero_dimension);
     RUN_TEST(test_atlas_error_cap_crosses_transaction_boundary);
@@ -992,8 +1060,8 @@ int main(void) {
     RUN_TEST(test_atlas_valid_hull_override_reports_once);
     RUN_TEST(test_atlas_truncation_drops_later_seqs);
     RUN_TEST(test_atlas_unfittable_reports_above_atlas_override);
-    RUN_TEST(test_build_error_format_unfittable);
-    RUN_TEST(test_build_error_format_duplicate_name);
+    RUN_TEST(test_build_error_format_matrix);
     RUN_TEST(test_build_error_format_image_too_large);
+    RUN_TEST(test_atlas_free_pack_cleans_open_transaction);
     return UNITY_END();
 }

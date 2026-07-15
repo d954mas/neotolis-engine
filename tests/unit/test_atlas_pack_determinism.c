@@ -191,11 +191,7 @@ void test_metrics_match_pinned_baseline(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabs(m.density_fill_frontier - PIN_DENSITY_FILL_FRONTIER) < PIN_DENSITY_TOL, "density_fill_frontier drifted from pinned baseline");
 }
 
-/* --- Per-sprite margin centering (B1 correctness gate) ---
- * A per-sprite margin override raises THIS sprite's reserved footprint by
- * 2*extra_margin on each axis (pipeline_tile_pack). The composed/serialized
- * content must sit in the MIDDLE of that surplus — split extra_margin left/top +
- * extra_margin right/bottom — not pile the whole surplus on the right/bottom. */
+/* Extra per-sprite margin must be split evenly around content. */
 
 /* Read region 0's min/max atlas UV from a single-sprite pack. Only the atlas
  * blob's own fields are read (offsets guarded against the file size), so this is
@@ -273,10 +269,7 @@ static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax,
     return true;
 }
 
-/* Decode page 0's RAW RGBA texture and return the opaque content's inclusive
- * pixel bounding box plus the page dims. Lets a test verify the COMPOSED pixels,
- * not only the serialized UV — a compose that dropped the centering offset is
- * invisible to a UV-only check. RAW (uncompressed) pages only. */
+/* Serialized UV alone cannot prove the composed-pixel offset. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *out_maxx, uint32_t *out_miny, uint32_t *out_maxy, uint32_t *out_w, uint32_t *out_h) {
     FILE *f = fopen(path, "rb");
@@ -376,10 +369,7 @@ static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *
     return true;
 }
 
-/* One solid RECT square with a per-sprite margin override, alone on a tight
- * (non-POT) zero-margin page: the margin surplus centers the content, so its
- * region UV span mirrors around the page midpoint (umin+umax == full-scale). A
- * degenerate origin-anchored region would leave umin == 0 and the sum short. */
+/* A tight page exposes asymmetric placement of surplus margin. */
 void test_margin_override_content_centered(void) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
@@ -432,10 +422,7 @@ void test_margin_override_content_centered(void) {
     TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, umin, "left inset must be nonzero (margin surplus present)");
     TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, vmin, "top inset must be nonzero (margin surplus present)");
 
-    /* Composed-pixel proof, independent of the serialized UV: decode page 0 and
-     * confirm the opaque content bbox is itself centered in the page. A compose
-     * that dropped the centering offset would place content at the origin here,
-     * invisible to the UV-only checks above. */
+    /* Pixel bounds independently verify the serialized centering contract. */
     uint32_t cx0 = 0;
     uint32_t cx1 = 0;
     uint32_t cy0 = 0;

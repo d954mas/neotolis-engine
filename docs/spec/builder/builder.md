@@ -1,7 +1,7 @@
 # Builder Architecture
 
 The builder is a standalone native C17 binary; packing rules are code, not a
-DSL. Covers the core API (typed add_* calls plus the begin/add/end atlas group),
+DSL. Covers the core API (typed add_* calls plus the begin/add/commit atlas transaction),
 build stages and validation, asset-ID header codegen and combined headers, the
 content-addressed encode cache, and the NFP-based atlas builder with its
 pipeline, vector packer, options, per-sprite overrides, and atlas cache.
@@ -71,6 +71,8 @@ void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_
 nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas);
 ```
 
+`nt_atlas_add_raw` borrows `rgba` only for the call and deep-copies valid RGBA8 input. The pointer is required only when the dimensions describe a valid non-zero byte span; zero or oversized dimensions ignore it and report the corresponding graceful content error.
+
 Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typed transaction because packing requires the complete sprite set. The handle owns atlas-local inputs and errors until the terminal `nt_atlas_commit`; it is invalid after commit.
 
 **Font UPM normalization.** `nt_font_opts_t.target_units_per_em` rescales a font's metrics, glyph contours, and kern offsets to a target units-per-em value offline (0 = keep the source UPM). This is the contract that lets fallback fonts of different native UPM be mixed in one font: set every member of a fallback set to the same `target_units_per_em` (the max member UPM) so their metrics share one coordinate space and merge without tripping the runtime shared-metrics assert. Normalization is done in the builder so the runtime stays a simple safety net.
@@ -100,7 +102,7 @@ The builder distinguishes two failure classes:
 
 The graceful channel is scoped to the atlas builder — it lets a batch of sprites survive one bad member. Content errors stay local to `NtAtlasBuild` while it is collecting. One bad sprite does not stop validation of the remaining sprites in that transaction, so related errors are reported together in stable add order. A failed commit publishes no atlas blob, page texture, metadata, or codegen region; it appends its errors to the pack accumulator and marks the final pack invalid. The accumulator holds up to `NT_BUILD_MAX_ERRORS` (256) content errors; beyond that the tail is dropped and `nt_builder_errors_truncated()` returns true. Atlas-specific kinds use the `NT_BUILD_ERR_KIND_ATLAS_*` prefix; generic image-content kinds remain `NT_BUILD_ERR_KIND_CORRUPT_IMAGE`, `NT_BUILD_ERR_KIND_ZERO_DIM`, and `NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE`. A single-dimension-oversized image file is reported as `IMAGE_TOO_LARGE`, not `CORRUPT_IMAGE`. Callers read committed errors before or after `finish_pack`:
 
-- `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits).
+- `nt_build_error_t` — pure-data record (kind, atlas/sprite names, dims, limits). Names longer than the fixed record fields retain both ends plus a stable hash instead of being silently truncated.
 - `const nt_build_error_t *nt_builder_get_errors(ctx, &count)` — borrowed, read-only view valid until `nt_builder_free_pack`.
 - `nt_build_error_format(err, buf, len)` — renders one actionable line on demand.
 

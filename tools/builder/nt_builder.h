@@ -83,7 +83,8 @@ typedef enum {
 } nt_build_error_kind;
 
 /* Pure-data error detail. Names are COPIED into fixed buffers, never
-   pointers — sprite names are freed in pipeline_cleanup, a pointer would dangle. */
+   pointers — sprite names are freed in pipeline_cleanup, a pointer would dangle.
+   Long names retain both ends plus a stable hash so diagnostics stay identifiable. */
 typedef struct {
     nt_build_error_kind kind;
     char atlas[NT_BUILD_ERR_NAME_MAX];
@@ -479,6 +480,9 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * for per-sprite settings (name override, pivot point). Pass NULL to use
  * defaults (centre pivot, name from path). See nt_atlas_sprite_opts_t above
  * for field semantics and the zero-init footgun warning.
+ * nt_atlas_add_raw borrows rgba_pixels for the call and deep-copies valid RGBA8
+ * input. The pointer is required only for a valid non-zero byte span; zero or
+ * oversized dimensions ignore it and record a graceful content error.
  *
  * nt_atlas_commit is terminal: recoverable content errors publish nothing and
  * are appended to the pack. After validation, publication failures assert and

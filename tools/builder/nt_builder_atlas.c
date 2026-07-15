@@ -24,13 +24,19 @@
 
 /* --- Content-error channel --- */
 
-/* Bounded copy into a fixed error-name buffer (src may be NULL). */
+/* Keep both ends and a hash so truncated diagnostics stay identifiable. */
 static void error_copy_name(char *dst, const char *src) {
     if (!src) {
         dst[0] = '\0';
         return;
     }
-    (void)snprintf(dst, NT_BUILD_ERR_NAME_MAX, "%s", src);
+    size_t len = strlen(src);
+    if (len < NT_BUILD_ERR_NAME_MAX) {
+        memcpy(dst, src, len + 1);
+        return;
+    }
+    uint64_t hash = nt_hash64_str(src).value;
+    (void)snprintf(dst, NT_BUILD_ERR_NAME_MAX, "%.48s...%.48s#%016llx", src, src + len - 48, (unsigned long long)hash);
 }
 
 static void atlas_push_error(NtAtlasBuild *atlas, uint32_t seq, const nt_build_error_t *err) {
@@ -844,9 +850,7 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
     }
     uint32_t effective_extrude = sopts->extrude ? sopts->extrude : atlas_opts->extrude;
     if (effective_extrude > 0) {
-        /* effective_override is sprite-shape domain (RECT=1); atlas_opts->shape is
-         * atlas-shape domain (RECT=0). Judge each in its own enum space — mixing
-         * them let a RECT atlas default fail and a CONVEX atlas default pass. */
+        /* Sprite and atlas shape values belong to different enum domains. */
         bool effective_is_rect = effective_override ? (effective_override == NT_ATLAS_SPRITE_SHAPE_RECT) : (atlas_opts->shape == NT_ATLAS_SHAPE_RECT);
         NT_BUILD_ASSERT(effective_is_rect && "effective extrude > 0 requires effective shape == RECT");
     }
@@ -957,7 +961,7 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
-    NT_BUILD_ASSERT(atlas && atlas->ctx && atlas->ctx->active_atlas == atlas && rgba_pixels && "atlas_add_raw: invalid args");
+    NT_BUILD_ASSERT(atlas && atlas->ctx && atlas->ctx->active_atlas == atlas && "atlas_add_raw: invalid atlas");
     /* Caller arguments are validated before content checks. */
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
@@ -983,6 +987,11 @@ void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t 
         push_content_error(state, add_seq, sopts.name, NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE, width, height);
         return;
     }
+    if (width > UINT16_MAX || height > UINT16_MAX) {
+        push_content_error(state, add_seq, sopts.name, NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, width, height);
+        return;
+    }
+    NT_BUILD_ASSERT(rgba_pixels && "atlas_add_raw: pixels are NULL");
 
     /* Deep-copy RGBA pixels */
     uint32_t pixel_bytes = width * height * 4;
@@ -1037,6 +1046,7 @@ void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_
     if (opts) {
         nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
         atlas_assert_sprite_opts(&sopts);
+        atlas_assert_sprite_cross_field(&sopts, &atlas->opts);
     }
     /* If opts is non-NULL, name MUST be NULL — a single name can't apply to
      * N matched files without hash collisions. Each file derives its own name

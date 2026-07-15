@@ -1526,9 +1526,8 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
  * fits), records the winning placement, and updates stats.
  *
  * Returns true if the sprite was placed. Returns false when a fresh page
- * is needed but ATLAS_MAX_PAGES is already reached — the caller should
- * emit an ERROR log and fall back to a canonical "stack at (margin, margin)
- * of page 0" placement for the remaining unsorted sprites. */
+ * is needed but ATLAS_MAX_PAGES is already reached; vector_pack propagates
+ * page exhaustion to its caller. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
@@ -1681,7 +1680,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     /* Fallback: nothing fit, allocate a fresh page and retry. */
     if (!found_any) {
         if (*ctx->page_count >= ATLAS_MAX_PAGES) {
-            return false; /* vector_pack caller asserts — see NT_BUILD_ASSERT in the sprite loop */
+            return false; /* vector_pack propagates page exhaustion. */
         }
 
         uint32_t new_page = (*ctx->page_count)++;
