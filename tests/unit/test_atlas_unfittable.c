@@ -699,7 +699,7 @@ void test_atlas_mid_pipeline_errors_lsan(void) {
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "mid", NULL);
 
     uint8_t slice9[8 * 8 * 4] = {0};
-    for (size_t i = 0; i < 8U * 8U; i++) {
+    for (size_t i = 0; i < sizeof(slice9) / 4; i++) {
         slice9[(i * 4) + 3] = 255;
     }
     nt_atlas_add_raw(atlas, slice9, 8, 8, &(nt_atlas_sprite_opts_t){.name = "slice9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4});
