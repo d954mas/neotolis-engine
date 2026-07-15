@@ -5755,6 +5755,7 @@ void test_atlas_codegen_large(void) {
     free(h_buf);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_opts_defaults(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     TEST_ASSERT_EQUAL(2048, opts.max_size);
@@ -5762,6 +5763,7 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(0, opts.margin);
     TEST_ASSERT_EQUAL(0, opts.extrude);
     TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
+    TEST_ASSERT_TRUE(opts.tracer_tolerance == 0.0F);
     TEST_ASSERT_EQUAL(8, opts.max_vertices);
     TEST_ASSERT_TRUE(opts.allow_transform);
     TEST_ASSERT_TRUE(opts.power_of_two);
@@ -5770,6 +5772,10 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_NULL(opts.compress);
     /* Default pixels_per_unit is 1.0 */
     TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
+
+    nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+    TEST_ASSERT_TRUE(sprite_opts.tracer_tolerance == 0.0F);
+    TEST_ASSERT_EQUAL_UINT8(0, sprite_opts.alpha_threshold);
 }
 
 /* Builder writes pixels_per_unit as a 4-byte resource metadata blob keyed by
@@ -5883,6 +5889,146 @@ static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out
     *out_regions = (const NtAtlasRegion *)ptr;
     *out_region_count = ahdr->region_count;
     return buf;
+}
+
+static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf) {
+    const NtPackHeader *pack = (const NtPackHeader *)pack_buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack_buf + sizeof(NtPackHeader));
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            const uint8_t *ablob = pack_buf + entries[i].offset;
+            const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+            return (const NtAtlasVertex *)(ablob + header->vertex_offset);
+        }
+    }
+    return NULL;
+}
+
+static const NtAtlasRegion *find_atlas_region(const NtAtlasRegion *regions, uint32_t count, const char *name) {
+    uint64_t name_hash = nt_hash64_str(name).value;
+    for (uint32_t i = 0; i < count; i++) {
+        if (regions[i].name_hash == name_hash) {
+            return &regions[i];
+        }
+    }
+    return NULL;
+}
+
+static void assert_rect_local_size(const NtAtlasRegion *region, const NtAtlasVertex *vertices, int32_t expected_w, int32_t expected_h) {
+    TEST_ASSERT_NOT_NULL(region);
+    TEST_ASSERT_NOT_NULL(vertices);
+    TEST_ASSERT_EQUAL_UINT8(4, region->vertex_count);
+    int32_t min_x = INT32_MAX;
+    int32_t min_y = INT32_MAX;
+    int32_t max_x = INT32_MIN;
+    int32_t max_y = INT32_MIN;
+    for (uint32_t i = 0; i < region->vertex_count; i++) {
+        const NtAtlasVertex *v = &vertices[region->vertex_start + i];
+        min_x = v->local_x < min_x ? v->local_x : min_x;
+        min_y = v->local_y < min_y ? v->local_y : min_y;
+        max_x = v->local_x > max_x ? v->local_x : max_x;
+        max_y = v->local_y > max_y ? v->local_y : max_y;
+    }
+    TEST_ASSERT_EQUAL_INT32(expected_w, (int32_t)max_x - min_x);
+    TEST_ASSERT_EQUAL_INT32(expected_h, (int32_t)max_y - min_y);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_tracer_tolerance_defaults_and_validation(void) {
+    (void)MKDIR(TMP_DIR);
+    const float invalid_values[] = {-1.0F, INFINITY, NAN};
+    for (uint32_t i = 0; i < 3; i++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_bad_tolerance.ntpack");
+        nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+        opts.tracer_tolerance = invalid_values[i];
+        EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "bad", &opts), "tracer_tolerance");
+    }
+
+    uint8_t pixel[4] = {255, 255, 255, 255};
+    for (uint32_t i = 0; i < 3; i++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/sprite_bad_tolerance.ntpack");
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "bad", NULL);
+        nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+        opts.name = "bad.png";
+        opts.tracer_tolerance = invalid_values[i];
+        EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, pixel, 1, 1, &opts), "tracer_tolerance");
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/signed_zero_tolerance.ntpack");
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.tracer_tolerance = -0.0F;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "zero", &atlas_opts);
+    TEST_ASSERT_FALSE(signbit(atlas->opts.tracer_tolerance));
+    nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+    sprite_opts.name = "zero.png";
+    sprite_opts.tracer_tolerance = -0.0F;
+    nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
+    TEST_ASSERT_FALSE(signbit(atlas->sprites[0].tracer_tolerance_override));
+    nt_builder_free_pack(ctx);
+}
+
+void test_sprite_alpha_threshold_controls_trim(void) {
+    const char *path = TMP_DIR "/sprite_alpha_threshold.ntpack";
+    (void)MKDIR(TMP_DIR);
+    uint8_t rgba[8 * 8 * 4] = {0};
+    for (uint32_t y = 0; y < 8; y++) {
+        for (uint32_t x = 0; x < 8; x++) {
+            uint8_t *pixel = rgba + (((size_t)y * 8 + x) * 4);
+            pixel[0] = pixel[1] = pixel[2] = 255;
+            pixel[3] = (x >= 2 && x < 6 && y >= 2 && y < 6) ? 255 : 64;
+        }
+    }
+
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "threshold", &atlas_opts);
+    nt_atlas_sprite_opts_t inherited = nt_atlas_sprite_opts_defaults();
+    inherited.name = "inherited.png";
+    nt_atlas_add_raw(atlas, rgba, 8, 8, &inherited);
+    nt_atlas_sprite_opts_t overridden = nt_atlas_sprite_opts_defaults();
+    overridden.name = "overridden.png";
+    overridden.alpha_threshold = 128;
+    nt_atlas_add_raw(atlas, rgba, 8, 8, &overridden);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL_UINT32(2, region_count);
+    const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
+    TEST_ASSERT_NOT_NULL(vertices);
+    assert_rect_local_size(find_atlas_region(regions, region_count, "inherited.png"), vertices, 8, 8);
+    assert_rect_local_size(find_atlas_region(regions, region_count, "overridden.png"), vertices, 4, 4);
+    free(buf);
+}
+
+void test_rect_ignores_sprite_tracer_tolerance(void) {
+    const char *path = TMP_DIR "/rect_ignores_tolerance.ntpack";
+    uint8_t rgba[8 * 8 * 4];
+    memset(rgba, 255, sizeof(rgba));
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "rect", &atlas_opts);
+    nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "rect.png";
+    opts.tracer_tolerance = 100.0F;
+    nt_atlas_add_raw(atlas, rgba, 8, 8, &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
+    assert_rect_local_size(&regions[0], vertices, 8, 8);
+    free(buf);
 }
 
 static bool atlas_page0_resource_resolves(const char *pack_path) {
@@ -7168,6 +7314,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen);
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
+    RUN_TEST(test_atlas_tracer_tolerance_defaults_and_validation);
     RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
     RUN_TEST(test_atlas_long_name_page_resource_resolves);
 
@@ -7176,6 +7323,8 @@ int main(void) {
     RUN_TEST(test_atlas_sprite_opts_custom_origin);
     RUN_TEST(test_atlas_sprite_opts_origin_out_of_range_allowed);
     RUN_TEST(test_atlas_sprite_opts_origin_nan_asserts);
+    RUN_TEST(test_sprite_alpha_threshold_controls_trim);
+    RUN_TEST(test_rect_ignores_sprite_tracer_tolerance);
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     /* Atlas cache hardening + BUG-2 regression */

@@ -314,6 +314,7 @@ typedef struct {
     uint32_t margin;                        /* atlas edge margin (default: 0) */
     uint32_t extrude;                       /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
     uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1) */
+    float tracer_tolerance;                 /* pixel-domain simplification tolerance (default: 0.0F = legacy; ignored by RECT) */
     uint8_t max_vertices;                   /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
@@ -355,6 +356,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .margin = 0,
         .extrude = 0,
         .alpha_threshold = 1,
+        .tracer_tolerance = 0.0F,
         .max_vertices = 8,
         .shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR,
         .allow_transform = true,
@@ -414,10 +416,12 @@ typedef struct {
     uint16_t slice9_bottom;
 
     /* Per-sprite overrides (0 = use atlas default). */
-    uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
-    uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
-    uint8_t max_vertices; /* 0 = atlas default, else 3..16 */
-    uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
+    float tracer_tolerance;  /* 0 = atlas default; finite and non-negative; ignored by RECT */
+    uint8_t alpha_threshold; /* 0 = atlas default */
+    uint8_t shape;           /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
+    uint8_t allow_rotate;    /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
+    uint8_t max_vertices;    /* 0 = atlas default, else 3..16 */
+    uint8_t margin;          /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
     /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed
      * (RECT only) and may be smaller OR larger than the atlas extrude. A zero
      * bleed cannot be expressed per-sprite (0 means inherit). Effective extrude,

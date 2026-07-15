@@ -757,6 +757,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");
+    NT_BUILD_ASSERT(isfinite(opts->tracer_tolerance) && opts->tracer_tolerance >= 0.0F && "nt_atlas_begin: tracer_tolerance must be finite and non-negative");
     /* unsigned cast catches a negative value cast into the enum too. */
     NT_BUILD_ASSERT((unsigned)opts->shape <= (unsigned)NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "nt_atlas_begin: opts.shape out of range");
     /* Simple AABB edge extrude needs a rectangular footprint; polygon packing
@@ -785,6 +786,9 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     NT_BUILD_ASSERT(!ctx->active_atlas && "nt_atlas_begin: nested atlas not allowed");
     nt_atlas_opts_t resolved = opts ? *opts : nt_atlas_opts_defaults();
     resolved.format = atlas_assert_opts(&resolved);
+    if (resolved.tracer_tolerance == 0.0F) {
+        resolved.tracer_tolerance = 0.0F;
+    }
     if (resolved.compress) {
         resolved.gen_mipmaps = true;
     }
@@ -825,6 +829,10 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
 static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_opts_t *opts) {
     nt_atlas_sprite_opts_t resolved = opts ? *opts : nt_atlas_sprite_opts_defaults();
     NT_BUILD_ASSERT(isfinite(resolved.origin_x) && isfinite(resolved.origin_y) && "atlas_add*: origin must be finite (no NaN/inf)");
+    NT_BUILD_ASSERT(isfinite(resolved.tracer_tolerance) && resolved.tracer_tolerance >= 0.0F && "atlas_add*: tracer_tolerance must be finite and non-negative");
+    if (resolved.tracer_tolerance == 0.0F) {
+        resolved.tracer_tolerance = 0.0F;
+    }
     return resolved;
 }
 
@@ -864,6 +872,8 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->slice9_right = sopts->slice9_right;
     sprite->slice9_top = sopts->slice9_top;
     sprite->slice9_bottom = sopts->slice9_bottom;
+    sprite->tracer_tolerance_override = sopts->tracer_tolerance;
+    sprite->alpha_threshold_override = sopts->alpha_threshold;
     sprite->shape_override = sopts->shape;
     sprite->rotate_override = sopts->allow_rotate;
     sprite->max_verts_override = sopts->max_vertices;
@@ -1070,6 +1080,30 @@ void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_
 /* --- Pipeline state: carries data between pipeline steps --- */
 
 typedef struct {
+    uint8_t alpha_threshold;
+    float tracer_tolerance;
+    uint8_t max_vertices;
+    nt_atlas_shape_t shape;
+} AtlasGeometryOpts;
+
+static AtlasGeometryOpts resolve_geometry_opts(const NtAtlasSpriteInput *sprite, const nt_atlas_opts_t *atlas) {
+    AtlasGeometryOpts resolved = {
+        .alpha_threshold = sprite->alpha_threshold_override ? sprite->alpha_threshold_override : atlas->alpha_threshold,
+        .tracer_tolerance = sprite->tracer_tolerance_override != 0.0F ? sprite->tracer_tolerance_override : atlas->tracer_tolerance,
+        .max_vertices = sprite->max_verts_override ? sprite->max_verts_override : atlas->max_vertices,
+        .shape = atlas->shape,
+    };
+    if (sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) {
+        resolved.shape = NT_ATLAS_SHAPE_RECT;
+    } else if (sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_CONVEX) {
+        resolved.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    } else if (sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_CONCAVE) {
+        resolved.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    }
+    return resolved;
+}
+
+typedef struct {
     NtBuilderContext *ctx;
     NtAtlasBuild *state;
     NtAtlasSpriteInput *sprites;
@@ -1078,6 +1112,7 @@ typedef struct {
     /* Alpha trim */
     uint32_t *trim_x, *trim_y, *trim_w, *trim_h;
     uint8_t **alpha_planes;
+    AtlasGeometryOpts *geometry_opts;
 
     /* Dedup */
     int32_t *dedup_map;
@@ -1107,6 +1142,14 @@ typedef struct {
     bool cache_hit;
 } AtlasPipeline;
 
+static void pipeline_resolve_geometry_opts(AtlasPipeline *p) {
+    p->geometry_opts = (AtlasGeometryOpts *)malloc((size_t)p->sprite_count * sizeof(AtlasGeometryOpts));
+    NT_BUILD_ASSERT(p->geometry_opts && "pipeline_resolve_geometry_opts: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        p->geometry_opts[i] = resolve_geometry_opts(&p->sprites[i], p->opts);
+    }
+}
+
 /* --- pipeline_alpha_trim: extract alpha planes + find tight bounding box --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1120,7 +1163,7 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
 
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
-        bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
+        bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->geometry_opts[i].alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
         if (!has_pixels) {
             /* Accumulate and keep validating the rest of this atlas. */
             nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
@@ -1204,6 +1247,7 @@ static void pipeline_dedup(AtlasPipeline *p) {
             const NtAtlasSpriteInput *so = &p->sprites[orig];
             /* Different slice9/shape/rotate constraints require separate placement */
             bool meta_match = sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
+                              sc->tracer_tolerance_override == so->tracer_tolerance_override && sc->alpha_threshold_override == so->alpha_threshold_override &&
                               sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override &&
                               sc->margin_override == so->margin_override && sc->extrude_override == so->extrude_override;
             if (meta_match && p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
@@ -1408,22 +1452,9 @@ static void pipeline_geometry(AtlasPipeline *p) {
             continue;
         }
 
-        /* Resolve per-sprite shape override (0 = atlas default) */
-        nt_atlas_shape_t effective_shape = p->opts->shape;
-        uint8_t effective_max_verts = p->opts->max_vertices;
-        if (p->sprites[idx].shape_override != 0) {
-            /* Map NT_ATLAS_SPRITE_SHAPE_* to nt_atlas_shape_t */
-            if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) {
-                effective_shape = NT_ATLAS_SHAPE_RECT;
-            } else if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_CONVEX) {
-                effective_shape = NT_ATLAS_SHAPE_CONVEX_HULL;
-            } else if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_CONCAVE) {
-                effective_shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
-            }
-        }
-        if (p->sprites[idx].max_verts_override != 0) {
-            effective_max_verts = p->sprites[idx].max_verts_override;
-        }
+        const AtlasGeometryOpts *geometry_opts = &p->geometry_opts[idx];
+        nt_atlas_shape_t effective_shape = geometry_opts->shape;
+        uint8_t effective_max_verts = geometry_opts->max_vertices;
 
         if (effective_shape == NT_ATLAS_SHAPE_RECT) {
             /* Rect mode: 4-vertex trim bounding box. */
@@ -1448,7 +1479,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
-                    if (a >= p->opts->alpha_threshold) {
+                    if (a >= geometry_opts->alpha_threshold) {
                         binary[((size_t)y * tw) + x] = 1;
                     }
                 }
@@ -2457,6 +2488,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->trim_y);
     free(p->trim_w);
     free(p->trim_h);
+    free(p->geometry_opts);
     free(p->dedup_map);
     free(p->unique_indices);
     free(p->vertex_counts);
@@ -2516,6 +2548,7 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     double t0 = nt_time_now();
     double t_total = t0;
 
+    pipeline_resolve_geometry_opts(&p);
     pipeline_alpha_trim(&p);
     double bench_alpha_trim = nt_time_now() - t0;
 
