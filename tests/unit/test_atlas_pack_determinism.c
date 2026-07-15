@@ -114,7 +114,7 @@ static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
 /* Pack the whole mini-corpus with nt_atlas_opts_defaults() (NO cache dir → real
  * default path) to `path`, then parse the produced .ntpack into `out`.
  * Returns true on a clean pack + parse. */
-static bool pack_and_parse_corpus_with_tolerance(const char *path, float tolerance, nt_bench_atlas_metrics_t *out) {
+static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape_t shape, float tolerance, bool sprite_override, nt_bench_atlas_metrics_t *out) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -125,6 +125,7 @@ static bool pack_and_parse_corpus_with_tolerance(const char *path, float toleran
     }
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = shape;
     opts.tracer_tolerance = tolerance;
     NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
@@ -135,7 +136,13 @@ static bool pack_and_parse_corpus_with_tolerance(const char *path, float toleran
         TEST_ASSERT_NOT_NULL(bufs[i]);
         gen_sprite(bufs[i], s);
         /* raw sprites require an explicit name (no path to derive one from). */
-        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        if (sprite_override && s->kind == SPR_TRI_RAMP) {
+            sprite_opts.tracer_tolerance = 2.0F;
+            sprite_opts.alpha_threshold = 128;
+        }
+        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &sprite_opts);
     }
 
     (void)nt_atlas_commit(atlas_build_128);
@@ -151,6 +158,10 @@ static bool pack_and_parse_corpus_with_tolerance(const char *path, float toleran
 
     memset(out, 0, sizeof(*out));
     return nt_bench_parse_ntpack(path, out) == 0;
+}
+
+static bool pack_and_parse_corpus_with_tolerance(const char *path, float tolerance, nt_bench_atlas_metrics_t *out) {
+    return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, tolerance, false, out);
 }
 
 static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *out) { return pack_and_parse_corpus_with_tolerance(path, 0.0F, out); }
@@ -216,15 +227,18 @@ void test_metrics_stable_across_two_packs(void) {
     TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_frontier), density_fixed(b.density_fill_frontier));
 }
 
-void test_positive_tolerance_pack_is_byte_deterministic(void) {
-    const char *a_path = TMP_DIR "/det_corpus_positive_a.ntpack";
-    const char *b_path = TMP_DIR "/det_corpus_positive_b.ntpack";
-    nt_bench_atlas_metrics_t a;
-    nt_bench_atlas_metrics_t b;
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_tolerance(a_path, 1.5F, &a), "positive pack/parse A failed");
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_tolerance(b_path, 1.5F, &b), "positive pack/parse B failed");
-    TEST_ASSERT_TRUE_MESSAGE(files_are_identical(a_path, b_path), "positive-tolerance atlas bytes are not deterministic");
-    TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
+void test_positive_tolerance_pack_bytes_repeat(void) {
+    const nt_atlas_shape_t shapes[] = {NT_ATLAS_SHAPE_CONCAVE_CONTOUR, NT_ATLAS_SHAPE_CONVEX_HULL};
+    const char *a_paths[] = {TMP_DIR "/det_concave_positive_a.ntpack", TMP_DIR "/det_convex_positive_a.ntpack"};
+    const char *b_paths[] = {TMP_DIR "/det_concave_positive_b.ntpack", TMP_DIR "/det_convex_positive_b.ntpack"};
+    for (uint32_t shape = 0; shape < 2; shape++) {
+        nt_bench_atlas_metrics_t a;
+        nt_bench_atlas_metrics_t b;
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(a_paths[shape], shapes[shape], 1.5F, true, &a), "positive pack/parse A failed");
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(b_paths[shape], shapes[shape], 1.5F, true, &b), "positive pack/parse B failed");
+        TEST_ASSERT_TRUE_MESSAGE(files_are_identical(a_paths[shape], b_paths[shape]), "positive-tolerance atlas bytes are not deterministic");
+        TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
+    }
 }
 
 /* These pins move only with an intentional default-output or cache-key change. */
@@ -504,7 +518,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_pack_matches_legacy_golden);
     RUN_TEST(test_metrics_stable_across_two_packs);
-    RUN_TEST(test_positive_tolerance_pack_is_byte_deterministic);
+    RUN_TEST(test_positive_tolerance_pack_bytes_repeat);
     RUN_TEST(test_metrics_match_pinned_baseline);
     RUN_TEST(test_margin_override_content_centered);
     return UNITY_END();

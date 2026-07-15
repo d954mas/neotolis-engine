@@ -5968,7 +5968,7 @@ static void build_convex_tolerance_fixture(const char *path, const uint8_t *rgba
     nt_builder_free_pack(ctx);
 }
 
-static uint32_t atlas_region_y_down_points(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]) {
+static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]) {
     for (uint32_t i = 0; i < region->vertex_count; i++) {
         const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
         out[i].x = vertex->local_x;
@@ -5978,7 +5978,7 @@ static uint32_t atlas_region_y_down_points(const NtAtlasRegion *region, const Nt
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_concave_positive_tolerance_is_count_first(void) {
+void test_aa_triangle_positive_tolerance_exact_coverage(void) {
     (void)MKDIR(TMP_DIR);
     enum { W = 28, H = 20, BUDGET = 8 };
     uint8_t rgba[W * H * 4] = {0};
@@ -6001,31 +6001,39 @@ void test_concave_positive_tolerance_is_count_first(void) {
         }
     }
 
-    const char *positive_path = TMP_DIR "/concave_tolerance_positive.ntpack";
-    build_concave_tolerance_fixture(positive_path, rgba, W, H, 1.5F, BUDGET, "aa_notch");
-
-    const NtAtlasRegion *positive_regions = NULL;
-    uint32_t positive_region_count = 0;
-    uint8_t *positive_pack = read_atlas_blob(positive_path, &positive_regions, &positive_region_count);
-    TEST_ASSERT_NOT_NULL(positive_pack);
-    TEST_ASSERT_EQUAL_UINT32(1, positive_region_count);
-    TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, positive_regions[0].vertex_count);
-
-    Point2D emitted[16];
-    const NtAtlasVertex *positive_vertices = atlas_blob_vertices(positive_pack);
-    uint32_t emitted_count = atlas_region_y_down_points(&positive_regions[0], positive_vertices, H, emitted);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
-
     Point2D contour[(W * H * 2) + 2];
     Point2D clean[(W * H * 2) + 2];
     bool overflow = false;
     uint32_t contour_count = trace_contour(binary, W, H, contour, (W * H * 2) + 2, &overflow);
     TEST_ASSERT_FALSE(overflow);
     uint32_t clean_count = remove_collinear(contour, contour_count, clean);
-    TEST_ASSERT_TRUE(polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count) <= 1.5);
 
-    free(positive_pack);
-    (void)remove(positive_path);
+    const char *paths[] = {TMP_DIR "/concave_tolerance_positive.ntpack", TMP_DIR "/convex_aa_tolerance_positive.ntpack"};
+    build_concave_tolerance_fixture(paths[0], rgba, W, H, 1.5F, BUDGET, "aa_concave");
+    build_convex_tolerance_fixture(paths[1], rgba, W, H, 1.5F, BUDGET, "aa_convex");
+    for (uint32_t shape = 0; shape < 2; shape++) {
+        const NtAtlasRegion *regions = NULL;
+        uint32_t region_count = 0;
+        uint8_t *pack = read_atlas_blob(paths[shape], &regions, &region_count);
+        TEST_ASSERT_NOT_NULL(pack);
+        TEST_ASSERT_EQUAL_UINT32(1, region_count);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, regions[0].vertex_count);
+
+        Point2D emitted[16];
+        uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(pack), H, emitted);
+        TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
+        if (shape == 0) {
+            TEST_ASSERT_TRUE(polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count) <= 1.5);
+        } else {
+            uint32_t raw_count = 0;
+            Point2D *raw = binary_build_convex_polygon(binary, W, H, UINT32_MAX, &raw_count);
+            TEST_ASSERT_NOT_NULL(raw);
+            TEST_ASSERT_TRUE(polygon_max_boundary_distance(raw, raw_count, emitted, emitted_count) <= 1.5);
+            free(raw);
+        }
+        free(pack);
+        (void)remove(paths[shape]);
+    }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -6057,7 +6065,7 @@ void test_concave_positive_budget_fallback_keeps_real_corner(void) {
     TEST_ASSERT_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
 
     Point2D emitted[16];
-    uint32_t emitted_count = atlas_region_y_down_points(&regions[0], atlas_blob_vertices(pack), H, emitted);
+    uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(pack), H, emitted);
     TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
 
     Point2D contour[(W * H * 2) + 2];
@@ -6120,7 +6128,7 @@ void test_convex_positive_tolerance_is_count_first(void) {
     TEST_ASSERT_LESS_THAN_UINT8(zero_regions[0].vertex_count, positive_regions[0].vertex_count);
 
     Point2D emitted[16];
-    uint32_t emitted_count = atlas_region_y_down_points(&positive_regions[0], atlas_blob_vertices(positive_pack), H, emitted);
+    uint32_t emitted_count = decode_serialized_region_y_down(&positive_regions[0], atlas_blob_vertices(positive_pack), H, emitted);
     TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
 
     uint32_t raw_count = 0;
@@ -6237,17 +6245,25 @@ void test_sprite_alpha_threshold_controls_trim(void) {
     free(buf);
 }
 
-void test_rect_ignores_sprite_tracer_tolerance(void) {
+void test_rect_ignores_tolerance_but_uses_sprite_threshold(void) {
     const char *path = TMP_DIR "/rect_ignores_tolerance.ntpack";
-    uint8_t rgba[8 * 8 * 4];
-    memset(rgba, 255, sizeof(rgba));
+    uint8_t rgba[8 * 8 * 4] = {0};
+    for (uint32_t y = 0; y < 8; y++) {
+        for (uint32_t x = 0; x < 8; x++) {
+            uint8_t *pixel = rgba + (((size_t)y * 8 + x) * 4);
+            pixel[0] = pixel[1] = pixel[2] = 255;
+            pixel[3] = (x >= 2 && x < 6 && y >= 2 && y < 6) ? 255 : 64;
+        }
+    }
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
+    atlas_opts.tracer_tolerance = 50.0F;
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "rect", &atlas_opts);
     nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
     opts.name = "rect.png";
     opts.tracer_tolerance = 100.0F;
+    opts.alpha_threshold = 128;
     nt_atlas_add_raw(atlas, rgba, 8, 8, &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -6258,8 +6274,112 @@ void test_rect_ignores_sprite_tracer_tolerance(void) {
     uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(buf);
     const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
-    assert_rect_local_size(&regions[0], vertices, 8, 8);
+    assert_rect_local_size(&regions[0], vertices, 4, 4);
+    TEST_ASSERT_EQUAL_INT16(2, regions[0].trim_offset_x);
+    TEST_ASSERT_EQUAL_INT16(2, regions[0].trim_offset_y);
     free(buf);
+}
+
+static void assert_serialized_local_polygons_equal(const NtAtlasRegion *a, const NtAtlasRegion *b, const NtAtlasVertex *vertices) {
+    TEST_ASSERT_EQUAL_UINT8(a->vertex_count, b->vertex_count);
+    for (uint32_t i = 0; i < a->vertex_count; i++) {
+        const NtAtlasVertex *av = &vertices[a->vertex_start + i];
+        const NtAtlasVertex *bv = &vertices[b->vertex_start + i];
+        TEST_ASSERT_EQUAL_INT16(av->local_x, bv->local_x);
+        TEST_ASSERT_EQUAL_INT16(av->local_y, bv->local_y);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_mixed_sprite_geometry_overrides_are_isolated(void) {
+    const char *path = TMP_DIR "/mixed_geometry_overrides.ntpack";
+    (void)MKDIR(TMP_DIR);
+    enum { W = 28, H = 20 };
+    uint8_t rgba[4][W * H * 4] = {0};
+    uint8_t threshold_mask[(W - 1) * H] = {0};
+    uint8_t override_mask[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        uint32_t edge = y + ((y >= 7 && y <= 10) ? 1U : 0U);
+        for (uint32_t x = 0; x < W; x++) {
+            uint8_t alpha = 0;
+            if (x >= edge + 3) {
+                alpha = 255;
+            } else if (x >= edge) {
+                alpha = (uint8_t)(64U + ((x - edge) * 64U));
+            }
+            for (uint32_t sprite = 0; sprite < 4; sprite++) {
+                uint8_t *pixel = rgba[sprite] + ((((size_t)y * W) + x) * 4);
+                pixel[0] = (uint8_t)(30U + (sprite * 40U));
+                pixel[1] = (uint8_t)(180U - (sprite * 20U));
+                pixel[2] = (uint8_t)(100U + (sprite * 30U));
+                pixel[3] = alpha;
+            }
+            if (x > 0) {
+                threshold_mask[((size_t)y * (W - 1)) + (x - 1)] = alpha >= 128 ? 1 : 0;
+            }
+            override_mask[((size_t)y * W) + x] = alpha >= 1 ? 1 : 0;
+        }
+    }
+
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    atlas_opts.alpha_threshold = 128;
+    atlas_opts.tracer_tolerance = 0.25F;
+    atlas_opts.max_vertices = 8;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "mixed", &atlas_opts);
+    const char *names[] = {"inherited_a", "inherited_b", "tolerance_override", "rect_override"};
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+        opts.name = names[i];
+        if (i == 2) {
+            opts.tracer_tolerance = 1.5F;
+        } else if (i == 3) {
+            opts.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
+            opts.tracer_tolerance = 100.0F;
+        }
+        nt_atlas_add_raw(atlas, rgba[i], W, H, &opts);
+    }
+    nt_atlas_sprite_opts_t threshold_override = nt_atlas_sprite_opts_defaults();
+    threshold_override.name = "threshold_override";
+    threshold_override.alpha_threshold = 1;
+    nt_atlas_add_raw(atlas, rgba[0], W, H, &threshold_override);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(pack);
+    TEST_ASSERT_EQUAL_UINT32(5, region_count);
+    const NtAtlasVertex *vertices = atlas_blob_vertices(pack);
+    const NtAtlasRegion *inherited_a = find_atlas_region(regions, region_count, "inherited_a");
+    const NtAtlasRegion *inherited_b = find_atlas_region(regions, region_count, "inherited_b");
+    const NtAtlasRegion *tolerance = find_atlas_region(regions, region_count, "tolerance_override");
+    const NtAtlasRegion *rect = find_atlas_region(regions, region_count, "rect_override");
+    const NtAtlasRegion *threshold = find_atlas_region(regions, region_count, "threshold_override");
+    TEST_ASSERT_NOT_NULL(inherited_a);
+    TEST_ASSERT_NOT_NULL(inherited_b);
+    TEST_ASSERT_NOT_NULL(tolerance);
+    TEST_ASSERT_NOT_NULL(rect);
+    TEST_ASSERT_NOT_NULL(threshold);
+    assert_serialized_local_polygons_equal(inherited_a, inherited_b, vertices);
+    TEST_ASSERT_LESS_THAN_UINT8(inherited_a->vertex_count, tolerance->vertex_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, tolerance->vertex_count);
+    TEST_ASSERT_EQUAL_INT16(1, inherited_a->trim_offset_x);
+    TEST_ASSERT_EQUAL_INT16(1, inherited_b->trim_offset_x);
+    TEST_ASSERT_EQUAL_INT16(0, threshold->trim_offset_x);
+    assert_rect_local_size(rect, vertices, W - 1, H);
+
+    Point2D emitted[16];
+    uint32_t emitted_count = decode_serialized_region_y_down(tolerance, vertices, H, emitted);
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, threshold_mask, W - 1, H) <= 0.0);
+    emitted_count = decode_serialized_region_y_down(threshold, vertices, H, emitted);
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, override_mask, W, H) <= 0.0);
+
+    free(pack);
+    (void)remove(path);
 }
 
 static bool atlas_page0_resource_resolves(const char *pack_path) {
@@ -7613,13 +7733,14 @@ int main(void) {
     RUN_TEST(test_atlas_sprite_opts_origin_out_of_range_allowed);
     RUN_TEST(test_atlas_sprite_opts_origin_nan_asserts);
     RUN_TEST(test_sprite_alpha_threshold_controls_trim);
-    RUN_TEST(test_rect_ignores_sprite_tracer_tolerance);
+    RUN_TEST(test_rect_ignores_tolerance_but_uses_sprite_threshold);
+    RUN_TEST(test_mixed_sprite_geometry_overrides_are_isolated);
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     /* Atlas cache hardening + BUG-2 regression */
     RUN_TEST(test_atlas_cache_identity_includes_geometry_controls);
     RUN_TEST(test_atlas_cache_signed_zero_tolerance_is_identical);
-    RUN_TEST(test_concave_positive_tolerance_is_count_first);
+    RUN_TEST(test_aa_triangle_positive_tolerance_exact_coverage);
     RUN_TEST(test_concave_positive_budget_fallback_keeps_real_corner);
     RUN_TEST(test_convex_positive_tolerance_is_count_first);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
