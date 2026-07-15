@@ -66,6 +66,7 @@ typedef struct {
     uint8_t max_verts_override; /* 0 = atlas default */
     uint8_t margin_override;    /* 0 = atlas default */
     uint8_t extrude_override;   /* 0 = atlas default */
+    uint32_t add_seq;           /* per-add sequence for stable add-order error reporting */
 } NtAtlasSpriteInput;
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */
@@ -74,8 +75,9 @@ typedef struct {
     uint64_t resource_id; /* nt_hash64 of path */
 } NtAtlasRegionCodegen;
 
-/* Atlas build state (active between begin_atlas / end_atlas) */
-typedef struct {
+/* Atlas build state (active between begin and commit). */
+struct NtAtlasBuild {
+    NtBuilderContext *ctx;           /* owner pack */
     char *name;                      /* atlas name for resource_id (owned) */
     nt_atlas_opts_t opts;            /* copy of user opts (compress ptr zeroed, use has_compress) */
     nt_tex_compress_opts_t compress; /* Basis compression settings */
@@ -84,7 +86,13 @@ typedef struct {
     uint32_t sprite_count;
     uint32_t sprite_capacity;
     uint64_t cache_key; /* computed atlas cache key */
-} NtBuildAtlasState;
+    nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
+    uint32_t error_seq[NT_BUILD_MAX_ERRORS];
+    uint32_t error_count;
+    uint32_t add_seq_counter;
+    bool errors_truncated;
+    bool failed;
+};
 
 /* Metadata accumulation limit */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -178,8 +186,8 @@ struct NtBuilderContext {
     uint32_t font_count;
     uint32_t atlas_count;
 
-    /* Atlas: active atlas state (non-NULL between begin_atlas/end_atlas) */
-    NtBuildAtlasState *active_atlas;
+    /* Atlas transaction currently collecting inputs. */
+    NtAtlasBuild *active_atlas;
 
     /* Deduplication stats */
     uint32_t dedup_count;
@@ -216,17 +224,28 @@ struct NtBuilderContext {
     /* Parallel encoding: thread count (0 = single-threaded) */
     uint32_t thread_count;
 
-    /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
+    /* Atlas region codegen entries (heap, populated by commit, consumed by codegen) */
     NtAtlasRegionCodegen *atlas_regions;
     uint32_t atlas_region_count;
     uint32_t atlas_region_capacity;
+
+    /* Committed atlas errors; any error makes final pack output invalid. */
+    nt_build_error_t errors[NT_BUILD_MAX_ERRORS];
+    uint32_t error_count;
+    bool errors_truncated;
+    bool failed;
+    bool atlas_cache_hit;
 };
+
+nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error);
+nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal decode functions -- called from add_* (eager decode) */
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts);
 nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
@@ -388,6 +407,20 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
     }
 }
 
+/* Derive the generated .h path for a pack, honoring an explicit header_dir.
+ * header_dir non-NULL -> "<header_dir>/<stem>.h"; else replace the pack extension.
+ * Shared by codegen and failed-build cleanup. */
+#define NT_BUILD_HEADER_PATH_MAX 1024
+static inline void nt_builder_derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
+    if (header_dir) {
+        char stem[256];
+        nt_builder_pack_stem(pack_path, stem, sizeof(stem));
+        (void)snprintf(header_path, size, "%s/%s.h", header_dir, stem);
+    } else {
+        nt_builder_pack_to_header_path(pack_path, header_path, size);
+    }
+}
+
 /* Deferred entry addition (shared between add_* and scene_mesh) */
 void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size, uint64_t decoded_hash);
 
@@ -396,6 +429,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
+char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large);
 
 /* Glob callback type is public (nt_builder.h). The iteration function itself
  * is also declared in nt_builder.h; do not re-declare here. */

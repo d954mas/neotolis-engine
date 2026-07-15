@@ -250,6 +250,7 @@ void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_
 
 void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "invalid add_textures args");
+    (void)nt_builder_assert_texture_opts(opts, opts ? opts->compress : NULL);
     GlobTextureParams p = {opts};
     nt_builder_glob_add(ctx, pattern, texture_glob_callback, &p);
 }

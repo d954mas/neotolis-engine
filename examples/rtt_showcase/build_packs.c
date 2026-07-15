@@ -75,12 +75,12 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "rtt_showcase_ui_atlas", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "rtt_showcase_ui_atlas", &atlas_opts);
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();
     white_opts.name = "_white";
-    nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
-    nt_builder_end_atlas(ctx);
+    nt_atlas_add_raw(atlas, white_pixel, 1, 1, &white_opts);
+    (void)nt_atlas_commit(atlas);
 
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){

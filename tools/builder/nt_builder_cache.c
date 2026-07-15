@@ -102,7 +102,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_ATLAS:        /* atlas uses atlas-level caching in end_atlas, not per-entry */
+    case NT_BUILD_ASSET_ATLAS:        /* atlas uses atlas-level caching during commit, not per-entry */
     case NT_BUILD_ASSET_ATLAS_REGION: /* codegen-only, no encode caching needed */
         /* No additional fields -- kind + version sufficient */
         break;
@@ -257,6 +257,7 @@ bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64
 
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir) {
     NT_BUILD_ASSERT(ctx && dir && "set_cache_dir: both ctx and dir required");
+    NT_BUILD_ASSERT(!ctx->active_atlas && "set_cache_dir: atlas transaction is open");
     NT_BUILD_ASSERT(strlen(dir) < 900 && "cache_dir too long (max ~900, leaves room for hash filename)");
     free(ctx->cache_dir);
     ctx->cache_dir = strdup(dir);

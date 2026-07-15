@@ -36,7 +36,7 @@ static const char *pack_path(const char *dir, const char *name) {
 
 /* Glob callback that adds sprites with an optional count limit */
 typedef struct {
-    NtBuilderContext *ctx;
+    NtAtlasBuild *atlas;
     uint32_t count;
     uint32_t limit; /* 0 = unlimited */
 } LimitedAddData;
@@ -46,8 +46,28 @@ static void limited_add_callback(const char *path, void *user) {
     if (d->limit > 0 && d->count >= d->limit) {
         return;
     }
-    nt_builder_atlas_add(d->ctx, path, NULL); /* NULL opts = defaults (centre pivot, name from path) */
+    nt_atlas_add(d->atlas, path, NULL); /* NULL opts = defaults (centre pivot, name from path) */
     d->count++;
+}
+
+/* Print the graceful content-error list for a failed pack. Read the list BEFORE
+   free_pack — the array lives on ctx. */
+static void report_atlas_errors(NtBuilderContext *ctx, nt_build_result_t r) {
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    for (uint32_t i = 0; i < n; i++) {
+        char msg[512];
+        nt_build_error_format(&errs[i], msg, sizeof(msg));
+        (void)fprintf(stderr, "atlas error: %s\n", msg);
+    }
+    if (nt_builder_errors_truncated(ctx)) {
+        (void)fprintf(stderr, "atlas error: list truncated at %d errors — more were dropped\n", NT_BUILD_MAX_ERRORS);
+    }
+    /* A stale-pack IO failure is distinct from content errors and must surface
+       even when the error list is non-empty. */
+    if (n == 0 || r == NT_BUILD_ERR_IO) {
+        (void)fprintf(stderr, "Pack failed: %d\n", r);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -119,23 +139,26 @@ int main(int argc, char *argv[]) {
     }
     (void)printf("atlas=%s max=%u shape=%s max_sprites=%u\n", atlas_name, opts.max_size, shape_name, max_sprites);
 
-    nt_builder_begin_atlas(ctx, atlas_name, &opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     if (max_sprites > 0) {
-        LimitedAddData data = {ctx, 0, max_sprites};
+        LimitedAddData data = {atlas, 0, max_sprites};
         (void)nt_builder_glob_iterate(glob_pattern, limited_add_callback, &data);
         (void)printf("Added %u sprites (limited to %u)\n", data.count, max_sprites);
     } else {
-        nt_builder_atlas_add_glob(ctx, glob_pattern, NULL); /* NULL = default centre pivot for every matched file */
+        nt_atlas_add_glob(atlas, glob_pattern, NULL); /* NULL = default centre pivot for every matched file */
     }
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
 
     /* Finish and generate headers */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    nt_builder_free_pack(ctx);
     if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "Pack failed: %d\n", r);
+        /* The atlas builder surfaces content errors via the error list; the
+           frontend sets fail-fast policy. */
+        report_atlas_errors(ctx, r);
+        nt_builder_free_pack(ctx);
         return 1;
     }
+    nt_builder_free_pack(ctx);
 
     /* Generate combined header */
     const char *headers[] = {pack_hdr};

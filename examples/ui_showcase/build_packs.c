@@ -112,25 +112,25 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "ui_showcase_atlas", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "ui_showcase_atlas", &atlas_opts);
 
     /* Checkbox: box (off) + checkmark overlay. */
     nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
     opts.name = "box_off";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/box_off.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/box_off.png", &opts);
 
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "checkmark";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/checkmark.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/checkmark.png", &opts);
 
     /* Radio: ring + dot overlay. */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "radio_ring";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/radio_ring.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/radio_ring.png", &opts);
 
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "radio_dot";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/radio_dot.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/radio_dot.png", &opts);
 
     /* Toggle track (slice9 pill): OFF grey + ON green so the track recolors by value. */
     opts = nt_atlas_sprite_opts_defaults();
@@ -139,15 +139,15 @@ int main(int argc, char *argv[]) {
     opts.slice9_right = TRACK_BORDER_X;
     opts.slice9_top = TRACK_BORDER_Y;
     opts.slice9_bottom = TRACK_BORDER_Y;
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/track_off.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/track_off.png", &opts);
 
     opts.name = "track_on";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/track_on.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/track_on.png", &opts);
 
     /* Toggle thumb / slider thumb (circle). */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "thumb";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/thumb.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/thumb.png", &opts);
 
     /* Slider/progress bar art: recessed track + smooth slice9 fill. */
     opts = nt_atlas_sprite_opts_defaults();
@@ -156,15 +156,15 @@ int main(int argc, char *argv[]) {
     opts.slice9_right = BAR_BORDER;
     opts.slice9_top = BAR_BORDER;
     opts.slice9_bottom = BAR_BORDER;
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_track.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/bar_track.png", &opts);
 
     opts.name = "bar_fill_smooth";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_smooth.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/bar_fill_smooth.png", &opts);
 
     /* Shaped diagonal-stripe fill for the CROP-clip progress variant (revealed, not stretched;
      * slice9 is ignored in CROP, so it keeps the bar pill borders only for the STRETCH siblings). */
     opts.name = "bar_fill_shaped";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_shaped.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/bar_fill_shaped.png", &opts);
 
     /* Scrollbar: recessed slot track + light capsule thumb (8px slice9). */
     opts = nt_atlas_sprite_opts_defaults();
@@ -173,10 +173,10 @@ int main(int argc, char *argv[]) {
     opts.slice9_right = BAR_BORDER;
     opts.slice9_top = BAR_BORDER;
     opts.slice9_bottom = BAR_BORDER;
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/scroll_track.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/scroll_track.png", &opts);
 
     opts.name = "bar_thumb";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_thumb.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/bar_thumb.png", &opts);
 
     /* Kenney slice9 panels (100x100, 10px corners) for the Images & Slice9 tab. */
     nt_atlas_sprite_opts_t panel_opts = nt_atlas_sprite_opts_defaults();
@@ -186,13 +186,13 @@ int main(int argc, char *argv[]) {
     panel_opts.slice9_bottom = PANEL_BORDER;
 
     panel_opts.name = "panel_beige";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/panel_beige.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/panel_beige.png", &panel_opts);
 
     panel_opts.name = "panel_blue";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/panel_blue.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/panel_blue.png", &panel_opts);
 
     panel_opts.name = "panel_brown";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/panel_brown.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/panel_brown.png", &panel_opts);
 
     /* Kenney buttons (384x128, 16px corners) for the button sibling-variation tabs. */
     nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
@@ -202,18 +202,18 @@ int main(int argc, char *argv[]) {
     btn_opts.slice9_bottom = BUTTON_BORDER;
 
     btn_opts.name = "button_blue";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/button_blue_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/button_blue_depth.png", &btn_opts);
 
     btn_opts.name = "button_green";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/button_green_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/button_green_depth.png", &btn_opts);
 
     btn_opts.name = "button_red";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/button_red_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/button_red_depth.png", &btn_opts);
 
     /* Real icon art (Kenney CC0 bunny, 32x32) for the icon button variant. */
     nt_atlas_sprite_opts_t icon_opts = nt_atlas_sprite_opts_defaults();
     icon_opts.name = "icon_bunny";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/icon_bunny.png", &icon_opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/icon_bunny.png", &icon_opts);
 
     /* Rich-text inline icons (named regions for <img=name/> by-name resolve). Two 16x16 fully-opaque
      * solid-color icons: "heart" (red) + "gold" (amber). Solid color so nothing trims; the rich demo
@@ -236,9 +236,9 @@ int main(int argc, char *argv[]) {
     }
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "heart";
-    nt_builder_atlas_add_raw(ctx, icon_heart, ICON_DIM, ICON_DIM, &opts);
+    nt_atlas_add_raw(atlas, icon_heart, ICON_DIM, ICON_DIM, &opts);
     opts.name = "gold";
-    nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &opts);
+    nt_atlas_add_raw(atlas, icon_gold, ICON_DIM, ICON_DIM, &opts);
 
     /* Tristate MIXED indicator: a centered horizontal dash (white, tintable) on a transparent
      * 28x28 field. slice9 borders keep the source UNTRIMMED so the dash stays CENTERED with
@@ -262,7 +262,7 @@ int main(int argc, char *argv[]) {
     opts.slice9_right = 1;
     opts.slice9_top = 1;
     opts.slice9_bottom = 1;
-    nt_builder_atlas_add_raw(ctx, mixed_dash, DASH_DIM, DASH_DIM, &opts);
+    nt_atlas_add_raw(atlas, mixed_dash, DASH_DIM, DASH_DIM, &opts);
 
     (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon + heart/gold inline icons\n", PANEL_BORDER, BUTTON_BORDER);
 
@@ -270,23 +270,23 @@ int main(int argc, char *argv[]) {
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();
     white_opts.name = "_white";
-    nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
+    nt_atlas_add_raw(atlas, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
     /* App-widget icon affordances (white, tintable): dropdown chevron, submenu arrow, tooltip caret.
      * Prebaked PNGs in raw/; builder premultiplies like every other sprite. */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "chevron_down";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/chevron_down.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/chevron_down.png", &opts);
 
     opts.name = "arrow_right";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/arrow_right.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/arrow_right.png", &opts);
 
     opts.name = "caret";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/caret.png", &opts);
+    nt_atlas_add(atlas, "examples/ui_showcase/raw/caret.png", &opts);
     (void)printf("  Atlas icons (tintable): chevron_down 16x16, arrow_right 12x12, caret 14x10\n");
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
     // #endregion
 
     // #region atlas: radial-image art (single full-bleed sprite -> UV spans [0,1])
@@ -308,7 +308,7 @@ int main(int argc, char *argv[]) {
     radial_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     radial_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "ui_showcase_radial_art", &radial_opts);
+    NtAtlasBuild *radial_atlas = nt_atlas_begin(ctx, "ui_showcase_radial_art", &radial_opts);
 
     /* Procedural 128x128 opaque test image: a 2-axis color gradient with a darker grid
      * overlay so the four reveal modes (desaturate/dim/hide/tint) and the swept boundary
@@ -333,10 +333,10 @@ int main(int argc, char *argv[]) {
     radial_sprite.name = "radial_art";
     radial_sprite.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
     radial_sprite.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
-    nt_builder_atlas_add_raw(ctx, radial_art, RADIAL_ART_DIM, RADIAL_ART_DIM, &radial_sprite);
+    nt_atlas_add_raw(radial_atlas, radial_art, RADIAL_ART_DIM, RADIAL_ART_DIM, &radial_sprite);
     (void)printf("  Atlas 'ui_showcase_radial_art': radial_art %dx%d (full-bleed, UV [0,1])\n", RADIAL_ART_DIM, RADIAL_ART_DIM);
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(radial_atlas);
     // #endregion
 
     // #region font: ASCII Latin + Cyrillic (demo-only)

@@ -1526,9 +1526,8 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
  * fits), records the winning placement, and updates stats.
  *
  * Returns true if the sprite was placed. Returns false when a fresh page
- * is needed but ATLAS_MAX_PAGES is already reached — the caller should
- * emit an ERROR log and fall back to a canonical "stack at (margin, margin)
- * of page 0" placement for the remaining unsorted sprites. */
+ * is needed but ATLAS_MAX_PAGES is already reached; vector_pack propagates
+ * page exhaustion to its caller. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
@@ -1681,7 +1680,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     /* Fallback: nothing fit, allocate a fresh page and retry. */
     if (!found_any) {
         if (*ctx->page_count >= ATLAS_MAX_PAGES) {
-            return false; /* vector_pack caller asserts — see NT_BUILD_ASSERT in the sprite loop */
+            return false; /* vector_pack propagates page exhaustion. */
         }
 
         uint32_t new_page = (*ctx->page_count)++;
@@ -1753,6 +1752,31 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     return true;
 }
 
+/* Keep this predicate identical to vpack_place_one_sprite's empty-page bounds.
+ * Square pages make identity-AABB fit orientation-independent. */
+bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts) {
+    NT_BUILD_ASSERT(hull_count <= VPACK_PLACED_MAX_VERTS && "vpack_sprite_fits_empty_page: hull exceeds inflate buffer");
+    float dilate = (float)opts->extrude + ((float)opts->padding * 0.5F);
+    Point2D inflated[VPACK_PLACED_MAX_VERTS];
+    uint32_t count = polygon_inflate(hull, hull_count, dilate, inflated);
+    /* Init to 0: vpack_calc_aabb writes all four via out-params, but the analyzer
+     * can't trace the store through the pointer and would flag a garbage read. */
+    int32_t a0 = 0;
+    int32_t a1 = 0;
+    int32_t a2 = 0;
+    int32_t a3 = 0;
+    vpack_calc_aabb(inflated, count, &a0, &a1, &a2, &a3);
+    int32_t margin = (int32_t)opts->margin;
+    int32_t extrude = (int32_t)opts->extrude;
+    int32_t min_edge = margin > extrude ? margin : extrude;
+    int32_t max_size = (int32_t)opts->max_size;
+    int32_t min_cand_x = (min_edge - a0 < min_edge) ? min_edge : (min_edge - a0);
+    int32_t min_cand_y = (min_edge - a1 < min_edge) ? min_edge : (min_edge - a1);
+    int32_t max_cand_x = max_size - margin - a2 - 1;
+    int32_t max_cand_y = max_size - margin - a3 - 1;
+    return (min_cand_x <= max_cand_x) && (min_cand_y <= max_cand_y);
+}
+
 /* NFP packer entry point. Places `sprite_count` sprites onto atlas pages
  * using their pre-inflated hull polygons.
  *
@@ -1787,10 +1811,10 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
  *   stats                — op counters (or_ops, test_ops, cache hits/misses,
  *                          page scans, etc.) and area totals. Reset at start.
  *
- * Returns: number of sprites placed. Always equals sprite_count unless
- * ATLAS_MAX_PAGES is exhausted (in which case remaining sprites are placed
- * at (margin, margin) on page 0 as a corrupt-safe fallback and an ERROR log
- * line is emitted).
+ * Returns: number of sprites placed. Equals sprite_count unless
+ * ATLAS_MAX_PAGES is exhausted, in which case it stops early, returns the
+ * partial count, and sets *out_pages_exhausted = true (no page-0 fallback;
+ * the caller reports PAGES_EXHAUSTED).
  *
  * Determinism: identical inputs produce identical placement (positions,
  * page counts, fill rates). NFP cache hit/miss counters jitter slightly in
@@ -1798,7 +1822,8 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
  */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
-                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count) {
+                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count, bool *out_pages_exhausted) {
+    *out_pages_exhausted = false;
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
@@ -1961,15 +1986,18 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         .stats = stats,
     };
 
+    uint32_t placed_count = 0;
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
         /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
-         * exhausted. Fail loudly per AGENTS.md "fail early": continuing with a
-         * silent fallback would produce an atlas where unplaced sprites collide
-         * at (margin, margin), and the caller would ship broken data. The
-         * developer needs to raise ATLAS_MAX_PAGES, increase max_size, or
-         * shrink the sprite set — all of which require a loud crash to notice. */
-        NT_BUILD_ASSERT(vpack_place_one_sprite(&pctx, idx, s, &out_placements[idx]) && "vector_pack: ATLAS_MAX_PAGES exhausted — raise the limit, bump opts.max_size, or split the atlas");
+         * exhausted (a whole-set property, not a per-sprite one). Signal the
+         * caller and break to the single cleanup region below — an early return
+         * here would leak every buffer and hang the worker pool. */
+        if (!vpack_place_one_sprite(&pctx, idx, s, &out_placements[idx])) {
+            *out_pages_exhausted = true;
+            break;
+        }
+        placed_count++;
     }
 
     // #region POT expansion
@@ -2034,7 +2062,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     }
     // #endregion
 
-    return sprite_count;
+    return placed_count;
 }
 
 /* --- Test-access wrapper (vpack internals remain static) ---

@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "ui_3d_demo_atlas", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "ui_3d_demo_atlas", &atlas_opts);
 
     /* Kenney buttons (384x128, 16px corners). Three colors so panels can
      * show idle=blue, hover=green, pressed=red. */
@@ -96,13 +96,13 @@ int main(int argc, char *argv[]) {
     btn_opts.slice9_right = BUTTON_BORDER;
     btn_opts.slice9_top = BUTTON_BORDER;
     btn_opts.slice9_bottom = BUTTON_BORDER;
-    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_blue_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_3d_demo/raw/button_blue_depth.png", &btn_opts);
 
     btn_opts.name = "button_green";
-    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_green_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_3d_demo/raw/button_green_depth.png", &btn_opts);
 
     btn_opts.name = "button_red";
-    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_red_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/ui_3d_demo/raw/button_red_depth.png", &btn_opts);
 
     (void)printf("  Atlas: 3 buttons (384x128 s9:%d)\n", BUTTON_BORDER);
 
@@ -110,17 +110,17 @@ int main(int argc, char *argv[]) {
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();
     white_opts.name = "_white";
-    nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
+    nt_atlas_add_raw(atlas, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
     /* Real icon art (Kenney CC0 bunny, 32x32 sprite) for the ICON-ONLY and
      * ICON+TEXT button variants. */
     nt_atlas_sprite_opts_t icon_opts = nt_atlas_sprite_opts_defaults();
     icon_opts.name = "icon_bunny";
-    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/icon_bunny.png", &icon_opts);
+    nt_atlas_add(atlas, "examples/ui_3d_demo/raw/icon_bunny.png", &icon_opts);
     (void)printf("  Atlas region 'icon_bunny': 32x32 (Kenney bunnymark sd)\n");
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
     // #endregion
 
     // #region font: ASCII Latin only

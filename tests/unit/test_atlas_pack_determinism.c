@@ -14,7 +14,9 @@
 #endif
 
 /* clang-format off */
+#include "nt_atlas_format.h"
 #include "nt_builder.h"
+#include "nt_pack_format.h"
 #include "ntpack_parse.h"
 #include "unity.h"
 /* clang-format on */
@@ -123,7 +125,7 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
     }
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    nt_builder_begin_atlas(ctx, "det_corpus", &opts);
+    NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
     uint8_t *bufs[CORPUS_COUNT] = {0};
     for (int i = 0; i < CORPUS_COUNT; ++i) {
@@ -132,10 +134,10 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
         TEST_ASSERT_NOT_NULL(bufs[i]);
         gen_sprite(bufs[i], s);
         /* raw sprites require an explicit name (no path to derive one from). */
-        nt_builder_atlas_add_raw(ctx, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
     }
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas_build_128);
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
 
@@ -189,9 +191,264 @@ void test_metrics_match_pinned_baseline(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabs(m.density_fill_frontier - PIN_DENSITY_FILL_FRONTIER) < PIN_DENSITY_TOL, "density_fill_frontier drifted from pinned baseline");
 }
 
+/* Extra per-sprite margin must be split evenly around content. */
+
+/* Read region 0's min/max atlas UV from a single-sprite pack. Only the atlas
+ * blob's own fields are read (offsets guarded against the file size), so this is
+ * a self-contained reader independent of the aggregate bench parser. */
+static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < (long)sizeof(NtPackHeader)) {
+        (void)fclose(f);
+        return false;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return false;
+    }
+    bool ok = fread(buf, 1, (size_t)sz, f) == (size_t)sz;
+    (void)fclose(f);
+    if (!ok) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *hdr = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas = &entries[i];
+            break;
+        }
+    }
+    if (!atlas || (uint64_t)atlas->offset + atlas->size > (uint64_t)sz) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas->offset;
+    const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
+    uint32_t regions_off = (uint32_t)sizeof(NtAtlasHeader) + ((uint32_t)ah->page_count * (uint32_t)sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)(ablob + regions_off);
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+
+    uint16_t u0 = UINT16_MAX;
+    uint16_t u1 = 0;
+    uint16_t v0 = UINT16_MAX;
+    uint16_t v1 = 0;
+    uint32_t vstart = regions[0].vertex_start;
+    uint32_t nv = regions[0].vertex_count;
+    for (uint32_t j = 0; j < nv; j++) {
+        const NtAtlasVertex *p = &verts[vstart + j];
+        if (p->atlas_u < u0) {
+            u0 = p->atlas_u;
+        }
+        if (p->atlas_u > u1) {
+            u1 = p->atlas_u;
+        }
+        if (p->atlas_v < v0) {
+            v0 = p->atlas_v;
+        }
+        if (p->atlas_v > v1) {
+            v1 = p->atlas_v;
+        }
+    }
+    *umin = u0;
+    *umax = u1;
+    *vmin = v0;
+    *vmax = v1;
+    free(buf);
+    return true;
+}
+
+/* Serialized UV alone cannot prove the composed-pixel offset. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool page0_opaque_bounds(const char *path, uint32_t *out_minx, uint32_t *out_maxx, uint32_t *out_miny, uint32_t *out_maxy, uint32_t *out_w, uint32_t *out_h) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < (long)sizeof(NtPackHeader)) {
+        (void)fclose(f);
+        return false;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return false;
+    }
+    bool ok = fread(buf, 1, (size_t)sz, f) == (size_t)sz;
+    (void)fclose(f);
+    if (!ok) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *hdr = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas = &entries[i];
+            break;
+        }
+    }
+    if (!atlas || (uint64_t)atlas->offset + atlas->size > (uint64_t)sz || atlas->size < sizeof(NtAtlasHeader) + sizeof(uint64_t)) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas->offset;
+    const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
+    if (ah->page_count == 0) {
+        free(buf);
+        return false;
+    }
+    uint64_t page0_id;
+    memcpy(&page0_id, ablob + sizeof(NtAtlasHeader), sizeof(page0_id));
+
+    const NtAssetEntry *tex = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE && entries[i].resource_id == page0_id) {
+            tex = &entries[i];
+            break;
+        }
+    }
+    if (!tex || (uint64_t)tex->offset + tex->size > (uint64_t)sz || tex->size < sizeof(NtTextureAssetHeader)) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *tblob = buf + tex->offset;
+    const NtTextureAssetHeader *th = (const NtTextureAssetHeader *)tblob;
+    uint32_t w = th->width;
+    uint32_t h = th->height;
+    if (th->compression != 0 || (uint64_t)sizeof(NtTextureAssetHeader) + (uint64_t)w * h * 4 > tex->size) {
+        free(buf); /* RAW only + guard the pixel span */
+        return false;
+    }
+    const uint8_t *px = tblob + sizeof(NtTextureAssetHeader);
+
+    uint32_t minx = w;
+    uint32_t maxx = 0;
+    uint32_t miny = h;
+    uint32_t maxy = 0;
+    bool any = false;
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            if (px[((size_t)((y * w) + x) * 4) + 3] >= 128) { /* opaque = alpha >= mid */
+                any = true;
+                minx = x < minx ? x : minx;
+                maxx = x > maxx ? x : maxx;
+                miny = y < miny ? y : miny;
+                maxy = y > maxy ? y : maxy;
+            }
+        }
+    }
+    free(buf);
+    if (!any) {
+        return false;
+    }
+    *out_minx = minx;
+    *out_maxx = maxx;
+    *out_miny = miny;
+    *out_maxy = maxy;
+    *out_w = w;
+    *out_h = h;
+    return true;
+}
+
+/* A tight page exposes asymmetric placement of surplus margin. */
+void test_margin_override_content_centered(void) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    const char *path = TMP_DIR "/margin_center.ntpack";
+    (void)remove(path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.margin = 0;
+    opts.extrude = 0;
+    opts.padding = 0;
+    opts.power_of_two = false; /* tight page → page edges hug the reserved footprint */
+    NtAtlasBuild *atlas_build_396 = nt_atlas_begin(ctx, "center", &opts);
+
+    enum { SQ = 20, MARGIN_OVERRIDE = 8 };
+    uint8_t *px = (uint8_t *)malloc((size_t)SQ * SQ * 4);
+    TEST_ASSERT_NOT_NULL(px);
+    for (size_t i = 0; i < (size_t)SQ * SQ; i++) {
+        px[(i * 4) + 0] = 200;
+        px[(i * 4) + 1] = 120;
+        px[(i * 4) + 2] = 40;
+        px[(i * 4) + 3] = 255;
+    }
+    nt_atlas_add_raw(atlas_build_396, px, SQ, SQ, &(nt_atlas_sprite_opts_t){.name = "sq", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT, .margin = MARGIN_OVERRIDE});
+    (void)nt_atlas_commit(atlas_build_396);
+
+    uint32_t n = 0;
+    (void)nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, n, "square with margin override must pack cleanly");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(px);
+
+    uint16_t umin = 0;
+    uint16_t umax = 0;
+    uint16_t vmin = 0;
+    uint16_t vmax = 0;
+    TEST_ASSERT_TRUE_MESSAGE(region0_uv_extents(path, &umin, &umax, &vmin, &vmax), "parse produced pack");
+
+    /* Centered ⇒ left inset (umin) == right inset (full-umax) ⇒ umin+umax == full.
+     * Tolerance absorbs UV quantization at the two content edges. */
+    const int32_t full = 65535;
+    const int32_t tol = 4;
+    TEST_ASSERT_INT_WITHIN_MESSAGE(tol, full, (int32_t)umin + (int32_t)umax, "content not horizontally centered in its margin cell");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(tol, full, (int32_t)vmin + (int32_t)vmax, "content not vertically centered in its margin cell");
+    /* The surplus must actually offset the content — guards against a degenerate
+     * origin-anchored region that would satisfy the sum only by both edges at 0. */
+    TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, umin, "left inset must be nonzero (margin surplus present)");
+    TEST_ASSERT_GREATER_THAN_UINT16_MESSAGE(0, vmin, "top inset must be nonzero (margin surplus present)");
+
+    /* Pixel bounds independently verify the serialized centering contract. */
+    uint32_t cx0 = 0;
+    uint32_t cx1 = 0;
+    uint32_t cy0 = 0;
+    uint32_t cy1 = 0;
+    uint32_t pw = 0;
+    uint32_t ph = 0;
+    TEST_ASSERT_TRUE_MESSAGE(page0_opaque_bounds(path, &cx0, &cx1, &cy0, &cy1, &pw, &ph), "decode page 0 pixels");
+    uint32_t left = cx0;
+    uint32_t right = pw - 1 - cx1;
+    uint32_t top = cy0;
+    uint32_t bottom = ph - 1 - cy1;
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)left, (int32_t)right, "composed content not horizontally centered in page pixels");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)top, (int32_t)bottom, "composed content not vertically centered in page pixels");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, left, "left pixel inset must be nonzero (margin surplus present)");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, top, "top pixel inset must be nonzero (margin surplus present)");
+    /* And the serialized UV must point AT those opaque pixels: umin/vmin map back
+     * to the content's top-left pixel within a texel (guards a stale-UV compose). */
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)cx0, (int32_t)((uint64_t)umin * pw / 65535), "region umin does not map to the opaque content left edge");
+    TEST_ASSERT_INT_WITHIN_MESSAGE(1, (int32_t)cy0, (int32_t)((uint64_t)vmin * ph / 65535), "region vmin does not map to the opaque content top edge");
+    (void)remove(path);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_metrics_stable_across_two_packs);
     RUN_TEST(test_metrics_match_pinned_baseline);
+    RUN_TEST(test_margin_override_content_centered);
     return UNITY_END();
 }

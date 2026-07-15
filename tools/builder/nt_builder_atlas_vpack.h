@@ -69,7 +69,14 @@ void pack_stats_reset(PackStats *stats);
  * no_rotate: per-sprite flag array (may be NULL = all sprites use opts->allow_transform).
  *            no_rotate[i] == true: force identity transform for sprite i. */
 uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
-                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count);
+                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count, bool *out_pages_exhausted);
+
+/* Empty-page fit test for one sprite. Returns false when the sprite's inflated
+ * hull cannot fit an empty max_size page — pipeline_tile_pack uses this for the
+ * graceful UNFITTABLE pre-check before vector_pack. Bit-exact with the
+ * real placement fit test (same inflate + per-axis bound), so it is never
+ * stricter than vector_pack for any shape. */
+bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, const nt_atlas_opts_t *opts);
 
 #ifdef __cplusplus
 }

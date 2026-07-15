@@ -92,23 +92,42 @@ nt_hash64_t nt_builder_normalize_and_hash(const char *str) {
 
 /* --- File I/O --- */
 
-char *nt_builder_read_file(const char *path, uint32_t *out_size) {
+char *nt_builder_read_file_bounded(const char *path, uint32_t max_size, uint32_t *out_size, bool *out_too_large) {
+    *out_size = 0;
+    *out_too_large = false;
     FILE *file = fopen(path, "rb");
     if (!file) {
         return NULL;
     }
 
+#ifdef _WIN32
+    if (_fseeki64(file, 0, SEEK_END) != 0) {
+#else
     if (fseek(file, 0, SEEK_END) != 0) {
+#endif
         (void)fclose(file);
         return NULL;
     }
-    long file_size = ftell(file);
+#ifdef _WIN32
+    int64_t file_size = _ftelli64(file);
+#else
+    int64_t file_size = ftell(file);
+#endif
     if (file_size < 0) {
         (void)fclose(file);
         return NULL;
     }
+#ifdef _WIN32
+    if (_fseeki64(file, 0, SEEK_SET) != 0) {
+#else
     if (fseek(file, 0, SEEK_SET) != 0) {
+#endif
         (void)fclose(file);
+        return NULL;
+    }
+    if ((uint64_t)file_size > max_size) {
+        (void)fclose(file);
+        *out_too_large = true;
         return NULL;
     }
 
@@ -131,6 +150,11 @@ char *nt_builder_read_file(const char *path, uint32_t *out_size) {
     (void)fclose(file);
     *out_size = (uint32_t)file_size;
     return buf;
+}
+
+char *nt_builder_read_file(const char *path, uint32_t *out_size) {
+    bool too_large = false;
+    return nt_builder_read_file_bounded(path, UINT32_MAX, out_size, &too_large);
 }
 
 /* --- Float16 conversion --- */

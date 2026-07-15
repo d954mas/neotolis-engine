@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "slice9_demo_atlas", &atlas_opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "slice9_demo_atlas", &atlas_opts);
 
     /* Kenney panels (100x100, 10px corners) */
     nt_atlas_sprite_opts_t panel_opts = nt_atlas_sprite_opts_defaults();
@@ -95,13 +95,13 @@ int main(int argc, char *argv[]) {
     panel_opts.slice9_bottom = PANEL_BORDER;
 
     panel_opts.name = "panel_beige";
-    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_beige.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/slice9_demo/raw/panel_beige.png", &panel_opts);
 
     panel_opts.name = "panel_blue";
-    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_blue.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/slice9_demo/raw/panel_blue.png", &panel_opts);
 
     panel_opts.name = "panel_brown";
-    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_brown.png", &panel_opts);
+    nt_atlas_add(atlas, "examples/slice9_demo/raw/panel_brown.png", &panel_opts);
 
     /* Kenney button (384x128, 16px corners) */
     nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
@@ -110,10 +110,10 @@ int main(int argc, char *argv[]) {
     btn_opts.slice9_right = BUTTON_BORDER;
     btn_opts.slice9_top = BUTTON_BORDER;
     btn_opts.slice9_bottom = BUTTON_BORDER;
-    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/button_blue_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/slice9_demo/raw/button_blue_depth.png", &btn_opts);
 
     btn_opts.name = "button_green";
-    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/button_green_depth.png", &btn_opts);
+    nt_atlas_add(atlas, "examples/slice9_demo/raw/button_green_depth.png", &btn_opts);
 
     (void)printf("  Atlas: 3 panels (100x100 s9:%d) + 2 buttons (384x128 s9:%d)\n", PANEL_BORDER, BUTTON_BORDER);
 
@@ -121,10 +121,10 @@ int main(int argc, char *argv[]) {
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();
     white_opts.name = "_white";
-    nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
+    nt_atlas_add_raw(atlas, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas);
     // #endregion
 
     // #region font: ASCII Latin only

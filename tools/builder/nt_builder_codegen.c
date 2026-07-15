@@ -66,16 +66,7 @@ static int sort_entry_cmp(const void *a, const void *b) { return strcmp(((const 
 
 /* --- Header path derivation --- */
 
-static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
-    if (header_dir) {
-        /* Extract pack filename stem, put .h in header_dir */
-        char stem[256];
-        nt_builder_pack_stem(pack_path, stem, sizeof(stem));
-        (void)snprintf(header_path, size, "%s/%s.h", header_dir, stem);
-    } else {
-        nt_builder_pack_to_header_path(pack_path, header_path, size);
-    }
-}
+static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) { nt_builder_derive_header_path(pack_path, header_dir, header_path, size); }
 
 /* --- Include guard derivation --- */
 
@@ -262,7 +253,7 @@ static void write_register_labels(FILE *f, const char *func_prefix, const Codege
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
-    char header_path[512];
+    char header_path[NT_BUILD_HEADER_PATH_MAX];
     derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
 
     char guard[256];

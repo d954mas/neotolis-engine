@@ -2,6 +2,7 @@
    TEST_ASSERT_EQUAL aborts via longjmp before any uninitialized access. */
 // NOLINTBEGIN(clang-analyzer-unix.Stream,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,9 +19,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
     return "leak:extensionSupportedGLX\n"
            "leak:nt_builder_decode_font\n" /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
            "leak:nt_builder_add_font\n"
-           "leak:nt_builder_finish_pack\n" /* shader error tests: longjmp leaks finish_pack internals */
-           "leak:vector_pack\n"            /* max-pages assert: longjmp skips vector_pack cleanup */
-           "leak:pipeline_tile_pack\n";    /* same test: longjmp skips pipeline_tile_pack cleanup */
+           "leak:nt_builder_finish_pack\n"; /* shader error tests: longjmp leaks finish_pack internals */
 }
 
 /* clang-format off */
@@ -45,9 +44,10 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 
 static jmp_buf s_build_assert_jmp;
 static NtBuilderContext *s_build_assert_ctx; /* freed after longjmp to avoid ASAN leaks */
+static const char *s_build_assert_expr;
 
 static void test_build_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_build_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_build_assert_jmp, 1);
@@ -67,6 +67,25 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
         nt_build_assert_handler = NULL;                                                                                                                                                                \
         nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
         s_build_assert_ctx = NULL;                                                                                                                                                                     \
+    } while (0)
+
+#define EXPECT_BUILD_ASSERT_MATCH(ctx, code, expected)                                                                                                                                                 \
+    do {                                                                                                                                                                                               \
+        s_build_assert_ctx = (ctx);                                                                                                                                                                    \
+        s_build_assert_expr = NULL;                                                                                                                                                                    \
+        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
+        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
+            code;                                                                                                                                                                                      \
+            nt_build_assert_handler = NULL;                                                                                                                                                            \
+            nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                  \
+            s_build_assert_ctx = NULL;                                                                                                                                                                 \
+            TEST_FAIL_MESSAGE("Expected NT_BUILD_ASSERT to fire");                                                                                                                                     \
+        }                                                                                                                                                                                              \
+        nt_build_assert_handler = NULL;                                                                                                                                                                \
+        bool assert_matches = s_build_assert_expr && strstr(s_build_assert_expr, (expected));                                                                                                          \
+        nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
+        s_build_assert_ctx = NULL;                                                                                                                                                                     \
+        TEST_ASSERT_TRUE_MESSAGE(assert_matches, "NT_BUILD_ASSERT reason did not match");                                                                                                              \
     } while (0)
 
 /* --- Temp directory for test output --- */
@@ -268,6 +287,28 @@ void test_hash_different_strings_differ(void) {
     TEST_ASSERT_TRUE(h1.value != h2.value);
 }
 
+void test_read_file_bounded_rejects_before_read(void) {
+    const char *path = TMP_DIR "/bounded_read.bin";
+    static const char contents[] = "0123456789abcdef";
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL(sizeof(contents) - 1, fwrite(contents, 1, sizeof(contents) - 1, file));
+    TEST_ASSERT_EQUAL(0, fclose(file));
+
+    uint32_t size = 0;
+    bool too_large = false;
+    char *data = nt_builder_read_file_bounded(path, 8, &size, &too_large);
+    TEST_ASSERT_NULL(data);
+    TEST_ASSERT_TRUE(too_large);
+
+    data = nt_builder_read_file_bounded(path, (uint32_t)(sizeof(contents) - 1), &size, &too_large);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_FALSE(too_large);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(contents) - 1, size);
+    TEST_ASSERT_EQUAL_MEMORY(contents, data, sizeof(contents) - 1);
+    free(data);
+}
+
 /* --- Pack writer core tests --- */
 
 void test_start_pack_returns_context(void) {
@@ -365,6 +406,108 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
+}
+
+void test_texture_invalid_compress_mode_asserts_at_add(void) {
+    const char *png_path = TMP_DIR "/invalid_compress_mode.png";
+    write_test_png(png_path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/invalid_compress_mode.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.mode = (nt_tex_compress_mode_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    opts.compress = &compress;
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_texture(ctx, png_path, &opts));
+}
+
+static void expect_texture_compress_opts_assert(nt_tex_compress_opts_t compress) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/invalid_compress_opts.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.compress = &compress;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_builder_assert_texture_opts(&opts, &compress));
+}
+
+void test_texture_compress_rdo_boundaries(void) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
+    opts.compress = &compress;
+
+    compress.endpoint_rdo_quality = 0.0F;
+    compress.selector_rdo_quality = 1.0e10F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+    compress.endpoint_rdo_quality = 1.0e10F;
+    compress.selector_rdo_quality = 0.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+
+    compress.endpoint_rdo_quality = 2.0e10F;
+    expect_texture_compress_opts_assert(compress);
+    compress = nt_tex_compress_etc1s_default();
+    compress.selector_rdo_quality = 2.0e10F;
+    expect_texture_compress_opts_assert(compress);
+
+    compress = nt_tex_compress_uastc_default();
+    opts.compress = &compress;
+    compress.endpoint_rdo_quality = 0.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+    compress.endpoint_rdo_quality = 0.001F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+    compress.endpoint_rdo_quality = 50.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+
+    compress.endpoint_rdo_quality = 0.0001F;
+    expect_texture_compress_opts_assert(compress);
+    compress.endpoint_rdo_quality = 50.001F;
+    expect_texture_compress_opts_assert(compress);
+}
+
+void test_texture_option_aliases_are_canonicalized(void) {
+    uint8_t pixel[4] = {255, 255, 255, 255};
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/texture_format_canonical.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    nt_tex_compress_opts_t compress = nt_tex_compress_uastc_default();
+    compress.selector_rdo_quality = 7.0F;
+    opts.format = 0;
+    opts.gen_mipmaps = false;
+    opts.compress = &compress;
+    nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
+
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->pending_count);
+    const NtBuildTextureData *td = (const NtBuildTextureData *)ctx->pending[0].data;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, td->opts.format);
+    TEST_ASSERT_TRUE(td->compress.selector_rdo_quality == 0.0F);
+    TEST_ASSERT_TRUE(td->opts.gen_mipmaps);
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_texture_option_aliases_are_canonicalized(void) {
+    uint8_t pixel[4] = {255, 255, 255, 255};
+    nt_tex_compress_opts_t compress = nt_tex_compress_uastc_default();
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_format_canonical.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.format = 0;
+    atlas_opts.compress = &compress;
+    atlas_opts.gen_mipmaps = false;
+    NtAtlasBuild *atlas_build_453 = nt_atlas_begin(ctx, "atlas", &atlas_opts);
+    nt_atlas_add_raw(atlas_build_453, pixel, 1, 1, &(nt_atlas_sprite_opts_t){.name = "pixel.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_453);
+
+    bool found_page = false;
+    const NtBuildTextureData *td = NULL;
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        if (ctx->pending[i].kind == NT_BUILD_ASSET_TEXTURE) {
+            td = (const NtBuildTextureData *)ctx->pending[i].data;
+            TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, td->opts.format);
+            TEST_ASSERT_TRUE(td->opts.gen_mipmaps);
+            found_page = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_page);
+    nt_builder_free_pack(ctx);
 }
 
 /* --- Premultiplied alpha: formula + flag propagation --- */
@@ -2411,6 +2554,29 @@ void test_early_dedup_pack_data_correct(void) {
     (void)fclose(f);
 }
 
+void test_texture_identity_includes_dimensions(void) {
+    const char *pack_path = TMP_DIR "/texture_dimension_identity.ntpack";
+    uint8_t pixels[2 * 8 * 4];
+    memset(pixels, 255, sizeof(pixels));
+
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_texture_raw(ctx, pixels, 2, 8, "textures/two_by_eight", NULL);
+    nt_builder_add_texture_raw(ctx, pixels, 4, 4, "textures/four_by_four", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader header;
+    NtAssetEntry entries[2];
+    TEST_ASSERT_EQUAL(1, fread(&header, sizeof(header), 1, f));
+    TEST_ASSERT_EQUAL_UINT16(2, header.asset_count);
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(entries), 1, f));
+    TEST_ASSERT_NOT_EQUAL(entries[0].offset, entries[1].offset);
+    (void)fclose(f);
+}
+
 /* --- Cross-source dedup tests (38.1 pipeline refactoring) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -4420,7 +4586,7 @@ void test_extrude_edges_preserve_hole(void) {
 /* --- End-to-end: real pipeline preserves hollow ring's hole ---
  *
  * Builds an atlas containing a single ring sprite (opaque border, transparent
- * center) through the production add_raw → end_atlas → finish_pack path,
+ * center) through the production add_raw → commit → finish_pack path,
  * then reads the resulting page texture from the .ntpack file and verifies
  * the central hole pixel is still transparent.
  *
@@ -4456,9 +4622,9 @@ void test_atlas_real_pipeline_preserves_hole(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* Default opts → shape=CONCAVE_CONTOUR, extrude=0, premultiplied=true */
-    nt_builder_begin_atlas(ctx, "ring", NULL);
-    nt_builder_atlas_add_raw(ctx, pixels, W, H, &(nt_atlas_sprite_opts_t){.name = "ring.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_4560 = nt_atlas_begin(ctx, "ring", NULL);
+    nt_atlas_add_raw(atlas_build_4560, pixels, W, H, &(nt_atlas_sprite_opts_t){.name = "ring.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_4560);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -4484,7 +4650,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
     const NtTextureAssetHeaderV2 *tex_hdr = (const NtTextureAssetHeaderV2 *)(pack + tex_entry->offset);
     TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
-    /* Atlas pages must be premultiplied (set by pipeline_register). */
+    /* Atlas pages must be premultiplied. */
     TEST_ASSERT_TRUE_MESSAGE((tex_hdr->flags & NT_TEXTURE_FLAG_PREMULTIPLIED) != 0, "atlas page must have premultiplied flag");
 
     const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeaderV2);
@@ -4558,7 +4724,348 @@ void test_atlas_shape_concave_rejects_extrude(void) {
     opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     opts.extrude = 2;
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "poly", &opts));
+}
+
+/* A failed pack still validates later transaction arguments. */
+void test_atlas_add_missing_file_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_missing.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtAtlasBuild *atlas_build_4677 = nt_atlas_begin(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255);
+    nt_atlas_add_raw(atlas_build_4677, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_4677);
+    free(px);
+    NtAtlasBuild *atlas_build_4685 = nt_atlas_begin(ctx, "next", NULL);
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add(atlas_build_4685, TMP_DIR "/does_not_exist_xyz.png", &(nt_atlas_sprite_opts_t){.name = "nope.png", .origin_x = 0.5F, .origin_y = 0.5F}),
+                              "atlas_add: failed to read file");
+}
+
+/* A later transaction still rejects a glob pattern that matches nothing. */
+void test_atlas_add_glob_empty_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_glob.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtAtlasBuild *atlas_build_4701 = nt_atlas_begin(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255);
+    nt_atlas_add_raw(atlas_build_4701, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_4701);
+    free(px);
+    NtAtlasBuild *atlas_build_4709 = nt_atlas_begin(ctx, "next", NULL);
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_glob(atlas_build_4709, TMP_DIR "/no_such_dir_xyz/*.png", NULL), "atlas_add_glob: no files matched pattern");
+}
+
+/* Glob-wide caller errors take precedence over an empty filesystem match. */
+void test_atlas_add_glob_cross_field_asserts_before_enumeration(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_glob_cross_field.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "glob", &opts);
+    nt_atlas_sprite_opts_t sprite_opts = {.origin_x = 0.5F, .origin_y = 0.5F, .extrude = 1};
+
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_glob(atlas, TMP_DIR "/no_such_dir_xyz/*.png", &sprite_opts), "effective extrude > 0 requires effective shape == RECT");
+}
+
+/* Commit one content-invalid transaction and leave the pack failed. */
+static void atlas_fail_pack(NtBuilderContext *ctx) {
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtAtlasBuild *atlas_build_4722 = nt_atlas_begin(ctx, "toobig", &opts);
+    uint8_t *px = make_test_sprite(80, 80, 200, 50, 100, 255);
+    nt_atlas_add_raw(atlas_build_4722, px, 80, 80, &(nt_atlas_sprite_opts_t){.name = "giant.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_4722);
+    free(px);
+}
+
+/* File and glob adds remain executable after an earlier failed transaction. */
+void test_atlas_file_and_glob_commit_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *file_path = TMP_DIR "/poison_valid_file.png";
+    const char *glob_path = TMP_DIR "/poison_valid_glob_a.png";
+    write_test_png(file_path);
+    write_test_png(glob_path);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_valid_file_glob.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+
+    NtAtlasBuild *file_atlas = nt_atlas_begin(ctx, "file", NULL);
+    nt_atlas_add(file_atlas, file_path, NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(file_atlas));
+
+    NtAtlasBuild *glob_atlas = nt_atlas_begin(ctx, "glob", NULL);
+    nt_atlas_add_glob(glob_atlas, TMP_DIR "/poison_valid_glob_*.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(glob_atlas));
+    TEST_ASSERT_EQUAL_UINT32(4, ctx->pending_count);
+
+    uint32_t error_count = 0;
+    (void)nt_builder_get_errors(ctx, &error_count);
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
+
+    nt_builder_free_pack(ctx);
+    (void)remove(file_path);
+    (void)remove(glob_path);
+}
+
+void test_atlas_begin_bad_ppu_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_ppu.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.pixels_per_unit = 0.0F;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+void test_atlas_begin_nan_ppu_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_ppu_nan.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.pixels_per_unit = NAN;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+/* Cross-field validation still runs after an earlier failed commit. */
+void test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_slice9.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    NtAtlasBuild *atlas_build_4757 = nt_atlas_begin(ctx, "next", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    /* slice9 border + non-RECT sprite shape → cross-field trap */
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_4757, s, 16, 16,
+                                              &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .shape = NT_ATLAS_SPRITE_SHAPE_CONVEX}));
+    free(s);
+}
+
+/* Per-sprite extrude still observes the later transaction's real shape. */
+void test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_extrude.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    NtAtlasBuild *atlas_build_4772 = nt_atlas_begin(ctx, "next", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_4772, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .extrude = 2}));
+    free(s);
+}
+
+/* A valid later transaction executes and publishes even though finish remains failed. */
+void test_atlas_add_raw_valid_opts_commits_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_valid_noop.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    NtAtlasBuild *atlas_build_4785 = nt_atlas_begin(ctx, "next", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_atlas_add_raw(atlas_build_4785, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ok.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    free(s);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas_build_4785));
+    TEST_ASSERT_EQUAL_UINT32(2, ctx->pending_count);
+    uint32_t err_count = 0;
+    (void)nt_builder_get_errors(ctx, &err_count);
+    TEST_ASSERT_EQUAL_UINT32(1, err_count);
+    nt_builder_free_pack(ctx);
+}
+
+/* Both shape enums use value 1 for different meanings. */
+void test_atlas_add_raw_extrude_convex_default_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_extrude_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    NtAtlasBuild *atlas_build_4806 = nt_atlas_begin(ctx, "convex", &opts);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_4806, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .extrude = 2}));
+    free(s);
+}
+
+/* Atlas-level extrude is inherited when the sprite override is zero, so a
+ * non-RECT sprite override must still trap. */
+void test_atlas_add_raw_inherited_extrude_nonrect_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_inherited_extrude_nonrect.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.extrude = 2;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "inherited", &opts);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ex.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_CONVEX}));
+    free(s);
+}
+
+/* Page format validation runs before a later transaction accepts inputs. */
+void test_atlas_begin_bad_format_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_fmt.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.premultiplied = false;                  /* isolate the format assert from the premultiplied check */
+    bad.format = (nt_texture_pixel_format_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+void test_atlas_begin_bad_shape_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_shape.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.shape = (nt_atlas_shape_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+/* Atlas max_vertices below 3 degenerates the simplified hull (hull_simplify
+ * reduces past the <3 guard) — nt_atlas_begin must trap it. */
+void test_atlas_begin_max_vertices_too_low_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxv_low.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_vertices = 2; /* < 3 */
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "lowv", &opts));
+}
+
+/* A per-sprite max_vertices override of 0 means "atlas default"; any other value
+ * below 3 is the same degenerate-hull caller bug and must trap. */
+void test_atlas_add_raw_max_vertices_override_too_low_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxv_ovr_low.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas_build_4851 = nt_atlas_begin(ctx, "ovr", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_4851, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "v.png", .origin_x = 0.5F, .origin_y = 0.5F, .max_vertices = 1}));
+    free(s);
+}
+
+/* Basis compression has no RG8/R8 equivalent. */
+void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_compress.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t comp = nt_tex_compress_etc1s_lowest();
+    bad.compress = &comp;
+    bad.premultiplied = false;         /* let the compress+format check fire, not premultiplied */
+    bad.format = NT_TEXTURE_FORMAT_R8; /* R8 has no Basis equivalent */
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+void test_atlas_begin_bad_compress_mode_asserts_after_failed_pack(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_compress_mode.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.mode = (nt_tex_compress_mode_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    bad.compress = &compress;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+void test_atlas_begin_bad_compress_quality_asserts_after_failed_pack(void) {
+    NtBuilderContext *etc_ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_etc_quality.ntpack");
+    TEST_ASSERT_NOT_NULL(etc_ctx);
+    atlas_fail_pack(etc_ctx);
+    nt_atlas_opts_t etc_bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t etc = nt_tex_compress_etc1s_default();
+    etc.quality = 0;
+    etc_bad.compress = &etc;
+    EXPECT_BUILD_ASSERT(etc_ctx, (void)nt_atlas_begin(etc_ctx, "next", &etc_bad));
+
+    NtBuilderContext *uastc_ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_uastc_quality.ntpack");
+    TEST_ASSERT_NOT_NULL(uastc_ctx);
+    atlas_fail_pack(uastc_ctx);
+    nt_atlas_opts_t uastc_bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t uastc = nt_tex_compress_uastc_default();
+    uastc.quality = 5;
+    uastc_bad.compress = &uastc;
+    EXPECT_BUILD_ASSERT(uastc_ctx, (void)nt_atlas_begin(uastc_ctx, "next", &uastc_bad));
+}
+
+void test_atlas_begin_bad_compress_rdo_asserts_after_failed_pack(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_compress_rdo.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.endpoint_rdo_quality = NAN;
+    bad.compress = &compress;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+void test_atlas_begin_default_format_sentinel_after_failed_pack(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_default_format.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.format = 0;
+
+    nt_build_assert_handler = test_build_assert_handler;
+    if (setjmp(s_build_assert_jmp) != 0) {
+        nt_build_assert_handler = NULL;
+        nt_builder_free_pack(ctx);
+        TEST_FAIL_MESSAGE("format=0 must resolve to RGBA8 before cross-field validation");
+    }
+    NtAtlasBuild *atlas_build_4928 = nt_atlas_begin(ctx, "next", &opts);
+    uint8_t pixel[4] = {255, 255, 255, 255};
+    nt_atlas_add_raw(atlas_build_4928, pixel, 1, 1, &(nt_atlas_sprite_opts_t){.name = "pixel.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_build_assert_handler = NULL;
+    (void)nt_atlas_commit(atlas_build_4928);
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_begin_extrude_over_max_size_asserts_after_failed_pack(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_extrude.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.shape = NT_ATLAS_SHAPE_RECT;
+    bad.extrude = bad.max_size + 1;
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+/* filter_mag must be NEAREST or LINEAR; GL has no mipmap magnification. */
+void test_atlas_begin_bad_filter_mag_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_filtermag.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR; /* mipmap variant invalid for mag */
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
+}
+
+/* An empty transaction is invalid even after an earlier failed commit. */
+void test_atlas_empty_commit_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_empty_skipped.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    atlas_fail_pack(ctx);
+    NtAtlasBuild *atlas_build_4966 = nt_atlas_begin(ctx, "next", NULL);
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_commit(atlas_build_4966));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -4570,10 +5077,10 @@ void test_atlas_round_trip_basic(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_4979 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_4979, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_4979, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_4979);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4623,10 +5130,10 @@ void test_atlas_round_trip_regions(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5032 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5032, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5032, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5032);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4699,10 +5206,10 @@ void test_atlas_round_trip_vertices(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5108 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5108, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5108, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5108);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4767,9 +5274,9 @@ void test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite(void) {
     s[(((0 * 16) + 0) * 4) + 3] = 255;
     s[(((15 * 16) + 15) * 4) + 3] = 255;
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "split.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5176 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5176, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "split.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5176);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4827,9 +5334,9 @@ void test_atlas_shape_convex_hull_produces_polygon(void) {
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
-    nt_builder_begin_atlas(ctx, "convex", &opts);
-    nt_builder_atlas_add_raw(ctx, s, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5236 = nt_atlas_begin(ctx, "convex", &opts);
+    nt_atlas_add_raw(atlas_build_5236, s, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5236);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4874,10 +5381,10 @@ void test_atlas_duplicate_detection(void) {
     /* Same pixel data, different names */
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "a.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "b.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5283 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5283, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "a.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5283, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "b.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5283);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4935,18 +5442,18 @@ void test_atlas_multi_page(void) {
     opts.max_size = 64;
     opts.power_of_two = false;
 
-    nt_builder_begin_atlas(ctx, "sprites", &opts);
+    NtAtlasBuild *atlas_build_5344 = nt_atlas_begin(ctx, "sprites", &opts);
 
     /* Each sprite has different color so dedup doesn't collapse them */
     for (uint32_t i = 0; i < 8; i++) {
         char name[32];
         (void)snprintf(name, sizeof(name), "spr%u.png", i);
         uint8_t *s = make_test_sprite(32, 32, (uint8_t)(i * 30), (uint8_t)(255 - (i * 30)), 128, 255);
-        nt_builder_atlas_add_raw(ctx, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_add_raw(atlas_build_5344, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
         free(s);
     }
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas_build_5344);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -4990,10 +5497,10 @@ void test_atlas_codegen(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5399 = nt_atlas_begin(ctx, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5399, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5399, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5399);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -5031,7 +5538,7 @@ void test_atlas_codegen_large(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_RECT;
     opts.allow_transform = false;
-    nt_builder_begin_atlas(ctx, "sprites", &opts);
+    NtAtlasBuild *atlas_build_5440 = nt_atlas_begin(ctx, "sprites", &opts);
 
     for (uint32_t i = 0; i < LARGE_ATLAS_REGION_COUNT; i++) {
         char name[32];
@@ -5039,11 +5546,11 @@ void test_atlas_codegen_large(void) {
         uint8_t g = (uint8_t)((i >> 8) & 0xFFU);
         uint8_t *s = make_test_sprite(1, 1, r, g, 0, 255);
         (void)snprintf(name, sizeof(name), "spr%04u.png", i);
-        nt_builder_atlas_add_raw(ctx, s, 1, 1, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_add_raw(atlas_build_5440, s, 1, 1, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
         free(s);
     }
 
-    nt_builder_end_atlas(ctx);
+    (void)nt_atlas_commit(atlas_build_5440);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
@@ -5113,9 +5620,9 @@ void test_builder_atlas_pixels_per_unit_metadata(void) {
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.pixels_per_unit = 2.5F;
-    nt_builder_begin_atlas(ctx, "ppu_atlas", &opts);
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5522 = nt_atlas_begin(ctx, "ppu_atlas", &opts);
+    nt_atlas_add_raw(atlas_build_5522, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5522);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5210,6 +5717,79 @@ static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out
     return buf;
 }
 
+static bool atlas_page0_resource_resolves(const char *pack_path) {
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    if (!buf || file_size < sizeof(NtPackHeader)) {
+        free(buf);
+        return false;
+    }
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    if (!atlas_entry || atlas_entry->size < sizeof(NtAtlasHeader) + sizeof(uint64_t) || (uint64_t)atlas_entry->offset + atlas_entry->size > file_size) {
+        free(buf);
+        return false;
+    }
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *atlas = (const NtAtlasHeader *)ablob;
+    if (atlas->page_count == 0) {
+        free(buf);
+        return false;
+    }
+
+    uint64_t page0_id = 0;
+    memcpy(&page0_id, ablob + sizeof(NtAtlasHeader), sizeof(page0_id));
+    bool found = false;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE && entries[i].resource_id == page0_id) {
+            found = true;
+            break;
+        }
+    }
+    free(buf);
+    return found;
+}
+
+void test_atlas_long_name_page_resource_resolves(void) {
+    const char *pack_path = TMP_DIR "/atlas_long_name.ntpack";
+    (void)MKDIR(TMP_DIR);
+    (void)remove(pack_path);
+
+    char atlas_name[600] = {0};
+    size_t name_len = 0;
+    for (uint32_t i = 0; i < 110; i++) {
+        const char segment[] = "x/../";
+        for (size_t j = 0; j < sizeof(segment) - 1; j++) {
+            atlas_name[name_len++] = segment[j];
+        }
+    }
+    const char suffix[] = "atlas";
+    for (size_t i = 0; i < sizeof(suffix); i++) {
+        atlas_name[name_len++] = suffix[i];
+    }
+    TEST_ASSERT_TRUE(strlen(atlas_name) > 512);
+
+    uint8_t *sprite = make_test_sprite(16, 16, 255, 128, 0, 255);
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, NULL);
+    nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(sprite);
+
+    TEST_ASSERT_TRUE_MESSAGE(atlas_page0_resource_resolves(pack_path), "atlas page ID must resolve to the published texture resource");
+}
+
 /* Default sprite opts: NULL opts == centre pivot (0.5, 0.5). */
 void test_atlas_sprite_opts_default_origin_is_centre(void) {
     (void)MKDIR(TMP_DIR);
@@ -5218,13 +5798,13 @@ void test_atlas_sprite_opts_default_origin_is_centre(void) {
 
     uint8_t *s = make_test_sprite(16, 16, 255, 128, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "origin_default", NULL);
+    NtAtlasBuild *atlas_build_5627 = nt_atlas_begin(ctx, "origin_default", NULL);
     /* Pass an opts struct with only .name set — still expect centre pivot because
      * the helper uses nt_atlas_sprite_opts_defaults() as the base. */
     nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
     sopts.name = "centre.png";
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &sopts);
-    nt_builder_end_atlas(ctx);
+    nt_atlas_add_raw(atlas_build_5627, s, 16, 16, &sopts);
+    (void)nt_atlas_commit(atlas_build_5627);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5249,10 +5829,10 @@ void test_atlas_sprite_opts_custom_origin(void) {
 
     uint8_t *s = make_test_sprite(16, 16, 0, 255, 128, 255);
 
-    nt_builder_begin_atlas(ctx, "origin_custom", NULL);
+    NtAtlasBuild *atlas_build_5658 = nt_atlas_begin(ctx, "origin_custom", NULL);
     /* Feet pivot — PNG y-down 1.0 (bottom edge) flips to y-up 0.0 in the blob. */
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
-    nt_builder_end_atlas(ctx);
+    nt_atlas_add_raw(atlas_build_5658, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    (void)nt_atlas_commit(atlas_build_5658);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5276,11 +5856,11 @@ void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
 
     uint8_t *s = make_test_sprite(16, 16, 128, 64, 255, 255);
 
-    nt_builder_begin_atlas(ctx, "origin_oor", NULL);
+    NtAtlasBuild *atlas_build_5685 = nt_atlas_begin(ctx, "origin_oor", NULL);
     /* Negative and > 1.0 — pivot lies outside the frame. Legal. PNG y-down 1.5
      * flips symmetrically to y-up -0.5 in the blob (1 - 1.5 = -0.5). */
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
-    nt_builder_end_atlas(ctx);
+    nt_atlas_add_raw(atlas_build_5685, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
+    (void)nt_atlas_commit(atlas_build_5685);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5303,14 +5883,14 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
-    nt_builder_begin_atlas(ctx, "origin_nan", NULL);
+    NtAtlasBuild *atlas_build_5712 = nt_atlas_begin(ctx, "origin_nan", NULL);
 
     /* NaN in origin — must fire NT_BUILD_ASSERT. Use a named local to avoid
      * compound-literal + macro expansion interactions. */
     nt_atlas_sprite_opts_t bad = nt_atlas_sprite_opts_defaults();
     bad.name = "bad.png";
     bad.origin_x = (float)(0.0 / 0.0); /* NaN */
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &bad));
+    EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_5712, s, 16, 16, &bad));
 
     free(s);
     /* ctx freed by EXPECT_BUILD_ASSERT */
@@ -5321,13 +5901,48 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
  *   - each region keeps its own origin_x/y verbatim
  * This is the walk-cycle reuse pattern. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-/* Regression: two end_atlas runs differing only in an atlas opt must produce
+/* Regression: two commits differing only in an atlas opt must produce
  * DIFFERENT atlas cache keys. Locks in compute_atlas_cache_key correctness —
  * if someone adds a new field to nt_atlas_opts_t without updating the hash
  * input, two atlases would share a cache entry and silently bind to the wrong
  * output. This test catches that by counting atlas_*.bin files in an isolated
  * cache directory: two different keys → two files. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_hit_rebuild_is_byte_identical(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_hit1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_hit2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_hit_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    uint8_t *sprite = make_test_sprite(16, 16, 100, 150, 200, 255);
+    const char *packs[] = {pack1, pack2};
+    for (uint32_t pass = 0; pass < 2; pass++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(packs[pass]);
+        nt_builder_set_cache_dir(ctx, cache);
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "cache_hit", NULL);
+        nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+        TEST_ASSERT_EQUAL(pass != 0, ctx->atlas_cache_hit);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        nt_builder_free_pack(ctx);
+        TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+    }
+    free(sprite);
+
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = read_file_bytes(pack1, &size1);
+    uint8_t *data2 = read_file_bytes(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
 void test_atlas_cache_invalidates_on_opts_change(void) {
     const char *pack1 = TMP_DIR "/atlas_cache_opts1.ntpack";
     const char *pack2 = TMP_DIR "/atlas_cache_opts2.ntpack";
@@ -5343,9 +5958,9 @@ void test_atlas_cache_invalidates_on_opts_change(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
     NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
     nt_builder_set_cache_dir(ctx1, cache);
-    nt_builder_begin_atlas(ctx1, "sprites", &opts1);
-    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx1);
+    NtAtlasBuild *atlas_build_5752 = nt_atlas_begin(ctx1, "sprites", &opts1);
+    nt_atlas_add_raw(atlas_build_5752, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5752);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
     nt_builder_free_pack(ctx1);
     free(s1);
@@ -5357,14 +5972,42 @@ void test_atlas_cache_invalidates_on_opts_change(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 255, 0, 0, 255);
     NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
     nt_builder_set_cache_dir(ctx2, cache);
-    nt_builder_begin_atlas(ctx2, "sprites", &opts2);
-    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx2);
+    NtAtlasBuild *atlas_build_5766 = nt_atlas_begin(ctx2, "sprites", &opts2);
+    nt_atlas_add_raw(atlas_build_5766, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5766);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
     nt_builder_free_pack(ctx2);
     free(s2);
 
     /* Two distinct atlas cache entries prove compute_atlas_cache_key honours the opt. */
+    TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
+}
+
+void test_atlas_cache_identity_includes_source_dimensions(void) {
+    const char *cache = TMP_DIR "/atlas_cache_dimensions";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+    uint8_t pixels[2 * 8 * 4];
+    memset(pixels, 255, sizeof(pixels));
+
+    NtBuilderContext *first = nt_builder_start_pack(TMP_DIR "/atlas_cache_dimensions_2x8.ntpack");
+    nt_builder_set_cache_dir(first, cache);
+    NtAtlasBuild *first_atlas = nt_atlas_begin(first, "dimensions", NULL);
+    nt_atlas_add_raw(first_atlas, pixels, 2, 8, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(first_atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(first));
+    nt_builder_free_pack(first);
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    NtBuilderContext *second = nt_builder_start_pack(TMP_DIR "/atlas_cache_dimensions_4x4.ntpack");
+    nt_builder_set_cache_dir(second, cache);
+    NtAtlasBuild *second_atlas = nt_atlas_begin(second, "dimensions", NULL);
+    nt_atlas_add_raw(second_atlas, pixels, 4, 4, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(second_atlas));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(second));
+    nt_builder_free_pack(second);
+
     TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
 }
 
@@ -5385,9 +6028,9 @@ void test_atlas_cache_corrupt_file_falls_back(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 100, 150, 200, 255);
     NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
     nt_builder_set_cache_dir(ctx1, cache);
-    nt_builder_begin_atlas(ctx1, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx1);
+    NtAtlasBuild *atlas_build_5794 = nt_atlas_begin(ctx1, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5794, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5794);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
     nt_builder_free_pack(ctx1);
     free(s1);
@@ -5402,9 +6045,9 @@ void test_atlas_cache_corrupt_file_falls_back(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 100, 150, 200, 255);
     NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
     nt_builder_set_cache_dir(ctx2, cache);
-    nt_builder_begin_atlas(ctx2, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_end_atlas(ctx2);
+    NtAtlasBuild *atlas_build_5811 = nt_atlas_begin(ctx2, "sprites", NULL);
+    nt_atlas_add_raw(atlas_build_5811, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_5811);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
     nt_builder_free_pack(ctx2);
     free(s2);
@@ -5414,43 +6057,51 @@ void test_atlas_cache_corrupt_file_falls_back(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
 }
 
-/* Regression for BUG-2: exhausting ATLAS_MAX_PAGES must fire a loud
- * NT_BUILD_ASSERT, not a silent fallback. Generates enough oversized sprites
- * that the packer cannot fit even one per page across all ATLAS_MAX_PAGES (64)
- * pages, then verifies the assert fires via EXPECT_BUILD_ASSERT. */
+/* Exhaustion must report PAGES_EXHAUSTED after joining workers and freeing buffers. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_max_pages_exhaustion_asserts(void) {
+void test_atlas_max_pages_exhaustion_graceful(void) {
     (void)MKDIR(TMP_DIR);
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxpages.ntpack");
+    const char *path = TMP_DIR "/atlas_maxpages.ntpack";
+    (void)remove(path);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* Tiny max_size + sprite that nearly fills each page → one sprite per page.
-     * Need > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. Use RECT
-     * shape for simple AABB packing (no polygon mode). */
+    /* Tiny max_size + sprite that fills each page → one sprite per page. Need
+     * > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. RECT shape; 57×57
+     * fills a 64 page (footprint == max_size), so no second sprite fits. */
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = 64;
     opts.margin = 2;
     opts.padding = 2;
     opts.shape = NT_ATLAS_SHAPE_RECT;
 
-    nt_builder_begin_atlas(ctx, "too_many", &opts);
+    NtAtlasBuild *atlas_build_5841 = nt_atlas_begin(ctx, "too_many", &opts);
 
-    /* 70 distinct sprites of 60x60 — each uses (60+padding)^2 = 62x62 of a
-     * 64x64 page, no room for a second sprite. Distinct red channels keep
-     * decoded_hash unique so dedup cannot collapse them. */
+    /* Distinct red channels keep decoded_hash unique so dedup cannot collapse. */
     enum { N_SPRITES = 70 };
     uint8_t *sprites[N_SPRITES];
     for (uint32_t i = 0; i < N_SPRITES; i++) {
-        sprites[i] = make_test_sprite(60, 60, (uint8_t)(i + 1), 50, 100, 255);
+        sprites[i] = make_test_sprite(57, 57, (uint8_t)(i + 1), 50, 100, 255);
         char name[32];
         (void)snprintf(name, sizeof(name), "sp_%u.png", i);
-        nt_builder_atlas_add_raw(ctx, sprites[i], 60, 60, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_add_raw(atlas_build_5841, sprites[i], 57, 57, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
     }
 
-    /* Pipeline allocates internally; longjmp from NT_BUILD_ASSERT can't free
-     * them. Suppress leak detection for this intentional assert-path test. */
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+    (void)nt_atlas_commit(atlas_build_5841); /* no abort — graceful accumulate + cleanup */
 
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    FILE *f = fopen(path, "rb");
+    TEST_ASSERT_NULL_MESSAGE(f, "no .ntpack must exist after a pages-exhausted build");
+    if (f) {
+        (void)fclose(f);
+    }
+
+    nt_builder_free_pack(ctx);
     for (uint32_t i = 0; i < N_SPRITES; i++) {
         free(sprites[i]);
     }
@@ -5464,10 +6115,10 @@ void test_atlas_duplicate_pixels_different_origin(void) {
 
     uint8_t *s = make_test_sprite(16, 16, 255, 200, 100, 255);
 
-    nt_builder_begin_atlas(ctx, "dup_origin", NULL);
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_centre.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5881 = nt_atlas_begin(ctx, "dup_origin", NULL);
+    nt_atlas_add_raw(atlas_build_5881, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_centre.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5881, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    (void)nt_atlas_commit(atlas_build_5881);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5540,11 +6191,11 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
     uint8_t *s_normal = make_test_sprite(16, 16, 255, 0, 0, 255);
     uint8_t *s_slice9 = make_test_sprite(32, 32, 0, 255, 0, 255);
 
-    nt_builder_begin_atlas(ctx, "s9test", NULL);
-    nt_builder_atlas_add_raw(ctx, s_normal, 16, 16, &(nt_atlas_sprite_opts_t){.name = "normal.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    nt_builder_atlas_add_raw(ctx, s_slice9, 32, 32,
-                             &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_5957 = nt_atlas_begin(ctx, "s9test", NULL);
+    nt_atlas_add_raw(atlas_build_5957, s_normal, 16, 16, &(nt_atlas_sprite_opts_t){.name = "normal.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_5957, s_slice9, 32, 32,
+                     &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
+    (void)nt_atlas_commit(atlas_build_5957);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5603,20 +6254,469 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
     free(buf);
 }
 
-/* Test: invalid slice9 borders (l+r >= width) triggers NT_BUILD_ASSERT. */
-void test_atlas_slice9_invalid_borders_asserts(void) {
+/* Test: invalid slice9 borders (l+r >= width) route to the graceful error channel
+ * as SLICE9_TOO_BIG (a content-dependent failure), not NT_BUILD_ASSERT. */
+void test_atlas_slice9_invalid_borders_reports_error(void) {
     (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_slice9_invalid.ntpack");
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_invalid.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* 60px wide sprite, borders 32+32 = 64 >= 60 -> should assert */
+    /* 60px wide sprite, borders 32+32 = 64 >= 60 -> graceful SLICE9_TOO_BIG */
     uint8_t *s = make_test_sprite(60, 60, 200, 100, 50, 255);
-    nt_builder_begin_atlas(ctx, "s9invalid", NULL);
-    nt_builder_atlas_add_raw(ctx, s, 60, 60,
-                             &(nt_atlas_sprite_opts_t){.name = "bad_s9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 32, .slice9_right = 32, .slice9_top = 4, .slice9_bottom = 4});
+    NtAtlasBuild *atlas_build_6030 = nt_atlas_begin(ctx, "s9invalid", NULL);
+    nt_atlas_add_raw(atlas_build_6030, s, 60, 60,
+                     &(nt_atlas_sprite_opts_t){.name = "bad_s9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 32, .slice9_right = 32, .slice9_top = 4, .slice9_bottom = 4});
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+    (void)nt_atlas_commit(atlas_build_6030);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("bad_s9.png", errs[0].sprite);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    /* No .ntpack is written after a failed commit. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_slice9_invalid.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
     free(s);
+}
+
+/* One atlas reports ALL of its bad sprites as a list, add-order-stable. */
+void test_atlas_collects_all_errors_in_one_atlas(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_collect_all.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_collect_all.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Three fully-transparent (alpha=0) sprites — each fails alpha-trim. */
+    uint8_t *t0 = make_test_sprite(16, 16, 255, 0, 0, 0);
+    uint8_t *t1 = make_test_sprite(16, 16, 0, 255, 0, 0);
+    uint8_t *t2 = make_test_sprite(16, 16, 0, 0, 255, 0);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "allbad", NULL);
+    nt_atlas_add_raw(atlas, t0, 16, 16, &(nt_atlas_sprite_opts_t){.name = "one.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas, t1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "two.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas, t2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "three.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    uint32_t before_commit = 0;
+    (void)nt_builder_get_errors(ctx, &before_commit);
+    TEST_ASSERT_EQUAL_UINT32(0, before_commit);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas));
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(3, n); /* all three reported, not just the first */
+    /* add-order-stable: errors listed in the order sprites were added. */
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("one.png", errs[0].sprite);
+    TEST_ASSERT_EQUAL_STRING("two.png", errs[1].sprite);
+    TEST_ASSERT_EQUAL_STRING("three.png", errs[2].sprite);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    /* No .ntpack written on failure. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_collect_all.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(t0);
+    free(t1);
+    free(t2);
+}
+
+/* A failed pack still builds later atlases so their real pipeline runs. */
+void test_atlas_failed_pack_builds_subsequent_atlas(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_poison_stop.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_stop.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Atlas A: a single transparent sprite fails its transaction. */
+    uint8_t *bad = make_test_sprite(16, 16, 255, 0, 0, 0);
+    NtAtlasBuild *atlas_a = nt_atlas_begin(ctx, "atlasA", NULL);
+    nt_atlas_add_raw(atlas_a, bad, 16, 16, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_a));
+
+    uint32_t after_a = 0;
+    (void)nt_builder_get_errors(ctx, &after_a);
+    TEST_ASSERT_EQUAL_UINT32(1, after_a);
+
+    /* Atlas B is valid and must publish its atlas + page pending entries even
+     * though finish_pack remains failed because of atlas A. */
+    uint8_t *good = make_test_sprite(16, 16, 255, 128, 0, 255);
+    NtAtlasBuild *atlas_b = nt_atlas_begin(ctx, "atlasB", NULL);
+    nt_atlas_add_raw(atlas_b, good, 16, 16, &(nt_atlas_sprite_opts_t){.name = "good.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas_b));
+
+    TEST_ASSERT_EQUAL_UINT32(2, ctx->pending_count);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ASSET_ATLAS, ctx->pending[0].kind);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ASSET_TEXTURE, ctx->pending[1].kind);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->meta_count);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->atlas_region_count);
+
+    uint32_t after_b = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &after_b);
+    TEST_ASSERT_EQUAL_UINT32(1, after_b);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errs[0].kind);
+    TEST_ASSERT_EQUAL_STRING("bad.png", errs[0].sprite);
+
+    /* finish_pack returns A's coarse code, writes no file. */
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_poison_stop.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(bad);
+    free(good);
+}
+
+void test_atlas_failed_commits_append_errors_in_commit_order(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_failed_commit_order.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    uint8_t transparent[4] = {255, 0, 0, 0};
+
+    NtAtlasBuild *atlas_a = nt_atlas_begin(ctx, "atlasA", NULL);
+    nt_atlas_add_raw(atlas_a, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = "first.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->error_count);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_a));
+
+    NtAtlasBuild *atlas_b = nt_atlas_begin(ctx, "atlasB", NULL);
+    nt_atlas_add_raw(atlas_b, transparent, 0, 1, &(nt_atlas_sprite_opts_t){.name = "second.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->error_count);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_b));
+
+    uint32_t count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &count);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_STRING("atlasA", errors[0].atlas);
+    TEST_ASSERT_EQUAL_STRING("first.png", errors[0].sprite);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, errors[0].kind);
+    TEST_ASSERT_EQUAL_STRING("atlasB", errors[1].atlas);
+    TEST_ASSERT_EQUAL_STRING("second.png", errors[1].sprite);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errors[1].kind);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->pending_count);
+
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_error_format_identifies_failed_transaction(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_error_transaction.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    uint8_t transparent[4] = {255, 0, 0, 0};
+
+    NtAtlasBuild *atlas_a = nt_atlas_begin(ctx, "atlasA", NULL);
+    nt_atlas_add_raw(atlas_a, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = "icon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_a));
+
+    NtAtlasBuild *atlas_b = nt_atlas_begin(ctx, "atlasB", NULL);
+    nt_atlas_add_raw(atlas_b, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = "icon.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_b));
+
+    uint32_t count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &count);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    char first[256];
+    char second[256];
+    nt_build_error_format(&errors[0], first, sizeof(first));
+    nt_build_error_format(&errors[1], second, sizeof(second));
+    TEST_ASSERT_NOT_NULL(strstr(first, "atlasA"));
+    TEST_ASSERT_NOT_NULL(strstr(second, "atlasB"));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(first, second));
+
+    nt_builder_free_pack(ctx);
+}
+
+void test_atlas_commit_duplicate_resource_id_asserts(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_atomic_collision.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    const uint8_t existing = 7;
+    nt_builder_add_blob(ctx, &existing, sizeof(existing), "collision/tex0");
+
+    uint8_t *sprite = make_test_sprite(16, 16, 255, 128, 0, 255);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "collision", NULL);
+    nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_commit(atlas), "duplicate resource_id");
+    free(sprite);
+}
+
+void test_atlas_pack_config_is_fixed_while_open(void) {
+    NtBuilderContext *thread_ctx = nt_builder_start_pack(TMP_DIR "/atlas_open_threads.ntpack");
+    TEST_ASSERT_NOT_NULL(thread_ctx);
+    (void)nt_atlas_begin(thread_ctx, "open", NULL);
+    EXPECT_BUILD_ASSERT(thread_ctx, nt_builder_set_threads(thread_ctx, 2));
+
+    NtBuilderContext *cache_ctx = nt_builder_start_pack(TMP_DIR "/atlas_open_cache.ntpack");
+    TEST_ASSERT_NOT_NULL(cache_ctx);
+    (void)nt_atlas_begin(cache_ctx, "open", NULL);
+    EXPECT_BUILD_ASSERT(cache_ctx, nt_builder_set_cache_dir(cache_ctx, TMP_DIR "/atlas_open_cache"));
+}
+
+/* A locally-failed open atlas still rejects a nested begin. */
+void test_atlas_local_error_open_nested_begin_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_poison_open_nested.ntpack");
+
+    /* A garbage file stb_image cannot decode → CORRUPT_IMAGE (the file must
+     * exist, else atlas_add asserts on the read). */
+    const char *bad_png = TMP_DIR "/poison_open_bad.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_open_nested.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* A content error remains local until this transaction is committed. */
+    NtAtlasBuild *atlas_build_6186 = nt_atlas_begin(ctx, "atlasA", NULL);
+    nt_atlas_add(atlas_build_6186, bad_png, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    uint32_t nerr = 0;
+    (void)nt_builder_get_errors(ctx, &nerr);
+    TEST_ASSERT_EQUAL_UINT32(0, nerr);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->active_atlas->error_count);
+
+    /* A second transaction cannot open while the first remains active. */
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "atlasB", NULL));
+
+    (void)remove(bad_png);
+}
+
+/* Return a pack with one failed transaction already committed. */
+static NtBuilderContext *make_failed_closed_pack(const char *path) {
+    (void)remove(path);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    uint8_t *transparent = make_test_sprite(16, 16, 255, 0, 0, 0);
+    NtAtlasBuild *atlas_build_6207 = nt_atlas_begin(ctx, "poison", NULL);
+    nt_atlas_add_raw(atlas_build_6207, transparent, 16, 16, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_6207);
+    free(transparent);
+    return ctx;
+}
+
+/* A failed pack still validates every later transaction contract. */
+void test_atlas_failed_pack_arg_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    uint8_t px[4 * 4 * 4] = {0};
+
+    /* Invalid atlas opts still trap. */
+    NtBuilderContext *c1 = make_failed_closed_pack(TMP_DIR "/poison_arg_begin.ntpack");
+    nt_atlas_opts_t bad_opts = nt_atlas_opts_defaults();
+    bad_opts.max_size = 0;
+    EXPECT_BUILD_ASSERT(c1, (void)nt_atlas_begin(c1, "x", &bad_opts));
+
+    /* Raw inputs still require an explicit region name. */
+    NtBuilderContext *c3 = make_failed_closed_pack(TMP_DIR "/poison_arg_name.ntpack");
+    NtAtlasBuild *atlas_build_6229 = nt_atlas_begin(c3, "next", NULL);
+    EXPECT_BUILD_ASSERT(c3, nt_atlas_add_raw(atlas_build_6229, px, 4, 4, &(nt_atlas_sprite_opts_t){.name = NULL, .origin_x = 0.5F, .origin_y = 0.5F}));
+
+    /* A glob cannot apply one shared name to all matches. */
+    NtBuilderContext *c4 = make_failed_closed_pack(TMP_DIR "/poison_arg_glob.ntpack");
+    NtAtlasBuild *atlas_build_6234 = nt_atlas_begin(c4, "next", NULL);
+    EXPECT_BUILD_ASSERT(c4, nt_atlas_add_glob(atlas_build_6234, "*.png", &(nt_atlas_sprite_opts_t){.name = "n.png", .origin_x = 0.5F, .origin_y = 0.5F}));
+}
+
+/* A failed pack still permits only one open atlas transaction. */
+void test_atlas_failed_pack_nested_begin_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_failed_closed_pack(TMP_DIR "/poison_skip_nested.ntpack");
+    (void)nt_atlas_begin(ctx, "B", NULL);
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "C", NULL));
+}
+
+/* A NULL transaction handle is always invalid. */
+void test_atlas_commit_null_asserts_after_failed_pack(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_failed_closed_pack(TMP_DIR "/poison_skip_end.ntpack");
+    EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_commit(NULL));
+}
+
+/* finish_pack rejects a later transaction that has not been committed. */
+void test_atlas_failed_pack_finish_open_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = make_failed_closed_pack(TMP_DIR "/poison_skip_finish.ntpack");
+    (void)nt_atlas_begin(ctx, "B", NULL);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+}
+
+/* atlas_add_raw with width==0 on an OPEN atlas is a graceful content error
+ * (ZERO_DIM), not a caller-contract assert — matches file-based atlas_add. */
+void test_atlas_add_raw_zero_dim_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_raw_zero_dim.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_zero_dim.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtAtlasBuild *atlas_build_6273 = nt_atlas_begin(ctx, "rawzero", NULL);
+    nt_atlas_add_raw(atlas_build_6273, NULL, 0, 4, &(nt_atlas_sprite_opts_t){.name = "zero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_6273);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    /* No .ntpack is written after a failed commit. */
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_raw_zero_dim.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+}
+
+/* Symmetric to the width==0 case: atlas_add_raw with height==0 on an OPEN atlas
+ * is a graceful ZERO_DIM content error, not a caller-contract assert. */
+void test_atlas_add_raw_zero_height_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_raw_zero_height.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_zero_height.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtAtlasBuild *atlas_build_6300 = nt_atlas_begin(ctx, "rawzeroh", NULL);
+    nt_atlas_add_raw(atlas_build_6300, NULL, 4, 0, &(nt_atlas_sprite_opts_t){.name = "zeroh.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_6300);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ZERO_DIM, errs[0].kind);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+
+    nt_builder_free_pack(ctx);
+}
+
+/* A non-empty raw span still requires caller-owned pixel data. */
+void test_atlas_add_raw_null_valid_span_asserts(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_raw_null.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "rawnull", NULL);
+
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, NULL, 1, 1, &(nt_atlas_sprite_opts_t){.name = "null.png", .origin_x = 0.5F, .origin_y = 0.5F}), "pixels are NULL");
+}
+
+void test_atlas_long_error_names_remain_distinguishable(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_long_error_names.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_long_error_names.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    char name_a[192];
+    char name_b[192];
+    char atlas_name[192];
+    memset(name_a, 'a', sizeof(name_a));
+    memset(name_b, 'a', sizeof(name_b));
+    memset(atlas_name, 'z', sizeof(atlas_name));
+    name_a[sizeof(name_a) - 2] = 'x';
+    name_b[sizeof(name_b) - 2] = 'y';
+    name_a[sizeof(name_a) - 1] = '\0';
+    name_b[sizeof(name_b) - 1] = '\0';
+    atlas_name[sizeof(atlas_name) - 1] = '\0';
+
+    char expected_a[NT_BUILD_ERR_NAME_MAX];
+    char expected_b[NT_BUILD_ERR_NAME_MAX];
+    char expected_atlas[NT_BUILD_ERR_NAME_MAX];
+    (void)snprintf(expected_a, sizeof(expected_a), "%.48s...%.48s#%016llx", name_a, name_a + strlen(name_a) - 48, (unsigned long long)nt_hash64_str(name_a).value);
+    (void)snprintf(expected_b, sizeof(expected_b), "%.48s...%.48s#%016llx", name_b, name_b + strlen(name_b) - 48, (unsigned long long)nt_hash64_str(name_b).value);
+    (void)snprintf(expected_atlas, sizeof(expected_atlas), "%.48s...%.48s#%016llx", atlas_name, atlas_name + strlen(atlas_name) - 48, (unsigned long long)nt_hash64_str(atlas_name).value);
+
+    const uint8_t transparent[4] = {0};
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, NULL);
+    nt_atlas_add_raw(atlas, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = name_a, .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas, transparent, 1, 1, &(nt_atlas_sprite_opts_t){.name = name_b, .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+
+    uint32_t count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &count);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_STRING(expected_atlas, errors[0].atlas);
+    TEST_ASSERT_EQUAL_STRING(expected_atlas, errors[1].atlas);
+    TEST_ASSERT_EQUAL_STRING(expected_a, errors[0].sprite);
+    TEST_ASSERT_EQUAL_STRING(expected_b, errors[1].sprite);
+
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+}
+
+/* finish_pack with an open transaction is a lifecycle error. */
+void test_finish_pack_open_atlas_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/finish_open_atlas.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/finish_open_atlas.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 0, 128, 255, 255);
+    NtAtlasBuild *atlas_build_6322 = nt_atlas_begin(ctx, "openatlas", NULL);
+    nt_atlas_add_raw(atlas_build_6322, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "s.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    free(s);
+    /* No commit: finish_pack must trap. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+}
+
+/* finish_pack rejects an open atlas even when it already has local errors. */
+void test_finish_pack_locally_failed_open_atlas_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/finish_poison_open.ntpack");
+
+    /* A garbage file produces a local CORRUPT_IMAGE error. */
+    const char *bad_png = TMP_DIR "/finish_poison_bad.png";
+    FILE *bf = fopen(bad_png, "wb");
+    TEST_ASSERT_NOT_NULL(bf);
+    (void)fwrite("not a real png", 1, 14, bf);
+    (void)fclose(bf);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/finish_poison_open.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtAtlasBuild *atlas_build_6345 = nt_atlas_begin(ctx, "openpoison", NULL);
+    nt_atlas_add(atlas_build_6345, bad_png, &(nt_atlas_sprite_opts_t){.name = "bad.png", .origin_x = 0.5F, .origin_y = 0.5F});
+
+    uint32_t nerr = 0;
+    (void)nt_builder_get_errors(ctx, &nerr);
+    TEST_ASSERT_EQUAL_UINT32(0, nerr);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx->active_atlas->error_count);
+
+    /* The local error does not make an uncommitted transaction finishable. */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    (void)remove(bad_png);
+}
+
+/* Duplicate region names in one atlas → one DUPLICATE_NAME error, coarse
+ * NT_BUILD_ERR_DUPLICATE, no file written. */
+void test_atlas_duplicate_name_graceful(void) {
+    (void)MKDIR(TMP_DIR);
+    (void)remove(TMP_DIR "/atlas_dupname.ntpack");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_dupname.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Two opaque sprites with DIFFERENT pixels (so no dedup) but the SAME name. */
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+    NtAtlasBuild *atlas_build_6369 = nt_atlas_begin(ctx, "dupatlas", NULL);
+    nt_atlas_add_raw(atlas_build_6369, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "same.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_atlas_add_raw(atlas_build_6369, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "same.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    (void)nt_atlas_commit(atlas_build_6369);
+
+    uint32_t n = 0;
+    const nt_build_error_t *errs = nt_builder_get_errors(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, errs[0].kind);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, nt_builder_finish_pack(ctx));
+
+    uint32_t fsz = 0;
+    uint8_t *f = read_file_bytes(TMP_DIR "/atlas_dupname.ntpack", &fsz);
+    TEST_ASSERT_NULL(f);
+
+    nt_builder_free_pack(ctx);
+    free(s1);
+    free(s2);
 }
 
 /* Test: slice9 region forces rect packing (vertex_count == 4). */
@@ -5632,10 +6732,10 @@ void test_atlas_slice9_forces_rect_packing(void) {
     opts.max_vertices = 8;
 
     uint8_t *s = make_test_sprite(32, 32, 0, 128, 255, 255);
-    nt_builder_begin_atlas(ctx, "s9rect", &opts);
-    nt_builder_atlas_add_raw(ctx, s, 32, 32,
-                             &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_6402 = nt_atlas_begin(ctx, "s9rect", &opts);
+    nt_atlas_add_raw(atlas_build_6402, s, 32, 32,
+                     &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
+    (void)nt_atlas_commit(atlas_build_6402);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5668,9 +6768,9 @@ void test_atlas_per_sprite_shape_override_rect(void) {
     opts.max_vertices = 8;
 
     uint8_t *s = make_test_sprite(32, 32, 100, 200, 50, 255);
-    nt_builder_begin_atlas(ctx, "shape_ov", &opts);
-    nt_builder_atlas_add_raw(ctx, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = "forced_rect.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT});
-    nt_builder_end_atlas(ctx);
+    NtAtlasBuild *atlas_build_6438 = nt_atlas_begin(ctx, "shape_ov", &opts);
+    nt_atlas_add_raw(atlas_build_6438, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = "forced_rect.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT});
+    (void)nt_atlas_commit(atlas_build_6438);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -5698,6 +6798,7 @@ int main(void) {
     RUN_TEST(test_hash_known_value);
     RUN_TEST(test_hash_path_normalization);
     RUN_TEST(test_hash_different_strings_differ);
+    RUN_TEST(test_read_file_bounded_rejects_before_read);
 
     /* Pack writer core */
     RUN_TEST(test_start_pack_returns_context);
@@ -5705,6 +6806,10 @@ int main(void) {
     /* Round-trip tests */
     RUN_TEST(test_shader_round_trip);
     RUN_TEST(test_texture_round_trip);
+    RUN_TEST(test_texture_invalid_compress_mode_asserts_at_add);
+    RUN_TEST(test_texture_compress_rdo_boundaries);
+    RUN_TEST(test_texture_option_aliases_are_canonicalized);
+    RUN_TEST(test_atlas_texture_option_aliases_are_canonicalized);
     RUN_TEST(test_mesh_round_trip);
 
     /* Validation errors (builder asserts on bad input -- tested via EXPECT_BUILD_ASSERT) */
@@ -5793,6 +6898,7 @@ int main(void) {
     RUN_TEST(test_early_dedup_identical_shaders);
     RUN_TEST(test_early_dedup_different_kinds_not_deduped);
     RUN_TEST(test_early_dedup_pack_data_correct);
+    RUN_TEST(test_texture_identity_includes_dimensions);
 
     /* Cross-source dedup (38.1 pipeline refactoring) */
     RUN_TEST(test_dedup_cross_source_texture_file_vs_memory);
@@ -5855,6 +6961,29 @@ int main(void) {
     RUN_TEST(test_extrude_edges_preserve_hole);
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
     RUN_TEST(test_atlas_shape_concave_rejects_extrude);
+    RUN_TEST(test_atlas_add_missing_file_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_glob_empty_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_glob_cross_field_asserts_before_enumeration);
+    RUN_TEST(test_atlas_begin_bad_ppu_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_nan_ppu_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_valid_opts_commits_after_failed_pack);
+    RUN_TEST(test_atlas_file_and_glob_commit_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_extrude_convex_default_asserts);
+    RUN_TEST(test_atlas_add_raw_inherited_extrude_nonrect_asserts);
+    RUN_TEST(test_atlas_begin_bad_format_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_bad_shape_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);
+    RUN_TEST(test_atlas_add_raw_max_vertices_override_too_low_asserts);
+    RUN_TEST(test_atlas_begin_compress_bad_format_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_bad_compress_mode_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_bad_compress_quality_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_bad_compress_rdo_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_default_format_sentinel_after_failed_pack);
+    RUN_TEST(test_atlas_begin_extrude_over_max_size_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_bad_filter_mag_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_empty_commit_asserts_after_failed_pack);
 
     /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);
@@ -5868,6 +6997,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
     RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
+    RUN_TEST(test_atlas_long_name_page_resource_resolves);
 
     /* Atlas sprite opts + origin (Point 2 follow-up) */
     RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);
@@ -5877,13 +7007,33 @@ int main(void) {
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     /* Atlas cache hardening + BUG-2 regression */
+    RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
+    RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
-    RUN_TEST(test_atlas_max_pages_exhaustion_asserts);
+    RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
 
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);
-    RUN_TEST(test_atlas_slice9_invalid_borders_asserts);
+    RUN_TEST(test_atlas_slice9_invalid_borders_reports_error);
+    RUN_TEST(test_atlas_collects_all_errors_in_one_atlas);
+    RUN_TEST(test_atlas_failed_pack_builds_subsequent_atlas);
+    RUN_TEST(test_atlas_failed_commits_append_errors_in_commit_order);
+    RUN_TEST(test_atlas_error_format_identifies_failed_transaction);
+    RUN_TEST(test_atlas_commit_duplicate_resource_id_asserts);
+    RUN_TEST(test_atlas_pack_config_is_fixed_while_open);
+    RUN_TEST(test_atlas_local_error_open_nested_begin_asserts);
+    RUN_TEST(test_atlas_failed_pack_arg_asserts);
+    RUN_TEST(test_atlas_failed_pack_nested_begin_asserts);
+    RUN_TEST(test_atlas_commit_null_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_failed_pack_finish_open_asserts);
+    RUN_TEST(test_atlas_add_raw_zero_dim_graceful);
+    RUN_TEST(test_atlas_add_raw_zero_height_graceful);
+    RUN_TEST(test_atlas_add_raw_null_valid_span_asserts);
+    RUN_TEST(test_atlas_long_error_names_remain_distinguishable);
+    RUN_TEST(test_finish_pack_open_atlas_asserts);
+    RUN_TEST(test_finish_pack_locally_failed_open_atlas_asserts);
+    RUN_TEST(test_atlas_duplicate_name_graceful);
     RUN_TEST(test_atlas_slice9_forces_rect_packing);
     RUN_TEST(test_atlas_per_sprite_shape_override_rect);
 
