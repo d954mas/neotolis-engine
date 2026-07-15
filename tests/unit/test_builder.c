@@ -6210,17 +6210,69 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
     /* ctx freed by EXPECT_BUILD_ASSERT */
 }
 
-/* Two pixel-identical sprites with DIFFERENT origins:
- *   - dedup shares vertex/index data (same vertex_start, same index_start)
- *   - each region keeps its own origin_x/y verbatim
- * This is the walk-cycle reuse pattern. */
+/* Geometry controls affect packed output and therefore belong in cache identity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-/* Regression: two commits differing only in an atlas opt must produce
- * DIFFERENT atlas cache keys. Locks in compute_atlas_cache_key correctness —
- * if someone adds a new field to nt_atlas_opts_t without updating the hash
- * input, two atlases would share a cache entry and silently bind to the wrong
- * output. This test catches that by counting atlas_*.bin files in an isolated
- * cache directory: two different keys → two files. */
+static bool build_atlas_cache_geometry_case(const char *pack_path, const char *cache_dir, float atlas_tolerance, float sprite_tolerance, uint8_t sprite_threshold) {
+    uint8_t sprite[16 * 16 * 4];
+    memset(sprite, 255, sizeof(sprite));
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_builder_set_cache_dir(ctx, cache_dir);
+    nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
+    atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
+    atlas_opts.tracer_tolerance = atlas_tolerance;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "geometry_cache", &atlas_opts);
+    nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+    sprite_opts.name = "hero.png";
+    sprite_opts.tracer_tolerance = sprite_tolerance;
+    sprite_opts.alpha_threshold = sprite_threshold;
+    nt_atlas_add_raw(atlas, sprite, 16, 16, &sprite_opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+    bool cache_hit = ctx->atlas_cache_hit;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    return cache_hit;
+}
+
+void test_atlas_cache_identity_includes_geometry_controls(void) {
+    const char *cache = TMP_DIR "/atlas_cache_geometry_controls";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_default.ntpack", cache, 0.0F, 0.0F, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+    TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_atlas_tolerance.ntpack", cache, 1.0F, 0.0F, 0));
+    TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
+    TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_sprite_tolerance.ntpack", cache, 0.0F, 1.0F, 0));
+    TEST_ASSERT_EQUAL_UINT32(3, count_atlas_cache_files(cache));
+    TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_sprite_threshold.ntpack", cache, 0.0F, 0.0F, 128));
+    TEST_ASSERT_EQUAL_UINT32(4, count_atlas_cache_files(cache));
+}
+
+void test_atlas_cache_signed_zero_tolerance_is_identical(void) {
+    const char *pack_positive = TMP_DIR "/atlas_cache_tolerance_positive_zero.ntpack";
+    const char *pack_negative = TMP_DIR "/atlas_cache_tolerance_negative_zero.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_tolerance_signed_zero";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(pack_positive, cache, 0.0F, 0.0F, 0));
+    TEST_ASSERT_TRUE(build_atlas_cache_geometry_case(pack_negative, cache, -0.0F, -0.0F, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    uint32_t positive_size = 0;
+    uint32_t negative_size = 0;
+    uint8_t *positive_data = read_file_bytes(pack_positive, &positive_size);
+    uint8_t *negative_data = read_file_bytes(pack_negative, &negative_size);
+    TEST_ASSERT_NOT_NULL(positive_data);
+    TEST_ASSERT_NOT_NULL(negative_data);
+    TEST_ASSERT_EQUAL_UINT32(positive_size, negative_size);
+    TEST_ASSERT_EQUAL_MEMORY(positive_data, negative_data, positive_size);
+    free(positive_data);
+    free(negative_data);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_cache_hit_rebuild_is_byte_identical(void) {
     const char *pack1 = TMP_DIR "/atlas_cache_hit1.ntpack";
@@ -6421,6 +6473,10 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     }
 }
 
+/* Two pixel-identical sprites with DIFFERENT origins:
+ *   - dedup shares vertex/index data (same vertex_start, same index_start)
+ *   - each region keeps its own origin_x/y verbatim
+ * This is the walk-cycle reuse pattern. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_pixels_different_origin(void) {
     (void)MKDIR(TMP_DIR);
@@ -7328,6 +7384,8 @@ int main(void) {
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     /* Atlas cache hardening + BUG-2 regression */
+    RUN_TEST(test_atlas_cache_identity_includes_geometry_controls);
+    RUN_TEST(test_atlas_cache_signed_zero_tolerance_is_identical);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);

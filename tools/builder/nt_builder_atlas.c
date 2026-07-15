@@ -477,12 +477,12 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    enum { ATLAS_CACHE_KEY_VERSION = 12 };
+    enum { ATLAS_CACHE_KEY_VERSION = 13 };
 
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 };
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + sizeof(uint8_t) };
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
@@ -508,6 +508,8 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
         sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
         sprite_buf[ov_off + 11] = sprites[i].margin_override;
         sprite_buf[ov_off + 12] = sprites[i].extrude_override;
+        memcpy(sprite_buf + ov_off + 13, &sprites[i].tracer_tolerance_override, sizeof(float));
+        sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override;
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -532,6 +534,8 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->extrude);
     memcpy(opts_buf + pos, &opts->alpha_threshold, sizeof(opts->alpha_threshold));
     pos += (uint32_t)sizeof(opts->alpha_threshold);
+    memcpy(opts_buf + pos, &opts->tracer_tolerance, sizeof(opts->tracer_tolerance));
+    pos += (uint32_t)sizeof(opts->tracer_tolerance);
     memcpy(opts_buf + pos, &opts->max_vertices, sizeof(opts->max_vertices));
     pos += (uint32_t)sizeof(opts->max_vertices);
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
