@@ -195,15 +195,40 @@ static bool segment_crosses_open_cell(Point2D a, Point2D b, uint32_t x, uint32_t
         return false;
     }
 
-    const int64_t corners[4][2] = {{left, top}, {right, top}, {right, bottom}, {left, bottom}};
-    int64_t min_cross = INT64_MAX;
-    int64_t max_cross = INT64_MIN;
-    for (uint32_t i = 0; i < 4; i++) {
-        int64_t cross = ((bx - ax) * (corners[i][1] - ay)) - ((by - ay) * (corners[i][0] - ax));
-        min_cross = cross < min_cross ? cross : min_cross;
-        max_cross = cross > max_cross ? cross : max_cross;
+    typedef struct {
+        int64_t numerator;
+        int64_t denominator;
+    } SegmentFraction;
+    SegmentFraction lower = {0, 1};
+    SegmentFraction upper = {1, 1};
+    const int64_t starts[2] = {ax, ay};
+    const int64_t deltas[2] = {bx - ax, by - ay};
+    const int64_t lows[2] = {left, top};
+    const int64_t highs[2] = {right, bottom};
+    for (uint32_t axis = 0; axis < 2; axis++) {
+        if (deltas[axis] == 0) {
+            if (starts[axis] <= lows[axis] || starts[axis] >= highs[axis]) {
+                return false;
+            }
+            continue;
+        }
+        SegmentFraction axis_lower = {0};
+        SegmentFraction axis_upper = {0};
+        if (deltas[axis] > 0) {
+            axis_lower = (SegmentFraction){lows[axis] - starts[axis], deltas[axis]};
+            axis_upper = (SegmentFraction){highs[axis] - starts[axis], deltas[axis]};
+        } else {
+            axis_lower = (SegmentFraction){starts[axis] - highs[axis], -deltas[axis]};
+            axis_upper = (SegmentFraction){starts[axis] - lows[axis], -deltas[axis]};
+        }
+        if ((lower.numerator * axis_lower.denominator) < (axis_lower.numerator * lower.denominator)) {
+            lower = axis_lower;
+        }
+        if ((axis_upper.numerator * upper.denominator) < (upper.numerator * axis_upper.denominator)) {
+            upper = axis_upper;
+        }
     }
-    return min_cross < 0 && max_cross > 0;
+    return (lower.numerator * upper.denominator) < (upper.numerator * lower.denominator);
 }
 
 bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells) {

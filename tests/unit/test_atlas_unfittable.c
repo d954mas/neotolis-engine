@@ -30,6 +30,8 @@
 void setUp(void) {}
 void tearDown(void) {}
 
+bool nt_atlas_test_frontier_lifecycle_stress(void);
+
 /* Fully-opaque N×N RGBA sprite; `red` keeps decoded_hash unique so dedup cannot
  * collapse distinct sprites in the pages-exhausted case. */
 static uint8_t *make_opaque(uint32_t n, uint8_t red) {
@@ -1035,6 +1037,8 @@ void test_atlas_free_pack_cleans_open_transaction(void) {
     nt_builder_free_pack(ctx);
 }
 
+void test_atlas_frontier_lifecycle_lsan(void) { TEST_ASSERT_TRUE(nt_atlas_test_frontier_lifecycle_stress()); }
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -1063,5 +1067,6 @@ int main(void) {
     RUN_TEST(test_build_error_format_matrix);
     RUN_TEST(test_build_error_format_image_too_large);
     RUN_TEST(test_atlas_free_pack_cleans_open_transaction);
+    RUN_TEST(test_atlas_frontier_lifecycle_lsan);
     return UNITY_END();
 }

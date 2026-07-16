@@ -1359,6 +1359,251 @@ static void geometry_candidate_discard(GeometryCandidate *candidate) {
     *candidate = (GeometryCandidate){0};
 }
 
+typedef struct {
+    GeometryCandidate slots[NT_POLYGON_MAX_VERTICES + 1];
+    const uint8_t *binary;
+    uint32_t width;
+    uint32_t height;
+    uint32_t max_vertices;
+    uint64_t opaque_area2;
+    uint32_t transfer_count;
+    uint32_t reject_count;
+    uint32_t replacement_count;
+    uint32_t destroy_count;
+    uint32_t cleared_source_count;
+} GeometryFrontier;
+
+typedef struct {
+    uint32_t slot_mask;
+    uint32_t selected_count;
+    uint32_t selected_index_count;
+    uint32_t transfer_count;
+    uint32_t reject_count;
+    uint32_t replacement_count;
+    uint32_t destroy_count;
+    uint32_t cleared_source_count;
+    uint64_t opaque_area2;
+    uint64_t base_area2;
+    uint64_t selected_area2;
+    uint64_t slot_area2[NT_POLYGON_MAX_VERTICES + 1];
+    Point2D selected_poly[NT_POLYGON_MAX_VERTICES];
+    uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+} NtAtlasFrontierTestResult;
+
+static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
+
+static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
+    uint32_t first = 0;
+    for (uint32_t i = 1; i < candidate->count; i++) {
+        if (geometry_point_less(candidate->poly[i], candidate->poly[first])) {
+            first = i;
+        }
+    }
+    if (first == 0) {
+        return;
+    }
+    Point2D canonical[NT_POLYGON_MAX_VERTICES];
+    for (uint32_t i = 0; i < candidate->count; i++) {
+        canonical[i] = candidate->poly[(first + i) % candidate->count];
+    }
+    memcpy(candidate->poly, canonical, (size_t)candidate->count * sizeof(Point2D));
+}
+
+static bool geometry_frontier_finalize(GeometryFrontier *frontier, GeometryCandidate *candidate) {
+    if (!candidate->valid || !candidate->poly || candidate->count < 3 || candidate->count > frontier->max_vertices || candidate->count > NT_POLYGON_MAX_VERTICES) {
+        return false;
+    }
+    geometry_candidate_canonicalize(candidate);
+    nt_polygon_feasibility_t feasibility = nt_polygon_feasibility(candidate->poly, candidate->count, frontier->binary, frontier->width, frontier->height, frontier->max_vertices);
+    if (!feasibility.valid) {
+        return false;
+    }
+    uint16_t *indices = (uint16_t *)malloc((size_t)feasibility.triangle_index_count * sizeof(uint16_t));
+    NT_BUILD_ASSERT(indices && "geometry_frontier_finalize: alloc failed");
+    memcpy(indices, feasibility.triangle_indices, (size_t)feasibility.triangle_index_count * sizeof(uint16_t));
+    free(candidate->triangle_indices);
+    candidate->triangle_indices = indices;
+    candidate->triangle_index_count = feasibility.triangle_index_count;
+    candidate->exact_abs_twice_area = feasibility.polygon_area2;
+    candidate->valid = true;
+    return true;
+}
+
+static int geometry_frontier_tuple_compare(const GeometryCandidate *left, const GeometryCandidate *right) {
+    for (uint32_t i = 0; i < left->count; i++) {
+        if (left->poly[i].x != right->poly[i].x) {
+            return left->poly[i].x < right->poly[i].x ? -1 : 1;
+        }
+        if (left->poly[i].y != right->poly[i].y) {
+            return left->poly[i].y < right->poly[i].y ? -1 : 1;
+        }
+    }
+    for (uint32_t i = 0; i < left->triangle_index_count; i++) {
+        if (left->triangle_indices[i] != right->triangle_indices[i]) {
+            return left->triangle_indices[i] < right->triangle_indices[i] ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+static bool geometry_frontier_candidate_better(const GeometryCandidate *candidate, const GeometryCandidate *current) {
+    if (!current->valid) {
+        return true;
+    }
+    if (candidate->exact_abs_twice_area != current->exact_abs_twice_area) {
+        return candidate->exact_abs_twice_area < current->exact_abs_twice_area;
+    }
+    return geometry_frontier_tuple_compare(candidate, current) < 0;
+}
+
+static void geometry_frontier_adopt(GeometryFrontier *frontier, GeometryCandidate *source) {
+    if (!geometry_frontier_finalize(frontier, source)) {
+        geometry_candidate_discard(source);
+        frontier->reject_count++;
+        frontier->cleared_source_count++;
+        return;
+    }
+    GeometryCandidate *slot = &frontier->slots[source->count];
+    if (!geometry_frontier_candidate_better(source, slot)) {
+        geometry_candidate_discard(source);
+        frontier->reject_count++;
+        frontier->cleared_source_count++;
+        return;
+    }
+    if (slot->valid) {
+        geometry_candidate_discard(slot);
+        frontier->replacement_count++;
+    }
+    *slot = *source;
+    *source = (GeometryCandidate){0};
+    frontier->transfer_count++;
+    frontier->cleared_source_count++;
+}
+
+static uint64_t geometry_frontier_base_area2(const GeometryFrontier *frontier) {
+    uint64_t base = UINT64_MAX;
+    for (uint32_t count = 3; count <= frontier->max_vertices; count++) {
+        if (frontier->slots[count].valid && frontier->slots[count].exact_abs_twice_area < base) {
+            base = frontier->slots[count].exact_abs_twice_area;
+        }
+    }
+    return base;
+}
+
+static uint32_t geometry_frontier_select(const GeometryFrontier *frontier, double max_added_area_percent) {
+    uint64_t base = geometry_frontier_base_area2(frontier);
+    if (base == UINT64_MAX || frontier->opaque_area2 == 0 || !isfinite(max_added_area_percent) || max_added_area_percent < 0.0) {
+        return UINT32_MAX;
+    }
+    for (uint32_t count = 3; count <= frontier->max_vertices; count++) {
+        const GeometryCandidate *candidate = &frontier->slots[count];
+        if (!candidate->valid || candidate->exact_abs_twice_area < base) {
+            continue;
+        }
+        double added_percent = ((double)(candidate->exact_abs_twice_area - base) * 100.0) / (double)frontier->opaque_area2;
+        if (added_percent <= max_added_area_percent) {
+            return count;
+        }
+    }
+    return UINT32_MAX;
+}
+
+static void geometry_frontier_destroy(GeometryFrontier *frontier) {
+    for (uint32_t count = 3; count <= NT_POLYGON_MAX_VERTICES; count++) {
+        if (frontier->slots[count].valid) {
+            geometry_candidate_discard(&frontier->slots[count]);
+            frontier->destroy_count++;
+        }
+    }
+}
+
+static uint64_t geometry_retained_area2(const uint8_t *binary, uint32_t width, uint32_t height) {
+    uint64_t retained = 0;
+    for (uint32_t y = 0; y < height; y++) {
+        for (uint32_t x = 0; x < width; x++) {
+            retained += binary[((size_t)y * width) + x] != 0 ? 1U : 0U;
+        }
+    }
+    return retained * 2U;
+}
+
+bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
+                                     float max_added_area_percent, NtAtlasFrontierTestResult *out_result) {
+    if (!polygons || !counts || !binary || !out_result || max_vertices < 3 || max_vertices > NT_POLYGON_MAX_VERTICES) {
+        return false;
+    }
+    *out_result = (NtAtlasFrontierTestResult){0};
+    GeometryFrontier frontier = {.binary = binary, .width = width, .height = height, .max_vertices = max_vertices, .opaque_area2 = geometry_retained_area2(binary, width, height)};
+    for (uint32_t i = 0; i < candidate_count; i++) {
+        GeometryCandidate candidate = {.count = counts[i], .valid = true};
+        if (counts[i] > 0) {
+            candidate.poly = (Point2D *)malloc((size_t)counts[i] * sizeof(Point2D));
+            NT_BUILD_ASSERT(candidate.poly && "nt_atlas_test_frontier_evaluate: alloc failed");
+            memcpy(candidate.poly, polygons[i], (size_t)counts[i] * sizeof(Point2D));
+        }
+        geometry_frontier_adopt(&frontier, &candidate);
+    }
+
+    uint64_t base = geometry_frontier_base_area2(&frontier);
+    uint32_t selected_count = geometry_frontier_select(&frontier, (double)max_added_area_percent);
+    out_result->opaque_area2 = frontier.opaque_area2;
+    out_result->base_area2 = base;
+    for (uint32_t count = 3; count <= max_vertices; count++) {
+        if (!frontier.slots[count].valid) {
+            continue;
+        }
+        out_result->slot_mask |= 1U << count;
+        out_result->slot_area2[count] = frontier.slots[count].exact_abs_twice_area;
+    }
+    if (selected_count != UINT32_MAX) {
+        const GeometryCandidate *selected = &frontier.slots[selected_count];
+        out_result->selected_count = selected_count;
+        out_result->selected_index_count = selected->triangle_index_count;
+        out_result->selected_area2 = selected->exact_abs_twice_area;
+        memcpy(out_result->selected_poly, selected->poly, (size_t)selected->count * sizeof(Point2D));
+        memcpy(out_result->selected_indices, selected->triangle_indices, (size_t)selected->triangle_index_count * sizeof(uint16_t));
+    }
+    geometry_frontier_destroy(&frontier);
+    out_result->transfer_count = frontier.transfer_count;
+    out_result->reject_count = frontier.reject_count;
+    out_result->replacement_count = frontier.replacement_count;
+    out_result->destroy_count = frontier.destroy_count;
+    out_result->cleared_source_count = frontier.cleared_source_count;
+    return selected_count != UINT32_MAX;
+}
+
+uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_t slot_mask, uint64_t opaque_area2, uint32_t max_vertices, float max_added_area_percent) {
+    if (!slot_area2 || max_vertices < 3 || max_vertices > NT_POLYGON_MAX_VERTICES) {
+        return UINT32_MAX;
+    }
+    GeometryFrontier frontier = {.max_vertices = max_vertices, .opaque_area2 = opaque_area2};
+    for (uint32_t count = 3; count <= max_vertices; count++) {
+        if ((slot_mask & (1U << count)) != 0) {
+            frontier.slots[count].valid = true;
+            frontier.slots[count].exact_abs_twice_area = slot_area2[count];
+        }
+    }
+    return geometry_frontier_select(&frontier, (double)max_added_area_percent);
+}
+
+bool nt_atlas_test_frontier_lifecycle_stress(void) {
+    const Point2D loose_quad[4] = {{0, 0}, {2, 0}, {2, 1}, {0, 1}};
+    const Point2D invalid_half_cell[3] = {{0, 0}, {1, 0}, {0, 1}};
+    const Point2D covering_triangle[3] = {{0, 0}, {2, 0}, {0, 2}};
+    const Point2D tight_quad[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const Point2D *polygons[] = {loose_quad, invalid_half_cell, covering_triangle, tight_quad};
+    const uint32_t counts[] = {4, 3, 3, 4};
+    const uint8_t retained[4] = {1, 0, 0, 0};
+    for (uint32_t repeat = 0; repeat < 64; repeat++) {
+        NtAtlasFrontierTestResult result = {0};
+        if (!nt_atlas_test_frontier_evaluate(polygons, counts, 4, retained, 2, 2, 4, 0.0F, &result) || result.transfer_count != 3 || result.reject_count != 1 || result.replacement_count != 1 ||
+            result.destroy_count != 2 || result.cleared_source_count != 4) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool geometry_candidate_better_positive(const GeometryCandidate *candidate, const GeometryCandidate *current) {
     if (!current->valid || candidate->count != current->count) {
         return !current->valid || candidate->count < current->count;
