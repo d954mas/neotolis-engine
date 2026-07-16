@@ -3,6 +3,32 @@
 # Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV]
 
 set -euo pipefail
+
+hull_path_key() {
+    local raw_path="${1//\\//}"
+    local platform="${2:-${NT_HULL_TOLERANCE_PLATFORM:-$(uname -s)}}"
+    local resolved
+    resolved="$(realpath -m -- "$raw_path")"
+    case "$platform" in
+        MSYS*|MINGW*|CYGWIN*) printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]' ;;
+        *) printf '%s' "$resolved" ;;
+    esac
+}
+
+hull_path_is_protected() {
+    local baseline_key output_key
+    baseline_key="$(hull_path_key "$1" "${3:-}")"
+    output_key="$(hull_path_key "$2" "${3:-}")"
+    case "$output_key" in
+        "$baseline_key"|"$baseline_key"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [[ "${NT_HULL_TOLERANCE_GUARD_LIB_ONLY:-0}" == 1 ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 cd "$(git rev-parse --show-toplevel)"
 
 PRESET="native-release"
@@ -58,14 +84,10 @@ if [[ -z "$CORPUS_SPEC" ]]; then
 fi
 IFS='|' read -r name glob shape max_size max_sprites <<< "$CORPUS_SPEC"
 
-BASELINE_DIR="$(realpath -m tools/research/atlas_bench/baseline)"
-RESOLVED_OUT="$(realpath -m "$OUT_DIR")"
-case "$RESOLVED_OUT" in
-    "$BASELINE_DIR"|"$BASELINE_DIR"/*)
-        echo "ERROR: sweep output must not be inside the Phase 78 baseline directory." >&2
-        exit 1
-        ;;
-esac
+if hull_path_is_protected "tools/research/atlas_bench/baseline" "$OUT_DIR"; then
+    echo "ERROR: sweep output must not be inside the Phase 78 baseline directory." >&2
+    exit 1
+fi
 if [[ -d "$OUT_DIR" ]] && [[ -n "$(find "$OUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
     echo "ERROR: output directory is not empty: ${OUT_DIR}" >&2
     exit 1

@@ -129,6 +129,7 @@ bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
+bash scripts/test_bench_hull_tolerance_guard.sh
 ok
 
 step "build (native-debug)"
