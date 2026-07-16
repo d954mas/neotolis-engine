@@ -4369,6 +4369,38 @@ void test_hull_simplify_covering_rejects_parallel_and_degenerate_edges(void) {
     TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(repeated, 4, 3, out));
 }
 
+void test_polygon_validate_rejects_invalid_rings_with_stable_reasons(void) {
+    const Point2D convex[] = {{0, 0}, {6, 0}, {6, 6}, {0, 6}};
+    const Point2D concave[] = {{0, 0}, {6, 0}, {6, 6}, {3, 3}, {0, 6}};
+    const Point2D clockwise[] = {{0, 0}, {0, 6}, {6, 6}, {6, 0}};
+    const Point2D bow_tie[] = {{0, 0}, {6, 6}, {0, 6}, {6, 0}};
+    const Point2D nonadjacent_touch[] = {{0, 0}, {6, 0}, {6, 6}, {3, 0}, {0, 6}};
+    const Point2D repeated[] = {{0, 0}, {6, 0}, {6, 6}, {6, 0}, {0, 6}};
+    const Point2D zero_area[] = {{0, 0}, {2, 0}, {4, 0}};
+
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(convex, 4));
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(concave, 5));
+    TEST_ASSERT_EQUAL(NT_POLYGON_INVALID_WINDING, polygon_validate(clockwise, 4));
+    TEST_ASSERT_EQUAL(NT_POLYGON_INVALID_SELF_INTERSECTION, polygon_validate(bow_tie, 4));
+    TEST_ASSERT_EQUAL(NT_POLYGON_INVALID_SELF_INTERSECTION, polygon_validate(nonadjacent_touch, 5));
+    TEST_ASSERT_EQUAL(NT_POLYGON_INVALID_REPEATED_VERTEX, polygon_validate(repeated, 5));
+    TEST_ASSERT_EQUAL(NT_POLYGON_INVALID_ZERO_AREA, polygon_validate(zero_area, 3));
+}
+
+void test_polygon_coverage_metrics_counts_exact_pixel_centers(void) {
+    const Point2D poly[] = {{0, 0}, {3, 0}, {3, 3}, {0, 3}};
+    uint8_t binary[4 * 4] = {0};
+    binary[(1 * 4) + 1] = 1;
+    binary[(3 * 4) + 3] = 1;
+
+    nt_polygon_coverage_metrics_t first = polygon_coverage_metrics(poly, 4, binary, 4, 4);
+    nt_polygon_coverage_metrics_t second = polygon_coverage_metrics(poly, 4, binary, 4, 4);
+    TEST_ASSERT_EQUAL_UINT32(1, first.lost_retained_pixels);
+    TEST_ASSERT_EQUAL_UINT32(8, first.extra_covered_pixels);
+    TEST_ASSERT_EQUAL_MEMORY(&first, &second, sizeof(first));
+    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(poly, 4, binary, 4, 4) > 0.0);
+}
+
 void test_polygon_boundary_distance_rejects_oversized_container(void) {
     const Point2D reference[8] = {
         {0, 0}, {8, 0}, {8, 8}, {5, 8}, {5, 3}, {3, 3}, {3, 8}, {0, 8},
@@ -7672,6 +7704,8 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
     RUN_TEST(test_hull_simplify_covering_rejects_parallel_and_degenerate_edges);
+    RUN_TEST(test_polygon_validate_rejects_invalid_rings_with_stable_reasons);
+    RUN_TEST(test_polygon_coverage_metrics_counts_exact_pixel_centers);
     RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
     RUN_TEST(test_perp_removal_keeps_real_corner_and_stable_ties);
     RUN_TEST(test_fan_triangulate_quad);

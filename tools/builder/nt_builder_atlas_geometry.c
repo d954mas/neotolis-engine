@@ -73,7 +73,86 @@ bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t threshold,
 
 /* --- 2D cross product for hull orientation --- */
 
-static int64_t cross2d(Point2D o, Point2D a, Point2D b) { return ((int64_t)(a.x - o.x) * (int64_t)(b.y - o.y)) - ((int64_t)(a.y - o.y) * (int64_t)(b.x - o.x)); }
+static int64_t cross2d(Point2D o, Point2D a, Point2D b) {
+    int64_t ax = (int64_t)a.x - (int64_t)o.x;
+    int64_t ay = (int64_t)a.y - (int64_t)o.y;
+    int64_t bx = (int64_t)b.x - (int64_t)o.x;
+    int64_t by = (int64_t)b.y - (int64_t)o.y;
+    return (ax * by) - (ay * bx);
+}
+
+static bool point2d_equal(Point2D a, Point2D b) { return a.x == b.x && a.y == b.y; }
+
+static bool point_on_segment(Point2D a, Point2D b, Point2D p) {
+    if (cross2d(a, b, p) != 0) {
+        return false;
+    }
+    int32_t min_x = a.x < b.x ? a.x : b.x;
+    int32_t max_x = a.x > b.x ? a.x : b.x;
+    int32_t min_y = a.y < b.y ? a.y : b.y;
+    int32_t max_y = a.y > b.y ? a.y : b.y;
+    return p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
+}
+
+static int cross_sign(int64_t value) { return (value > 0) - (value < 0); }
+
+static bool segments_intersect_or_touch(Point2D a, Point2D b, Point2D c, Point2D d) {
+    int64_t ab_c = cross2d(a, b, c);
+    int64_t ab_d = cross2d(a, b, d);
+    int64_t cd_a = cross2d(c, d, a);
+    int64_t cd_b = cross2d(c, d, b);
+    if (cross_sign(ab_c) != cross_sign(ab_d) && cross_sign(cd_a) != cross_sign(cd_b)) {
+        return true;
+    }
+    return (ab_c == 0 && point_on_segment(a, b, c)) || (ab_d == 0 && point_on_segment(a, b, d)) || (cd_a == 0 && point_on_segment(c, d, a)) || (cd_b == 0 && point_on_segment(c, d, b));
+}
+
+static int64_t polygon_signed_twice_area(const Point2D *poly, uint32_t count) {
+    int64_t twice_area = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t j = (i + 1U) % count;
+        twice_area += ((int64_t)poly[i].x * (int64_t)poly[j].y) - ((int64_t)poly[j].x * (int64_t)poly[i].y);
+    }
+    return twice_area;
+}
+
+nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count) {
+    if (!poly || count < 3) {
+        return NT_POLYGON_INVALID_TOO_FEW_VERTICES;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        for (uint32_t j = i + 1U; j < count; j++) {
+            if (point2d_equal(poly[i], poly[j])) {
+                return NT_POLYGON_INVALID_REPEATED_VERTEX;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1U) % count];
+        for (uint32_t j = i + 1U; j < count; j++) {
+            Point2D c = poly[j];
+            Point2D d = poly[(j + 1U) % count];
+            bool adjacent = ((i + 1U) % count == j) || ((j + 1U) % count == i);
+            if (!adjacent && segments_intersect_or_touch(a, b, c, d)) {
+                return NT_POLYGON_INVALID_SELF_INTERSECTION;
+            }
+        }
+    }
+    int64_t twice_area = polygon_signed_twice_area(poly, count);
+    if (twice_area == 0) {
+        return NT_POLYGON_INVALID_ZERO_AREA;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D common = poly[(i + 1U) % count];
+        Point2D d = poly[(i + 2U) % count];
+        if (point_on_segment(a, common, d) || point_on_segment(common, d, a)) {
+            return NT_POLYGON_INVALID_SELF_INTERSECTION;
+        }
+    }
+    return twice_area > 0 ? NT_POLYGON_VALID : NT_POLYGON_INVALID_WINDING;
+}
 
 /* --- qsort comparator: sort by x, then by y --- */
 
@@ -566,6 +645,24 @@ static double polygon_point_edge_distance_sq(const Point2D *poly, uint32_t poly_
 
 /* Distance from point (cx,cy) to the nearest polygon edge. */
 static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) { return sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy)); }
+
+nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
+    nt_polygon_coverage_metrics_t metrics = {0};
+    if (!poly || poly_count < 3 || !binary) {
+        return metrics;
+    }
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            double cx = (double)x + 0.5;
+            double cy = (double)y + 0.5;
+            bool covered = point_in_polygon_f(poly, poly_count, cx, cy) || polygon_point_edge_distance_sq(poly, poly_count, cx, cy) <= 1e-18;
+            bool retained = binary[((size_t)y * tw) + x] != 0;
+            metrics.lost_retained_pixels += retained && !covered ? 1U : 0U;
+            metrics.extra_covered_pixels += !retained && covered ? 1U : 0U;
+        }
+    }
+    return metrics;
+}
 
 typedef struct {
     double a;
@@ -1393,11 +1490,7 @@ uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count) {
         return 0;
     }
 
-    int64_t twice_area = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t j = (i + 1 == count) ? 0 : i + 1;
-        twice_area += ((int64_t)poly[i].x * (int64_t)poly[j].y) - ((int64_t)poly[j].x * (int64_t)poly[i].y);
-    }
+    int64_t twice_area = polygon_signed_twice_area(poly, count);
     if (twice_area < 0) {
         twice_area = -twice_area;
     }

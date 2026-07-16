@@ -70,6 +70,26 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
 
 /* --- Polygon predicates and measurements ----------------------------- */
 
+typedef enum {
+    NT_POLYGON_VALID = 0,
+    NT_POLYGON_INVALID_TOO_FEW_VERTICES,
+    NT_POLYGON_INVALID_REPEATED_VERTEX,
+    NT_POLYGON_INVALID_SELF_INTERSECTION,
+    NT_POLYGON_INVALID_ZERO_AREA,
+    NT_POLYGON_INVALID_WINDING,
+} nt_polygon_validity_t;
+
+typedef struct {
+    uint32_t lost_retained_pixels;
+    uint32_t extra_covered_pixels;
+} nt_polygon_coverage_metrics_t;
+
+/* Validate a closed CCW ring. Adjacent edges may share only their common endpoint. */
+nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count);
+
+/* Count retained centers outside and transparent centers inside the polygon. */
+nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th);
+
 /* Ray-casting point-in-polygon test (even-odd rule). */
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);
 
