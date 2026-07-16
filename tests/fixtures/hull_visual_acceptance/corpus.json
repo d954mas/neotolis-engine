@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {"sample_id":"sq9-aa-triangle","shape":"convex","alpha_threshold":1,"max_vertices":8,"fixture":"asymmetric-aa-triangle"},
+    {"sample_id":"sq9-aa-triangle","shape":"concave","alpha_threshold":1,"max_vertices":8,"fixture":"asymmetric-aa-triangle"},
+    {"sample_id":"opaque-square-max3","shape":"convex","alpha_threshold":1,"max_vertices":3,"fixture":"opaque-square"},
+    {"sample_id":"connected-mask-adversarial","shape":"concave","alpha_threshold":1,"max_vertices":13,"fixture":"connected-mask"},
+    {"sample_id":"mixed-aa-representative","shape":"convex","alpha_threshold":1,"max_vertices":8,"fixture":"mixed-aa"},
+    {"sample_id":"mixed-aa-representative","shape":"concave","alpha_threshold":1,"max_vertices":8,"fixture":"mixed-aa"},
+    {"sample_id":"pixel-art-threshold-control","shape":"rect","alpha_threshold":128,"max_vertices":4,"fixture":"pixel-art-threshold"}
+  ]
+}
