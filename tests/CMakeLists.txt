@@ -745,6 +745,17 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Compiles the complete pre-tolerance positional option lists as an external consumer would.
+    add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
+    target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(test_atlas_options_compat PRIVATE
+            -Wno-missing-field-initializers
+            -Wno-error=missing-field-initializers
+        )
+    endif()
+    nt_setup_test_target(test_atlas_options_compat)
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.

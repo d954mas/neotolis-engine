@@ -264,13 +264,19 @@ typedef struct {
     uint32_t margin;                        /* atlas edge margin (default 0) */
     uint32_t extrude;                       /* AABB edge duplication (default 0; <= max_size; RECT only when non-zero) */
     uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
-    float tracer_tolerance;                 /* pixel-domain fidelity tolerance (default 0.0F = legacy; RECT ignores it) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;                   /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
     bool power_of_two;                      /* round atlas dims to POT (default true) */
     bool debug_png;                         /* write debug atlas page PNGs (default false) */
     bool premultiplied;                     /* premultiply RGB by alpha during texture encode (default true) */
+    float pixels_per_unit;                  /* source pixels per world unit (default 1.0F) */
+    nt_texture_default_filter_t filter_min; /* default LINEAR_MIPMAP_LINEAR */
+    nt_texture_default_filter_t filter_mag; /* default LINEAR */
+    nt_texture_default_wrap_t wrap_u;       /* default REPEAT */
+    nt_texture_default_wrap_t wrap_v;       /* default REPEAT */
+    bool gen_mipmaps;                       /* RAW only; default true */
+    float tracer_tolerance;                 /* pixel-domain fidelity tolerance (default 0.0F = legacy; RECT ignores it) */
 } nt_atlas_opts_t;
 ```
 
@@ -311,15 +317,20 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    float tracer_tolerance;  /* 0 = atlas default; finite, non-negative; RECT ignores it */
-    uint8_t alpha_threshold; /* 0 = atlas default */
     uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
     uint8_t max_vertices; /* 0 = atlas default, max 16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
     uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
+    float tracer_tolerance;  /* 0 = atlas default; finite, non-negative; RECT ignores it */
+    uint8_t alpha_threshold; /* 0 = atlas default */
 } nt_atlas_sprite_opts_t;
 ```
+
+The Phase 80 tolerance and per-sprite threshold controls are appended after each
+complete pre-Phase-80 field list. Legal legacy positional initializers therefore
+retain every existing field mapping when recompiled; the appended controls are
+zero-initialized and preserve their default/inherit semantics.
 
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
