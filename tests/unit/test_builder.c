@@ -4360,12 +4360,15 @@ void test_hull_simplify_covering_keeps_earliest_equal_error_pair(void) {
     TEST_ASSERT_EQUAL_MEMORY(first, second, sizeof(expected));
 }
 
-void test_hull_simplify_covering_rejects_parallel_and_degenerate_edges(void) {
+void test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges(void) {
     const Point2D square[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    const Point2D expected[3] = {{0, 0}, {8, 0}, {0, 8}};
     const Point2D repeated[4] = {{0, 0}, {4, 0}, {4, 0}, {0, 4}};
     Point2D out[4];
 
-    TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(square, 4, 3, out));
+    TEST_ASSERT_EQUAL_UINT32(3, hull_simplify_covering(square, 4, 3, out));
+    TEST_ASSERT_EQUAL_MEMORY(expected, out, sizeof(expected));
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(out, 3));
     TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(repeated, 4, 3, out));
 }
 
@@ -5543,6 +5546,61 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     free(buf);
     (void)remove(path);
     (void)remove(repeat_path);
+}
+
+static uint8_t *read_atlas_blob(const char *path, const NtAtlasRegion **out_regions, uint32_t *out_region_count);
+static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf);
+static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]);
+
+void test_convex_opaque_square_budget_three_is_exact_and_deterministic(void) {
+    (void)MKDIR(TMP_DIR);
+    enum { W = 4, H = 4, BUDGET = 3 };
+    const char *path = TMP_DIR "/convex_square_budget_three.ntpack";
+    const char *repeat_path = TMP_DIR "/convex_square_budget_three_repeat.ntpack";
+    uint8_t rgba[W * H * 4];
+    uint8_t binary[W * H];
+    memset(rgba, 255, sizeof(rgba));
+    memset(binary, 1, sizeof(binary));
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    opts.max_vertices = BUDGET;
+    const char *paths[] = {path, repeat_path};
+    for (uint32_t i = 0; i < 2; i++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(paths[i]);
+        TEST_ASSERT_NOT_NULL(ctx);
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "square", &opts);
+        nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        nt_builder_free_pack(ctx);
+    }
+
+    uint32_t size = 0;
+    uint32_t repeat_size = 0;
+    uint8_t *pack = read_file_bytes(path, &size);
+    uint8_t *repeat = read_file_bytes(repeat_path, &repeat_size);
+    TEST_ASSERT_NOT_NULL(pack);
+    TEST_ASSERT_NOT_NULL(repeat);
+    TEST_ASSERT_EQUAL_UINT32(size, repeat_size);
+    TEST_ASSERT_EQUAL_MEMORY(pack, repeat, size);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *parsed = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(parsed);
+    TEST_ASSERT_EQUAL_UINT32(1, region_count);
+    TEST_ASSERT_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
+    Point2D emitted[16];
+    uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(parsed), H, emitted);
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(emitted, emitted_count));
+    TEST_ASSERT_EQUAL_UINT32(0, polygon_coverage_metrics(emitted, emitted_count, binary, W, H).lost_retained_pixels);
+
+    free(parsed);
+    free(repeat);
+    free(pack);
+    (void)remove(repeat_path);
+    (void)remove(path);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -7776,7 +7834,7 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_no_reduction);
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
-    RUN_TEST(test_hull_simplify_covering_rejects_parallel_and_degenerate_edges);
+    RUN_TEST(test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges);
     RUN_TEST(test_polygon_validate_rejects_invalid_rings_with_stable_reasons);
     RUN_TEST(test_polygon_coverage_metrics_counts_exact_pixel_centers);
     RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
@@ -7824,6 +7882,7 @@ int main(void) {
     RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
     RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
     RUN_TEST(test_convex_budget_preserves_all_retained_pixels);
+    RUN_TEST(test_convex_opaque_square_budget_three_is_exact_and_deterministic);
     RUN_TEST(test_convex_covering_gate_preserves_correct_legacy_vertices);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);

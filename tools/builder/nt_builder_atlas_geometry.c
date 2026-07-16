@@ -351,9 +351,63 @@ static bool covering_encloses(const Point2D *poly, uint32_t poly_count, const Po
     return true;
 }
 
+static uint32_t covering_triangle_parallel_fallback(const Point2D *points, uint32_t count, Point2D out[3]) {
+    int32_t min_x = points[0].x;
+    int32_t max_x = points[0].x;
+    int32_t min_y = points[0].y;
+    int32_t max_y = points[0].y;
+    for (uint32_t i = 1; i < count; i++) {
+        min_x = points[i].x < min_x ? points[i].x : min_x;
+        max_x = points[i].x > max_x ? points[i].x : max_x;
+        min_y = points[i].y < min_y ? points[i].y : min_y;
+        max_y = points[i].y > max_y ? points[i].y : max_y;
+    }
+    int64_t width = (int64_t)max_x - min_x;
+    int64_t height = (int64_t)max_y - min_y;
+    if (width <= 0 || height <= 0) {
+        return 0;
+    }
+
+    const int64_t candidates[4][6] = {
+        {min_x, min_y, (int64_t)min_x + (2 * width), min_y, min_x, (int64_t)min_y + (2 * height)},
+        {max_x, min_y, max_x, (int64_t)min_y + (2 * height), (int64_t)max_x - (2 * width), min_y},
+        {max_x, max_y, (int64_t)max_x - (2 * width), max_y, max_x, (int64_t)max_y - (2 * height)},
+        {min_x, max_y, min_x, (int64_t)max_y - (2 * height), (int64_t)min_x + (2 * width), max_y},
+    };
+    bool found = false;
+    uint64_t best_twice_area = UINT64_MAX;
+    for (uint32_t candidate_idx = 0; candidate_idx < 4; candidate_idx++) {
+        Point2D candidate[3];
+        bool in_range = true;
+        for (uint32_t i = 0; i < 3; i++) {
+            size_t coord = (size_t)i * 2;
+            int64_t x = candidates[candidate_idx][coord];
+            int64_t y = candidates[candidate_idx][coord + 1];
+            if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {
+                in_range = false;
+                break;
+            }
+            candidate[i] = (Point2D){(int32_t)x, (int32_t)y};
+        }
+        if (!in_range || polygon_validate(candidate, 3) != NT_POLYGON_VALID || !covering_encloses(candidate, 3, points, count)) {
+            continue;
+        }
+        uint64_t twice_area = (uint64_t)polygon_signed_twice_area(candidate, 3);
+        if (!found || twice_area < best_twice_area) {
+            found = true;
+            best_twice_area = twice_area;
+            memcpy(out, candidate, sizeof(candidate));
+        }
+    }
+    return found ? 3U : 0U;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t hull_simplify_covering(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
     if (!hull || !out || n < 3 || max_vertices < 3) {
+        return 0;
+    }
+    if (polygon_validate(hull, n) != NT_POLYGON_VALID) {
         return 0;
     }
     if (n <= max_vertices) {
@@ -434,11 +488,12 @@ uint32_t hull_simplify_covering(const Point2D *hull, uint32_t n, uint32_t max_ve
         }
 
         if (!found) {
+            uint32_t fallback_count = max_vertices == 3 ? covering_triangle_parallel_fallback(hull, n, out) : 0;
             free(scratch_sources);
             free(current_sources);
             free(scratch);
             free(current);
-            return 0;
+            return fallback_count;
         }
 
         covering_replace_edge(current, current_sources, count, best_edge, best_point, scratch, scratch_sources);
