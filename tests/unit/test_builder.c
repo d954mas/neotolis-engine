@@ -5972,6 +5972,19 @@ static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf) {
     return NULL;
 }
 
+static const uint16_t *atlas_blob_indices(const uint8_t *pack_buf) {
+    const NtPackHeader *pack = (const NtPackHeader *)pack_buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack_buf + sizeof(NtPackHeader));
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            const uint8_t *ablob = pack_buf + entries[i].offset;
+            const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
+            return (const uint16_t *)(ablob + header->index_offset);
+        }
+    }
+    return NULL;
+}
+
 static void build_concave_tolerance_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float tolerance, uint8_t max_vertices, const char *name) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -6066,6 +6079,66 @@ void test_aa_triangle_positive_tolerance_exact_coverage(void) {
         free(pack);
         (void)remove(paths[shape]);
     }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_connected_mask_serializes_simple_exact_triangulation(void) {
+    (void)MKDIR(TMP_DIR);
+    enum { W = 24, H = 24, TRIM_X = 7, TRIM_Y = 6, TRIM_W = 16, TRIM_H = 9, BUDGET = 13 };
+    const Point2D source[] = {
+        {15, 6},  {15, 7},  {16, 7},  {16, 6},  {17, 6},  {17, 7},  {19, 7},  {19, 6},  {20, 6},  {20, 7},  {21, 7},  {21, 8}, {19, 8}, {19, 9}, {22, 9}, {22, 7},  {23, 7}, {23, 10}, {18, 10},
+        {18, 11}, {17, 11}, {17, 12}, {16, 12}, {16, 13}, {15, 13}, {15, 14}, {12, 14}, {12, 15}, {11, 15}, {11, 13}, {9, 13}, {9, 12}, {7, 12}, {7, 10}, {10, 10}, {10, 9}, {11, 9},  {11, 6},
+    };
+    uint8_t rgba[W * H * 4] = {0};
+    uint8_t binary[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            size_t pixel = ((size_t)y * W) + x;
+            bool retained = point_in_polygon_f(source, (uint32_t)(sizeof(source) / sizeof(source[0])), (double)x + 0.5, (double)y + 0.5);
+            binary[pixel] = retained ? 1 : 0;
+            rgba[(pixel * 4) + 3] = retained ? 255 : 0;
+        }
+    }
+
+    const char *path = TMP_DIR "/connected_mask_simple.ntpack";
+    build_concave_tolerance_fixture(path, rgba, W, H, 1.0F, BUDGET, "connected_mask");
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(pack);
+    TEST_ASSERT_EQUAL_UINT32(1, region_count);
+
+    uint8_t local_binary[TRIM_W * TRIM_H] = {0};
+    for (uint32_t y = 0; y < TRIM_H; y++) {
+        for (uint32_t x = 0; x < TRIM_W; x++) {
+            local_binary[(y * TRIM_W) + x] = binary[((y + TRIM_Y) * W) + x + TRIM_X];
+        }
+    }
+    Point2D emitted[16];
+    uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(pack), TRIM_H, emitted);
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(emitted, emitted_count));
+    nt_polygon_coverage_metrics_t coverage = polygon_coverage_metrics(emitted, emitted_count, local_binary, TRIM_W, TRIM_H);
+    TEST_ASSERT_EQUAL_UINT32(0, coverage.lost_retained_pixels);
+
+    const uint16_t *indices = atlas_blob_indices(pack);
+    TEST_ASSERT_NOT_NULL(indices);
+    TEST_ASSERT_EQUAL_UINT32((emitted_count - 2U) * 3U, regions[0].index_count);
+    uint64_t triangle_twice_area = 0;
+    for (uint32_t i = 0; i < regions[0].index_count; i += 3U) {
+        uint16_t ia = indices[regions[0].index_start + i];
+        uint16_t ib = indices[regions[0].index_start + i + 1U];
+        uint16_t ic = indices[regions[0].index_start + i + 2U];
+        TEST_ASSERT_LESS_THAN_UINT16(emitted_count, ia);
+        TEST_ASSERT_LESS_THAN_UINT16(emitted_count, ib);
+        TEST_ASSERT_LESS_THAN_UINT16(emitted_count, ic);
+        int64_t cross = (((int64_t)emitted[ib].x - emitted[ia].x) * ((int64_t)emitted[ic].y - emitted[ia].y)) - (((int64_t)emitted[ib].y - emitted[ia].y) * ((int64_t)emitted[ic].x - emitted[ia].x));
+        TEST_ASSERT_TRUE(cross < 0);
+        triangle_twice_area += (uint64_t)(-cross);
+    }
+    TEST_ASSERT_EQUAL_UINT64(polygon_area_pixels(emitted, emitted_count) * 2U, triangle_twice_area);
+
+    free(pack);
+    (void)remove(path);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -7775,6 +7848,7 @@ int main(void) {
     RUN_TEST(test_atlas_cache_identity_includes_geometry_controls);
     RUN_TEST(test_atlas_cache_signed_zero_tolerance_is_identical);
     RUN_TEST(test_aa_triangle_positive_tolerance_exact_coverage);
+    RUN_TEST(test_connected_mask_serializes_simple_exact_triangulation);
     RUN_TEST(test_concave_positive_budget_fallback_keeps_real_corner);
     RUN_TEST(test_convex_positive_tolerance_is_count_first);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);

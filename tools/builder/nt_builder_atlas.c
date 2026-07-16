@@ -1408,7 +1408,7 @@ static bool geometry_inflate_candidate(Point2D **poly, uint32_t *count, double a
 
 static bool geometry_finalize_candidate(GeometryCandidate *candidate, const Point2D *reference, uint32_t reference_count, const uint8_t *binary_source, uint32_t tw, uint32_t th,
                                         uint32_t max_vertices) {
-    if (!candidate->valid || candidate->count < 3 || candidate->count > max_vertices) {
+    if (!candidate->valid || candidate->count < 3 || candidate->count > max_vertices || polygon_validate(candidate->poly, candidate->count) != NT_POLYGON_VALID) {
         geometry_candidate_discard(candidate);
         return false;
     }
@@ -1418,12 +1418,16 @@ static bool geometry_finalize_candidate(GeometryCandidate *candidate, const Poin
         geometry_candidate_discard(candidate);
         return false;
     }
+    if (polygon_validate(candidate->poly, candidate->count) != NT_POLYGON_VALID) {
+        geometry_candidate_discard(candidate);
+        return false;
+    }
     outside = polygon_max_outside_pixel_distance(candidate->poly, candidate->count, binary_source, tw, th);
     if (outside > 0.0 && !geometry_inflate_candidate(&candidate->poly, &candidate->count, outside + 1.0, max_vertices)) {
         geometry_candidate_discard(candidate);
         return false;
     }
-    if (polygon_max_outside_pixel_distance(candidate->poly, candidate->count, binary_source, tw, th) > 0.0) {
+    if (polygon_validate(candidate->poly, candidate->count) != NT_POLYGON_VALID || polygon_coverage_metrics(candidate->poly, candidate->count, binary_source, tw, th).lost_retained_pixels != 0) {
         geometry_candidate_discard(candidate);
         return false;
     }
@@ -1962,6 +1966,40 @@ static void pipeline_geometry(AtlasPipeline *p) {
     }
 }
 
+static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx) {
+    uint32_t tw = p->trim_w[idx];
+    uint32_t th = p->trim_h[idx];
+    uint32_t source_w = p->sprites[idx].width;
+    uint8_t *binary = (uint8_t *)calloc((size_t)tw * th, 1);
+    NT_BUILD_ASSERT(binary && "pipeline geometry mask alloc failed");
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            uint8_t alpha = p->alpha_planes[idx][((size_t)(p->trim_y[idx] + y) * source_w) + p->trim_x[idx] + x];
+            binary[((size_t)y * tw) + x] = alpha >= p->geometry_opts[idx].alpha_threshold ? 1 : 0;
+        }
+    }
+    return binary;
+}
+
+static void pipeline_geometry_acceptance_gate(AtlasPipeline *p) {
+    for (uint32_t ui = 0; ui < p->unique_count; ui++) {
+        uint32_t idx = p->unique_indices[ui];
+        if (!p->hull_vertices[idx]) {
+            continue;
+        }
+        uint8_t *binary = pipeline_geometry_binary_mask(p, idx);
+        nt_polygon_coverage_metrics_t coverage = polygon_coverage_metrics(p->hull_vertices[idx], p->vertex_counts[idx], binary, p->trim_w[idx], p->trim_h[idx]);
+        free(binary);
+        if (polygon_validate(p->hull_vertices[idx], p->vertex_counts[idx]) == NT_POLYGON_VALID && coverage.lost_retained_pixels == 0) {
+            continue;
+        }
+        free(p->hull_vertices[idx]);
+        p->hull_vertices[idx] = NULL;
+        p->vertex_counts[idx] = 0;
+        push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, p->trim_w[idx], p->trim_h[idx]);
+    }
+}
+
 /* Collect independent content errors before packing or publication. */
 
 /* Match the packing footprint, including larger per-sprite overrides. */
@@ -2384,6 +2422,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
         if (p->dedup_map[i] >= 0) {
             continue; /* Duplicate — its vertex/index storage is shared with the original */
         }
+        NT_BUILD_ASSERT(polygon_validate(p->hull_vertices[i], p->vertex_counts[i]) == NT_POLYGON_VALID && "pipeline_serialize: invalid polygon escaped geometry gate");
+        uint8_t *binary = pipeline_geometry_binary_mask(p, i);
+        nt_polygon_coverage_metrics_t coverage = polygon_coverage_metrics(p->hull_vertices[i], p->vertex_counts[i], binary, p->trim_w[i], p->trim_h[i]);
+        free(binary);
+        NT_BUILD_ASSERT(coverage.lost_retained_pixels == 0 && "pipeline_serialize: uncovered retained pixel escaped geometry gate");
         total_vertex_count += p->vertex_counts[i];
         /* Single-component fan/ear-clip triangulation: (n - 2) triangles. */
         uint32_t tri = (p->vertex_counts[i] >= 3) ? p->vertex_counts[i] - 2 : 0;
@@ -2828,6 +2871,7 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", p.sprite_count, p.unique_count);
     t0 = nt_time_now();
     pipeline_geometry(&p);
+    pipeline_geometry_acceptance_gate(&p);
     double bench_geometry = nt_time_now() - t0;
     NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
 
