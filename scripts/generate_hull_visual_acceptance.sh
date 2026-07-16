@@ -5,71 +5,65 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+VERIFY_REPEAT=false
+if [[ $# -gt 1 || (${1:-} != "" && ${1:-} != "--verify-repeat") ]]; then
+    echo "Usage: $0 [--verify-repeat]" >&2
+    exit 2
+fi
+if [[ ${1:-} == "--verify-repeat" ]]; then
+    VERIFY_REPEAT=true
+fi
+
 FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
 CORPUS="tests/fixtures/hull_visual_acceptance/corpus.json"
-SWEEP_DIR="build/bench/hull-area-mixed-aa"
 FINAL_DIR="build/reports/phase80-hull-visual-acceptance"
 TEMP_DIR="${FINAL_DIR}.tmp"
+REPEAT_DIR="${FINAL_DIR}.repeat"
 PREVIOUS_DIR="${FINAL_DIR}.previous"
-REQUIRED="sq9-aa-triangle:convex,sq9-aa-triangle:concave,opaque-square-max3:convex,connected-mask-adversarial:concave,mixed-aa-representative:convex,mixed-aa-representative:concave,pixel-art-threshold-control:rect"
-
-frontier_string() {
-    local column="$1"
-    local field="$2"
-    awk -v column="$column" -v field="$field" '
-        index($0, "\"column_id\": \"" column "\"") { active = 1 }
-        active && index($0, "\"" field "\"") {
-            value = $0
-            sub(/^.*: "/, "", value)
-            sub(/"[,]?[[:space:]]*$/, "", value)
-            print value
-            exit
-        }
-    ' "$FRONTIER"
-}
-
-frontier_number() {
-    local column="$1"
-    local field="$2"
-    awk -v column="$column" -v field="$field" '
-        index($0, "\"column_id\": \"" column "\"") { active = 1 }
-        active && index($0, "\"" field "\"") {
-            value = $0
-            sub(/^.*: /, "", value)
-            sub(/[,]$/, "", value)
-            print value
-            exit
-        }
-    ' "$FRONTIER"
-}
+REQUIRED="sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,opaque-square-max3:convex,connected-mask-adversarial:concave,pixel-art-threshold-control:rect"
+PERCENTS=(0 2 5 10 15 25)
 
 frontier_valid() {
     [[ -f "$FRONTIER" ]] || return 1
-    grep -q '"measurement_source_commit": "bd379927abc66d5a850f779e445584d902e84d7e"' "$FRONTIER" || return 1
-    local column source expected actual percent json_percent
-    for column in baseline candidate recommended; do
-        source="$(frontier_string "$column" sweep_source)"
-        expected="$(frontier_string "$column" sweep_sha256)"
-        percent="$(frontier_number "$column" max_added_area_percent)"
-        [[ -n "$source" && -n "$expected" && -n "$percent" && -f "$source" ]] || return 1
+    grep -Eq '"schema_version"[[:space:]]*:[[:space:]]*2([,[:space:]]|$)' "$FRONTIER" || return 1
+    grep -Eq '"measurement_source_commit"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' "$FRONTIER" || return 1
+    grep -Eq '"tool_version"[[:space:]]*:[[:space:]]*"2\.0\.0"' "$FRONTIER" || return 1
+    grep -Eq '"builder_threads"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$FRONTIER" || return 1
+    grep -Eq '"corpus_sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"' "$FRONTIER" || return 1
+    grep -Eq '"settings_sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"' "$FRONTIER" || return 1
+    grep -Eq '"sweep_values"[[:space:]]*:[[:space:]]*\[0,[[:space:]]*2,[[:space:]]*5,[[:space:]]*10,[[:space:]]*15,[[:space:]]*25\]' "$FRONTIER" || return 1
+
+    local sources=()
+    local hashes=()
+    local baseline_hashes=()
+    local selected_hashes=()
+    mapfile -t sources < <(sed -n 's/.*"sweep_source": "\([^"]*\)".*/\1/p' "$FRONTIER" | awk 'NR <= 6')
+    mapfile -t hashes < <(sed -n 's/.*"sweep_sha256": "\([0-9a-f]*\)".*/\1/p' "$FRONTIER" | awk 'NR <= 6')
+    mapfile -t baseline_hashes < <(sed -n 's/.*"baseline_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$FRONTIER" | awk 'NR <= 6')
+    mapfile -t selected_hashes < <(sed -n 's/.*"selected_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$FRONTIER" | awk 'NR <= 6')
+    [[ ${#sources[@]} -eq 6 && ${#hashes[@]} -eq 6 && ${#baseline_hashes[@]} -eq 6 && ${#selected_hashes[@]} -eq 6 ]] || return 1
+
+    local i source actual
+    for i in "${!PERCENTS[@]}"; do
+        source="${sources[$i]}"
+        [[ -f "$source" ]] || return 1
         actual="$(sha256sum "$source" | awk '{print $1}')"
-        [[ "$actual" == "$expected" ]] || return 1
-        json_percent="${percent%.0}"
-        grep -Eq "\"max_added_area_percent\"[[:space:]]*:[[:space:]]*${json_percent}([,.]|[[:space:]]|$)" "$source" || return 1
-        grep -Fq '"corpus": "C:\\projects\\neotolis-engine\\assets\\sprites\\bigatlas\\*.png"' "$source" || return 1
-        grep -q '"sprites": 4812' "$source" || return 1
+        [[ "$actual" == "${hashes[$i]}" ]] || return 1
+        grep -Eq "\"max_added_area_percent\"[[:space:]]*:[[:space:]]*${PERCENTS[$i]}([,.[:space:]]|$)" "$source" || return 1
+        grep -Fq '"corpus": "assets/sprites/bigatlas/*.png"' "$source" || return 1
+        grep -Eq '"sprites"[[:space:]]*:[[:space:]]*128([,[:space:]]|$)' "$source" || return 1
+        grep -Eq '"valid"[[:space:]]*:[[:space:]]*true([,[:space:]]|$)' "$source" || return 1
+        grep -Fq '"gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}' "$source" || return 1
+        grep -Fq "\"baseline_pack_sha256\": \"${baseline_hashes[$i]}\"" "$source" || return 1
+        grep -Fq "\"selected_pack_sha256\": \"${selected_hashes[$i]}\"" "$source" || return 1
     done
 }
 
-if frontier_valid; then
-    echo "=== Sweep frontier provenance is valid ==="
-else
-    echo "ERROR: measured Phase 80-05 sweep provenance is missing or stale." >&2
-    echo "       It must be reproduced from source commit bd379927 on all 4,812 mixed-AA assets," >&2
-    echo "       with primary/repeat production proof equality for 0%, 5%, and 10%." >&2
-    echo "       The current post-Phase-80 builder is not an equivalent measurement tool; refusing substitution." >&2
+if ! frontier_valid; then
+    echo "ERROR: the six-column Phase 80 frontier or one of its measured proof artifacts is missing, stale, or corrupt." >&2
     exit 1
 fi
+echo "=== Six-column sweep provenance is valid ==="
 
 if [[ ! -f build/_cmake/native-debug/CMakeCache.txt ]]; then
     cmake --preset native-debug
@@ -84,16 +78,24 @@ elif [[ ! -x "$REPORT_EXE" ]]; then
     exit 1
 fi
 
-case "$TEMP_DIR|$PREVIOUS_DIR" in
-    "build/reports/phase80-hull-visual-acceptance.tmp|build/reports/phase80-hull-visual-acceptance.previous")
-        rm -rf -- "$TEMP_DIR" "$PREVIOUS_DIR"
+case "$TEMP_DIR|$REPEAT_DIR|$PREVIOUS_DIR" in
+    "build/reports/phase80-hull-visual-acceptance.tmp|build/reports/phase80-hull-visual-acceptance.repeat|build/reports/phase80-hull-visual-acceptance.previous")
+        rm -rf -- "$TEMP_DIR" "$REPEAT_DIR" "$PREVIOUS_DIR"
         ;;
     *) echo "ERROR: refusing to replace unexpected report paths" >&2; exit 1 ;;
 esac
-trap 'rm -rf -- "$TEMP_DIR" "$PREVIOUS_DIR"' EXIT
+trap 'rm -rf -- "$TEMP_DIR" "$REPEAT_DIR" "$PREVIOUS_DIR"' EXIT
 
 "$REPORT_EXE" generate --corpus "$CORPUS" --frontier "$FRONTIER" --out "$TEMP_DIR"
 "$REPORT_EXE" validate --manifest "$TEMP_DIR/manifest.json" --html "$TEMP_DIR/index.html" --require-samples "$REQUIRED"
+
+if [[ "$VERIFY_REPEAT" == true ]]; then
+    "$REPORT_EXE" generate --corpus "$CORPUS" --frontier "$FRONTIER" --out "$REPEAT_DIR"
+    "$REPORT_EXE" validate --manifest "$REPEAT_DIR/manifest.json" --html "$REPEAT_DIR/index.html" --require-samples "$REQUIRED"
+    cmp -s "$TEMP_DIR/manifest.json" "$REPEAT_DIR/manifest.json" || { echo "ERROR: repeated manifest differs" >&2; exit 1; }
+    cmp -s "$TEMP_DIR/index.html" "$REPEAT_DIR/index.html" || { echo "ERROR: repeated HTML differs" >&2; exit 1; }
+    rm -rf -- "$REPEAT_DIR"
+fi
 
 if [[ -d "$FINAL_DIR" ]]; then
     mv -- "$FINAL_DIR" "$PREVIOUS_DIR"

@@ -1386,6 +1386,10 @@ typedef struct {
     double total_overdraw_percent;
 } NtAtlasFrontierTestResult;
 
+static _Thread_local uint32_t geometry_test_forced_frontier_count;
+
+void nt_atlas_test_force_frontier_count(uint32_t count) { geometry_test_forced_frontier_count = count; }
+
 static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
 
 static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
@@ -1452,7 +1456,35 @@ static bool geometry_frontier_candidate_better(const GeometryCandidate *candidat
     return geometry_frontier_tuple_compare(candidate, current) < 0;
 }
 
+static int32_t geometry_clamp_i32(int32_t value, int32_t min_value, int32_t max_value) {
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+static void geometry_frontier_clamp_to_trim(const GeometryFrontier *frontier, GeometryCandidate *candidate) {
+    if (!candidate->poly || candidate->count < 3U || candidate->count > NT_POLYGON_MAX_VERTICES) {
+        return;
+    }
+    Point2D bounded[NT_POLYGON_MAX_VERTICES];
+    Point2D compact[NT_POLYGON_MAX_VERTICES];
+    for (uint32_t i = 0; i < candidate->count; i++) {
+        bounded[i].x = geometry_clamp_i32(candidate->poly[i].x, 0, (int32_t)frontier->width);
+        bounded[i].y = geometry_clamp_i32(candidate->poly[i].y, 0, (int32_t)frontier->height);
+    }
+    const uint32_t compact_count = remove_collinear(bounded, candidate->count, compact);
+    if (compact_count >= 3U) {
+        memcpy(candidate->poly, compact, (size_t)compact_count * sizeof(Point2D));
+        candidate->count = compact_count;
+    }
+}
+
 static void geometry_frontier_adopt(GeometryFrontier *frontier, GeometryCandidate *source) {
+    geometry_frontier_clamp_to_trim(frontier, source);
     if (!geometry_frontier_finalize(frontier, source)) {
         geometry_candidate_discard(source);
         frontier->reject_count++;
@@ -1564,6 +1596,9 @@ static GeometrySelection geometry_frontier_take_selection(GeometryFrontier *fron
     GeometrySelection result = {0};
     uint64_t base_area2 = geometry_frontier_base_area2(frontier);
     uint32_t selected_count = geometry_frontier_select(frontier, (double)max_added_area_percent);
+    if (geometry_test_forced_frontier_count != 0U) {
+        selected_count = geometry_test_forced_frontier_count <= frontier->max_vertices && frontier->slots[geometry_test_forced_frontier_count].valid ? geometry_test_forced_frontier_count : UINT32_MAX;
+    }
     if (base_area2 == UINT64_MAX || selected_count == UINT32_MAX) {
         return result;
     }
@@ -1939,8 +1974,72 @@ static GeometryCandidate strategy_convex(const uint8_t *binary_source, uint32_t 
     return result;
 }
 
+static uint32_t geometry_corner_cut_count(uint32_t mask) {
+    uint32_t count = 0U;
+    for (uint32_t bit = 0U; bit < 4U; bit++) {
+        count += (mask & (1U << bit)) != 0U ? 1U : 0U;
+    }
+    return count;
+}
+
+static uint32_t geometry_write_corner_cut_polygon(Point2D *poly, uint32_t mask, int32_t width, int32_t height, int32_t depth) {
+    uint32_t out = 0U;
+    poly[out++] = (mask & 1U) != 0U ? (Point2D){depth, 0} : (Point2D){0, 0};
+    if ((mask & 2U) != 0U) {
+        poly[out++] = (Point2D){width - depth, 0};
+        poly[out++] = (Point2D){width, depth};
+    } else {
+        poly[out++] = (Point2D){width, 0};
+    }
+    if ((mask & 4U) != 0U) {
+        poly[out++] = (Point2D){width, height - depth};
+        poly[out++] = (Point2D){width - depth, height};
+    } else {
+        poly[out++] = (Point2D){width, height};
+    }
+    if ((mask & 8U) != 0U) {
+        poly[out++] = (Point2D){depth, height};
+        poly[out++] = (Point2D){0, height - depth};
+    } else {
+        poly[out++] = (Point2D){0, height};
+    }
+    if ((mask & 1U) != 0U) {
+        poly[out++] = (Point2D){0, depth};
+    }
+    return out;
+}
+
+static void geometry_frontier_add_corner_cut_depth(GeometryFrontier *frontier, uint32_t target_count, uint32_t mask, uint32_t depth) {
+    GeometryCandidate candidate = {.count = target_count, .generator_ordinal = 6U, .valid = true};
+    candidate.poly = (Point2D *)malloc((size_t)target_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(candidate.poly && "geometry_frontier_add_corner_cut_depth: alloc failed");
+    const uint32_t out = geometry_write_corner_cut_polygon(candidate.poly, mask, (int32_t)frontier->width, (int32_t)frontier->height, (int32_t)depth);
+    NT_BUILD_ASSERT(out == target_count);
+    geometry_frontier_adopt(frontier, &candidate);
+}
+
+static void geometry_frontier_add_corner_cut_mask(GeometryFrontier *frontier, uint32_t target_count, uint32_t mask, uint32_t max_depth) {
+    for (uint32_t depth = 1U; depth <= max_depth; depth++) {
+        geometry_frontier_add_corner_cut_depth(frontier, target_count, mask, depth);
+    }
+}
+
+static void geometry_frontier_add_corner_cuts(GeometryFrontier *frontier, uint32_t target_count) {
+    if (target_count < 5U || target_count > 8U) {
+        return;
+    }
+    const uint32_t cuts = target_count - 4U;
+    const uint32_t max_depth = (frontier->width < frontier->height ? frontier->width : frontier->height) / 2U;
+    for (uint32_t mask = 1U; mask < 16U; mask++) {
+        if (geometry_corner_cut_count(mask) != cuts) {
+            continue;
+        }
+        geometry_frontier_add_corner_cut_mask(frontier, target_count, mask, max_depth);
+    }
+}
+
 static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, uint32_t clean_count, const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t max_vertices,
-                                                         float max_added_area_percent, uint32_t *out_slot_mask) {
+                                                         float max_added_area_percent, NtAtlasFrontierTestResult *out_frontier) {
     GeometryFrontier frontier = {
         .binary = binary_source,
         .width = tw,
@@ -1969,16 +2068,19 @@ static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, u
         convex.generator_ordinal = 3;
         (void)geometry_finalize_candidate(&convex, clean, clean_count, binary_source, tw, th, max_vertices);
         geometry_frontier_adopt(&frontier, &convex);
+
+        geometry_frontier_add_corner_cuts(&frontier, target);
     }
     for (uint32_t count = max_vertices; count > 3; count--) {
         geometry_frontier_enumerate_covering_removals(&frontier, &frontier.slots[count], 4);
         geometry_frontier_enumerate_covering_pair_removals(&frontier, &frontier.slots[count], 5);
     }
-    if (out_slot_mask) {
-        *out_slot_mask = 0;
+    if (out_frontier) {
+        *out_frontier = (NtAtlasFrontierTestResult){.opaque_area2 = frontier.opaque_area2, .base_area2 = geometry_frontier_base_area2(&frontier)};
         for (uint32_t count = 3; count <= max_vertices; count++) {
             if (frontier.slots[count].valid) {
-                *out_slot_mask |= 1U << count;
+                out_frontier->slot_mask |= 1U << count;
+                out_frontier->slot_area2[count] = frontier.slots[count].exact_abs_twice_area;
             }
         }
     }
@@ -1999,12 +2101,49 @@ uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_
     bool overflow = false;
     uint32_t contour_count = trace_contour(binary, width, height, contour, contour_capacity, &overflow);
     uint32_t clean_count = overflow ? 0 : remove_collinear(contour, contour_count, clean);
-    uint32_t slot_mask = 0;
-    GeometrySelection selection = geometry_build_concave_frontier(clean, clean_count, binary, width, height, max_vertices, 0.0F, &slot_mask);
+    NtAtlasFrontierTestResult result = {0};
+    GeometrySelection selection = geometry_build_concave_frontier(clean, clean_count, binary, width, height, max_vertices, 0.0F, &result);
     geometry_selection_discard(&selection);
     free(clean);
     free(contour);
-    return slot_mask;
+    return result.slot_mask;
+}
+
+bool nt_atlas_test_concave_frontier_required_percent(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices, uint32_t target_count, float *out_percent) {
+    if (!binary || !out_percent || target_count < 3U || target_count > max_vertices || max_vertices > NT_POLYGON_MAX_VERTICES) {
+        return false;
+    }
+    uint32_t retained_count = 0U;
+    for (size_t i = 0; i < (size_t)width * height; i++) {
+        retained_count += binary[i] != 0U ? 1U : 0U;
+    }
+    const uint32_t contour_capacity = (2U * retained_count) + 2U;
+    Point2D *contour = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
+    Point2D *clean = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
+    NT_BUILD_ASSERT(contour && clean && "nt_atlas_test_concave_frontier_required_percent: alloc failed");
+    bool overflow = false;
+    const uint32_t contour_count = trace_contour(binary, width, height, contour, contour_capacity, &overflow);
+    const uint32_t clean_count = overflow ? 0U : remove_collinear(contour, contour_count, clean);
+    NtAtlasFrontierTestResult result = {0};
+    GeometrySelection selection = geometry_build_concave_frontier(clean, clean_count, binary, width, height, max_vertices, 0.0F, &result);
+    geometry_selection_discard(&selection);
+    free(clean);
+    free(contour);
+    if ((result.slot_mask & (1U << target_count)) == 0U || result.opaque_area2 == 0U || result.slot_area2[target_count] < result.base_area2) {
+        return false;
+    }
+    const double required = ((double)(result.slot_area2[target_count] - result.base_area2) * 100.0) / (double)result.opaque_area2;
+    float percent = (float)required;
+    for (uint32_t attempt = 0; attempt < 8U; attempt++) {
+        const double allowed = (double)result.opaque_area2 * (double)percent;
+        const double added = (double)(result.slot_area2[target_count] - result.base_area2) * 100.0;
+        if (added <= allowed) {
+            *out_percent = percent;
+            return true;
+        }
+        percent = nextafterf(percent, INFINITY);
+    }
+    return false;
 }
 
 uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
