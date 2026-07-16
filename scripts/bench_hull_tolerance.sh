@@ -40,6 +40,13 @@ HULL_TOTALS=()
 HULL_MEANS=()
 FRONTIER_DENSITIES=()
 SELECTED_OVERDRAW=()
+BENCH_THREADS="${NT_BUILDER_THREADS:-1}"
+
+if [[ ! "$BENCH_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: NT_BUILDER_THREADS must be a positive integer for a reproducible sweep." >&2
+    exit 1
+fi
+export NT_BUILDER_THREADS="$BENCH_THREADS"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -184,10 +191,10 @@ if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
     FRONTIER_TMP="${FRONTIER}.tmp.${$}"
     commit="$(git rev-parse HEAD)"
     corpus_sha="$(sha256sum "${matches[@]}" | sha256sum | awk '{print $1}')"
-    settings_sha="$(printf '%s\n' "$name|$glob|$shape|$max_size|$max_sprites|$SAMPLE_CSV" | sha256sum | awk '{print $1}')"
+    settings_sha="$(printf '%s\n' "$name|$glob|$shape|$max_size|$max_sprites|$SAMPLE_CSV|threads=$BENCH_THREADS" | sha256sum | awk '{print $1}')"
     {
         printf '{\n  "schema_version": 2,\n  "measurement_source_commit": "%s",\n' "$commit"
-        printf '  "tool_version": "2.0.0",\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$corpus_sha" "$settings_sha"
+        printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$BENCH_THREADS" "$corpus_sha" "$settings_sha"
         printf '  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are %s at 0%%, %s at 2/5%%, and %s at 10/15/25%%; 10%% captures the final measured reduction and larger allowances add no gain.",\n' \
             "${HULL_TOTALS[0]}" "${HULL_TOTALS[1]}" "${HULL_TOTALS[3]}"
         printf '  "default_max_added_area_percent": 10,\n  "sweep_values": [0, 2, 5, 10, 15, 25],\n  "sweep": [\n'
