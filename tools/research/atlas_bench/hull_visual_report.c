@@ -32,6 +32,7 @@ typedef struct {
     double tolerance;
     char source[VISUAL_PATH_MAX];
     char sha256[65];
+    char source_commit[41];
 } VisualColumn;
 
 typedef struct {
@@ -280,7 +281,8 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
         return false;
     }
     const char *cursor = (const char *)bytes;
-    bool ok = strstr(cursor, "\"schema_version\": 1") != NULL;
+    char source_commit[41];
+    bool ok = strstr(cursor, "\"schema_version\": 1") != NULL && text_value(cursor, "measurement_source_commit", source_commit, sizeof(source_commit)) && strlen(source_commit) == 40U;
     for (uint32_t i = 0; ok && i < VISUAL_COLUMN_COUNT; i++) {
         char needle[96];
         (void)snprintf(needle, sizeof(needle), "\"column_id\": \"%s\"", ids[i]);
@@ -293,6 +295,7 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
         }
         columns[i].id = ids[i];
         columns[i].tolerance = tolerance;
+        (void)snprintf(columns[i].source_commit, sizeof(columns[i].source_commit), "%s", source_commit);
         char actual[65];
         size_t sweep_size = 0;
         uint8_t *sweep = read_file(columns[i].source, &sweep_size);
@@ -666,6 +669,8 @@ static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_C
         json_escape(file, columns[i].source);
         (void)fputs(",\"sweep_sha256\":", file);
         json_escape(file, columns[i].sha256);
+        (void)fputs(",\"measurement_source_commit\":", file);
+        json_escape(file, columns[i].source_commit);
         (void)fputc('}', file);
     }
     (void)fputs("],\n  \"rows\": [", file);
@@ -826,6 +831,10 @@ static bool required_rows_present(const char *manifest, const char *html, const 
 }
 
 int nt_hull_visual_validate(const char *manifest_path, const char *html_path, const char *required_samples) {
+    static const char *panel_fields[] = {
+        "\"effective_alpha_mask\"", "\"original_alpha_values\"", "\"polygon\"",           "\"numbered_vertices\"", "\"vertex_count\"",  "\"lost_pixels\"",   "\"lost_ratio\"",       "\"extra_pixels\"",
+        "\"extra_ratio\"",          "\"fidelity_px\"",           "\"self_intersection\"", "\"signed_area\"",       "\"winding_valid\"", "\"vertex_budget\"", "\"production_gates\"",
+    };
     size_t manifest_size = 0;
     size_t html_size = 0;
     uint8_t *manifest_bytes = read_file(manifest_path, &manifest_size);
@@ -842,11 +851,15 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
     const char *candidate = strstr(manifest, "\"column_id\":\"candidate\"");
     const char *recommended = strstr(manifest, "\"column_id\":\"recommended\"");
     bool ok = strstr(manifest, "\"schema_version\": 1") != NULL && strstr(manifest, "\"overall_pass\": true") != NULL && strstr(manifest, "\"result\":\"FAIL\"") == NULL &&
-              count_substring(manifest, "\"panel_id\"") == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT && count_substring(manifest, "\"effective_alpha_mask\"") == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT &&
-              count_substring(manifest, "\"production_gates\"") == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT && baseline != NULL && candidate != NULL && recommended != NULL && baseline < candidate &&
-              candidate < recommended && strstr(html, "<!doctype html>") != NULL && strstr(html, "Vertex count / budget") != NULL && strstr(html, "Lost pixels / ratio") != NULL &&
-              strstr(html, "Fidelity px") != NULL && strstr(html, "<script") == NULL && strstr(html, "http://") == NULL && strstr(html, "https://") == NULL &&
-              required_rows_present(manifest, html, required_samples);
+              strstr(manifest, "\"failing_panel_ids\": []") != NULL && count_substring(manifest, "\"panel_id\"") == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT &&
+              count_substring(manifest, "\"sweep_source\"") == VISUAL_COLUMN_COUNT && count_substring(manifest, "\"sweep_sha256\"") == VISUAL_COLUMN_COUNT &&
+              count_substring(manifest, "\"measurement_source_commit\"") == VISUAL_COLUMN_COUNT && strstr(manifest, "\"sweep_source\":\"\"") == NULL &&
+              strstr(manifest, "\"sweep_sha256\":\"\"") == NULL && baseline != NULL && candidate != NULL && recommended != NULL && baseline < candidate && candidate < recommended &&
+              strstr(html, "<!doctype html>") != NULL && strstr(html, "Vertex count / budget") != NULL && strstr(html, "Lost pixels / ratio") != NULL && strstr(html, "Fidelity px") != NULL &&
+              strstr(html, "<script") == NULL && strstr(html, "http://") == NULL && strstr(html, "https://") == NULL && required_rows_present(manifest, html, required_samples);
+    for (uint32_t field = 0; ok && field < (uint32_t)(sizeof(panel_fields) / sizeof(panel_fields[0])); field++) {
+        ok = count_substring(manifest, panel_fields[field]) == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT;
+    }
     free(manifest_bytes);
     free(html_bytes);
     if (!ok) {

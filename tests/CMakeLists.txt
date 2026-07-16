@@ -718,6 +718,19 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
+    add_executable(test_atlas_hull_visual_report
+        unit/test_atlas_hull_visual_report.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
+    )
+    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_hull_visual_report PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_hull_visual_report PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Proves the graceful transparent-after-trim error path is leak-free:
     # runs under live LSan, no detect_leaks=0 masking.
     add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
