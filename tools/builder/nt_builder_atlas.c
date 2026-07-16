@@ -474,8 +474,8 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 15 };
-_Static_assert(ATLAS_CACHE_KEY_VERSION > 14, "selected-geometry frontier requires a fresh atlas cache key");
+enum { ATLAS_CACHE_KEY_VERSION = 16 };
+_Static_assert(ATLAS_CACHE_KEY_VERSION > 15, "raw alpha-threshold cache identity requires a fresh atlas cache key");
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
@@ -492,7 +492,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (2 * sizeof(uint8_t)) };
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (3 * sizeof(uint8_t)) };
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
@@ -520,8 +520,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
         sprite_buf[ov_off + 12] = sprites[i].extrude_override;
         float area_percent = sprites[i].has_max_added_area_percent_override ? sprites[i].max_added_area_percent_override : 0.0F;
         memcpy(sprite_buf + ov_off + 13, &area_percent, sizeof(float));
-        sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override ? sprites[i].alpha_threshold_override : opts->alpha_threshold;
-        sprite_buf[ov_off + 14 + sizeof(float)] = sprites[i].has_max_added_area_percent_override ? 1 : 0;
+        sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override;
+        sprite_buf[ov_off + 14 + sizeof(float)] = sprites[i].alpha_threshold_override != 0 ? 1 : 0;
+        sprite_buf[ov_off + 15 + sizeof(float)] = sprites[i].has_max_added_area_percent_override ? 1 : 0;
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -548,6 +549,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_added_area_percent);
     memcpy(opts_buf + pos, &opts->max_vertices, sizeof(opts->max_vertices));
     pos += (uint32_t)sizeof(opts->max_vertices);
+    opts_buf[pos++] = opts->alpha_threshold;
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
      * premultiplied, debug_png, compress) are handled by the texture cache
      * and must NOT appear — otherwise changing e.g. premultiplied triggers
@@ -1240,6 +1242,36 @@ static void pipeline_cache_check(AtlasPipeline *p) {
 
 /* --- pipeline_dedup: detect duplicate sprites by hash + pixel comparison --- */
 
+static bool pipeline_dedup_meta_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
+    const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
+    const NtAtlasSpriteInput *so = &p->sprites[orig_idx];
+    return sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
+           sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
+           (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
+           p->geometry_opts[curr_idx].effective_alpha_threshold == p->geometry_opts[orig_idx].effective_alpha_threshold && sc->shape_override == so->shape_override &&
+           sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override && sc->extrude_override == so->extrude_override;
+}
+
+static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
+    if (p->trim_w[curr_idx] != p->trim_w[orig_idx] || p->trim_h[curr_idx] != p->trim_h[orig_idx]) {
+        return false;
+    }
+    const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
+    const NtAtlasSpriteInput *so = &p->sprites[orig_idx];
+    const uint32_t tw = p->trim_w[curr_idx];
+    const uint32_t th = p->trim_h[curr_idx];
+    for (uint32_t row = 0; row < th; row++) {
+        size_t off_a = (((size_t)(p->trim_y[curr_idx] + row) * sc->width) + p->trim_x[curr_idx]) * 4;
+        size_t off_b = (((size_t)(p->trim_y[orig_idx] + row) * so->width) + p->trim_x[orig_idx]) * 4;
+        const uint8_t *row_a = sc->rgba + off_a;
+        const uint8_t *row_b = so->rgba + off_b;
+        if (memcmp(row_a, row_b, ((size_t)tw) * 4) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_dedup(AtlasPipeline *p) {
     DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(p->sprite_count * sizeof(DedupSortEntry));
@@ -1258,40 +1290,17 @@ static void pipeline_dedup(AtlasPipeline *p) {
     }
 
     for (uint32_t i = 1; i < p->sprite_count; i++) {
-        if (dedup_entries[i].hash == dedup_entries[i - 1].hash) {
-            uint32_t curr_idx = dedup_entries[i].index;
-            uint32_t prev_idx = dedup_entries[i - 1].index;
-            /* Find the original (follow chain) */
-            uint32_t orig = prev_idx;
+        const uint32_t curr_idx = dedup_entries[i].index;
+        uint32_t j = i;
+        while (j > 0 && dedup_entries[j - 1].hash == dedup_entries[i].hash) {
+            j--;
+            uint32_t orig = dedup_entries[j].index;
             while (p->dedup_map[orig] >= 0) {
                 orig = (uint32_t)p->dedup_map[orig];
             }
-            /* Verify trimmed pixels + pack-affecting metadata match */
-            const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
-            const NtAtlasSpriteInput *so = &p->sprites[orig];
-            /* Different slice9/shape/rotate constraints require separate placement */
-            bool meta_match = sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
-                              sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
-                              (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
-                              p->geometry_opts[curr_idx].effective_alpha_threshold == p->geometry_opts[orig].effective_alpha_threshold && sc->shape_override == so->shape_override &&
-                              sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override &&
-                              sc->extrude_override == so->extrude_override;
-            if (meta_match && p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
-                bool pixels_match = true;
-                uint32_t tw = p->trim_w[curr_idx];
-                uint32_t th = p->trim_h[curr_idx];
-                for (uint32_t row = 0; row < th && pixels_match; row++) {
-                    size_t off_a = (((size_t)(p->trim_y[curr_idx] + row) * sc->width) + p->trim_x[curr_idx]) * 4;
-                    size_t off_b = (((size_t)(p->trim_y[orig] + row) * so->width) + p->trim_x[orig]) * 4;
-                    const uint8_t *row_a = sc->rgba + off_a;
-                    const uint8_t *row_b = so->rgba + off_b;
-                    if (memcmp(row_a, row_b, ((size_t)tw) * 4) != 0) {
-                        pixels_match = false;
-                    }
-                }
-                if (pixels_match) {
-                    p->dedup_map[curr_idx] = (int32_t)orig;
-                }
+            if (pipeline_dedup_meta_match(p, curr_idx, orig) && pipeline_dedup_pixels_match(p, curr_idx, orig)) {
+                p->dedup_map[curr_idx] = (int32_t)orig;
+                break;
             }
         }
     }
@@ -1452,6 +1461,9 @@ static bool geometry_frontier_candidate_better(const GeometryCandidate *candidat
     }
     if (candidate->exact_abs_twice_area != current->exact_abs_twice_area) {
         return candidate->exact_abs_twice_area < current->exact_abs_twice_area;
+    }
+    if (candidate->generator_ordinal != current->generator_ordinal) {
+        return candidate->generator_ordinal < current->generator_ordinal;
     }
     return geometry_frontier_tuple_compare(candidate, current) < 0;
 }
@@ -2378,9 +2390,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 continue;
             }
 
-            /* Concave tracing uses the convex frontier as a bounded source when
-             * morphological closing cannot produce one simple contour. */
-
             // #region Morphological closing — merge disjoint components into one
             /* If sprite has multiple disjoint opaque regions, iteratively dilate the
              * binary mask until they form one connected component, so a single contour
@@ -2458,8 +2467,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 }
             }
             if (convex_reason) {
-                GeometrySelection selection = geometry_build_convex_frontier(binary_source, tw, th, effective_max_verts, geometry_opts->max_added_area_percent);
-                (void)pipeline_install_geometry_selection(p, idx, &selection);
+                pipeline_push_hull_infeasible(p, idx);
             }
             free(binary_source);
             free(binary);

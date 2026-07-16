@@ -129,7 +129,6 @@ bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
-bash scripts/test_bench_hull_tolerance_guard.sh
 ok
 
 step "build (native-debug)"
@@ -139,6 +138,10 @@ if [ ! -f "$NATIVE_BUILD_DIR/CMakeCache.txt" ]; then
     exit 1
 fi
 cmake --build "$NATIVE_BUILD_DIR"
+ok
+
+step "hull tolerance guard"
+bash scripts/test_bench_hull_tolerance_guard.sh
 ok
 
 step "ctest (native-debug)"

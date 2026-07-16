@@ -189,19 +189,24 @@ done
 if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
     FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
     FRONTIER_TMP="${FRONTIER}.tmp.${$}"
+    PROOF_DIR="tests/fixtures/hull_visual_acceptance/proof"
+    mkdir -p "$PROOF_DIR"
     commit="$(git rev-parse HEAD)"
     corpus_sha="$(sha256sum "${matches[@]}" | sha256sum | awk '{print $1}')"
     settings_sha="$(printf '%s\n' "$name|$glob|$shape|$max_size|$max_sprites|$SAMPLE_CSV|threads=$BENCH_THREADS" | sha256sum | awk '{print $1}')"
     {
         printf '{\n  "schema_version": 2,\n  "measurement_source_commit": "%s",\n' "$commit"
         printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$BENCH_THREADS" "$corpus_sha" "$settings_sha"
-        printf '  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are %s at 0%%, %s at 2/5%%, and %s at 10/15/25%%; 10%% captures the final measured reduction and larger allowances add no gain.",\n' \
-            "${HULL_TOTALS[0]}" "${HULL_TOTALS[1]}" "${HULL_TOTALS[3]}"
+        printf '  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are %s/%s/%s/%s/%s/%s at 0/2/5/10/15/25%%; 10%% is the production default, while larger allowances remain available for corpora that continue trading area for fewer vertices.",\n' \
+            "${HULL_TOTALS[0]}" "${HULL_TOTALS[1]}" "${HULL_TOTALS[2]}" "${HULL_TOTALS[3]}" "${HULL_TOTALS[4]}" "${HULL_TOTALS[5]}"
         printf '  "default_max_added_area_percent": 10,\n  "sweep_values": [0, 2, 5, 10, 15, 25],\n  "sweep": [\n'
         for i in "${!SAMPLES[@]}"; do
             sample="${SAMPLES[$i]}"
             safe_sample="${sample//./p}"
             source="${OUT_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
+            proof_source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
+            cp "$source" "$proof_source"
+            source="$proof_source"
             source_sha="$(sha256sum "$source" | awk '{print $1}')"
             selected_pack_sha="$(sed -n 's/.*"selected_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$source")"
             baseline_pack_sha="$(sed -n 's/.*"baseline_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$source")"
@@ -214,7 +219,7 @@ if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
         for spec in 'baseline|0' 'candidate|2' 'recommended|3'; do
             IFS='|' read -r id i <<< "$spec"
             sample="${SAMPLES[$i]}"
-            source="${OUT_DIR}/$(printf '%02d-percent-%s' "$i" "${sample//./p}").json"
+            source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "${sample//./p}").json"
             source_sha="$(sha256sum "$source" | awk '{print $1}')"
             printf '    %s{"column_id": "%s", "max_added_area_percent": %s, "sweep_source": "%s", "sweep_sha256": "%s"}\n' \
                 "$([[ "$id" == baseline ]] && printf '' || printf ',')" "$id" "$sample" "$source" "$source_sha"

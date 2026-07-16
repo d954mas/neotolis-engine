@@ -209,7 +209,8 @@ int main(int argc, char *argv[]) {
         max_sprites = (uint32_t)strtoul(argv[next_arg], NULL, 10);
         next_arg++;
     }
-    float max_added_area_percent = 0.0F;
+    nt_atlas_opts_t default_opts = nt_atlas_opts_defaults();
+    float max_added_area_percent = default_opts.max_added_area_percent;
     bool percent_seen = false;
     while (next_arg < argc) {
         if (strcmp(argv[next_arg], "--max-added-area-percent") != 0 || percent_seen || next_arg + 1 >= argc || !parse_added_area_percent(argv[next_arg + 1], &max_added_area_percent)) {

@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "tool_version": "2.0.0",
+    "builder_version": 1,
+    "corpus": "assets/sprites/bigatlas/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "concave",
+      "max_size": 4096,
+      "padding": 2,
+      "max_vertices": 8,
+      "allow_transform": true,
+      "alpha_threshold": 1,
+      "max_added_area_percent": 0,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "mixed_aa",
+      "sprites": 128,
+      "unique": 0,
+      "pages": 1,
+      "region_count": 128,
+      "pack_ms": 27349.0246,
+      "density_fill_frontier": 0.5383,
+      "density_fill_texture": 0.4353,
+      "hull_verts": {
+        "total": 926,
+        "min": 5,
+        "max": 8,
+        "mean": 7.2344
+      }
+    }
+  ],
+  "selected_geometry_proof": {
+    "source": "assets/sprites/bigatlas/ages_ copy.png",
+    "baseline_pack_sha256": "be49168b46924485acf66f0e87f368c46a9b65fcc4664a08d4c42a4c30230094",
+    "selected_pack_sha256": "be49168b46924485acf66f0e87f368c46a9b65fcc4664a08d4c42a4c30230094",
+    "valid": true,
+    "retained_cell_count": 16260,
+    "base_vertex_count": 8,
+    "selected_vertex_count": 8,
+    "opaque_area2": 32520,
+    "base_area2": 32572,
+    "selected_area2": 32572,
+    "added_area2": 0,
+    "lost_area2": 0,
+    "base_overdraw_percent": 0.15990160,
+    "added_area_percent": 0.00000000,
+    "total_overdraw_percent": 0.15990160,
+    "gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}
+  }
+}

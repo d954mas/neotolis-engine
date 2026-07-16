@@ -386,7 +386,10 @@ static bool validate_corpus(const char *path) {
     for (uint32_t i = 0; i < VISUAL_ROW_COUNT; i++) {
         const char *sample = strstr((const char *)bytes, VISUAL_ROWS[i].sample_id);
         const char *shape = sample != NULL ? strstr(sample, VISUAL_ROWS[i].shape_name) : NULL;
-        if (shape == NULL) {
+        double threshold = -1.0;
+        double budget = -1.0;
+        if (shape == NULL || !number_value(sample, "alpha_threshold", &threshold) || !number_value(sample, "max_vertices", &budget) || (uint8_t)threshold != VISUAL_ROWS[i].threshold ||
+            (uint8_t)budget != VISUAL_ROWS[i].budget) {
             ok = false;
             break;
         }

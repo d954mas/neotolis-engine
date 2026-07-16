@@ -48,8 +48,10 @@ if [[ -e "$OUT_ALIAS" ]]; then
     exit 1
 fi
 
-BENCH_EXE="build/tools/research/native-debug/atlas_bench.exe"
-if [[ ! -x "$BENCH_EXE" ]]; then
+BENCH_EXE="build/tools/research/native-debug/atlas_bench"
+if [[ -x "${BENCH_EXE}.exe" ]]; then
+    BENCH_EXE="${BENCH_EXE}.exe"
+elif [[ ! -x "$BENCH_EXE" ]]; then
     echo "atlas_bench must be built before the guard" >&2
     exit 1
 fi
