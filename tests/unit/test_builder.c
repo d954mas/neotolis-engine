@@ -4372,6 +4372,14 @@ void test_rdp_simplify_reduction(void) {
     TEST_ASSERT_EQUAL_UINT32(4, n);
 }
 
+void test_rdp_simplify_restores_input_when_epsilon_would_collapse_polygon(void) {
+    const Point2D hull[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    Point2D out[4] = {{INT32_MIN, INT32_MIN}, {INT32_MIN, INT32_MIN}, {INT32_MIN, INT32_MIN}, {INT32_MIN, INT32_MIN}};
+
+    TEST_ASSERT_EQUAL_UINT32(4, rdp_simplify(hull, 4, 100.0, out));
+    TEST_ASSERT_EQUAL_MEMORY(hull, out, sizeof(hull));
+}
+
 void test_hull_simplify_covering_keeps_earliest_equal_error_pair(void) {
     const Point2D hull[8] = {
         {3, 0}, {7, 0}, {10, 3}, {10, 7}, {7, 10}, {3, 10}, {0, 7}, {0, 3},
@@ -8191,6 +8199,7 @@ int main(void) {
     RUN_TEST(test_convex_hull_collinear);
     RUN_TEST(test_rdp_simplify_no_reduction);
     RUN_TEST(test_rdp_simplify_reduction);
+    RUN_TEST(test_rdp_simplify_restores_input_when_epsilon_would_collapse_polygon);
     RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
     RUN_TEST(test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges);
     RUN_TEST(test_polygon_validate_rejects_invalid_rings_with_stable_reasons);

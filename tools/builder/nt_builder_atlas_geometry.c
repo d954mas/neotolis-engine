@@ -1728,7 +1728,11 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
     free(a_map);
     free(chain);
 
-    return (count >= 3) ? count : n;
+    if (count < 3) {
+        memcpy(out, poly, (size_t)n * sizeof(Point2D));
+        return n;
+    }
+    return count;
 }
 
 /* --- Polygon inflation via Clipper2 (handles concave corners correctly) --- */
