@@ -4221,6 +4221,7 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
 void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
 uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
                                           uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
+uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -4495,6 +4496,25 @@ void test_positive_concave_composes_rdp_then_perp_on_same_candidate(void) {
         kept_real_corner = kept_real_corner || (first_final[i].x == 4 && first_final[i].y == 6);
     }
     TEST_ASSERT_TRUE(kept_real_corner);
+}
+
+void test_positive_candidate_area_tie_break_is_exact_and_winding_independent(void) {
+    const Point2D half_pixel[3] = {{0, 0}, {1, 0}, {0, 1}};
+    const Point2D half_pixel_reversed[3] = {{0, 1}, {1, 0}, {0, 0}};
+    const Point2D whole_pixel[3] = {{0, 0}, {2, 0}, {0, 1}};
+    const Point2D same_area_lexicographically_smaller[3] = {{0, 0}, {1, 0}, {0, 2}};
+
+    TEST_ASSERT_EQUAL_UINT64(1, polygon_abs_twice_area(half_pixel, 3));
+    TEST_ASSERT_EQUAL_UINT64(1, polygon_abs_twice_area(half_pixel_reversed, 3));
+    TEST_ASSERT_EQUAL_UINT64(2, polygon_abs_twice_area(whole_pixel, 3));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_select_positive_candidate(whole_pixel, 3, 0, half_pixel, 3, 9));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_select_positive_candidate(half_pixel, 3, 9, whole_pixel, 3, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_select_positive_candidate(whole_pixel, 3, 7, whole_pixel, 3, 3));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_select_positive_candidate(whole_pixel, 3, 3, same_area_lexicographically_smaller, 3, 3));
+
+    for (uint32_t repeat = 0; repeat < 8; repeat++) {
+        TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_select_positive_candidate(whole_pixel, 3, 0, half_pixel, 3, 9));
+    }
 }
 
 /* fan_triangulate: 4 vertices produces 2 triangles */
@@ -7897,6 +7917,7 @@ int main(void) {
     RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
     RUN_TEST(test_perp_removal_keeps_real_corner_and_stable_ties);
     RUN_TEST(test_positive_concave_composes_rdp_then_perp_on_same_candidate);
+    RUN_TEST(test_positive_candidate_area_tie_break_is_exact_and_winding_independent);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);

@@ -109,6 +109,9 @@ double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_cou
 /* Polygon area in pixels (absolute value). */
 uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count);
 
+/* Exact absolute doubled polygon area. */
+uint64_t polygon_abs_twice_area(const Point2D *poly, uint32_t count);
+
 /* --- Polygon inflation (Clipper2) ------------------------------------ */
 
 /* Inflate a polygon by `amount` pixels using miter joins. Output buffer

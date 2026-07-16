@@ -1304,6 +1304,7 @@ typedef struct {
     double inflate_amt; /* required Clipper2 inflate amount (pixels) */
     double fidelity_error;
     uint32_t generator_ordinal;
+    uint64_t exact_abs_twice_area;
     double est_area; /* scoring key — lower is better */
     bool valid;      /* false = strategy declined / produced degenerate output */
 } GeometryCandidate;
@@ -1347,8 +1348,8 @@ static bool geometry_candidate_better_positive(const GeometryCandidate *candidat
     if (!current->valid || candidate->count != current->count) {
         return !current->valid || candidate->count < current->count;
     }
-    if (candidate->est_area != current->est_area) {
-        return candidate->est_area < current->est_area;
+    if (candidate->exact_abs_twice_area != current->exact_abs_twice_area) {
+        return candidate->exact_abs_twice_area < current->exact_abs_twice_area;
     }
     if (candidate->generator_ordinal != current->generator_ordinal) {
         return candidate->generator_ordinal < current->generator_ordinal;
@@ -1433,6 +1434,7 @@ static bool geometry_finalize_candidate(GeometryCandidate *candidate, const Poin
     }
 
     candidate->fidelity_error = polygon_max_boundary_distance(reference, reference_count, candidate->poly, candidate->count);
+    candidate->exact_abs_twice_area = polygon_abs_twice_area(candidate->poly, candidate->count);
     candidate->est_area = geometry_estimate_inflated_area(candidate->poly, candidate->count, 0.0);
     candidate->inflate_amt = 0.0;
     return true;
@@ -1658,6 +1660,31 @@ uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_c
     uint32_t count = candidate.count;
     geometry_candidate_discard(&candidate);
     return count;
+}
+
+uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal) {
+    if (polygon_validate(first, first_count) != NT_POLYGON_VALID || polygon_validate(second, second_count) != NT_POLYGON_VALID) {
+        return UINT32_MAX;
+    }
+
+    GeometryCandidate candidates[2] = {0};
+    const Point2D *inputs[2] = {first, second};
+    const uint32_t counts[2] = {first_count, second_count};
+    const uint32_t ordinals[2] = {first_ordinal, second_ordinal};
+    for (uint32_t i = 0; i < 2; i++) {
+        candidates[i].poly = (Point2D *)malloc((size_t)counts[i] * sizeof(Point2D));
+        NT_BUILD_ASSERT(candidates[i].poly && "nt_atlas_test_select_positive_candidate: alloc failed");
+        memcpy(candidates[i].poly, inputs[i], (size_t)counts[i] * sizeof(Point2D));
+        candidates[i].count = counts[i];
+        candidates[i].generator_ordinal = ordinals[i];
+        candidates[i].exact_abs_twice_area = polygon_abs_twice_area(inputs[i], counts[i]);
+        candidates[i].valid = true;
+    }
+
+    uint32_t selected = geometry_candidate_better_positive(&candidates[1], &candidates[0]) ? 1U : 0U;
+    geometry_candidate_discard(&candidates[0]);
+    geometry_candidate_discard(&candidates[1]);
+    return selected;
 }
 
 static GeometryCandidate geometry_convex_reduction_candidate(const Point2D *reference, uint32_t reference_count, uint32_t target) {

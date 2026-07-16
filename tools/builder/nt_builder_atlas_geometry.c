@@ -1541,14 +1541,25 @@ void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw
 }
 
 uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count) {
+    uint64_t twice_area = polygon_abs_twice_area(poly, count);
+    return (twice_area >> 1U) + (twice_area & 1U);
+}
+
+uint64_t polygon_abs_twice_area(const Point2D *poly, uint32_t count) {
     if (count < 3) {
         return 0;
     }
 
-    int64_t twice_area = polygon_signed_twice_area(poly, count);
-    if (twice_area < 0) {
-        twice_area = -twice_area;
+    uint64_t positive = 0;
+    uint64_t negative = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t next = (i + 1U) % count;
+        int64_t cross = ((int64_t)poly[i].x * poly[next].y) - ((int64_t)poly[next].x * poly[i].y);
+        uint64_t magnitude = cross < 0 ? (uint64_t)(-(cross + 1)) + 1U : (uint64_t)cross;
+        uint64_t *sum = cross < 0 ? &negative : &positive;
+        NT_BUILD_ASSERT(UINT64_MAX - *sum >= magnitude && "polygon area overflow");
+        *sum += magnitude;
     }
 
-    return ((uint64_t)twice_area + 1ULL) >> 1U;
+    return positive >= negative ? positive - negative : negative - positive;
 }
