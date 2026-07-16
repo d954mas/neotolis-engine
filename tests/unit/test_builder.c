@@ -4407,6 +4407,78 @@ void test_polygon_coverage_metrics_counts_exact_pixel_centers(void) {
     TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(poly, 4, binary, 4, 4) > 0.0);
 }
 
+void test_polygon_full_cell_coverage_rejects_center_only_triangle(void) {
+    const Point2D half_cell[3] = {{0, 0}, {1, 0}, {0, 1}};
+    const Point2D whole_cell[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint8_t retained[1] = {1};
+    uint32_t retained_count = 0;
+    uint32_t lost_count = 0;
+
+    TEST_ASSERT_TRUE(point_in_polygon_f(half_cell, 3, 0.5, 0.5) || polygon_coverage_metrics(half_cell, 3, retained, 1, 1).lost_retained_pixels == 0);
+    TEST_ASSERT_FALSE(nt_polygon_covers_retained_cells(half_cell, 3, retained, 1, 1, &retained_count, &lost_count));
+    TEST_ASSERT_EQUAL_UINT32(1, retained_count);
+    TEST_ASSERT_EQUAL_UINT32(1, lost_count);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(whole_cell, 4, retained, 1, 1, &retained_count, &lost_count));
+    TEST_ASSERT_EQUAL_UINT32(0, lost_count);
+}
+
+void test_polygon_full_cell_coverage_rejects_open_cell_boundary_crossing(void) {
+    const Point2D crossing[7] = {{0, 0}, {1, 0}, {1, 1}, {2, 0}, {3, 0}, {3, 3}, {0, 3}};
+    const Point2D container[4] = {{0, 0}, {3, 0}, {3, 3}, {0, 3}};
+    uint8_t retained[3 * 3] = {0};
+    retained[1] = 1;
+    uint32_t retained_count = 0;
+    uint32_t lost_count = 0;
+
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(crossing, 7));
+    TEST_ASSERT_FALSE(nt_polygon_covers_retained_cells(crossing, 7, retained, 3, 3, &retained_count, &lost_count));
+    TEST_ASSERT_EQUAL_UINT32(1, retained_count);
+    TEST_ASSERT_EQUAL_UINT32(1, lost_count);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(container, 4, retained, 3, 3, &retained_count, &lost_count));
+    TEST_ASSERT_EQUAL_UINT32(1, retained_count);
+    TEST_ASSERT_EQUAL_UINT32(0, lost_count);
+}
+
+void test_polygon_validated_triangulation_rejects_corrupt_lists(void) {
+    const Point2D concave[6] = {{0, 0}, {4, 0}, {4, 4}, {2, 2}, {1, 4}, {0, 4}};
+    uint16_t indices[NT_POLYGON_MAX_TRIANGLE_INDICES] = {0};
+    uint32_t index_count = 0;
+    uint64_t area2 = 0;
+
+    TEST_ASSERT_TRUE(nt_polygon_triangulate_validated(concave, 6, indices, &index_count, &area2));
+    TEST_ASSERT_EQUAL_UINT32(12, index_count);
+    TEST_ASSERT_EQUAL_UINT64(polygon_abs_twice_area(concave, 6), area2);
+    TEST_ASSERT_TRUE(nt_polygon_triangles_validate(concave, 6, indices, index_count, NULL));
+
+    uint16_t saved = indices[0];
+    indices[0] = 6;
+    TEST_ASSERT_FALSE(nt_polygon_triangles_validate(concave, 6, indices, index_count, NULL));
+    indices[0] = saved;
+    TEST_ASSERT_FALSE(nt_polygon_triangles_validate(concave, 6, indices, index_count - 3, NULL));
+    indices[1] = indices[0];
+    TEST_ASSERT_FALSE(nt_polygon_triangles_validate(concave, 6, indices, index_count, NULL));
+}
+
+void test_polygon_feasibility_rejects_bounds_topology_winding_and_budget(void) {
+    const uint8_t retained[4] = {1, 1, 1, 1};
+    const Point2D valid[4] = {{0, 0}, {2, 0}, {2, 2}, {0, 2}};
+    const Point2D out_of_bounds[4] = {{-1, 0}, {2, 0}, {2, 2}, {0, 2}};
+    const Point2D repeated[4] = {{0, 0}, {2, 0}, {2, 0}, {0, 2}};
+    const Point2D clockwise[4] = {{0, 0}, {0, 2}, {2, 2}, {2, 0}};
+
+    nt_polygon_feasibility_t proof = nt_polygon_feasibility(valid, 4, retained, 2, 2, 4);
+    TEST_ASSERT_TRUE(proof.valid);
+    TEST_ASSERT_EQUAL_UINT64(8, proof.retained_area2);
+    TEST_ASSERT_EQUAL_UINT64(8, proof.polygon_area2);
+    TEST_ASSERT_EQUAL_UINT64(0, proof.lost_area2);
+    TEST_ASSERT_EQUAL_UINT32(6, proof.triangle_index_count);
+
+    TEST_ASSERT_FALSE(nt_polygon_feasibility(valid, 4, retained, 2, 2, 3).valid);
+    TEST_ASSERT_FALSE(nt_polygon_feasibility(out_of_bounds, 4, retained, 2, 2, 4).valid);
+    TEST_ASSERT_FALSE(nt_polygon_feasibility(repeated, 4, retained, 2, 2, 4).valid);
+    TEST_ASSERT_FALSE(nt_polygon_feasibility(clockwise, 4, retained, 2, 2, 4).valid);
+}
+
 void test_polygon_boundary_distance_rejects_oversized_container(void) {
     const Point2D reference[8] = {
         {0, 0}, {8, 0}, {8, 8}, {5, 8}, {5, 3}, {3, 3}, {3, 8}, {0, 8},
@@ -8000,6 +8072,10 @@ int main(void) {
     RUN_TEST(test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges);
     RUN_TEST(test_polygon_validate_rejects_invalid_rings_with_stable_reasons);
     RUN_TEST(test_polygon_coverage_metrics_counts_exact_pixel_centers);
+    RUN_TEST(test_polygon_full_cell_coverage_rejects_center_only_triangle);
+    RUN_TEST(test_polygon_full_cell_coverage_rejects_open_cell_boundary_crossing);
+    RUN_TEST(test_polygon_validated_triangulation_rejects_corrupt_lists);
+    RUN_TEST(test_polygon_feasibility_rejects_bounds_topology_winding_and_budget);
     RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
     RUN_TEST(test_perp_removal_keeps_real_corner_and_stable_ties);
     RUN_TEST(test_positive_concave_composes_rdp_then_perp_on_same_candidate);

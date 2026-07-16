@@ -1306,7 +1306,9 @@ static void pipeline_dedup(AtlasPipeline *p) {
  * directly comparable. */
 
 typedef struct {
-    Point2D *poly;      /* heap-allocated, caller frees if not adopted */
+    Point2D *poly; /* heap-allocated, caller frees if not adopted */
+    uint16_t *triangle_indices;
+    uint32_t triangle_index_count;
     uint32_t count;     /* vertex count */
     double inflate_amt; /* required Clipper2 inflate amount (pixels) */
     double fidelity_error;
@@ -1332,22 +1334,28 @@ static double geometry_estimate_inflated_area(const Point2D *poly, uint32_t coun
     return (double)polygon_area_pixels(poly, count) + (perim * inflate_amt) + (3.14159 * inflate_amt * inflate_amt);
 }
 
+static void geometry_candidate_discard(GeometryCandidate *candidate);
+
 /* If candidate is better than current, free current->poly and take candidate.
  * Otherwise free candidate->poly. Either way ownership is resolved on return. */
 static void geometry_maybe_adopt(GeometryCandidate *current, GeometryCandidate candidate) {
     if (!candidate.valid) {
+        geometry_candidate_discard(&candidate);
         return;
     }
     if (!current->valid || candidate.est_area < current->est_area) {
         free(current->poly);
+        free(current->triangle_indices);
         *current = candidate;
     } else {
         free(candidate.poly);
+        free(candidate.triangle_indices);
     }
 }
 
 static void geometry_candidate_discard(GeometryCandidate *candidate) {
     free(candidate->poly);
+    free(candidate->triangle_indices);
     *candidate = (GeometryCandidate){0};
 }
 
@@ -1822,6 +1830,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     if (best.valid) {
                         p->hull_vertices[idx] = best.poly;
                         p->vertex_counts[idx] = best.count;
+                        free(best.triangle_indices);
                     } else {
                         push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL, tw, th);
                     }
@@ -1935,6 +1944,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         if (best.valid) {
                             p->hull_vertices[idx] = best.poly;
                             p->vertex_counts[idx] = best.count;
+                            free(best.triangle_indices);
                         } else {
                             convex_reason = "positive tolerance finalization failed";
                         }

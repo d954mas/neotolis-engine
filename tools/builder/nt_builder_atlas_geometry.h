@@ -84,11 +84,43 @@ typedef struct {
     uint32_t extra_covered_pixels;
 } nt_polygon_coverage_metrics_t;
 
+enum {
+    NT_POLYGON_MAX_VERTICES = 16,
+    NT_POLYGON_MAX_TRIANGLE_INDICES = (NT_POLYGON_MAX_VERTICES - 2) * 3,
+};
+
+typedef struct {
+    bool bounds_valid;
+    bool topology_valid;
+    bool coverage_valid;
+    bool triangulation_valid;
+    bool valid;
+    uint32_t retained_cell_count;
+    uint32_t lost_retained_cell_count;
+    uint32_t triangle_index_count;
+    uint64_t retained_area2;
+    uint64_t polygon_area2;
+    uint64_t lost_area2;
+    uint16_t triangle_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+} nt_polygon_feasibility_t;
+
 /* Validate a closed CCW ring. Adjacent edges may share only their common endpoint. */
 nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count);
 
 /* Count retained centers outside and transparent centers inside the polygon. */
 nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th);
+
+/* Prove that every retained unit cell is wholly inside or on the polygon. */
+bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells);
+
+/* Validate an existing triangle list against the polygon's exact topology and area. */
+bool nt_polygon_triangles_validate(const Point2D *poly, uint32_t poly_count, const uint16_t *indices, uint32_t index_count, uint64_t *out_area2);
+
+/* Triangulate without fallback and publish only a fully validated triangle list. */
+bool nt_polygon_triangulate_validated(const Point2D *poly, uint32_t poly_count, uint16_t *out_indices, uint32_t *out_index_count, uint64_t *out_area2);
+
+/* One fail-closed proof for bounds, topology, coverage, and triangulation. */
+nt_polygon_feasibility_t nt_polygon_feasibility(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices);
 
 /* Ray-casting point-in-polygon test (even-odd rule). */
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);

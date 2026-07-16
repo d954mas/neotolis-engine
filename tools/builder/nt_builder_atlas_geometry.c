@@ -154,6 +154,268 @@ nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count) {
     return twice_area > 0 ? NT_POLYGON_VALID : NT_POLYGON_INVALID_WINDING;
 }
 
+static bool point_in_or_on_polygon_scaled(const Point2D *poly, uint32_t count, int64_t px, int64_t py, int64_t scale) {
+    int winding = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1U) % count];
+        int64_t ax = (int64_t)a.x * scale;
+        int64_t ay = (int64_t)a.y * scale;
+        int64_t bx = (int64_t)b.x * scale;
+        int64_t by = (int64_t)b.y * scale;
+        int64_t cross = ((bx - ax) * (py - ay)) - ((by - ay) * (px - ax));
+        if (cross == 0 && px >= (ax < bx ? ax : bx) && px <= (ax > bx ? ax : bx) && py >= (ay < by ? ay : by) && py <= (ay > by ? ay : by)) {
+            return true;
+        }
+        if (ay <= py) {
+            if (by > py && cross > 0) {
+                winding++;
+            }
+        } else if (by <= py && cross < 0) {
+            winding--;
+        }
+    }
+    return winding != 0;
+}
+
+static bool segment_crosses_open_cell(Point2D a, Point2D b, uint32_t x, uint32_t y) {
+    int64_t ax = (int64_t)a.x * 2;
+    int64_t ay = (int64_t)a.y * 2;
+    int64_t bx = (int64_t)b.x * 2;
+    int64_t by = (int64_t)b.y * 2;
+    int64_t left = (int64_t)x * 2;
+    int64_t top = (int64_t)y * 2;
+    int64_t right = left + 2;
+    int64_t bottom = top + 2;
+    int64_t min_x = ax < bx ? ax : bx;
+    int64_t max_x = ax > bx ? ax : bx;
+    int64_t min_y = ay < by ? ay : by;
+    int64_t max_y = ay > by ? ay : by;
+    if (max_x <= left || min_x >= right || max_y <= top || min_y >= bottom) {
+        return false;
+    }
+
+    const int64_t corners[4][2] = {{left, top}, {right, top}, {right, bottom}, {left, bottom}};
+    int64_t min_cross = INT64_MAX;
+    int64_t max_cross = INT64_MIN;
+    for (uint32_t i = 0; i < 4; i++) {
+        int64_t cross = ((bx - ax) * (corners[i][1] - ay)) - ((by - ay) * (corners[i][0] - ax));
+        min_cross = cross < min_cross ? cross : min_cross;
+        max_cross = cross > max_cross ? cross : max_cross;
+    }
+    return min_cross < 0 && max_cross > 0;
+}
+
+bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells) {
+    uint32_t retained_cells = 0;
+    uint32_t lost_cells = 0;
+    if (!poly || poly_count < 3 || !binary) {
+        if (out_retained_cells) {
+            *out_retained_cells = 0;
+        }
+        if (out_lost_cells) {
+            *out_lost_cells = 0;
+        }
+        return false;
+    }
+
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (binary[((size_t)y * tw) + x] == 0) {
+                continue;
+            }
+            retained_cells++;
+            bool covered = point_in_or_on_polygon_scaled(poly, poly_count, x, y, 1) && point_in_or_on_polygon_scaled(poly, poly_count, (int64_t)x + 1, y, 1) &&
+                           point_in_or_on_polygon_scaled(poly, poly_count, (int64_t)x + 1, (int64_t)y + 1, 1) && point_in_or_on_polygon_scaled(poly, poly_count, x, (int64_t)y + 1, 1);
+            for (uint32_t edge = 0; covered && edge < poly_count; edge++) {
+                covered = !segment_crosses_open_cell(poly[edge], poly[(edge + 1U) % poly_count], x, y);
+            }
+            lost_cells += covered ? 0U : 1U;
+        }
+    }
+
+    if (out_retained_cells) {
+        *out_retained_cells = retained_cells;
+    }
+    if (out_lost_cells) {
+        *out_lost_cells = lost_cells;
+    }
+    return retained_cells > 0 && lost_cells == 0;
+}
+
+typedef struct {
+    uint16_t from;
+    uint16_t to;
+} TriangleEdge;
+
+static bool polygon_vertices_adjacent(uint16_t a, uint16_t b, uint32_t count) { return ((uint32_t)a + 1U) % count == b || ((uint32_t)b + 1U) % count == a; }
+
+static bool triangle_diagonal_inside(const Point2D *poly, uint32_t count, uint16_t from, uint16_t to) {
+    if (polygon_vertices_adjacent(from, to, count)) {
+        return true;
+    }
+    Point2D a = poly[from];
+    Point2D b = poly[to];
+    if (!point_in_or_on_polygon_scaled(poly, count, (int64_t)a.x + b.x, (int64_t)a.y + b.y, 2)) {
+        return false;
+    }
+    for (uint32_t edge = 0; edge < count; edge++) {
+        uint32_t next = (edge + 1U) % count;
+        if (edge == from || edge == to || next == from || next == to) {
+            continue;
+        }
+        if (segments_intersect_or_touch(a, b, poly[edge], poly[next])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+bool nt_polygon_triangles_validate(const Point2D *poly, uint32_t poly_count, const uint16_t *indices, uint32_t index_count, uint64_t *out_area2) {
+    if (!poly || !indices || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || polygon_validate(poly, poly_count) != NT_POLYGON_VALID || index_count != (poly_count - 2U) * 3U) {
+        return false;
+    }
+
+    TriangleEdge edges[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    uint64_t triangle_area2 = 0;
+    for (uint32_t triangle = 0; triangle < index_count / 3U; triangle++) {
+        uint16_t a = indices[(triangle * 3U) + 0U];
+        uint16_t b = indices[(triangle * 3U) + 1U];
+        uint16_t c = indices[(triangle * 3U) + 2U];
+        if (a >= poly_count || b >= poly_count || c >= poly_count || a == b || b == c || c == a) {
+            return false;
+        }
+        int64_t area2 = cross2d(poly[a], poly[b], poly[c]);
+        if (area2 <= 0 || UINT64_MAX - triangle_area2 < (uint64_t)area2) {
+            return false;
+        }
+        triangle_area2 += (uint64_t)area2;
+        TriangleEdge tri_edges[3] = {{a, b}, {b, c}, {c, a}};
+        for (uint32_t edge = 0; edge < 3; edge++) {
+            edges[(triangle * 3U) + edge] = tri_edges[edge];
+            if (!triangle_diagonal_inside(poly, poly_count, tri_edges[edge].from, tri_edges[edge].to)) {
+                return false;
+            }
+        }
+    }
+    if (triangle_area2 != polygon_abs_twice_area(poly, poly_count)) {
+        return false;
+    }
+
+    bool consumed[NT_POLYGON_MAX_TRIANGLE_INDICES] = {0};
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (consumed[i]) {
+            continue;
+        }
+        uint32_t same = 0;
+        uint32_t reverse = 0;
+        for (uint32_t j = i; j < index_count; j++) {
+            if ((edges[j].from == edges[i].from && edges[j].to == edges[i].to) || (edges[j].from == edges[i].to && edges[j].to == edges[i].from)) {
+                consumed[j] = true;
+                same += edges[j].from == edges[i].from && edges[j].to == edges[i].to ? 1U : 0U;
+                reverse += edges[j].from == edges[i].to && edges[j].to == edges[i].from ? 1U : 0U;
+            }
+        }
+        bool boundary = ((uint32_t)edges[i].from + 1U) % poly_count == edges[i].to;
+        if ((boundary && (same != 1U || reverse != 0U)) || (!boundary && (same != 1U || reverse != 1U))) {
+            return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (polygon_vertices_adjacent(edges[i].from, edges[i].to, poly_count)) {
+            continue;
+        }
+        for (uint32_t j = i + 1U; j < index_count; j++) {
+            if (polygon_vertices_adjacent(edges[j].from, edges[j].to, poly_count) || edges[i].from == edges[j].from || edges[i].from == edges[j].to || edges[i].to == edges[j].from ||
+                edges[i].to == edges[j].to) {
+                continue;
+            }
+            if (segments_intersect_or_touch(poly[edges[i].from], poly[edges[i].to], poly[edges[j].from], poly[edges[j].to])) {
+                return false;
+            }
+        }
+    }
+
+    if (out_area2) {
+        *out_area2 = triangle_area2;
+    }
+    return true;
+}
+
+bool nt_polygon_triangulate_validated(const Point2D *poly, uint32_t poly_count, uint16_t *out_indices, uint32_t *out_index_count, uint64_t *out_area2) {
+    if (!poly || !out_indices || !out_index_count || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || polygon_validate(poly, poly_count) != NT_POLYGON_VALID) {
+        return false;
+    }
+    uint32_t index_count = (poly_count - 2U) * 3U;
+    if (poly_count == 3) {
+        out_indices[0] = 0;
+        out_indices[1] = 1;
+        out_indices[2] = 2;
+    } else {
+        int32_t xy[NT_POLYGON_MAX_VERTICES * 2];
+        for (uint32_t i = 0; i < poly_count; i++) {
+            xy[(size_t)i * 2U] = poly[i].x;
+            xy[((size_t)i * 2U) + 1U] = poly[i].y;
+        }
+        uint16_t *generated = NULL;
+        uint32_t triangle_count = nt_clipper2_triangulate(xy, poly_count, &generated);
+        if (!generated || triangle_count != poly_count - 2U) {
+            free(generated);
+            return false;
+        }
+        memcpy(out_indices, generated, (size_t)index_count * sizeof(uint16_t));
+        free(generated);
+        for (uint32_t triangle = 0; triangle < triangle_count; triangle++) {
+            uint16_t *a = &out_indices[(triangle * 3U) + 0U];
+            uint16_t *b = &out_indices[(triangle * 3U) + 1U];
+            uint16_t *c = &out_indices[(triangle * 3U) + 2U];
+            if (*a >= poly_count || *b >= poly_count || *c >= poly_count) {
+                return false;
+            }
+            if (cross2d(poly[*a], poly[*b], poly[*c]) < 0) {
+                uint16_t swap = *b;
+                *b = *c;
+                *c = swap;
+            }
+        }
+    }
+    if (!nt_polygon_triangles_validate(poly, poly_count, out_indices, index_count, out_area2)) {
+        return false;
+    }
+    *out_index_count = index_count;
+    return true;
+}
+
+nt_polygon_feasibility_t nt_polygon_feasibility(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices) {
+    nt_polygon_feasibility_t result = {0};
+    if (!poly || !binary || poly_count < 3 || poly_count > max_vertices || poly_count > NT_POLYGON_MAX_VERTICES || tw == 0 || th == 0 || tw > INT16_MAX || th > INT16_MAX) {
+        return result;
+    }
+    result.bounds_valid = true;
+    for (uint32_t i = 0; i < poly_count; i++) {
+        if (poly[i].x < 0 || poly[i].y < 0 || (uint32_t)poly[i].x > tw || (uint32_t)poly[i].y > th) {
+            result.bounds_valid = false;
+            return result;
+        }
+    }
+    result.topology_valid = polygon_validate(poly, poly_count) == NT_POLYGON_VALID;
+    if (!result.topology_valid) {
+        return result;
+    }
+    result.coverage_valid = nt_polygon_covers_retained_cells(poly, poly_count, binary, tw, th, &result.retained_cell_count, &result.lost_retained_cell_count);
+    result.retained_area2 = (uint64_t)result.retained_cell_count * 2U;
+    result.lost_area2 = (uint64_t)result.lost_retained_cell_count * 2U;
+    result.polygon_area2 = polygon_abs_twice_area(poly, poly_count);
+    if (!result.coverage_valid) {
+        return result;
+    }
+    result.triangulation_valid = nt_polygon_triangulate_validated(poly, poly_count, result.triangle_indices, &result.triangle_index_count, NULL);
+    result.valid = result.bounds_valid && result.topology_valid && result.coverage_valid && result.triangulation_valid;
+    return result;
+}
+
 /* --- qsort comparator: sort by x, then by y --- */
 
 static int point2d_cmp(const void *a, const void *b) {
@@ -596,42 +858,13 @@ uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
 /* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
 
 /* Triangulates a simple polygon (convex or concave). Uses Clipper2 CDT
- * for better triangle quality than ear-clipping. Falls back to fan_triangulate
- * on failure (e.g., self-intersecting input).
+ * and publishes only a fully validated result.
  * Input:  polygon vertices (CCW winding), vertex count n.
  * Output: triangle indices (local 0..n-1) written to 'indices'.
  * Returns number of triangles. */
 uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices) {
-    if (n < 3) {
-        return 0;
-    }
-    if (n == 3) {
-        indices[0] = 0;
-        indices[1] = 1;
-        indices[2] = 2;
-        return 1;
-    }
-    /* Convert to flat xy and call Clipper2 CDT via bridge */
-    int32_t stack_xy[64];
-    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc((size_t)n * 2 * sizeof(int32_t));
-    NT_BUILD_ASSERT(xy && "triangulate: alloc failed");
-    for (size_t i = 0; i < n; i++) {
-        xy[i * 2] = poly[i].x;
-        xy[(i * 2) + 1] = poly[i].y;
-    }
-    uint16_t *cdt_indices = NULL;
-    uint32_t tri_count = nt_clipper2_triangulate(xy, n, &cdt_indices);
-    if (xy != stack_xy) {
-        free(xy);
-    }
-    if (tri_count == 0 || !cdt_indices) {
-        /* Clipper2 CDT failed (degenerate/self-intersecting) — fallback to fan */
-        free(cdt_indices);
-        return fan_triangulate(n, indices);
-    }
-    memcpy(indices, cdt_indices, (size_t)tri_count * 3 * sizeof(uint16_t));
-    free(cdt_indices);
-    return tri_count;
+    uint32_t index_count = 0;
+    return nt_polygon_triangulate_validated(poly, n, indices, &index_count, NULL) ? index_count / 3U : 0U;
 }
 
 /* --- Point-in-polygon test (ray casting, even-odd rule) --- */
