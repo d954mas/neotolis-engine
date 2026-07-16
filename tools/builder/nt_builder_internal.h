@@ -61,7 +61,8 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    float tracer_tolerance_override;  /* 0 = atlas default */
+    float max_added_area_percent_override;
+    bool has_max_added_area_percent_override;
     uint8_t alpha_threshold_override; /* 0 = atlas default */
     uint8_t shape_override;           /* 0 = atlas default */
     uint8_t rotate_override;          /* 0 = atlas default */

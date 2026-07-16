@@ -477,12 +477,12 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    enum { ATLAS_CACHE_KEY_VERSION = 13 };
+    enum { ATLAS_CACHE_KEY_VERSION = 14 };
 
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + sizeof(uint8_t) };
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (2 * sizeof(uint8_t)) };
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
@@ -508,8 +508,10 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
         sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
         sprite_buf[ov_off + 11] = sprites[i].margin_override;
         sprite_buf[ov_off + 12] = sprites[i].extrude_override;
-        memcpy(sprite_buf + ov_off + 13, &sprites[i].tracer_tolerance_override, sizeof(float));
+        float area_percent = sprites[i].has_max_added_area_percent_override ? sprites[i].max_added_area_percent_override : 0.0F;
+        memcpy(sprite_buf + ov_off + 13, &area_percent, sizeof(float));
         sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override;
+        sprite_buf[ov_off + 14 + sizeof(float)] = sprites[i].has_max_added_area_percent_override ? 1 : 0;
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -534,8 +536,8 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->extrude);
     memcpy(opts_buf + pos, &opts->alpha_threshold, sizeof(opts->alpha_threshold));
     pos += (uint32_t)sizeof(opts->alpha_threshold);
-    memcpy(opts_buf + pos, &opts->tracer_tolerance, sizeof(opts->tracer_tolerance));
-    pos += (uint32_t)sizeof(opts->tracer_tolerance);
+    memcpy(opts_buf + pos, &opts->max_added_area_percent, sizeof(opts->max_added_area_percent));
+    pos += (uint32_t)sizeof(opts->max_added_area_percent);
     memcpy(opts_buf + pos, &opts->max_vertices, sizeof(opts->max_vertices));
     pos += (uint32_t)sizeof(opts->max_vertices);
     /* Only pack/compose-affecting opts go here. Post-pack fields (format,
@@ -761,7 +763,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     NT_BUILD_ASSERT(opts->padding <= opts->max_size && "nt_atlas_begin: padding exceeds max_size");
     NT_BUILD_ASSERT(opts->margin <= opts->max_size && "nt_atlas_begin: margin exceeds max_size");
     NT_BUILD_ASSERT(opts->extrude <= opts->max_size && "nt_atlas_begin: extrude exceeds max_size");
-    NT_BUILD_ASSERT(isfinite(opts->tracer_tolerance) && opts->tracer_tolerance >= 0.0F && "nt_atlas_begin: tracer_tolerance must be finite and non-negative");
+    NT_BUILD_ASSERT(isfinite(opts->max_added_area_percent) && opts->max_added_area_percent >= 0.0F && "nt_atlas_begin: max_added_area_percent must be finite and non-negative");
     /* unsigned cast catches a negative value cast into the enum too. */
     NT_BUILD_ASSERT((unsigned)opts->shape <= (unsigned)NT_ATLAS_SHAPE_CONCAVE_CONTOUR && "nt_atlas_begin: opts.shape out of range");
     /* Simple AABB edge extrude needs a rectangular footprint; polygon packing
@@ -790,8 +792,8 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     NT_BUILD_ASSERT(!ctx->active_atlas && "nt_atlas_begin: nested atlas not allowed");
     nt_atlas_opts_t resolved = opts ? *opts : nt_atlas_opts_defaults();
     resolved.format = atlas_assert_opts(&resolved);
-    if (resolved.tracer_tolerance == 0.0F) {
-        resolved.tracer_tolerance = 0.0F;
+    if (resolved.max_added_area_percent == 0.0F) {
+        resolved.max_added_area_percent = 0.0F;
     }
     if (resolved.compress) {
         resolved.gen_mipmaps = true;
@@ -833,9 +835,9 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
 static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_opts_t *opts) {
     nt_atlas_sprite_opts_t resolved = opts ? *opts : nt_atlas_sprite_opts_defaults();
     NT_BUILD_ASSERT(isfinite(resolved.origin_x) && isfinite(resolved.origin_y) && "atlas_add*: origin must be finite (no NaN/inf)");
-    NT_BUILD_ASSERT(isfinite(resolved.tracer_tolerance) && resolved.tracer_tolerance >= 0.0F && "atlas_add*: tracer_tolerance must be finite and non-negative");
-    if (resolved.tracer_tolerance == 0.0F) {
-        resolved.tracer_tolerance = 0.0F;
+    NT_BUILD_ASSERT(isfinite(resolved.max_added_area_percent) && resolved.max_added_area_percent >= 0.0F && "atlas_add*: max_added_area_percent must be finite and non-negative");
+    if (!resolved.has_max_added_area_percent || resolved.max_added_area_percent == 0.0F) {
+        resolved.max_added_area_percent = 0.0F;
     }
     return resolved;
 }
@@ -876,7 +878,8 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->slice9_right = sopts->slice9_right;
     sprite->slice9_top = sopts->slice9_top;
     sprite->slice9_bottom = sopts->slice9_bottom;
-    sprite->tracer_tolerance_override = sopts->tracer_tolerance;
+    sprite->max_added_area_percent_override = sopts->max_added_area_percent;
+    sprite->has_max_added_area_percent_override = sopts->has_max_added_area_percent;
     sprite->alpha_threshold_override = sopts->alpha_threshold;
     sprite->shape_override = sopts->shape;
     sprite->rotate_override = sopts->allow_rotate;
@@ -1085,7 +1088,7 @@ void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_
 
 typedef struct {
     uint8_t alpha_threshold;
-    float tracer_tolerance;
+    float max_added_area_percent;
     uint8_t max_vertices;
     nt_atlas_shape_t shape;
 } AtlasGeometryOpts;
@@ -1093,7 +1096,7 @@ typedef struct {
 static AtlasGeometryOpts resolve_geometry_opts(const NtAtlasSpriteInput *sprite, const nt_atlas_opts_t *atlas) {
     AtlasGeometryOpts resolved = {
         .alpha_threshold = sprite->alpha_threshold_override ? sprite->alpha_threshold_override : atlas->alpha_threshold,
-        .tracer_tolerance = sprite->tracer_tolerance_override != 0.0F ? sprite->tracer_tolerance_override : atlas->tracer_tolerance,
+        .max_added_area_percent = sprite->has_max_added_area_percent_override ? sprite->max_added_area_percent_override : atlas->max_added_area_percent,
         .max_vertices = sprite->max_verts_override ? sprite->max_verts_override : atlas->max_vertices,
         .shape = atlas->shape,
     };
@@ -1251,9 +1254,10 @@ static void pipeline_dedup(AtlasPipeline *p) {
             const NtAtlasSpriteInput *so = &p->sprites[orig];
             /* Different slice9/shape/rotate constraints require separate placement */
             bool meta_match = sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
-                              sc->tracer_tolerance_override == so->tracer_tolerance_override && sc->alpha_threshold_override == so->alpha_threshold_override &&
-                              sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override &&
-                              sc->margin_override == so->margin_override && sc->extrude_override == so->extrude_override;
+                              sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
+                              (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
+                              sc->alpha_threshold_override == so->alpha_threshold_override && sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override &&
+                              sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override && sc->extrude_override == so->extrude_override;
             if (meta_match && p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
                 bool pixels_match = true;
                 uint32_t tw = p->trim_w[curr_idx];
@@ -1810,8 +1814,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
 
             if (effective_shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
-                if (geometry_opts->tracer_tolerance > 0.0F) {
-                    GeometryCandidate best = geometry_build_convex_positive(binary, tw, th, effective_max_verts, (double)geometry_opts->tracer_tolerance);
+                if (geometry_opts->max_added_area_percent > 0.0F) {
+                    GeometryCandidate best = geometry_build_convex_positive(binary, tw, th, effective_max_verts, (double)geometry_opts->max_added_area_percent);
                     if (best.valid) {
                         p->hull_vertices[idx] = best.poly;
                         p->vertex_counts[idx] = best.count;
@@ -1922,8 +1926,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     uint32_t clean_count = remove_collinear(contour, contour_count, clean);
                     free(contour);
 
-                    if (geometry_opts->tracer_tolerance > 0.0F) {
-                        GeometryCandidate best = geometry_select_positive_concave(clean, clean_count, binary_source, tw, th, effective_max_verts, (double)geometry_opts->tracer_tolerance);
+                    if (geometry_opts->max_added_area_percent > 0.0F) {
+                        GeometryCandidate best = geometry_select_positive_concave(clean, clean_count, binary_source, tw, th, effective_max_verts, (double)geometry_opts->max_added_area_percent);
                         free(clean);
                         if (best.valid) {
                             p->hull_vertices[idx] = best.poly;

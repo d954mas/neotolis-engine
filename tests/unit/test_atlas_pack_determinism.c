@@ -126,7 +126,7 @@ static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = shape;
-    opts.tracer_tolerance = tolerance;
+    opts.max_added_area_percent = tolerance;
     NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
     uint8_t *bufs[CORPUS_COUNT] = {0};
@@ -139,7 +139,8 @@ static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape
         nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
         sprite_opts.name = s->name;
         if (sprite_override && s->kind == SPR_TRI_RAMP) {
-            sprite_opts.tracer_tolerance = 2.0F;
+            sprite_opts.max_added_area_percent = 2.0F;
+            sprite_opts.has_max_added_area_percent = true;
             sprite_opts.alpha_threshold = 128;
         }
         nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &sprite_opts);

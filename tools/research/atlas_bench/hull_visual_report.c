@@ -527,7 +527,7 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
     opts.shape = row->shape;
     opts.alpha_threshold = strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? 1U : row->threshold;
     opts.max_vertices = row->budget;
-    opts.tracer_tolerance = (float)column->tolerance;
+    opts.max_added_area_percent = (float)column->tolerance;
     opts.allow_transform = false;
     opts.power_of_two = false;
     opts.gen_mipmaps = false;

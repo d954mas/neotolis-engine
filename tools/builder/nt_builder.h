@@ -344,7 +344,7 @@ typedef struct {
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
     bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
     /* New public controls stay after the complete legacy positional field list. */
-    float tracer_tolerance; /* pixel-domain simplification tolerance (default: 0.0F = legacy; ignored by RECT) */
+    float max_added_area_percent; /* max simplification-added area relative to retained-pixel area (default: 10%) */
 } nt_atlas_opts_t;
 
 /* Default atlas options */
@@ -357,7 +357,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .margin = 0,
         .extrude = 0,
         .alpha_threshold = 1,
-        .tracer_tolerance = 0.0F,
+        .max_added_area_percent = 10.0F,
         .max_vertices = 8,
         .shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR,
         .allow_transform = true,
@@ -428,8 +428,9 @@ typedef struct {
      * The packing footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
     /* New public controls stay after the complete legacy positional field list. */
-    float tracer_tolerance;  /* 0 = atlas default; finite and non-negative; ignored by RECT */
-    uint8_t alpha_threshold; /* 0 = atlas default */
+    float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
+    uint8_t alpha_threshold;         /* 0 = atlas default */
+    bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

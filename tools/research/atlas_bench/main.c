@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
     opts.shape = shape;
     opts.max_size = max_size;
     opts.max_vertices = BENCH_MAX_VERTICES;
-    opts.tracer_tolerance = tracer_tolerance;
+    opts.max_added_area_percent = tracer_tolerance;
 
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     bench_add_data_t add = {atlas, 0, max_sprites};
@@ -186,7 +186,7 @@ int main(int argc, char *argv[]) {
     run.opts_max_vertices = opts.max_vertices;
     run.opts_allow_transform = opts.allow_transform ? 1 : 0;
     run.opts_alpha_threshold = opts.alpha_threshold;
-    run.opts_tracer_tolerance = opts.tracer_tolerance;
+    run.opts_tracer_tolerance = opts.max_added_area_percent;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;
     /* The pack format does not expose dedup or cache counters. */
     run.cache_hits = 0;
