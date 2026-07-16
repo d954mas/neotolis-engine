@@ -5,7 +5,7 @@
   "builder_threads": 1,
   "corpus_sha256": "86be6b0b73e16011beff9a100fc724c978023369b57b2209f4563f8f6bc37934",
   "settings_sha256": "6896129518e7cb46affd30ae65546fd665e32f8d42b40a0d5fca367cddaac2f5",
-  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are 926 at 0%, 782 at 2/5%, and 682 at 10/15/25%; 10% captures the final measured reduction and larger allowances add no gain.",
+  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are 926 at 0%, 782 at 2%, 738 at 5%, 682 at 10%, 656 at 15%, and 604 at 25%. 10% is the conservative default: it captures most of the measured reduction before the more aggressive 15/25% range.",
   "default_max_added_area_percent": 10,
   "sweep_values": [0, 2, 5, 10, 15, 25],
   "sweep": [

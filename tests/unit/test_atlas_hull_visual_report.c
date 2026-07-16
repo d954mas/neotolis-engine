@@ -22,6 +22,9 @@ static const char *REQUIRED_ROWS[] = {
     "sq9-aa-triangle:convex",           "rotated-diamond:convex", "concave-notch:concave", "transparent-donut:concave", "opaque-square-max3:convex", "connected-mask-adversarial:concave",
     "pixel-art-threshold-control:rect",
 };
+static const char *REAL_ART_ROWS[] = {
+    "real-rhombus-outline:concave", "real-resource-wood:concave", "real-card-down-outline:concave", "real-d12-outline:concave", "real-flask-empty:concave", "real-tile-sparse:concave",
+};
 static const char *COLUMNS[] = {"percent-0", "percent-2", "percent-5", "percent-10", "percent-15", "percent-25"};
 static const uint32_t COLUMN_VALUES[] = {0, 2, 5, 10, 15, 25};
 
@@ -84,8 +87,9 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"overall_pass\": true"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"failing_panel_ids\": []"));
     const uint32_t row_count = (uint32_t)(sizeof(REQUIRED_ROWS) / sizeof(REQUIRED_ROWS[0]));
+    const uint32_t real_art_row_count = (uint32_t)(sizeof(REAL_ART_ROWS) / sizeof(REAL_ART_ROWS[0]));
     const uint32_t column_count = (uint32_t)(sizeof(COLUMNS) / sizeof(COLUMNS[0]));
-    const uint32_t panel_count = row_count * column_count;
+    const uint32_t panel_count = (row_count + real_art_row_count) * column_count;
     TEST_ASSERT_EQUAL_UINT32(panel_count, count_text(manifest, "\"panel_id\""));
     const char *previous = manifest;
     for (uint32_t column = 0; column < column_count; column++) {
@@ -141,7 +145,7 @@ static void assert_manifest_schema_and_html(void) {
     for (uint32_t i = 0; i < (uint32_t)(sizeof(fields) / sizeof(fields[0])); i++) {
         TEST_ASSERT_GREATER_OR_EQUAL_UINT32_MESSAGE(panel_count, count_text(manifest, fields[i]), fields[i]);
     }
-    TEST_ASSERT_EQUAL_UINT32(panel_count + row_count, count_text(manifest, "\"result\":\"PASS\""));
+    TEST_ASSERT_EQUAL_UINT32(panel_count + row_count + real_art_row_count, count_text(manifest, "\"result\":\"PASS\""));
     TEST_ASSERT_NULL(strstr(manifest, "\"result\":\"FAIL\""));
     TEST_ASSERT_NULL(strstr(html, "<script"));
     TEST_ASSERT_NULL(strstr(html, "http://"));
@@ -152,6 +156,9 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NOT_NULL(strstr(html, "Full retained-cell coverage"));
     TEST_ASSERT_NOT_NULL(strstr(html, "Exact lost area"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_counts\":[6,7,8]"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"real_art_rows\""));
+    TEST_ASSERT_EQUAL_UINT32(real_art_row_count * column_count, count_text(manifest, "\"real_art_sample\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(html, "Real art"));
     TEST_ASSERT_EQUAL_UINT32(3, count_text(manifest, "\"connected_frontier_vertex_count\""));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_vertex_count\":6"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_vertex_count\":7"));
@@ -175,6 +182,26 @@ static void assert_manifest_schema_and_html(void) {
         TEST_ASSERT_NOT_NULL_MESSAGE(identity, donut_identities[i]);
         TEST_ASSERT_TRUE_MESSAGE(identity < donut_end, donut_identities[i]);
     }
+    const char *card_10 = strstr(manifest, "\"panel_id\":\"real-card-down-outline:concave:percent-10\"");
+    TEST_ASSERT_NOT_NULL(card_10);
+    const char *card_10_end = strstr(card_10, "\"result\":\"PASS\"");
+    TEST_ASSERT_NOT_NULL(card_10_end);
+    const char *card_base = strstr(card_10, "\"baseline_vertex_count\":8");
+    const char *card_selected = strstr(card_10, "\"selected_vertex_count\":6");
+    TEST_ASSERT_NOT_NULL(card_base);
+    TEST_ASSERT_NOT_NULL(card_selected);
+    TEST_ASSERT_TRUE(card_base < card_10_end);
+    TEST_ASSERT_TRUE(card_selected < card_10_end);
+    const char *d12_10 = strstr(manifest, "\"panel_id\":\"real-d12-outline:concave:percent-10\"");
+    TEST_ASSERT_NOT_NULL(d12_10);
+    const char *d12_10_end = strstr(d12_10, "\"result\":\"PASS\"");
+    TEST_ASSERT_NOT_NULL(d12_10_end);
+    const char *d12_base = strstr(d12_10, "\"baseline_vertex_count\":8");
+    const char *d12_selected = strstr(d12_10, "\"selected_vertex_count\":7");
+    TEST_ASSERT_NOT_NULL(d12_base);
+    TEST_ASSERT_NOT_NULL(d12_selected);
+    TEST_ASSERT_TRUE(d12_base < d12_10_end);
+    TEST_ASSERT_TRUE(d12_selected < d12_10_end);
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\""));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_atlas\":\"visual\""));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_sprite\":\"fixture\""));
@@ -199,6 +226,24 @@ static void assert_manifest_schema_and_html(void) {
         for (uint32_t column = 0; column < column_count; column++) {
             char panel_id[320];
             (void)snprintf(panel_id, sizeof(panel_id), "\"panel_id\":\"%s:%s\"", REQUIRED_ROWS[row], COLUMNS[column]);
+            TEST_ASSERT_NOT_NULL_MESSAGE(strstr(manifest, panel_id), panel_id);
+        }
+    }
+    for (uint32_t row = 0; row < real_art_row_count; row++) {
+        char row_id[256];
+        (void)snprintf(row_id, sizeof(row_id), "\"row_id\":\"%s\"", REAL_ART_ROWS[row]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(manifest, row_id), REAL_ART_ROWS[row]);
+        char html_row[256];
+        (void)snprintf(html_row, sizeof(html_row), "id=\"row-%s\"", REAL_ART_ROWS[row]);
+        for (char *cursor = html_row; *cursor != '\0'; cursor++) {
+            if (*cursor == ':') {
+                *cursor = '-';
+            }
+        }
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(html, html_row), html_row);
+        for (uint32_t column = 0; column < column_count; column++) {
+            char panel_id[320];
+            (void)snprintf(panel_id, sizeof(panel_id), "\"panel_id\":\"%s:%s\"", REAL_ART_ROWS[row], COLUMNS[column]);
             TEST_ASSERT_NOT_NULL_MESSAGE(strstr(manifest, panel_id), panel_id);
         }
     }
@@ -259,7 +304,8 @@ static void test_report_schema_production_gates_and_determinism(void) {
     TEST_ASSERT_EQUAL_INT(
         0, nt_hull_visual_validate(REPORT_A "/manifest.json", REPORT_A "/index.html",
                                    "sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,opaque-square-max3:convex,connected-mask-adversarial:concave,"
-                                   "pixel-art-threshold-control:rect"));
+                                   "pixel-art-threshold-control:rect,real-rhombus-outline:concave,real-resource-wood:concave,real-card-down-outline:concave,real-d12-outline:concave,"
+                                   "real-flask-empty:concave,real-tile-sparse:concave"));
     assert_manifest_schema_and_html();
     assert_production_gate_helpers();
     assert_same_file(REPORT_A "/manifest.json", REPORT_B "/manifest.json");

@@ -5,6 +5,7 @@
 #include "nt_builder_atlas_geometry.h"
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
+#include "stb_image.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -24,6 +25,7 @@
 
 #define VISUAL_SCHEMA_VERSION 2
 #define VISUAL_ROW_COUNT 7
+#define REAL_ART_ROW_COUNT 6
 #define VISUAL_COLUMN_COUNT 6
 #define VISUAL_MAX_VERTICES 16
 #define VISUAL_PATH_MAX 1024
@@ -43,15 +45,18 @@ typedef struct {
 typedef struct {
     const char *sample_id;
     const char *shape_name;
+    const char *source_path;
     nt_atlas_shape_t shape;
     uint8_t threshold;
     uint8_t budget;
+    bool real_art;
 } VisualRow;
 
 typedef struct {
     uint32_t width;
     uint32_t height;
     uint8_t *rgba;
+    bool stb_owned;
 } VisualFixture;
 
 typedef struct {
@@ -78,10 +83,19 @@ typedef struct {
 } VisualPanel;
 
 static const VisualRow VISUAL_ROWS[VISUAL_ROW_COUNT] = {
-    {"sq9-aa-triangle", "convex", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8},      {"rotated-diamond", "convex", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8},
-    {"concave-notch", "concave", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 10},  {"transparent-donut", "concave", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 12},
-    {"opaque-square-max3", "convex", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 3},   {"connected-mask-adversarial", "concave", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 13},
-    {"pixel-art-threshold-control", "rect", NT_ATLAS_SHAPE_RECT, 128, 4},
+    {"sq9-aa-triangle", "convex", NULL, NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8, false},      {"rotated-diamond", "convex", NULL, NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8, false},
+    {"concave-notch", "concave", NULL, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 10, false},  {"transparent-donut", "concave", NULL, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 12, false},
+    {"opaque-square-max3", "convex", NULL, NT_ATLAS_SHAPE_CONVEX_HULL, 1, 3, false},   {"connected-mask-adversarial", "concave", NULL, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 13, false},
+    {"pixel-art-threshold-control", "rect", NULL, NT_ATLAS_SHAPE_RECT, 128, 4, false},
+};
+
+static const VisualRow REAL_ART_ROWS[REAL_ART_ROW_COUNT] = {
+    {"real-rhombus-outline", "concave", "assets/sprites/bigatlas/rhombus_outline.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
+    {"real-resource-wood", "concave", "assets/sprites/bigatlas/resource_wood.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
+    {"real-card-down-outline", "concave", "assets/sprites/bigatlas/card_down_outline_.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
+    {"real-d12-outline", "concave", "assets/sprites/bigatlas/d12_outline_.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
+    {"real-flask-empty", "concave", "assets/sprites/bigatlas/flask_empty_.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
+    {"real-tile-sparse", "concave", "assets/sprites/bigatlas/tile_0100.png", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8, true},
 };
 
 static uint32_t visual_fail_stage;
@@ -377,6 +391,12 @@ static bool validate_corpus(const char *path) {
             break;
         }
     }
+    for (uint32_t i = 0; ok && i < REAL_ART_ROW_COUNT; i++) {
+        size_t source_size = 0;
+        uint8_t *source = read_file(REAL_ART_ROWS[i].source_path, &source_size);
+        ok = source != NULL && source_size > 0U;
+        free(source);
+    }
     free(bytes);
     return ok;
 }
@@ -419,7 +439,33 @@ static void set_pixel(VisualFixture *fixture, uint32_t x, uint32_t y, uint8_t al
     fixture->rgba[offset + 3U] = alpha;
 }
 
+static bool fixture_load_png(const VisualRow *row, VisualFixture *fixture) {
+    size_t size = 0;
+    uint8_t *encoded = read_file(row->source_path, &size);
+    if (encoded == NULL || size == 0U) {
+        free(encoded);
+        return false;
+    }
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    fixture->rgba = stbi_load_from_memory(encoded, (int)size, &width, &height, &channels, 4);
+    free(encoded);
+    if (fixture->rgba == NULL || width <= 0 || height <= 0) {
+        stbi_image_free(fixture->rgba);
+        memset(fixture, 0, sizeof(*fixture));
+        return false;
+    }
+    fixture->width = (uint32_t)width;
+    fixture->height = (uint32_t)height;
+    fixture->stb_owned = true;
+    return true;
+}
+
 static bool fixture_create(const VisualRow *row, VisualFixture *fixture) {
+    if (row->source_path != NULL) {
+        return fixture_load_png(row, fixture);
+    }
     if (strcmp(row->sample_id, "sq9-aa-triangle") == 0) {
         fixture->width = 28;
         fixture->height = 20;
@@ -505,6 +551,15 @@ static bool fixture_create(const VisualRow *row, VisualFixture *fixture) {
         }
     }
     return true;
+}
+
+static void fixture_destroy(VisualFixture *fixture) {
+    if (fixture->rgba != NULL && fixture->stb_owned) {
+        stbi_image_free(fixture->rgba);
+    } else {
+        free(fixture->rgba);
+    }
+    memset(fixture, 0, sizeof(*fixture));
 }
 
 typedef struct {
@@ -742,6 +797,9 @@ static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualC
     const double total_overdraw = ((double)panel->proof.selected_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
     (void)fprintf(file, "%s{\"panel_id\":\"%s:%s:%s\",\"row_id\":\"%s:%s\",\"sample_id\":\"%s\",\"shape\":\"%s\",\"column_id\":\"%s\",", first ? "" : ",", row->sample_id, row->shape_name, column->id,
                   row->sample_id, row->shape_name, row->sample_id, row->shape_name, column->id);
+    (void)fprintf(file, "\"real_art_sample\":%s,\"source_image\":", row->real_art ? "true" : "false");
+    json_escape(file, row->source_path != NULL ? row->source_path : "");
+    (void)fputc(',', file);
     (void)fprintf(file,
                   "\"max_added_area_percent\":%.3f,\"effective_alpha_threshold\":%u,\"threshold_source\":\"%s\","
                   "\"trim\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},\"original_alpha_values\":",
@@ -782,8 +840,8 @@ static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualC
                   panel->proof.ceiling_valid ? "true" : "false", panel->hull_infeasible ? "true" : "false", panel->result ? "PASS" : "FAIL");
 }
 
-static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT], const VisualPanel connected_evidence[3],
-                           const char *corpus_sha256, const char *frontier_sha256) {
+static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT],
+                           const VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT], const VisualPanel connected_evidence[3], const char *corpus_sha256, const char *frontier_sha256) {
     FILE *file = fopen(path, "wb");
     if (file == NULL) {
         return false;
@@ -792,6 +850,11 @@ static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_C
     for (uint32_t row = 0; row < VISUAL_ROW_COUNT; row++) {
         for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
             overall = overall && panels[row][column].result;
+        }
+    }
+    for (uint32_t row = 0; row < REAL_ART_ROW_COUNT; row++) {
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            overall = overall && real_panels[row][column].result;
         }
     }
     for (uint32_t evidence = 0; evidence < 3U; evidence++) {
@@ -831,12 +894,35 @@ static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_C
         }
         (void)fputs("]}", file);
     }
+    (void)fputs("],\n  \"real_art_rows\": [", file);
+    for (uint32_t row = 0; row < REAL_ART_ROW_COUNT; row++) {
+        bool row_pass = true;
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            row_pass = row_pass && real_panels[row][column].result;
+        }
+        (void)fprintf(file, "%s{\"sample_id\":\"%s\",\"shape\":\"%s\",\"row_id\":\"%s:%s\",\"source_image\":", row == 0 ? "" : ",", REAL_ART_ROWS[row].sample_id, REAL_ART_ROWS[row].shape_name,
+                      REAL_ART_ROWS[row].sample_id, REAL_ART_ROWS[row].shape_name);
+        json_escape(file, REAL_ART_ROWS[row].source_path);
+        (void)fprintf(file, ",\"result\":\"%s\",\"panels\":[", row_pass ? "PASS" : "FAIL");
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            write_manifest_panel(file, &REAL_ART_ROWS[row], &columns[column], &real_panels[row][column], column == 0);
+        }
+        (void)fputs("]}", file);
+    }
     (void)fputs("],\n  \"failing_panel_ids\": [", file);
     bool first = true;
     for (uint32_t row = 0; row < VISUAL_ROW_COUNT; row++) {
         for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
             if (!panels[row][column].result) {
                 (void)fprintf(file, "%s\"%s:%s:%s\"", first ? "" : ",", VISUAL_ROWS[row].sample_id, VISUAL_ROWS[row].shape_name, columns[column].id);
+                first = false;
+            }
+        }
+    }
+    for (uint32_t row = 0; row < REAL_ART_ROW_COUNT; row++) {
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            if (!real_panels[row][column].result) {
+                (void)fprintf(file, "%s\"%s:%s:%s\"", first ? "" : ",", REAL_ART_ROWS[row].sample_id, REAL_ART_ROWS[row].shape_name, columns[column].id);
                 first = false;
             }
         }
@@ -881,7 +967,8 @@ static void write_svg(FILE *file, const VisualPanel *panel) {
     (void)fputs("</svg>", file);
 }
 
-static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT], const VisualPanel connected_evidence[3]) {
+static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT],
+                       const VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT], const VisualPanel connected_evidence[3]) {
     FILE *file = fopen(path, "wb");
     if (file == NULL) {
         return false;
@@ -935,6 +1022,38 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
         }
         (void)fputs("</div></section>", file);
     }
+    (void)fputs("<section class=\"row\" id=\"real-art\"><h2>Real art</h2><p class=\"lede\">Fixed samples from assets/sprites/bigatlas rebuilt through the same production atlas path. "
+                "These panels are for human default-tolerance review, not synthetic edge-case coverage.</p></section>",
+                file);
+    for (uint32_t row = 0; row < REAL_ART_ROW_COUNT; row++) {
+        (void)fprintf(file, "<section class=\"row\" id=\"row-%s-%s\"><h2>", REAL_ART_ROWS[row].sample_id, REAL_ART_ROWS[row].shape_name);
+        html_escape(file, REAL_ART_ROWS[row].sample_id);
+        (void)fputs(" В· ", file);
+        html_escape(file, REAL_ART_ROWS[row].source_path);
+        (void)fputs("</h2><div class=\"grid\">", file);
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            const VisualPanel *panel = &real_panels[row][column];
+            const double denominator = panel->proof.opaque_area2 > 0U ? (double)panel->proof.opaque_area2 : 1.0;
+            const double base_overdraw = ((double)panel->proof.base_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
+            const double added_area = (double)panel->proof.added_area2 * 100.0 / denominator;
+            const double total_overdraw = ((double)panel->proof.selected_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
+            (void)fprintf(file, "<article class=\"panel\" id=\"panel-%s-%s-%s\"><h3>%s В· %.1f%% added-area limit</h3><span class=\"badge\">%s</span>", REAL_ART_ROWS[row].sample_id,
+                          REAL_ART_ROWS[row].shape_name, columns[column].id, columns[column].id, columns[column].percent, panel->result ? "PASS" : "FAIL");
+            write_svg(file, panel);
+            (void)fprintf(file,
+                          "<table><tr><td>Selected vertices / hard ceiling</td><td>%u / %u</td></tr><tr><td>Aopaque / Abase / Aselected</td><td>%.1f / %.1f / %.1f</td></tr>"
+                          "<tr><td>Base / added / total overdraw</td><td>%.3f%% / %.3f%% / %.3f%%</td></tr><tr><td>Exact lost area</td><td>%.1f</td></tr>"
+                          "<tr><td>Full retained-cell coverage</td><td>%s</td></tr><tr><td>Topology / bounds / winding</td><td>%s</td></tr><tr><td>Triangulation valid</td><td>%s</td></tr>"
+                          "<tr><td>Added-area allowance</td><td>%s</td></tr><tr><td>Source image</td><td>",
+                          panel->selected.vertex_count, REAL_ART_ROWS[row].budget, (double)panel->proof.opaque_area2 * 0.5, (double)panel->proof.base_area2 * 0.5,
+                          (double)panel->proof.selected_area2 * 0.5, base_overdraw, added_area, total_overdraw, (double)panel->lost_area2 * 0.5, panel->proof.selected_coverage_valid ? "yes" : "no",
+                          (panel->proof.selected_topology_valid && panel->proof.selected_bounds_valid) ? "valid" : "invalid", panel->proof.selected_triangulation_valid ? "yes" : "no",
+                          panel->proof.allowance_valid ? "within limit" : "exceeded");
+            html_escape(file, REAL_ART_ROWS[row].source_path);
+            (void)fprintf(file, "</td></tr><tr><td>Selected pack SHA-256</td><td><code>%s</code></td></tr></table></article>", panel->selected_pack_sha256);
+        }
+        (void)fputs("</div></section>", file);
+    }
     (void)fputs("<section class=\"row\" id=\"connected-frontier-evidence\"><h2>Connected-mask production frontier: 6 / 7 / 8 vertices</h2><p class=\"lede\">Each card is a real 0% production pack "
                 "with the shown hard ceiling; its serialized polygon and triangles are reconstructed and validated before rendering.</p><div class=\"grid\">",
                 file);
@@ -955,6 +1074,7 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
 int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, const char *out_dir) {
     VisualColumn columns[VISUAL_COLUMN_COUNT] = {0};
     VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT] = {0};
+    VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT] = {0};
     VisualPanel connected_evidence[3] = {0};
     char corpus_sha256[65] = {0};
     char frontier_sha256[65] = {0};
@@ -969,7 +1089,16 @@ int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, 
         for (uint32_t column = 0; ok && column < VISUAL_COLUMN_COUNT; column++) {
             ok = panel_build(&VISUAL_ROWS[row], &columns[column], &fixture, out_dir, (row * VISUAL_COLUMN_COUNT) + column, true, 0U, &panels[row][column]);
         }
-        free(fixture.rgba);
+        fixture_destroy(&fixture);
+    }
+    for (uint32_t row = 0; ok && row < REAL_ART_ROW_COUNT; row++) {
+        VisualFixture fixture = {0};
+        ok = fixture_create(&REAL_ART_ROWS[row], &fixture);
+        for (uint32_t column = 0; ok && column < VISUAL_COLUMN_COUNT; column++) {
+            ok = panel_build(&REAL_ART_ROWS[row], &columns[column], &fixture, out_dir, (VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT) + (row * VISUAL_COLUMN_COUNT) + column, false, 0U,
+                             &real_panels[row][column]);
+        }
+        fixture_destroy(&fixture);
     }
     const VisualRow *connected_row = &VISUAL_ROWS[5];
     VisualFixture connected_fixture = {0};
@@ -1008,7 +1137,8 @@ int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, 
         evidence_column.percent = (double)required_percent;
         (void)snprintf(evidence_column.id, sizeof(evidence_column.id), "slot-%u", target_count);
         if (ok) {
-            ok = panel_build(connected_row, &evidence_column, &connected_fixture, out_dir, (VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT) + evidence, false, target_count, &connected_evidence[evidence]);
+            const uint32_t ordinal = (VISUAL_ROW_COUNT + REAL_ART_ROW_COUNT) * VISUAL_COLUMN_COUNT + evidence;
+            ok = panel_build(connected_row, &evidence_column, &connected_fixture, out_dir, ordinal, false, target_count, &connected_evidence[evidence]);
             if (!ok) {
                 (void)fprintf(stderr, "atlas_hull_visual_report: connected slot %u production pack/proof failed\n", target_count);
             }
@@ -1019,16 +1149,22 @@ int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, 
         }
     }
     free(connected_mask);
-    free(connected_fixture.rgba);
+    fixture_destroy(&connected_fixture);
     ok = ok && file_sha256_hex(corpus_path, corpus_sha256) && file_sha256_hex(frontier_path, frontier_sha256);
     char manifest_path[VISUAL_PATH_MAX];
     char html_path[VISUAL_PATH_MAX];
     (void)snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", out_dir);
     (void)snprintf(html_path, sizeof(html_path), "%s/index.html", out_dir);
-    ok = ok && write_manifest(manifest_path, columns, panels, connected_evidence, corpus_sha256, frontier_sha256) && write_html(html_path, columns, panels, connected_evidence);
+    ok = ok && write_manifest(manifest_path, columns, panels, real_panels, connected_evidence, corpus_sha256, frontier_sha256) &&
+         write_html(html_path, columns, panels, real_panels, connected_evidence);
     for (uint32_t row = 0; row < VISUAL_ROW_COUNT; row++) {
         for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
             panel_destroy(&panels[row][column]);
+        }
+    }
+    for (uint32_t row = 0; row < REAL_ART_ROW_COUNT; row++) {
+        for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
+            panel_destroy(&real_panels[row][column]);
         }
     }
     for (uint32_t evidence = 0; evidence < 3U; evidence++) {
@@ -1118,7 +1254,8 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
     const char *manifest = (const char *)manifest_bytes;
     const char *html = (const char *)html_bytes;
     static const char *columns[VISUAL_COLUMN_COUNT] = {"percent-0", "percent-2", "percent-5", "percent-10", "percent-15", "percent-25"};
-    const uint32_t panel_count = VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT;
+    const uint32_t panel_count = (VISUAL_ROW_COUNT + REAL_ART_ROW_COUNT) * VISUAL_COLUMN_COUNT;
+    const uint32_t row_count = VISUAL_ROW_COUNT + REAL_ART_ROW_COUNT;
     const uint32_t error_panel_count = VISUAL_COLUMN_COUNT;
     const uint32_t feasible_panel_count = panel_count - error_panel_count;
     bool ok = strstr(manifest, "\"schema_version\": 2") != NULL && strstr(manifest, "\"overall_pass\": true") != NULL && strstr(manifest, "\"result\":\"FAIL\"") == NULL &&
@@ -1126,7 +1263,8 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
               count_substring(manifest, "\"sweep_source\"") == VISUAL_COLUMN_COUNT && count_substring(manifest, "\"sweep_sha256\"") == VISUAL_COLUMN_COUNT &&
               count_substring(manifest, "\"measurement_source_commit\"") == VISUAL_COLUMN_COUNT && strstr(manifest, "\"sweep_source\":\"\"") == NULL &&
               strstr(manifest, "\"sweep_sha256\":\"\"") == NULL && strstr(manifest, "\"visual_corpus_sha256\":\"\"") == NULL && strstr(manifest, "\"frontier_sha256\":\"\"") == NULL &&
-              count_substring(manifest, "\"result\":\"PASS\"") == panel_count + VISUAL_ROW_COUNT && count_substring(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\"") == error_panel_count &&
+              strstr(manifest, "\"real_art_rows\"") != NULL && count_substring(manifest, "\"real_art_sample\":true") == REAL_ART_ROW_COUNT * VISUAL_COLUMN_COUNT && strstr(html, "Real art") != NULL &&
+              count_substring(manifest, "\"result\":\"PASS\"") == panel_count + row_count && count_substring(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\"") == error_panel_count &&
               count_substring(manifest, "\"expected_error_match\":true") == error_panel_count && count_substring(manifest, "\"allowance_valid\":true") == feasible_panel_count &&
               count_substring(manifest, "\"selected_coverage_valid\":true") == feasible_panel_count && count_substring(manifest, "\"selected_triangulation_valid\":true") == feasible_panel_count &&
               count_substring(manifest, "\"ceiling_valid\":true") == feasible_panel_count && count_substring(manifest, "\"baseline_pack_sha256\":\"\"") == error_panel_count &&
