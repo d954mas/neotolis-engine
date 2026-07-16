@@ -1494,6 +1494,41 @@ static GeometryCandidate strategy_rdp(const Point2D *clean, uint32_t clean_count
     return result;
 }
 
+static GeometryCandidate strategy_rdp_perp(const Point2D *clean, uint32_t clean_count, uint32_t target, double tolerance, Point2D *rdp_out, uint32_t *rdp_out_count, Point2D *perp_out,
+                                           uint32_t *perp_out_count) {
+    uint32_t rdp_target = target + 2U < clean_count ? target + 2U : clean_count;
+    GeometryCandidate rdp = strategy_rdp(clean, clean_count, rdp_target);
+    if (rdp_out_count) {
+        *rdp_out_count = rdp.count;
+    }
+    if (rdp_out) {
+        memcpy(rdp_out, rdp.poly, (size_t)rdp.count * sizeof(Point2D));
+    }
+
+    GeometryCandidate result = {0};
+    result.poly = (Point2D *)malloc((size_t)rdp.count * sizeof(Point2D));
+    NT_BUILD_ASSERT(result.poly && "strategy_rdp_perp: alloc failed");
+    double max_dev = 0.0;
+    if (rdp.count > target) {
+        result.count = hull_simplify_perp(rdp.poly, rdp.count, target, result.poly, &max_dev);
+    } else {
+        result.count = rdp.count;
+        memcpy(result.poly, rdp.poly, (size_t)rdp.count * sizeof(Point2D));
+    }
+    free(rdp.poly);
+
+    result.inflate_amt = 0.0;
+    result.est_area = geometry_estimate_inflated_area(result.poly, result.count, 0.0);
+    result.valid = result.count >= 3 && result.count <= target && max_dev <= tolerance;
+    if (perp_out_count) {
+        *perp_out_count = result.count;
+    }
+    if (perp_out) {
+        memcpy(perp_out, result.poly, (size_t)result.count * sizeof(Point2D));
+    }
+    return result;
+}
+
 /* Strategy 2: greedy perpendicular-distance simplification, exactly target verts.
  * Inflate amount comes from measuring actual pixel coverage loss, not eps. */
 static GeometryCandidate strategy_perp(const Point2D *clean, uint32_t clean_count, uint32_t target, const uint8_t *binary_source, uint32_t tw, uint32_t th) {
@@ -1586,13 +1621,12 @@ static GeometryCandidate geometry_select_positive_concave(const Point2D *clean, 
     GeometrySeenPolygon seen[64] = {0};
     uint32_t seen_count = 0;
     for (uint32_t target = 3; target <= max_vertices; target++) {
-        geometry_consider_positive(&best, strategy_rdp(clean, clean_count, target), target, 0, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
-        geometry_consider_positive(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th), target, 1, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices,
-                                   tolerance);
+        geometry_consider_positive(&best, strategy_rdp_perp(clean, clean_count, target, tolerance, NULL, NULL, NULL, NULL), target, 0, seen, &seen_count, clean, clean_count, binary_source, tw, th,
+                                   max_vertices, tolerance);
         if (target >= 4) {
-            geometry_consider_positive(&best, strategy_rect(tw, th), target, 2, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
+            geometry_consider_positive(&best, strategy_rect(tw, th), target, 1, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
         }
-        geometry_consider_positive(&best, strategy_convex(binary_source, tw, th, target), target, 3, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
+        geometry_consider_positive(&best, strategy_convex(binary_source, tw, th, target), target, 2, seen, &seen_count, clean, clean_count, binary_source, tw, th, max_vertices, tolerance);
     }
 
     if (best.valid) {
@@ -1607,6 +1641,23 @@ static GeometryCandidate geometry_select_positive_concave(const Point2D *clean, 
     rect.generator_ordinal = 2;
     (void)geometry_finalize_candidate(&rect, clean, clean_count, binary_source, tw, th, max_vertices);
     return rect;
+}
+
+uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
+                                          uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal) {
+    GeometryCandidate candidate = strategy_rdp_perp(clean, clean_count, target, tolerance, rdp_out, rdp_count, perp_out, perp_count);
+    candidate.generator_ordinal = 0;
+    if (!geometry_finalize_candidate(&candidate, clean, clean_count, binary, width, height, target) || candidate.fidelity_error > tolerance) {
+        geometry_candidate_discard(&candidate);
+        return 0;
+    }
+    memcpy(final_out, candidate.poly, (size_t)candidate.count * sizeof(Point2D));
+    if (generator_ordinal) {
+        *generator_ordinal = candidate.generator_ordinal;
+    }
+    uint32_t count = candidate.count;
+    geometry_candidate_discard(&candidate);
+    return count;
 }
 
 static GeometryCandidate geometry_convex_reduction_candidate(const Point2D *reference, uint32_t reference_count, uint32_t target) {

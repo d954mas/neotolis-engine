@@ -4219,6 +4219,8 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
 /* edge-extrude helper stays static; test access via this wrapper defined in
  * nt_builder_atlas.c. */
 void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
+uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
+                                          uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -4438,6 +4440,61 @@ void test_perp_removal_keeps_real_corner_and_stable_ties(void) {
     TEST_ASSERT_EQUAL_UINT32(5, hull_simplify_perp(equal_error, 6, 5, out, &max_dev));
     TEST_ASSERT_EQUAL_MEMORY(expected_equal_error, out, sizeof(expected_equal_error));
     TEST_ASSERT_TRUE(fabs(max_dev) < 1e-12);
+}
+
+void test_positive_concave_composes_rdp_then_perp_on_same_candidate(void) {
+    const Point2D source[10] = {
+        {0, 0}, {2, 0}, {4, 1}, {6, 0}, {8, 0}, {8, 8}, {5, 8}, {4, 4}, {3, 8}, {0, 8},
+    };
+    uint8_t binary[8 * 8] = {0};
+    for (uint32_t y = 0; y < 8; y++) {
+        for (uint32_t x = 0; x < 8; x++) {
+            binary[(y * 8) + x] = point_in_polygon_f(source, 10, (double)x + 0.5, (double)y + 0.5) ? 1 : 0;
+        }
+    }
+
+    Point2D first_rdp[10];
+    Point2D second_rdp[10];
+    Point2D first_perp[10];
+    Point2D second_perp[10];
+    Point2D first_final[10];
+    Point2D second_final[10];
+    uint32_t first_rdp_count = 0;
+    uint32_t second_rdp_count = 0;
+    uint32_t first_perp_count = 0;
+    uint32_t second_perp_count = 0;
+    uint32_t first_ordinal = UINT32_MAX;
+    uint32_t second_ordinal = UINT32_MAX;
+    uint32_t first_count = nt_atlas_test_rdp_perp_candidate(source, 10, binary, 8, 8, 5, 3.0, first_rdp, &first_rdp_count, first_perp, &first_perp_count, first_final, &first_ordinal);
+    uint32_t second_count = nt_atlas_test_rdp_perp_candidate(source, 10, binary, 8, 8, 5, 3.0, second_rdp, &second_rdp_count, second_perp, &second_perp_count, second_final, &second_ordinal);
+
+    const Point2D expected_rdp[7] = {{0, 0}, {8, 0}, {8, 8}, {5, 8}, {4, 4}, {3, 8}, {0, 8}};
+    const Point2D expected_perp[5] = {{0, 0}, {8, 0}, {8, 8}, {4, 4}, {0, 8}};
+    const Point2D expected_final[5] = {{8, 10}, {4, 6}, {0, 10}, {-1, -1}, {9, -1}};
+
+    TEST_ASSERT_EQUAL_UINT32(7, first_rdp_count);
+    TEST_ASSERT_EQUAL_UINT32(5, first_perp_count);
+    TEST_ASSERT_EQUAL_UINT32(5, first_count);
+    TEST_ASSERT_EQUAL_UINT32(first_rdp_count, second_rdp_count);
+    TEST_ASSERT_EQUAL_UINT32(first_perp_count, second_perp_count);
+    TEST_ASSERT_EQUAL_UINT32(first_count, second_count);
+    TEST_ASSERT_EQUAL_MEMORY(expected_rdp, first_rdp, sizeof(expected_rdp));
+    TEST_ASSERT_EQUAL_MEMORY(expected_perp, first_perp, sizeof(expected_perp));
+    TEST_ASSERT_EQUAL_MEMORY(expected_final, first_final, sizeof(expected_final));
+    TEST_ASSERT_EQUAL_MEMORY(first_rdp, second_rdp, (size_t)first_rdp_count * sizeof(Point2D));
+    TEST_ASSERT_EQUAL_MEMORY(first_perp, second_perp, (size_t)first_perp_count * sizeof(Point2D));
+    TEST_ASSERT_EQUAL_MEMORY(first_final, second_final, (size_t)first_count * sizeof(Point2D));
+    TEST_ASSERT_EQUAL_UINT32(first_ordinal, second_ordinal);
+    TEST_ASSERT_EQUAL_UINT32(0, first_ordinal);
+    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(first_final, first_count));
+    TEST_ASSERT_EQUAL_UINT32(0, polygon_coverage_metrics(first_final, first_count, binary, 8, 8).lost_retained_pixels);
+    TEST_ASSERT_TRUE(polygon_max_boundary_distance(source, 10, first_final, first_count) <= 3.0);
+
+    bool kept_real_corner = false;
+    for (uint32_t i = 0; i < first_count; i++) {
+        kept_real_corner = kept_real_corner || (first_final[i].x == 4 && first_final[i].y == 6);
+    }
+    TEST_ASSERT_TRUE(kept_real_corner);
 }
 
 /* fan_triangulate: 4 vertices produces 2 triangles */
@@ -7839,6 +7896,7 @@ int main(void) {
     RUN_TEST(test_polygon_coverage_metrics_counts_exact_pixel_centers);
     RUN_TEST(test_polygon_boundary_distance_rejects_oversized_container);
     RUN_TEST(test_perp_removal_keeps_real_corner_and_stable_ties);
+    RUN_TEST(test_positive_concave_composes_rdp_then_perp_on_same_candidate);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
