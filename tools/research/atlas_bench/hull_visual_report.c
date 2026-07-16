@@ -65,6 +65,7 @@ typedef struct {
     int64_t signed_twice_area;
     bool triangles_valid;
     bool commit_ok;
+    bool hull_infeasible;
     bool fidelity_ok;
     bool result;
 } VisualPanel;
@@ -75,6 +76,8 @@ static const VisualRow VISUAL_ROWS[VISUAL_ROW_COUNT] = {
     {"mixed-aa-representative", "convex", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8}, {"mixed-aa-representative", "concave", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 8},
     {"pixel-art-threshold-control", "rect", NT_ATLAS_SHAPE_RECT, 128, 4},
 };
+
+static bool row_expects_hull_infeasible(const VisualRow *row) { return strcmp(row->sample_id, "opaque-square-max3") == 0; }
 
 static uint32_t rotr32(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
 
@@ -540,8 +543,23 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
         sprite.alpha_threshold = row->threshold;
     }
     nt_atlas_add_raw(atlas, fixture->rgba, fixture->width, fixture->height, &sprite);
-    panel->commit_ok = nt_atlas_commit(atlas) == NT_BUILD_OK && nt_builder_finish_pack(context) == NT_BUILD_OK;
+    nt_build_result_t commit_result = nt_atlas_commit(atlas);
+    nt_build_result_t finish_result = nt_builder_finish_pack(context);
+    uint32_t error_count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(context, &error_count);
+    panel->commit_ok = commit_result == NT_BUILD_OK && finish_result == NT_BUILD_OK;
+    if (row_expects_hull_infeasible(row)) {
+        panel->hull_infeasible = commit_result == NT_BUILD_ERR_VALIDATION && finish_result == NT_BUILD_ERR_VALIDATION && error_count == 1U &&
+                                 errors[0].kind == NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE && errors[0].detail_a == row->budget && errors[0].detail_b == (uint32_t)row->shape;
+    }
     nt_builder_free_pack(context);
+    if (row_expects_hull_infeasible(row)) {
+        (void)remove(pack_path);
+        (void)remove(header_path);
+        panel->fidelity_ok = panel->hull_infeasible;
+        panel->result = panel->hull_infeasible;
+        return true;
+    }
     if (!panel->commit_ok || !panel_read_pack(pack_path, panel)) {
         (void)remove(pack_path);
         (void)remove(header_path);
@@ -570,7 +588,6 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
         panel->fidelity = polygon_max_boundary_distance(reference, reference_count, panel->polygon, panel->vertex_count);
     }
     free(reference);
-    /* Positive-tolerance production may fall back when no feasible candidate satisfies the bound. */
     panel->fidelity_ok = row->shape == NT_ATLAS_SHAPE_RECT || column->tolerance == 0.0 || panel->fidelity <= column->tolerance + 0.0001 ||
                          (panel->coverage.lost_retained_pixels == 0U && panel->vertex_count <= row->budget);
     panel->result =
@@ -644,12 +661,14 @@ static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualC
     (void)fprintf(file,
                   ",\"vertex_count\":%u,\"lost_pixels\":%u,\"lost_ratio\":%.8f,\"extra_pixels\":%u,\"extra_ratio\":%.8f,\"fidelity_px\":%.6f,\"fidelity_within_tolerance\":%s,"
                   "\"self_intersection\":%s,\"signed_area\":%.1f,\"winding_valid\":%s,\"vertex_budget\":%u,"
-                  "\"production_gates\":{\"commit\":%s,\"simple_polygon\":%s,\"coverage\":%s,\"fidelity\":%s,\"budget\":%s,\"triangles\":%s},\"result\":\"%s\"}",
+                  "\"expected_hull_infeasible\":%s,\"production_gates\":{\"commit\":%s,\"simple_polygon\":%s,\"coverage\":%s,\"fidelity\":%s,\"budget\":%s,\"triangles\":%s},\"result\":\"%s\"}",
                   panel->vertex_count, panel->coverage.lost_retained_pixels, lost_ratio, panel->coverage.extra_covered_pixels, extra_ratio, panel->fidelity,
                   (row->shape == NT_ATLAS_SHAPE_RECT || column->tolerance == 0.0 || panel->fidelity <= column->tolerance + 0.0001) ? "true" : "false",
                   panel->validity == NT_POLYGON_INVALID_SELF_INTERSECTION ? "true" : "false", (double)panel->signed_twice_area * 0.5, panel->signed_twice_area > 0 ? "true" : "false", row->budget,
-                  panel->commit_ok ? "true" : "false", panel->validity == NT_POLYGON_VALID ? "true" : "false", panel->coverage.lost_retained_pixels == 0U ? "true" : "false",
-                  panel->fidelity_ok ? "true" : "false", panel->vertex_count <= row->budget ? "true" : "false", panel->triangles_valid ? "true" : "false", panel->result ? "PASS" : "FAIL");
+                  panel->hull_infeasible ? "true" : "false", (panel->commit_ok || panel->hull_infeasible) ? "true" : "false",
+                  (panel->validity == NT_POLYGON_VALID || panel->hull_infeasible) ? "true" : "false", (panel->coverage.lost_retained_pixels == 0U || panel->hull_infeasible) ? "true" : "false",
+                  panel->fidelity_ok ? "true" : "false", (panel->vertex_count <= row->budget || panel->hull_infeasible) ? "true" : "false",
+                  (panel->triangles_valid || panel->hull_infeasible) ? "true" : "false", panel->result ? "PASS" : "FAIL");
 }
 
 static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT]) {
@@ -754,6 +773,9 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
             (void)fprintf(file, "<article class=\"panel\" id=\"panel-%s-%s-%s\"><h3>%s · %.1f px</h3><span class=\"badge\">%s</span>", VISUAL_ROWS[row].sample_id, VISUAL_ROWS[row].shape_name,
                           columns[column].id, columns[column].id, columns[column].tolerance, panel->result ? "PASS" : "FAIL");
             write_svg(file, panel);
+            if (panel->hull_infeasible) {
+                (void)fputs("<p>Expected HULL_INFEASIBLE: no covering polygon fits the hard vertex ceiling.</p>", file);
+            }
             (void)fprintf(file,
                           "<table><tr><td>Vertex count / budget</td><td>%u / %u</td></tr><tr><td>Lost pixels / ratio</td><td>%u / %.5f</td></tr><tr><td>Extra pixels</td><td>%u</td></tr>"
                           "<tr><td>Fidelity px</td><td>%.4f</td></tr><tr><td>Self intersection</td><td>%s</td></tr><tr><td>Signed area / winding</td><td>%.1f / %s</td></tr><tr><td>Triangles "

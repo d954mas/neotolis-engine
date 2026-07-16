@@ -104,6 +104,36 @@ typedef struct {
     uint16_t triangle_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
 } nt_polygon_feasibility_t;
 
+typedef struct {
+    bool inputs_valid;
+    bool opaque_area_valid;
+    bool base_bounds_valid;
+    bool base_topology_valid;
+    bool base_coverage_valid;
+    bool base_triangulation_valid;
+    bool base_area_valid;
+    bool selected_bounds_valid;
+    bool selected_topology_valid;
+    bool selected_coverage_valid;
+    bool selected_triangulation_valid;
+    bool selected_area_valid;
+    bool metric_order_valid;
+    bool allowance_valid;
+    bool ceiling_valid;
+    bool valid;
+    uint32_t retained_cell_count;
+    uint32_t base_vertex_count;
+    uint32_t selected_vertex_count;
+    uint32_t base_triangle_index_count;
+    uint32_t selected_triangle_index_count;
+    uint32_t max_vertices;
+    float max_added_area_percent;
+    uint64_t opaque_area2;
+    uint64_t base_area2;
+    uint64_t selected_area2;
+    uint64_t added_area2;
+} nt_selected_geometry_proof_t;
+
 /* Validate a closed CCW ring. Adjacent edges may share only their common endpoint. */
 nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count);
 
@@ -121,6 +151,14 @@ bool nt_polygon_triangulate_validated(const Point2D *poly, uint32_t poly_count, 
 
 /* One fail-closed proof for bounds, topology, coverage, and triangulation. */
 nt_polygon_feasibility_t nt_polygon_feasibility(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices);
+
+/* Validate the complete selected-geometry contract without owning any input. */
+nt_selected_geometry_proof_t nt_selected_geometry_validate(const uint8_t *binary, uint32_t width, uint32_t height, uint64_t claimed_opaque_area2, const Point2D *base_poly, uint32_t base_count,
+                                                           uint64_t claimed_base_area2, const uint16_t *base_indices, uint32_t base_index_count, const Point2D *selected_poly, uint32_t selected_count,
+                                                           uint64_t claimed_selected_area2, const uint16_t *selected_indices, uint32_t selected_index_count, float max_added_area_percent,
+                                                           uint32_t max_vertices);
+
+bool nt_selected_geometry_proof_equal(const nt_selected_geometry_proof_t *left, const nt_selected_geometry_proof_t *right);
 
 /* Ray-casting point-in-polygon test (even-odd rule). */
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);

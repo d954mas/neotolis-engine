@@ -4246,6 +4246,7 @@ typedef struct {
 bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
                                      float max_added_area_percent, NtAtlasFrontierTestResult *out_result);
 uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_t slot_mask, uint64_t opaque_area2, uint32_t max_vertices, float max_added_area_percent);
+uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -4774,6 +4775,90 @@ void test_geometry_frontier_donut_metrics_cancel_hole_from_added_area(void) {
         TEST_ASSERT_TRUE(nt_atlas_test_frontier_evaluate(polygons, counts, 1, donut, 3, 3, 4, 0.0F, &repeated));
         TEST_ASSERT_EQUAL_MEMORY(&first, &repeated, sizeof(first));
     }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_selected_geometry_validator_rejects_corrupt_claims(void) {
+    const uint8_t retained[2] = {1, 1};
+    const Point2D quad[4] = {{0, 0}, {2, 0}, {2, 1}, {0, 1}};
+    const uint16_t triangles[6] = {0, 1, 2, 0, 2, 3};
+    nt_selected_geometry_proof_t proof = nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 4, triangles, 6, 0.0F, 4);
+    TEST_ASSERT_TRUE(proof.valid);
+    TEST_ASSERT_EQUAL_UINT64(4, proof.opaque_area2);
+    TEST_ASSERT_EQUAL_UINT64(4, proof.base_area2);
+    TEST_ASSERT_EQUAL_UINT64(4, proof.selected_area2);
+
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 2, quad, 4, 4, triangles, 6, quad, 4, 4, triangles, 6, 0.0F, 4).valid);
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 6, triangles, 6, quad, 4, 4, triangles, 6, 0.0F, 4).valid);
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 6, triangles, 6, 0.0F, 4).valid);
+
+    uint16_t corrupt[6] = {0, 1, 4, 0, 2, 3};
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 4, corrupt, 6, 0.0F, 4).valid);
+    const uint16_t reversed[6] = {0, 2, 1, 0, 3, 2};
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 4, reversed, 6, 0.0F, 4).valid);
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 4, triangles, 6, -1.0F, 4).valid);
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained, 2, 1, 4, quad, 4, 4, triangles, 6, quad, 4, 4, triangles, 6, 0.0F, 3).valid);
+
+    const uint8_t retained_with_gap[3] = {1, 1, 0};
+    const Point2D expanded[4] = {{0, 0}, {3, 0}, {3, 1}, {0, 1}};
+    nt_selected_geometry_proof_t boundary = nt_selected_geometry_validate(retained_with_gap, 3, 1, 4, quad, 4, 4, triangles, 6, expanded, 4, 6, triangles, 6, 50.0F, 4);
+    TEST_ASSERT_TRUE(boundary.valid);
+    TEST_ASSERT_FALSE(nt_selected_geometry_validate(retained_with_gap, 3, 1, 4, quad, 4, 4, triangles, 6, expanded, 4, 6, triangles, 6, 49.99F, 4).valid);
+    TEST_ASSERT_TRUE(nt_selected_geometry_proof_equal(&boundary, &boundary));
+    TEST_ASSERT_FALSE(nt_selected_geometry_proof_equal(&proof, &boundary));
+}
+
+void test_rect_budget_three_is_graceful_hull_infeasible(void) {
+    const char *path = TMP_DIR "/rect_budget_three.ntpack";
+    (void)remove(path);
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 255, sizeof(rgba));
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.max_vertices = 3;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "hard_ceiling", &opts);
+    nt_atlas_add_raw(atlas, rgba, 4, 4, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas));
+
+    uint32_t error_count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &error_count);
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE, errors[0].kind);
+    TEST_ASSERT_EQUAL_UINT32(3, errors[0].detail_a);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    FILE *published = fopen(path, "rb");
+    TEST_ASSERT_NULL(published);
+}
+
+void test_convex_budget_three_is_graceful_hull_infeasible(void) {
+    const char *path = TMP_DIR "/convex_budget_three.ntpack";
+    (void)remove(path);
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 255, sizeof(rgba));
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    opts.max_vertices = 3;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "hard_ceiling", &opts);
+    nt_atlas_add_raw(atlas, rgba, 4, 4, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas));
+
+    uint32_t error_count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &error_count);
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE, errors[0].kind);
+    TEST_ASSERT_EQUAL_UINT32(3, errors[0].detail_a);
+    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_SHAPE_CONVEX_HULL, errors[0].detail_b);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    FILE *published = fopen(path, "rb");
+    TEST_ASSERT_NULL(published);
 }
 
 /* fan_triangulate: 4 vertices produces 2 triangles */
@@ -5697,7 +5782,7 @@ void test_atlas_round_trip_vertices(void) {
     free(buf);
 }
 
-void test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite(void) {
+void test_atlas_shape_concave_uses_convex_frontier_on_disjoint_sprite(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_disjoint_convex.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -5888,121 +5973,6 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
 static uint8_t *read_atlas_blob(const char *path, const NtAtlasRegion **out_regions, uint32_t *out_region_count);
 static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf);
 static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]);
-
-void test_convex_opaque_square_budget_three_is_exact_and_deterministic(void) {
-    (void)MKDIR(TMP_DIR);
-    enum { W = 4, H = 4, BUDGET = 3 };
-    const char *path = TMP_DIR "/convex_square_budget_three.ntpack";
-    const char *repeat_path = TMP_DIR "/convex_square_budget_three_repeat.ntpack";
-    uint8_t rgba[W * H * 4];
-    uint8_t binary[W * H];
-    memset(rgba, 255, sizeof(rgba));
-    memset(binary, 1, sizeof(binary));
-
-    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
-    opts.max_vertices = BUDGET;
-    const char *paths[] = {path, repeat_path};
-    for (uint32_t i = 0; i < 2; i++) {
-        NtBuilderContext *ctx = nt_builder_start_pack(paths[i]);
-        TEST_ASSERT_NOT_NULL(ctx);
-        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "square", &opts);
-        nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "square.png", .origin_x = 0.5F, .origin_y = 0.5F});
-        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
-        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-        nt_builder_free_pack(ctx);
-    }
-
-    uint32_t size = 0;
-    uint32_t repeat_size = 0;
-    uint8_t *pack = read_file_bytes(path, &size);
-    uint8_t *repeat = read_file_bytes(repeat_path, &repeat_size);
-    TEST_ASSERT_NOT_NULL(pack);
-    TEST_ASSERT_NOT_NULL(repeat);
-    TEST_ASSERT_EQUAL_UINT32(size, repeat_size);
-    TEST_ASSERT_EQUAL_MEMORY(pack, repeat, size);
-
-    const NtAtlasRegion *regions = NULL;
-    uint32_t region_count = 0;
-    uint8_t *parsed = read_atlas_blob(path, &regions, &region_count);
-    TEST_ASSERT_NOT_NULL(parsed);
-    TEST_ASSERT_EQUAL_UINT32(1, region_count);
-    TEST_ASSERT_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
-    Point2D emitted[16];
-    uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(parsed), H, emitted);
-    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(emitted, emitted_count));
-    TEST_ASSERT_EQUAL_UINT32(0, polygon_coverage_metrics(emitted, emitted_count, binary, W, H).lost_retained_pixels);
-
-    free(parsed);
-    free(repeat);
-    free(pack);
-    (void)remove(repeat_path);
-    (void)remove(path);
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_convex_covering_gate_preserves_correct_legacy_vertices(void) {
-    (void)MKDIR(TMP_DIR);
-    const char *path = TMP_DIR "/atlas_convex_legacy_vertices.ntpack";
-    enum { W = 16, H = 16, BUDGET = 4 };
-    const Point2D source_hull[3] = {{0, 0}, {17, 0}, {0, 17}};
-    uint8_t binary[W * H] = {0};
-    uint8_t *rgba = make_test_sprite(W, H, 255, 255, 255, 0);
-    for (uint32_t y = 0; y < H; y++) {
-        for (uint32_t x = 0; x < W; x++) {
-            if (point_in_polygon_f(source_hull, 3, (double)x + 0.5, (double)y + 0.5)) {
-                binary[(y * W) + x] = 1;
-                rgba[((((size_t)y * W) + x) * 4) + 3] = 255;
-            }
-        }
-    }
-
-    uint32_t legacy_count = 0;
-    Point2D *legacy = binary_build_convex_polygon(binary, W, H, BUDGET, &legacy_count);
-    TEST_ASSERT_NOT_NULL(legacy);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(legacy, legacy_count, binary, W, H) <= 0.0);
-
-    NtBuilderContext *ctx = nt_builder_start_pack(path);
-    TEST_ASSERT_NOT_NULL(ctx);
-    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
-    opts.max_vertices = BUDGET;
-    opts.max_added_area_percent = 0.0F;
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "convex", &opts);
-    nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-    free(rgba);
-
-    uint32_t file_size = 0;
-    uint8_t *buf = read_file_bytes(path, &file_size);
-    TEST_ASSERT_NOT_NULL(buf);
-    const NtPackHeader *pack = (const NtPackHeader *)buf;
-    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
-    const NtAssetEntry *atlas_entry = NULL;
-    for (uint32_t i = 0; i < pack->asset_count; i++) {
-        if (entries[i].asset_type == NT_ASSET_ATLAS) {
-            atlas_entry = &entries[i];
-            break;
-        }
-    }
-    TEST_ASSERT_NOT_NULL(atlas_entry);
-    const uint8_t *ablob = buf + atlas_entry->offset;
-    const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
-    const NtAtlasRegion *region = (const NtAtlasRegion *)(ablob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
-    const NtAtlasVertex *vertices = (const NtAtlasVertex *)(ablob + header->vertex_offset);
-    TEST_ASSERT_EQUAL_UINT32(legacy_count, region->vertex_count);
-    for (uint32_t i = 0; i < legacy_count; i++) {
-        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
-        TEST_ASSERT_EQUAL_INT32(legacy[i].x, vertex->local_x);
-        TEST_ASSERT_EQUAL_INT32(legacy[i].y, H - vertex->local_y);
-    }
-
-    free(legacy);
-    free(buf);
-    (void)remove(path);
-}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_detection(void) {
@@ -6382,12 +6352,12 @@ static const uint16_t *atlas_blob_indices(const uint8_t *pack_buf) {
     return NULL;
 }
 
-static void build_concave_tolerance_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float tolerance, uint8_t max_vertices, const char *name) {
+static void build_concave_added_area_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float added_area_percent, uint8_t max_vertices, const char *name) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
-    opts.max_added_area_percent = tolerance;
+    opts.max_added_area_percent = added_area_percent;
     opts.max_vertices = max_vertices;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "concave", &opts);
     nt_atlas_add_raw(atlas, rgba, width, height, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
@@ -6396,12 +6366,12 @@ static void build_concave_tolerance_fixture(const char *path, const uint8_t *rgb
     nt_builder_free_pack(ctx);
 }
 
-static void build_convex_tolerance_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float tolerance, uint8_t max_vertices, const char *name) {
+static void build_convex_added_area_fixture(const char *path, const uint8_t *rgba, uint32_t width, uint32_t height, float added_area_percent, uint8_t max_vertices, const char *name) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
-    opts.max_added_area_percent = tolerance;
+    opts.max_added_area_percent = added_area_percent;
     opts.max_vertices = max_vertices;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "convex", &opts);
     nt_atlas_add_raw(atlas, rgba, width, height, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
@@ -6420,7 +6390,7 @@ static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, con
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_aa_triangle_positive_tolerance_exact_coverage(void) {
+void test_aa_triangle_added_area_percent_preserves_full_cell_coverage(void) {
     (void)MKDIR(TMP_DIR);
     enum { W = 28, H = 20, BUDGET = 8 };
     uint8_t rgba[W * H * 4] = {0};
@@ -6443,36 +6413,20 @@ void test_aa_triangle_positive_tolerance_exact_coverage(void) {
         }
     }
 
-    Point2D contour[(W * H * 2) + 2];
-    Point2D clean[(W * H * 2) + 2];
-    bool overflow = false;
-    uint32_t contour_count = trace_contour(binary, W, H, contour, (W * H * 2) + 2, &overflow);
-    TEST_ASSERT_FALSE(overflow);
-    uint32_t clean_count = remove_collinear(contour, contour_count, clean);
-
     const char *paths[] = {TMP_DIR "/concave_tolerance_positive.ntpack", TMP_DIR "/convex_aa_tolerance_positive.ntpack"};
-    build_concave_tolerance_fixture(paths[0], rgba, W, H, 1.5F, BUDGET, "aa_concave");
-    build_convex_tolerance_fixture(paths[1], rgba, W, H, 1.5F, BUDGET, "aa_convex");
+    build_concave_added_area_fixture(paths[0], rgba, W, H, 1.5F, BUDGET, "aa_concave");
+    build_convex_added_area_fixture(paths[1], rgba, W, H, 1.5F, BUDGET, "aa_convex");
     for (uint32_t shape = 0; shape < 2; shape++) {
         const NtAtlasRegion *regions = NULL;
         uint32_t region_count = 0;
         uint8_t *pack = read_atlas_blob(paths[shape], &regions, &region_count);
         TEST_ASSERT_NOT_NULL(pack);
         TEST_ASSERT_EQUAL_UINT32(1, region_count);
-        TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, regions[0].vertex_count);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
 
         Point2D emitted[16];
         uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(pack), H, emitted);
-        TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
-        if (shape == 0) {
-            TEST_ASSERT_TRUE(polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count) <= 1.5);
-        } else {
-            uint32_t raw_count = 0;
-            Point2D *raw = binary_build_convex_polygon(binary, W, H, UINT32_MAX, &raw_count);
-            TEST_ASSERT_NOT_NULL(raw);
-            TEST_ASSERT_TRUE(polygon_max_boundary_distance(raw, raw_count, emitted, emitted_count) <= 1.5);
-            free(raw);
-        }
+        TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(emitted, emitted_count, binary, W, H, NULL, NULL));
         free(pack);
         (void)remove(paths[shape]);
     }
@@ -6497,8 +6451,11 @@ void test_connected_mask_serializes_simple_exact_triangulation(void) {
         }
     }
 
+    uint32_t slot_mask = nt_atlas_test_concave_frontier_slot_mask(binary, W, H, BUDGET);
+    TEST_ASSERT_BITS_HIGH((1U << 6U) | (1U << 7U) | (1U << 8U), slot_mask);
+
     const char *path = TMP_DIR "/connected_mask_simple.ntpack";
-    build_concave_tolerance_fixture(path, rgba, W, H, 1.0F, BUDGET, "connected_mask");
+    build_concave_added_area_fixture(path, rgba, W, H, 1.0F, BUDGET, "connected_mask");
     const NtAtlasRegion *regions = NULL;
     uint32_t region_count = 0;
     uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
@@ -6539,7 +6496,7 @@ void test_connected_mask_serializes_simple_exact_triangulation(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_concave_positive_budget_fallback_keeps_real_corner(void) {
+void test_concave_added_area_percent_respects_budget_and_coverage(void) {
     (void)MKDIR(TMP_DIR);
     enum { W = 12, H = 12, BUDGET = 5 };
     uint8_t rgba[W * H * 4] = {0};
@@ -6557,42 +6514,25 @@ void test_concave_positive_budget_fallback_keeps_real_corner(void) {
     }
 
     const char *path = TMP_DIR "/concave_tolerance_budget.ntpack";
-    build_concave_tolerance_fixture(path, rgba, W, H, 0.1F, BUDGET, "deep_notch");
+    build_concave_added_area_fixture(path, rgba, W, H, 0.1F, BUDGET, "deep_notch");
 
     const NtAtlasRegion *regions = NULL;
     uint32_t region_count = 0;
     uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(pack);
     TEST_ASSERT_EQUAL_UINT32(1, region_count);
-    TEST_ASSERT_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(BUDGET, regions[0].vertex_count);
 
     Point2D emitted[16];
     uint32_t emitted_count = decode_serialized_region_y_down(&regions[0], atlas_blob_vertices(pack), H, emitted);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
-
-    Point2D contour[(W * H * 2) + 2];
-    Point2D clean[(W * H * 2) + 2];
-    bool overflow = false;
-    uint32_t contour_count = trace_contour(binary, W, H, contour, (W * H * 2) + 2, &overflow);
-    TEST_ASSERT_FALSE(overflow);
-    uint32_t clean_count = remove_collinear(contour, contour_count, clean);
-    double fidelity = polygon_max_boundary_distance(clean, clean_count, emitted, emitted_count);
-    TEST_ASSERT_TRUE(fidelity > 0.1);
-
-    bool retained_notch_corner = false;
-    for (uint32_t i = 0; i < emitted_count; i++) {
-        if (emitted[i].x == 6 && emitted[i].y == 0) {
-            retained_notch_corner = true;
-        }
-    }
-    TEST_ASSERT_TRUE(retained_notch_corner);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(emitted, emitted_count, binary, W, H, NULL, NULL));
 
     free(pack);
     (void)remove(path);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_convex_positive_tolerance_is_count_first(void) {
+void test_convex_added_area_percent_does_not_increase_vertex_count(void) {
     (void)MKDIR(TMP_DIR);
     enum { W = 16, H = 16, BUDGET = 8 };
     const Point2D source_hull[] = {
@@ -6614,8 +6554,8 @@ void test_convex_positive_tolerance_is_count_first(void) {
 
     const char *zero_path = TMP_DIR "/convex_tolerance_zero.ntpack";
     const char *positive_path = TMP_DIR "/convex_tolerance_positive.ntpack";
-    build_convex_tolerance_fixture(zero_path, rgba, W, H, 0.0F, BUDGET, "rounded_octagon");
-    build_convex_tolerance_fixture(positive_path, rgba, W, H, 4.0F, BUDGET, "rounded_octagon");
+    build_convex_added_area_fixture(zero_path, rgba, W, H, 0.0F, BUDGET, "rounded_octagon");
+    build_convex_added_area_fixture(positive_path, rgba, W, H, 4.0F, BUDGET, "rounded_octagon");
 
     const NtAtlasRegion *zero_regions = NULL;
     const NtAtlasRegion *positive_regions = NULL;
@@ -6627,18 +6567,12 @@ void test_convex_positive_tolerance_is_count_first(void) {
     TEST_ASSERT_NOT_NULL(positive_pack);
     TEST_ASSERT_EQUAL_UINT32(1, zero_region_count);
     TEST_ASSERT_EQUAL_UINT32(1, positive_region_count);
-    TEST_ASSERT_LESS_THAN_UINT8(zero_regions[0].vertex_count, positive_regions[0].vertex_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(zero_regions[0].vertex_count, positive_regions[0].vertex_count);
 
     Point2D emitted[16];
     uint32_t emitted_count = decode_serialized_region_y_down(&positive_regions[0], atlas_blob_vertices(positive_pack), H, emitted);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, binary, W, H) <= 0.0);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(emitted, emitted_count, binary, W, H, NULL, NULL));
 
-    uint32_t raw_count = 0;
-    Point2D *raw = binary_build_convex_polygon(binary, W, H, UINT32_MAX, &raw_count);
-    TEST_ASSERT_NOT_NULL(raw);
-    TEST_ASSERT_TRUE(polygon_max_boundary_distance(raw, raw_count, emitted, emitted_count) <= 4.0);
-
-    free(raw);
     free(positive_pack);
     free(zero_pack);
     (void)remove(positive_path);
@@ -6903,8 +6837,8 @@ void test_mixed_sprite_geometry_overrides_are_isolated(void) {
     TEST_ASSERT_NOT_NULL(rect);
     TEST_ASSERT_NOT_NULL(threshold);
     assert_serialized_local_polygons_equal(inherited_a, inherited_b, vertices);
-    TEST_ASSERT_LESS_THAN_UINT8(inherited_a->vertex_count, tolerance->vertex_count);
-    TEST_ASSERT_LESS_OR_EQUAL_UINT8(4, tolerance->vertex_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(inherited_a->vertex_count, tolerance->vertex_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(8, tolerance->vertex_count);
     TEST_ASSERT_EQUAL_INT16(1, inherited_a->trim_offset_x);
     TEST_ASSERT_EQUAL_INT16(1, inherited_b->trim_offset_x);
     TEST_ASSERT_EQUAL_INT16(0, threshold->trim_offset_x);
@@ -6912,9 +6846,9 @@ void test_mixed_sprite_geometry_overrides_are_isolated(void) {
 
     Point2D emitted[16];
     uint32_t emitted_count = decode_serialized_region_y_down(tolerance, vertices, H, emitted);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, threshold_mask, W - 1, H) <= 0.0);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(emitted, emitted_count, threshold_mask, W - 1, H, NULL, NULL));
     emitted_count = decode_serialized_region_y_down(threshold, vertices, H, emitted);
-    TEST_ASSERT_TRUE(polygon_max_outside_pixel_distance(emitted, emitted_count, override_mask, W, H) <= 0.0);
+    TEST_ASSERT_TRUE(nt_polygon_covers_retained_cells(emitted, emitted_count, override_mask, W, H, NULL, NULL));
 
     free(pack);
     (void)remove(path);
@@ -7133,6 +7067,8 @@ void test_atlas_cache_identity_includes_geometry_controls(void) {
     TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_default.ntpack", cache, 10.0F, 0.0F, false, 0));
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
     TEST_ASSERT_TRUE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_repeat.ntpack", cache, 10.0F, 0.0F, false, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+    TEST_ASSERT_TRUE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_effective_alpha.ntpack", cache, 10.0F, 0.0F, false, 1));
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
     TEST_ASSERT_FALSE(build_atlas_cache_geometry_case(TMP_DIR "/atlas_cache_geometry_atlas_percent.ntpack", cache, 2.0F, 0.0F, false, 0));
     TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
@@ -8274,6 +8210,9 @@ int main(void) {
     RUN_TEST(test_geometry_frontier_percent_boundaries_are_exact);
     RUN_TEST(test_geometry_frontier_selector_rejects_zero_area_and_avoids_overflow);
     RUN_TEST(test_geometry_frontier_donut_metrics_cancel_hole_from_added_area);
+    RUN_TEST(test_selected_geometry_validator_rejects_corrupt_claims);
+    RUN_TEST(test_rect_budget_three_is_graceful_hull_infeasible);
+    RUN_TEST(test_convex_budget_three_is_graceful_hull_infeasible);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
@@ -8314,11 +8253,9 @@ int main(void) {
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);
-    RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
+    RUN_TEST(test_atlas_shape_concave_uses_convex_frontier_on_disjoint_sprite);
     RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
     RUN_TEST(test_convex_budget_preserves_all_retained_pixels);
-    RUN_TEST(test_convex_opaque_square_budget_three_is_exact_and_deterministic);
-    RUN_TEST(test_convex_covering_gate_preserves_correct_legacy_vertices);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
@@ -8342,10 +8279,10 @@ int main(void) {
     RUN_TEST(test_atlas_cache_identity_includes_geometry_controls);
     RUN_TEST(test_atlas_cache_signed_zero_area_percent_is_identical);
     RUN_TEST(test_atlas_dedup_distinguishes_area_override_presence);
-    RUN_TEST(test_aa_triangle_positive_tolerance_exact_coverage);
+    RUN_TEST(test_aa_triangle_added_area_percent_preserves_full_cell_coverage);
     RUN_TEST(test_connected_mask_serializes_simple_exact_triangulation);
-    RUN_TEST(test_concave_positive_budget_fallback_keeps_real_corner);
-    RUN_TEST(test_convex_positive_tolerance_is_count_first);
+    RUN_TEST(test_concave_added_area_percent_respects_budget_and_coverage);
+    RUN_TEST(test_convex_added_area_percent_does_not_increase_vertex_count);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);

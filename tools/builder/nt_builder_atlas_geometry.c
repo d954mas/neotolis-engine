@@ -452,6 +452,86 @@ nt_polygon_feasibility_t nt_polygon_feasibility(const Point2D *poly, uint32_t po
     return result;
 }
 
+static bool selected_geometry_bounds_valid(const Point2D *poly, uint32_t count, uint32_t width, uint32_t height) {
+    if (!poly || count < 3 || count > NT_POLYGON_MAX_VERTICES || width == 0 || height == 0 || width > INT16_MAX || height > INT16_MAX) {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < 0 || poly[i].y < 0 || (uint32_t)poly[i].x > width || (uint32_t)poly[i].y > height) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_selected_geometry_proof_t nt_selected_geometry_validate(const uint8_t *binary, uint32_t width, uint32_t height, uint64_t claimed_opaque_area2, const Point2D *base_poly, uint32_t base_count,
+                                                           uint64_t claimed_base_area2, const uint16_t *base_indices, uint32_t base_index_count, const Point2D *selected_poly, uint32_t selected_count,
+                                                           uint64_t claimed_selected_area2, const uint16_t *selected_indices, uint32_t selected_index_count, float max_added_area_percent,
+                                                           uint32_t max_vertices) {
+    nt_selected_geometry_proof_t proof = {0};
+    proof.base_vertex_count = base_count;
+    proof.selected_vertex_count = selected_count;
+    proof.base_triangle_index_count = base_index_count;
+    proof.selected_triangle_index_count = selected_index_count;
+    proof.max_vertices = max_vertices;
+    proof.max_added_area_percent = max_added_area_percent == 0.0F ? 0.0F : max_added_area_percent;
+    proof.opaque_area2 = claimed_opaque_area2;
+    proof.base_area2 = claimed_base_area2;
+    proof.selected_area2 = claimed_selected_area2;
+    proof.inputs_valid = binary && base_poly && base_indices && selected_poly && selected_indices && width > 0 && height > 0 && width <= INT16_MAX && height <= INT16_MAX && max_vertices >= 3 &&
+                         max_vertices <= NT_POLYGON_MAX_VERTICES && isfinite(max_added_area_percent) && max_added_area_percent >= 0.0F;
+    if (!proof.inputs_valid) {
+        return proof;
+    }
+
+    uint32_t retained = 0;
+    size_t cell_count = (size_t)width * height;
+    for (size_t i = 0; i < cell_count; i++) {
+        retained += binary[i] != 0 ? 1U : 0U;
+    }
+    proof.retained_cell_count = retained;
+    uint64_t recomputed_opaque_area2 = (uint64_t)retained * 2U;
+    proof.opaque_area_valid = retained > 0 && claimed_opaque_area2 == recomputed_opaque_area2;
+
+    proof.base_bounds_valid = selected_geometry_bounds_valid(base_poly, base_count, width, height);
+    proof.base_topology_valid = proof.base_bounds_valid && polygon_validate(base_poly, base_count) == NT_POLYGON_VALID;
+    proof.base_coverage_valid = proof.base_topology_valid && nt_polygon_covers_retained_cells(base_poly, base_count, binary, width, height, NULL, NULL);
+    uint64_t recomputed_base_area2 = 0;
+    proof.base_triangulation_valid = proof.base_coverage_valid && nt_polygon_triangles_validate(base_poly, base_count, base_indices, base_index_count, &recomputed_base_area2);
+    proof.base_area_valid = proof.base_triangulation_valid && recomputed_base_area2 == claimed_base_area2;
+
+    proof.selected_bounds_valid = selected_geometry_bounds_valid(selected_poly, selected_count, width, height);
+    proof.selected_topology_valid = proof.selected_bounds_valid && polygon_validate(selected_poly, selected_count) == NT_POLYGON_VALID;
+    proof.selected_coverage_valid = proof.selected_topology_valid && nt_polygon_covers_retained_cells(selected_poly, selected_count, binary, width, height, NULL, NULL);
+    uint64_t recomputed_selected_area2 = 0;
+    proof.selected_triangulation_valid =
+        proof.selected_coverage_valid && nt_polygon_triangles_validate(selected_poly, selected_count, selected_indices, selected_index_count, &recomputed_selected_area2);
+    proof.selected_area_valid = proof.selected_triangulation_valid && recomputed_selected_area2 == claimed_selected_area2;
+
+    proof.metric_order_valid =
+        proof.opaque_area_valid && proof.base_area_valid && proof.selected_area_valid && claimed_base_area2 >= claimed_opaque_area2 && claimed_selected_area2 >= claimed_base_area2;
+    proof.added_area2 = proof.metric_order_valid ? claimed_selected_area2 - claimed_base_area2 : 0;
+    proof.allowance_valid = proof.metric_order_valid && ((double)proof.added_area2 * 100.0) <= ((double)claimed_opaque_area2 * (double)max_added_area_percent);
+    proof.ceiling_valid = base_count <= max_vertices && selected_count <= max_vertices;
+    proof.valid = proof.inputs_valid && proof.opaque_area_valid && proof.base_bounds_valid && proof.base_topology_valid && proof.base_coverage_valid && proof.base_triangulation_valid &&
+                  proof.base_area_valid && proof.selected_bounds_valid && proof.selected_topology_valid && proof.selected_coverage_valid && proof.selected_triangulation_valid &&
+                  proof.selected_area_valid && proof.metric_order_valid && proof.allowance_valid && proof.ceiling_valid;
+    return proof;
+}
+
+bool nt_selected_geometry_proof_equal(const nt_selected_geometry_proof_t *left, const nt_selected_geometry_proof_t *right) {
+    return left && right && left->inputs_valid == right->inputs_valid && left->opaque_area_valid == right->opaque_area_valid && left->base_bounds_valid == right->base_bounds_valid &&
+           left->base_topology_valid == right->base_topology_valid && left->base_coverage_valid == right->base_coverage_valid && left->base_triangulation_valid == right->base_triangulation_valid &&
+           left->base_area_valid == right->base_area_valid && left->selected_bounds_valid == right->selected_bounds_valid && left->selected_topology_valid == right->selected_topology_valid &&
+           left->selected_coverage_valid == right->selected_coverage_valid && left->selected_triangulation_valid == right->selected_triangulation_valid &&
+           left->selected_area_valid == right->selected_area_valid && left->metric_order_valid == right->metric_order_valid && left->allowance_valid == right->allowance_valid &&
+           left->ceiling_valid == right->ceiling_valid && left->valid == right->valid && left->retained_cell_count == right->retained_cell_count &&
+           left->base_vertex_count == right->base_vertex_count && left->selected_vertex_count == right->selected_vertex_count && left->base_triangle_index_count == right->base_triangle_index_count &&
+           left->selected_triangle_index_count == right->selected_triangle_index_count && left->max_vertices == right->max_vertices && left->max_added_area_percent == right->max_added_area_percent &&
+           left->opaque_area2 == right->opaque_area2 && left->base_area2 == right->base_area2 && left->selected_area2 == right->selected_area2 && left->added_area2 == right->added_area2;
+}
+
 /* --- qsort comparator: sort by x, then by y --- */
 
 static int point2d_cmp(const void *a, const void *b) {
