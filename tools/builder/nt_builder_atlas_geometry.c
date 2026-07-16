@@ -116,6 +116,15 @@ static int64_t polygon_signed_twice_area(const Point2D *poly, uint32_t count) {
     return twice_area;
 }
 
+static bool polygon_coordinates_widening_safe(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < INT16_MIN || poly[i].x > INT16_MAX || poly[i].y < INT16_MIN || poly[i].y > INT16_MAX) {
+            return false;
+        }
+    }
+    return true;
+}
+
 nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count) {
     if (!poly || count < 3) {
         return NT_POLYGON_INVALID_TOO_FEW_VERTICES;
@@ -234,7 +243,7 @@ static bool segment_crosses_open_cell(Point2D a, Point2D b, uint32_t x, uint32_t
 bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells) {
     uint32_t retained_cells = 0;
     uint32_t lost_cells = 0;
-    if (!poly || poly_count < 3 || !binary) {
+    if (!poly || poly_count < 3 || !binary || tw > INT16_MAX || th > INT16_MAX || !polygon_coordinates_widening_safe(poly, poly_count)) {
         if (out_retained_cells) {
             *out_retained_cells = 0;
         }
@@ -298,7 +307,8 @@ static bool triangle_diagonal_inside(const Point2D *poly, uint32_t count, uint16
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_polygon_triangles_validate(const Point2D *poly, uint32_t poly_count, const uint16_t *indices, uint32_t index_count, uint64_t *out_area2) {
-    if (!poly || !indices || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || polygon_validate(poly, poly_count) != NT_POLYGON_VALID || index_count != (poly_count - 2U) * 3U) {
+    if (!poly || !indices || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || !polygon_coordinates_widening_safe(poly, poly_count) || polygon_validate(poly, poly_count) != NT_POLYGON_VALID ||
+        index_count != (poly_count - 2U) * 3U) {
         return false;
     }
 
@@ -370,7 +380,8 @@ bool nt_polygon_triangles_validate(const Point2D *poly, uint32_t poly_count, con
 }
 
 bool nt_polygon_triangulate_validated(const Point2D *poly, uint32_t poly_count, uint16_t *out_indices, uint32_t *out_index_count, uint64_t *out_area2) {
-    if (!poly || !out_indices || !out_index_count || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || polygon_validate(poly, poly_count) != NT_POLYGON_VALID) {
+    if (!poly || !out_indices || !out_index_count || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || !polygon_coordinates_widening_safe(poly, poly_count) ||
+        polygon_validate(poly, poly_count) != NT_POLYGON_VALID) {
         return false;
     }
     uint32_t index_count = (poly_count - 2U) * 3U;

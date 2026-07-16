@@ -4238,6 +4238,9 @@ typedef struct {
     uint64_t slot_area2[NT_POLYGON_MAX_VERTICES + 1];
     Point2D selected_poly[NT_POLYGON_MAX_VERTICES];
     uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    double base_overdraw_percent;
+    double added_area_percent;
+    double total_overdraw_percent;
 } NtAtlasFrontierTestResult;
 
 bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
@@ -4664,6 +4667,45 @@ void test_geometry_frontier_equal_area_tie_is_canonical_and_order_independent(vo
     TEST_ASSERT_EQUAL_MEMORY(first.selected_indices, second.selected_indices, sizeof(first.selected_indices));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_geometry_frontier_permutations_keep_slots_base_and_triangles(void) {
+    const Point2D loose_quad[4] = {{0, 0}, {2, 0}, {2, 1}, {0, 1}};
+    const Point2D invalid_half_cell[3] = {{0, 0}, {1, 0}, {0, 1}};
+    const Point2D covering_triangle[3] = {{0, 0}, {2, 0}, {0, 2}};
+    const Point2D tight_quad[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const Point2D *source_polygons[] = {loose_quad, invalid_half_cell, covering_triangle, tight_quad};
+    const uint32_t source_counts[] = {4, 3, 3, 4};
+    const uint8_t orders[8][4] = {{0, 1, 2, 3}, {3, 2, 1, 0}, {1, 3, 0, 2}, {2, 0, 3, 1}, {0, 2, 1, 3}, {3, 1, 2, 0}, {1, 0, 3, 2}, {2, 3, 0, 1}};
+    const uint8_t retained[4] = {1, 0, 0, 0};
+    NtAtlasFrontierTestResult base_result = {0};
+
+    for (uint32_t permutation = 0; permutation < 8; permutation++) {
+        const Point2D *polygons[4] = {0};
+        uint32_t counts[4] = {0};
+        for (uint32_t i = 0; i < 4; i++) {
+            polygons[i] = source_polygons[orders[permutation][i]];
+            counts[i] = source_counts[orders[permutation][i]];
+        }
+        NtAtlasFrontierTestResult result = {0};
+        TEST_ASSERT_TRUE(nt_atlas_test_frontier_evaluate(polygons, counts, 4, retained, 2, 2, 4, 100.0F, &result));
+        if (permutation == 0) {
+            base_result = result;
+            continue;
+        }
+        TEST_ASSERT_EQUAL_UINT32(base_result.slot_mask, result.slot_mask);
+        TEST_ASSERT_EQUAL_UINT32(base_result.selected_count, result.selected_count);
+        TEST_ASSERT_EQUAL_UINT32(base_result.selected_index_count, result.selected_index_count);
+        TEST_ASSERT_EQUAL_UINT64(base_result.base_area2, result.base_area2);
+        TEST_ASSERT_EQUAL_MEMORY(base_result.slot_area2, result.slot_area2, sizeof(result.slot_area2));
+        TEST_ASSERT_EQUAL_MEMORY(base_result.selected_poly, result.selected_poly, sizeof(result.selected_poly));
+        TEST_ASSERT_EQUAL_MEMORY(base_result.selected_indices, result.selected_indices, sizeof(result.selected_indices));
+    }
+    TEST_ASSERT_TRUE(fabs(base_result.base_overdraw_percent) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs(base_result.added_area_percent - 100.0) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs(base_result.total_overdraw_percent - 100.0) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs((base_result.base_overdraw_percent + base_result.added_area_percent) - base_result.total_overdraw_percent) <= 1e-12);
+}
+
 void test_geometry_frontier_base_area_is_global_and_zero_selects_smallest_base_tie(void) {
     uint64_t areas[NT_POLYGON_MAX_VERTICES + 1] = {0};
     areas[3] = 240;
@@ -4676,6 +4718,62 @@ void test_geometry_frontier_base_area_is_global_and_zero_selects_smallest_base_t
     TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_frontier_select_areas(areas, slots, 200, 6, 10.0F));
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_frontier_select_areas(areas, slots, 200, 6, 20.0F));
     TEST_ASSERT_EQUAL_UINT32(5, nt_atlas_test_frontier_select_areas(areas, slots, 200, 5, 0.0F));
+}
+
+void test_geometry_frontier_percent_boundaries_are_exact(void) {
+    uint64_t areas[NT_POLYGON_MAX_VERTICES + 1] = {0};
+    areas[3] = 1050;
+    areas[4] = 1030;
+    areas[5] = 1020;
+    areas[6] = 1010;
+    areas[7] = 1004;
+    areas[8] = 1000;
+    uint32_t slots = (1U << 3U) | (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | (1U << 8U);
+
+    TEST_ASSERT_EQUAL_UINT32(8, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 0.0F));
+    TEST_ASSERT_EQUAL_UINT32(8, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 1.99F));
+    TEST_ASSERT_EQUAL_UINT32(7, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 2.0F));
+    TEST_ASSERT_EQUAL_UINT32(7, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 4.99F));
+    TEST_ASSERT_EQUAL_UINT32(6, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 5.0F));
+    TEST_ASSERT_EQUAL_UINT32(5, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 10.0F));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 15.0F));
+    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_frontier_select_areas(areas, slots, 200, 8, 25.0F));
+}
+
+void test_geometry_frontier_selector_rejects_zero_area_and_avoids_overflow(void) {
+    uint64_t areas[NT_POLYGON_MAX_VERTICES + 1] = {0};
+    areas[3] = UINT64_MAX;
+    areas[4] = UINT64_MAX - 10U;
+    uint32_t slots = (1U << 3U) | (1U << 4U);
+
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, nt_atlas_test_frontier_select_areas(areas, slots, 0, 4, 100.0F));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_frontier_select_areas(areas, slots, 100, 4, 9.99F));
+    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_frontier_select_areas(areas, slots, 100, 4, 10.0F));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_geometry_frontier_donut_metrics_cancel_hole_from_added_area(void) {
+    const Point2D outer[4] = {{0, 0}, {3, 0}, {3, 3}, {0, 3}};
+    const Point2D *polygons[] = {outer};
+    const uint32_t counts[] = {4};
+    const uint8_t donut[9] = {1, 1, 1, 1, 0, 1, 1, 1, 1};
+    NtAtlasFrontierTestResult first = {0};
+    NtAtlasFrontierTestResult repeated = {0};
+
+    TEST_ASSERT_TRUE(nt_atlas_test_frontier_evaluate(polygons, counts, 1, donut, 3, 3, 4, 0.0F, &first));
+    TEST_ASSERT_EQUAL_UINT64(16, first.opaque_area2);
+    TEST_ASSERT_EQUAL_UINT64(18, first.base_area2);
+    TEST_ASSERT_EQUAL_UINT64(18, first.selected_area2);
+    TEST_ASSERT_TRUE(fabs(first.base_overdraw_percent - 12.5) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs(first.added_area_percent) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs(first.total_overdraw_percent - 12.5) <= 1e-12);
+    TEST_ASSERT_TRUE(fabs((first.base_overdraw_percent + first.added_area_percent) - first.total_overdraw_percent) <= 1e-12);
+    TEST_ASSERT_EQUAL_UINT64(first.selected_area2 - first.opaque_area2, (first.base_area2 - first.opaque_area2) + (first.selected_area2 - first.base_area2));
+
+    for (uint32_t repeat = 0; repeat < 8; repeat++) {
+        TEST_ASSERT_TRUE(nt_atlas_test_frontier_evaluate(polygons, counts, 1, donut, 3, 3, 4, 0.0F, &repeated));
+        TEST_ASSERT_EQUAL_MEMORY(&first, &repeated, sizeof(first));
+    }
 }
 
 /* fan_triangulate: 4 vertices produces 2 triangles */
@@ -8171,7 +8269,11 @@ int main(void) {
     RUN_TEST(test_positive_candidate_area_tie_break_is_exact_and_winding_independent);
     RUN_TEST(test_geometry_frontier_adopts_tightest_per_count_and_owns_buffers);
     RUN_TEST(test_geometry_frontier_equal_area_tie_is_canonical_and_order_independent);
+    RUN_TEST(test_geometry_frontier_permutations_keep_slots_base_and_triangles);
     RUN_TEST(test_geometry_frontier_base_area_is_global_and_zero_selects_smallest_base_tie);
+    RUN_TEST(test_geometry_frontier_percent_boundaries_are_exact);
+    RUN_TEST(test_geometry_frontier_selector_rejects_zero_area_and_avoids_overflow);
+    RUN_TEST(test_geometry_frontier_donut_metrics_cancel_hole_from_added_area);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);

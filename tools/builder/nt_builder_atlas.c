@@ -1388,6 +1388,9 @@ typedef struct {
     uint64_t slot_area2[NT_POLYGON_MAX_VERTICES + 1];
     Point2D selected_poly[NT_POLYGON_MAX_VERTICES];
     uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    double base_overdraw_percent;
+    double added_area_percent;
+    double total_overdraw_percent;
 } NtAtlasFrontierTestResult;
 
 static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
@@ -1500,8 +1503,9 @@ static uint32_t geometry_frontier_select(const GeometryFrontier *frontier, doubl
         if (!candidate->valid || candidate->exact_abs_twice_area < base) {
             continue;
         }
-        double added_percent = ((double)(candidate->exact_abs_twice_area - base) * 100.0) / (double)frontier->opaque_area2;
-        if (added_percent <= max_added_area_percent) {
+        double added_area = (double)(candidate->exact_abs_twice_area - base) * 100.0;
+        double allowed_area = (double)frontier->opaque_area2 * max_added_area_percent;
+        if (added_area <= allowed_area) {
             return count;
         }
     }
@@ -1527,6 +1531,7 @@ static uint64_t geometry_retained_area2(const uint8_t *binary, uint32_t width, u
     return retained * 2U;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
                                      float max_added_area_percent, NtAtlasFrontierTestResult *out_result) {
     if (!polygons || !counts || !binary || !out_result || max_vertices < 3 || max_vertices > NT_POLYGON_MAX_VERTICES) {
@@ -1557,11 +1562,15 @@ bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint3
     }
     if (selected_count != UINT32_MAX) {
         const GeometryCandidate *selected = &frontier.slots[selected_count];
+        NT_BUILD_ASSERT(base >= frontier.opaque_area2 && selected->exact_abs_twice_area >= base);
         out_result->selected_count = selected_count;
         out_result->selected_index_count = selected->triangle_index_count;
         out_result->selected_area2 = selected->exact_abs_twice_area;
         memcpy(out_result->selected_poly, selected->poly, (size_t)selected->count * sizeof(Point2D));
         memcpy(out_result->selected_indices, selected->triangle_indices, (size_t)selected->triangle_index_count * sizeof(uint16_t));
+        out_result->base_overdraw_percent = ((double)(base - frontier.opaque_area2) * 100.0) / (double)frontier.opaque_area2;
+        out_result->added_area_percent = ((double)(selected->exact_abs_twice_area - base) * 100.0) / (double)frontier.opaque_area2;
+        out_result->total_overdraw_percent = ((double)(selected->exact_abs_twice_area - frontier.opaque_area2) * 100.0) / (double)frontier.opaque_area2;
     }
     geometry_frontier_destroy(&frontier);
     out_result->transfer_count = frontier.transfer_count;
