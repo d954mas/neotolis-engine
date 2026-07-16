@@ -4,6 +4,7 @@
 #include "nt_builder.h"
 #include "nt_builder_atlas_geometry.h"
 #include "nt_pack_format.h"
+#include "ntpack_parse.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -21,15 +22,17 @@
 #define NT_MKDIR(path) mkdir(path, 0755)
 #endif
 
-#define VISUAL_SCHEMA_VERSION 1
+#define VISUAL_SCHEMA_VERSION 2
 #define VISUAL_ROW_COUNT 7
 #define VISUAL_COLUMN_COUNT 3
 #define VISUAL_MAX_VERTICES 16
 #define VISUAL_PATH_MAX 1024
 
+uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
+
 typedef struct {
     const char *id;
-    double tolerance;
+    double percent;
     char source[VISUAL_PATH_MAX];
     char sha256[65];
     char source_commit[41];
@@ -50,7 +53,11 @@ typedef struct {
 } VisualFixture;
 
 typedef struct {
+    Point2D baseline_polygon[VISUAL_MAX_VERTICES];
     Point2D polygon[VISUAL_MAX_VERTICES];
+    uint16_t baseline_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    uint32_t baseline_vertex_count;
     uint32_t vertex_count;
     uint32_t trim_x;
     uint32_t trim_y;
@@ -60,14 +67,19 @@ typedef struct {
     uint8_t *mask;
     uint32_t retained_pixels;
     nt_polygon_coverage_metrics_t coverage;
-    double fidelity;
     nt_polygon_validity_t validity;
     int64_t signed_twice_area;
     bool triangles_valid;
     bool commit_ok;
     bool hull_infeasible;
-    bool fidelity_ok;
+    bool allowance_ok;
     bool result;
+    nt_selected_geometry_proof_t proof;
+    uint64_t lost_area2;
+    char baseline_pack_sha256[65];
+    char selected_pack_sha256[65];
+    uint32_t connected_frontier_counts[3];
+    bool connected_frontier_valid;
 } VisualPanel;
 
 static const VisualRow VISUAL_ROWS[VISUAL_ROW_COUNT] = {
@@ -285,26 +297,26 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
     }
     const char *cursor = (const char *)bytes;
     char source_commit[41];
-    bool ok = strstr(cursor, "\"schema_version\": 1") != NULL && text_value(cursor, "measurement_source_commit", source_commit, sizeof(source_commit)) && strlen(source_commit) == 40U;
+    bool ok = strstr(cursor, "\"schema_version\": 2") != NULL && text_value(cursor, "measurement_source_commit", source_commit, sizeof(source_commit)) && strlen(source_commit) == 40U;
     for (uint32_t i = 0; ok && i < VISUAL_COLUMN_COUNT; i++) {
         char needle[96];
         (void)snprintf(needle, sizeof(needle), "\"column_id\": \"%s\"", ids[i]);
         const char *object = strstr(cursor, needle);
-        double tolerance = 0.0;
-        if (object == NULL || !number_value(object, "tolerance_px", &tolerance) || tolerance < 0.0 || !text_value(object, "sweep_source", columns[i].source, sizeof(columns[i].source)) ||
+        double percent = 0.0;
+        if (object == NULL || !number_value(object, "max_added_area_percent", &percent) || percent < 0.0 || !text_value(object, "sweep_source", columns[i].source, sizeof(columns[i].source)) ||
             !text_value(object, "sweep_sha256", columns[i].sha256, sizeof(columns[i].sha256))) {
             ok = false;
             break;
         }
         columns[i].id = ids[i];
-        columns[i].tolerance = tolerance;
+        columns[i].percent = percent;
         (void)snprintf(columns[i].source_commit, sizeof(columns[i].source_commit), "%s", source_commit);
         char actual[65];
         size_t sweep_size = 0;
         uint8_t *sweep = read_file(columns[i].source, &sweep_size);
         double measured = -1.0;
-        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep != NULL && number_value((const char *)sweep, "tracer_tolerance", &measured) &&
-             fabs(measured - tolerance) < 0.0001;
+        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep != NULL && number_value((const char *)sweep, "max_added_area_percent", &measured) &&
+             fabs(measured - percent) < 0.0001;
         free(sweep);
         cursor = object + strlen(needle);
     }
@@ -439,54 +451,54 @@ static bool fixture_create(const VisualRow *row, VisualFixture *fixture) {
     return true;
 }
 
-static bool panel_read_pack(const char *path, VisualPanel *panel) {
-    size_t size = 0;
-    uint8_t *bytes = read_file(path, &size);
-    if (bytes == NULL || size < sizeof(NtPackHeader)) {
-        free(bytes);
-        return false;
+typedef struct {
+    bool ok;
+    bool hull_infeasible;
+} PanelPackResult;
+
+static void panel_remove_pack(const char *path) {
+    char header[VISUAL_PATH_MAX];
+    (void)snprintf(header, sizeof(header), "%s", path);
+    char *extension = strstr(header, ".ntpack");
+    if (extension != NULL && extension[7] == '\0') {
+        (void)snprintf(extension, 8U, ".h");
+        (void)remove(header);
     }
-    const NtPackHeader *pack = (const NtPackHeader *)bytes;
-    if (pack->magic != NT_PACK_MAGIC || pack->version != NT_PACK_VERSION || sizeof(NtPackHeader) + ((size_t)pack->asset_count * sizeof(NtAssetEntry)) > size) {
-        free(bytes);
-        return false;
+    (void)remove(path);
+}
+
+static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixture *fixture, const char *path, float percent, uint8_t max_vertices) {
+    PanelPackResult result = {0};
+    NtBuilderContext *context = nt_builder_start_pack(path);
+    if (context == NULL) {
+        return result;
     }
-    const NtAssetEntry *entries = (const NtAssetEntry *)(bytes + sizeof(NtPackHeader));
-    bool ok = false;
-    for (uint32_t i = 0; i < pack->asset_count; i++) {
-        const NtAssetEntry *entry = &entries[i];
-        if (entry->asset_type != NT_ASSET_ATLAS || (uint64_t)entry->offset + entry->size > size || entry->size < sizeof(NtAtlasHeader)) {
-            continue;
-        }
-        const uint8_t *blob = bytes + entry->offset;
-        const NtAtlasHeader *header = (const NtAtlasHeader *)blob;
-        const size_t region_offset = sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t));
-        if (header->magic != NT_ATLAS_MAGIC || header->region_count != 1 || region_offset + sizeof(NtAtlasRegion) > entry->size ||
-            (uint64_t)header->vertex_offset + ((uint64_t)header->total_vertex_count * sizeof(NtAtlasVertex)) > entry->size ||
-            (uint64_t)header->index_offset + ((uint64_t)header->total_index_count * sizeof(uint16_t)) > entry->size) {
-            break;
-        }
-        const NtAtlasRegion *region = (const NtAtlasRegion *)(blob + region_offset);
-        const NtAtlasVertex *vertices = (const NtAtlasVertex *)(blob + header->vertex_offset);
-        const uint16_t *indices = (const uint16_t *)(blob + header->index_offset);
-        if (region->vertex_count < 3 || region->vertex_count > VISUAL_MAX_VERTICES || region->vertex_start + region->vertex_count > header->total_vertex_count ||
-            region->index_start + region->index_count > header->total_index_count) {
-            break;
-        }
-        panel->vertex_count = region->vertex_count;
-        for (uint32_t vertex = 0; vertex < panel->vertex_count; vertex++) {
-            panel->polygon[vertex].x = vertices[region->vertex_start + vertex].local_x;
-            panel->polygon[vertex].y = (int32_t)panel->trim_h - vertices[region->vertex_start + vertex].local_y;
-        }
-        panel->triangles_valid = region->index_count == (panel->vertex_count - 2U) * 3U;
-        for (uint32_t index = 0; panel->triangles_valid && index < region->index_count; index++) {
-            panel->triangles_valid = indices[region->index_start + index] < panel->vertex_count;
-        }
-        ok = true;
-        break;
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = row->shape;
+    opts.alpha_threshold = strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? 1U : row->threshold;
+    opts.max_vertices = max_vertices;
+    opts.max_added_area_percent = percent;
+    opts.allow_transform = false;
+    opts.power_of_two = false;
+    opts.gen_mipmaps = false;
+    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    NtAtlasBuild *atlas = nt_atlas_begin(context, "visual", &opts);
+    nt_atlas_sprite_opts_t sprite = nt_atlas_sprite_opts_defaults();
+    sprite.name = "fixture";
+    if (strcmp(row->sample_id, "pixel-art-threshold-control") == 0) {
+        sprite.alpha_threshold = row->threshold;
     }
-    free(bytes);
-    return ok;
+    nt_atlas_add_raw(atlas, fixture->rgba, fixture->width, fixture->height, &sprite);
+    const nt_build_result_t commit = nt_atlas_commit(atlas);
+    const nt_build_result_t finish = nt_builder_finish_pack(context);
+    uint32_t error_count = 0U;
+    const nt_build_error_t *errors = nt_builder_get_errors(context, &error_count);
+    result.ok = commit == NT_BUILD_OK && finish == NT_BUILD_OK;
+    result.hull_infeasible = commit == NT_BUILD_ERR_VALIDATION && finish == NT_BUILD_ERR_VALIDATION && error_count == 1U && errors[0].kind == NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE &&
+                             errors[0].detail_a == max_vertices && errors[0].detail_b == (uint32_t)row->shape;
+    nt_builder_free_pack(context);
+    return result;
 }
 
 static bool panel_build(const VisualRow *row, const VisualColumn *column, const VisualFixture *fixture, const char *out_dir, uint32_t ordinal, VisualPanel *panel) {
@@ -516,82 +528,77 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
     }
     free(alpha);
 
+    char base_path[VISUAL_PATH_MAX];
     char pack_path[VISUAL_PATH_MAX];
-    char header_path[VISUAL_PATH_MAX];
-    (void)snprintf(pack_path, sizeof(pack_path), "%s/panel-%02u.ntpack", out_dir, ordinal);
-    (void)snprintf(header_path, sizeof(header_path), "%s/panel-%02u.h", out_dir, ordinal);
-    (void)remove(pack_path);
-    (void)remove(header_path);
-    NtBuilderContext *context = nt_builder_start_pack(pack_path);
-    if (context == NULL) {
-        return false;
-    }
-    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.shape = row->shape;
-    opts.alpha_threshold = strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? 1U : row->threshold;
-    opts.max_vertices = row->budget;
-    opts.max_added_area_percent = (float)column->tolerance;
-    opts.allow_transform = false;
-    opts.power_of_two = false;
-    opts.gen_mipmaps = false;
-    opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
-    opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
-    NtAtlasBuild *atlas = nt_atlas_begin(context, "visual", &opts);
-    nt_atlas_sprite_opts_t sprite = nt_atlas_sprite_opts_defaults();
-    sprite.name = "fixture";
-    if (strcmp(row->sample_id, "pixel-art-threshold-control") == 0) {
-        sprite.alpha_threshold = row->threshold;
-    }
-    nt_atlas_add_raw(atlas, fixture->rgba, fixture->width, fixture->height, &sprite);
-    nt_build_result_t commit_result = nt_atlas_commit(atlas);
-    nt_build_result_t finish_result = nt_builder_finish_pack(context);
-    uint32_t error_count = 0;
-    const nt_build_error_t *errors = nt_builder_get_errors(context, &error_count);
-    panel->commit_ok = commit_result == NT_BUILD_OK && finish_result == NT_BUILD_OK;
+    (void)snprintf(base_path, sizeof(base_path), "%s/panel-%02u-base.ntpack", out_dir, ordinal);
+    (void)snprintf(pack_path, sizeof(pack_path), "%s/panel-%02u-selected.ntpack", out_dir, ordinal);
+    panel_remove_pack(base_path);
+    panel_remove_pack(pack_path);
+    const PanelPackResult baseline_pack = panel_write_pack(row, fixture, base_path, 0.0F, row->budget);
+    const PanelPackResult selected_pack = panel_write_pack(row, fixture, pack_path, (float)column->percent, row->budget);
+    panel->commit_ok = baseline_pack.ok && selected_pack.ok;
     if (row_expects_hull_infeasible(row)) {
-        panel->hull_infeasible = commit_result == NT_BUILD_ERR_VALIDATION && finish_result == NT_BUILD_ERR_VALIDATION && error_count == 1U &&
-                                 errors[0].kind == NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE && errors[0].detail_a == row->budget && errors[0].detail_b == (uint32_t)row->shape;
-    }
-    nt_builder_free_pack(context);
-    if (row_expects_hull_infeasible(row)) {
-        (void)remove(pack_path);
-        (void)remove(header_path);
-        panel->fidelity_ok = panel->hull_infeasible;
+        panel->hull_infeasible = baseline_pack.hull_infeasible && selected_pack.hull_infeasible;
+        panel_remove_pack(base_path);
+        panel_remove_pack(pack_path);
+        panel->allowance_ok = panel->hull_infeasible;
         panel->result = panel->hull_infeasible;
         return true;
     }
-    if (!panel->commit_ok || !panel_read_pack(pack_path, panel)) {
-        (void)remove(pack_path);
-        (void)remove(header_path);
+    nt_bench_selected_geometry_t baseline = {0};
+    nt_bench_selected_geometry_t selected = {0};
+    if (!panel->commit_ok || nt_bench_parse_selected_geometry(base_path, 0U, panel->trim_h, &baseline) != 0 || nt_bench_parse_selected_geometry(pack_path, 0U, panel->trim_h, &selected) != 0 ||
+        nt_bench_file_sha256_hex(base_path, panel->baseline_pack_sha256) != 0 || nt_bench_file_sha256_hex(pack_path, panel->selected_pack_sha256) != 0) {
+        nt_bench_selected_geometry_destroy(&selected);
+        nt_bench_selected_geometry_destroy(&baseline);
+        panel_remove_pack(base_path);
+        panel_remove_pack(pack_path);
         return false;
     }
-    (void)remove(pack_path);
-    (void)remove(header_path);
+    panel->baseline_vertex_count = baseline.vertex_count;
+    panel->vertex_count = selected.vertex_count;
+    memcpy(panel->baseline_polygon, baseline.polygon, (size_t)baseline.vertex_count * sizeof(Point2D));
+    memcpy(panel->polygon, selected.polygon, (size_t)selected.vertex_count * sizeof(Point2D));
+    memcpy(panel->baseline_indices, baseline.triangle_indices, (size_t)baseline.triangle_index_count * sizeof(uint16_t));
+    memcpy(panel->selected_indices, selected.triangle_indices, (size_t)selected.triangle_index_count * sizeof(uint16_t));
+    const uint64_t opaque_area2 = (uint64_t)panel->retained_pixels * 2U;
+    const uint64_t base_area2 = polygon_abs_twice_area(baseline.polygon, baseline.vertex_count);
+    const uint64_t selected_area2 = polygon_abs_twice_area(selected.polygon, selected.vertex_count);
+    panel->proof = nt_selected_geometry_validate(panel->mask, panel->trim_w, panel->trim_h, opaque_area2, baseline.polygon, baseline.vertex_count, base_area2, baseline.triangle_indices,
+                                                 baseline.triangle_index_count, selected.polygon, selected.vertex_count, selected_area2, selected.triangle_indices, selected.triangle_index_count,
+                                                 (float)column->percent, row->budget);
+    const nt_polygon_feasibility_t feasibility = nt_polygon_feasibility(selected.polygon, selected.vertex_count, panel->mask, panel->trim_w, panel->trim_h, row->budget);
+    panel->lost_area2 = feasibility.lost_area2;
+    nt_bench_selected_geometry_destroy(&selected);
+    nt_bench_selected_geometry_destroy(&baseline);
+    panel_remove_pack(base_path);
+    panel_remove_pack(pack_path);
 
     panel->validity = polygon_validate(panel->polygon, panel->vertex_count);
     panel->coverage = polygon_coverage_metrics(panel->polygon, panel->vertex_count, panel->mask, panel->trim_w, panel->trim_h);
     panel->signed_twice_area = signed_twice_area(panel->polygon, panel->vertex_count);
-    Point2D *reference = NULL;
-    uint32_t reference_count = 0;
-    if (row->shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
-        reference = binary_build_convex_polygon(panel->mask, panel->trim_w, panel->trim_h, UINT32_MAX, &reference_count);
-    } else if (row->shape == NT_ATLAS_SHAPE_CONCAVE_CONTOUR) {
-        const uint32_t capacity = (panel->trim_w * panel->trim_h * 2U) + 2U;
-        Point2D *contour = (Point2D *)malloc((size_t)capacity * sizeof(Point2D));
-        reference = (Point2D *)malloc((size_t)capacity * sizeof(Point2D));
-        bool overflow = false;
-        uint32_t contour_count = contour != NULL ? trace_contour(panel->mask, panel->trim_w, panel->trim_h, contour, capacity, &overflow) : 0U;
-        reference_count = !overflow && reference != NULL ? remove_collinear(contour, contour_count, reference) : 0U;
-        free(contour);
+    panel->triangles_valid = panel->proof.selected_triangulation_valid;
+    panel->allowance_ok = panel->proof.allowance_valid;
+    panel->connected_frontier_valid = true;
+    if (strcmp(row->sample_id, "connected-mask-adversarial") == 0) {
+        const size_t mask_size = (size_t)fixture->width * fixture->height;
+        uint8_t *frontier_mask = (uint8_t *)malloc(mask_size);
+        if (frontier_mask == NULL) {
+            return false;
+        }
+        for (size_t pixel = 0; pixel < mask_size; pixel++) {
+            frontier_mask[pixel] = fixture->rgba[(pixel * 4U) + 3U] >= row->threshold ? 1U : 0U;
+        }
+        const uint32_t slot_mask = nt_atlas_test_concave_frontier_slot_mask(frontier_mask, fixture->width, fixture->height, row->budget);
+        free(frontier_mask);
+        for (uint32_t slot = 0; slot < 3U; slot++) {
+            const uint32_t count = slot + 6U;
+            const bool present = (slot_mask & (1U << count)) != 0U;
+            panel->connected_frontier_counts[slot] = present ? count : 0U;
+            panel->connected_frontier_valid = panel->connected_frontier_valid && present;
+        }
     }
-    if (reference != NULL && reference_count >= 3U) {
-        panel->fidelity = polygon_max_boundary_distance(reference, reference_count, panel->polygon, panel->vertex_count);
-    }
-    free(reference);
-    panel->fidelity_ok = row->shape == NT_ATLAS_SHAPE_RECT || column->tolerance == 0.0 || panel->fidelity <= column->tolerance + 0.0001 ||
-                         (panel->coverage.lost_retained_pixels == 0U && panel->vertex_count <= row->budget);
-    panel->result =
-        panel->commit_ok && panel->validity == NT_POLYGON_VALID && panel->coverage.lost_retained_pixels == 0U && panel->fidelity_ok && panel->vertex_count <= row->budget && panel->triangles_valid;
+    panel->result = panel->commit_ok && panel->proof.valid && panel->connected_frontier_valid;
     return true;
 }
 
@@ -625,50 +632,56 @@ static void write_alpha_json(FILE *file, const VisualPanel *panel) {
     (void)fputc(']', file);
 }
 
-static void write_polygon_json(FILE *file, const VisualPanel *panel, bool numbered) {
+static void write_points_json(FILE *file, const Point2D *polygon, uint32_t count, bool numbered) {
     (void)fputc('[', file);
-    for (uint32_t i = 0; i < panel->vertex_count; i++) {
+    for (uint32_t i = 0; i < count; i++) {
         if (i > 0) {
             (void)fputc(',', file);
         }
         if (numbered) {
-            (void)fprintf(file, "{\"n\":%u,\"x\":%d,\"y\":%d}", i + 1U, panel->polygon[i].x, panel->polygon[i].y);
+            (void)fprintf(file, "{\"n\":%u,\"x\":%d,\"y\":%d}", i + 1U, polygon[i].x, polygon[i].y);
         } else {
-            (void)fprintf(file, "{\"x\":%d,\"y\":%d}", panel->polygon[i].x, panel->polygon[i].y);
+            (void)fprintf(file, "{\"x\":%d,\"y\":%d}", polygon[i].x, polygon[i].y);
         }
     }
     (void)fputc(']', file);
 }
 
 static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualColumn *column, const VisualPanel *panel, bool first) {
-    const double lost_ratio = panel->retained_pixels > 0U ? (double)panel->coverage.lost_retained_pixels / panel->retained_pixels : 0.0;
-    const uint32_t pixels = panel->trim_w * panel->trim_h;
-    const double extra_ratio = pixels > 0U ? (double)panel->coverage.extra_covered_pixels / pixels : 0.0;
+    const double denominator = panel->proof.opaque_area2 > 0U ? (double)panel->proof.opaque_area2 : 1.0;
+    const double base_overdraw = ((double)panel->proof.base_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
+    const double added_area = (double)panel->proof.added_area2 * 100.0 / denominator;
+    const double total_overdraw = ((double)panel->proof.selected_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
     (void)fprintf(file, "%s{\"panel_id\":\"%s:%s:%s\",\"row_id\":\"%s:%s\",\"sample_id\":\"%s\",\"shape\":\"%s\",\"column_id\":\"%s\",", first ? "" : ",", row->sample_id, row->shape_name, column->id,
                   row->sample_id, row->shape_name, row->sample_id, row->shape_name, column->id);
     (void)fprintf(file,
-                  "\"tolerance_px\":%.3f,\"tolerance_ignored\":%s,\"effective_alpha_threshold\":%u,\"threshold_source\":\"%s\","
+                  "\"max_added_area_percent\":%.3f,\"effective_alpha_threshold\":%u,\"threshold_source\":\"%s\","
                   "\"trim\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},\"original_alpha_values\":",
-                  column->tolerance, row->shape == NT_ATLAS_SHAPE_RECT ? "true" : "false", row->threshold, strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? "per-sprite" : "atlas",
-                  panel->trim_x, panel->trim_y, panel->trim_w, panel->trim_h);
+                  column->percent, row->threshold, strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? "per-sprite" : "atlas", panel->trim_x, panel->trim_y, panel->trim_w, panel->trim_h);
     write_alpha_json(file, panel);
     (void)fputs(",\"effective_alpha_mask\":", file);
     write_mask_json(file, panel);
+    (void)fputs(",\"baseline_polygon\":", file);
+    write_points_json(file, panel->baseline_polygon, panel->baseline_vertex_count, false);
     (void)fputs(",\"polygon\":", file);
-    write_polygon_json(file, panel, false);
+    write_points_json(file, panel->polygon, panel->vertex_count, false);
     (void)fputs(",\"numbered_vertices\":", file);
-    write_polygon_json(file, panel, true);
-    (void)fprintf(file,
-                  ",\"vertex_count\":%u,\"lost_pixels\":%u,\"lost_ratio\":%.8f,\"extra_pixels\":%u,\"extra_ratio\":%.8f,\"fidelity_px\":%.6f,\"fidelity_within_tolerance\":%s,"
-                  "\"self_intersection\":%s,\"signed_area\":%.1f,\"winding_valid\":%s,\"vertex_budget\":%u,"
-                  "\"expected_hull_infeasible\":%s,\"production_gates\":{\"commit\":%s,\"simple_polygon\":%s,\"coverage\":%s,\"fidelity\":%s,\"budget\":%s,\"triangles\":%s},\"result\":\"%s\"}",
-                  panel->vertex_count, panel->coverage.lost_retained_pixels, lost_ratio, panel->coverage.extra_covered_pixels, extra_ratio, panel->fidelity,
-                  (row->shape == NT_ATLAS_SHAPE_RECT || column->tolerance == 0.0 || panel->fidelity <= column->tolerance + 0.0001) ? "true" : "false",
-                  panel->validity == NT_POLYGON_INVALID_SELF_INTERSECTION ? "true" : "false", (double)panel->signed_twice_area * 0.5, panel->signed_twice_area > 0 ? "true" : "false", row->budget,
-                  panel->hull_infeasible ? "true" : "false", (panel->commit_ok || panel->hull_infeasible) ? "true" : "false",
-                  (panel->validity == NT_POLYGON_VALID || panel->hull_infeasible) ? "true" : "false", (panel->coverage.lost_retained_pixels == 0U || panel->hull_infeasible) ? "true" : "false",
-                  panel->fidelity_ok ? "true" : "false", (panel->vertex_count <= row->budget || panel->hull_infeasible) ? "true" : "false",
-                  (panel->triangles_valid || panel->hull_infeasible) ? "true" : "false", panel->result ? "PASS" : "FAIL");
+    write_points_json(file, panel->polygon, panel->vertex_count, true);
+    (void)fprintf(
+        file,
+        ",\"vertex_count\":%u,\"baseline_vertex_count\":%u,\"opaque_area2\":%llu,\"base_area2\":%llu,\"selected_area2\":%llu,\"added_area2\":%llu,\"exact_lost_area2\":%llu,"
+        "\"base_overdraw_percent\":%.8f,\"added_area_percent\":%.8f,\"total_overdraw_percent\":%.8f,"
+        "\"baseline_pack_sha256\":\"%s\",\"selected_pack_sha256\":\"%s\","
+        "\"connected_frontier_counts\":[%u,%u,%u],\"connected_frontier_valid\":%s,"
+        "\"self_intersection\":%s,\"signed_area\":%.1f,\"winding_valid\":%s,\"vertex_budget\":%u,"
+        "\"expected_hull_infeasible\":%s,\"production_gates\":{\"commit\":%s,\"full_cell_coverage\":%s,\"simple_polygon\":%s,\"allowance\":%s,\"budget\":%s,\"triangles\":%s},\"result\":\"%s\"}",
+        panel->vertex_count, panel->baseline_vertex_count, (unsigned long long)panel->proof.opaque_area2, (unsigned long long)panel->proof.base_area2, (unsigned long long)panel->proof.selected_area2,
+        (unsigned long long)panel->proof.added_area2, (unsigned long long)panel->lost_area2, base_overdraw, added_area, total_overdraw, panel->baseline_pack_sha256, panel->selected_pack_sha256,
+        panel->connected_frontier_counts[0], panel->connected_frontier_counts[1], panel->connected_frontier_counts[2], panel->connected_frontier_valid ? "true" : "false",
+        panel->validity == NT_POLYGON_INVALID_SELF_INTERSECTION ? "true" : "false", (double)panel->signed_twice_area * 0.5, panel->signed_twice_area > 0 ? "true" : "false", row->budget,
+        panel->hull_infeasible ? "true" : "false", (panel->commit_ok || panel->hull_infeasible) ? "true" : "false", (panel->proof.selected_coverage_valid || panel->hull_infeasible) ? "true" : "false",
+        (panel->proof.selected_topology_valid || panel->hull_infeasible) ? "true" : "false", panel->allowance_ok ? "true" : "false",
+        (panel->vertex_count <= row->budget || panel->hull_infeasible) ? "true" : "false", (panel->triangles_valid || panel->hull_infeasible) ? "true" : "false", panel->result ? "PASS" : "FAIL");
 }
 
 static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT]) {
@@ -684,7 +697,7 @@ static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_C
     }
     (void)fprintf(file, "{\n  \"schema_version\": %d,\n  \"overall_pass\": %s,\n  \"columns\": [", VISUAL_SCHEMA_VERSION, overall ? "true" : "false");
     for (uint32_t i = 0; i < VISUAL_COLUMN_COUNT; i++) {
-        (void)fprintf(file, "%s{\"column_id\":\"%s\",\"tolerance_px\":%.3f,\"sweep_source\":", i == 0 ? "" : ",", columns[i].id, columns[i].tolerance);
+        (void)fprintf(file, "%s{\"column_id\":\"%s\",\"max_added_area_percent\":%.3f,\"sweep_source\":", i == 0 ? "" : ",", columns[i].id, columns[i].percent);
         json_escape(file, columns[i].source);
         (void)fputs(",\"sweep_sha256\":", file);
         json_escape(file, columns[i].sha256);
@@ -769,20 +782,24 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
         (void)fputs("</h2><div class=\"grid\">", file);
         for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
             const VisualPanel *panel = &panels[row][column];
-            const double lost_ratio = panel->retained_pixels > 0U ? (double)panel->coverage.lost_retained_pixels / panel->retained_pixels : 0.0;
-            (void)fprintf(file, "<article class=\"panel\" id=\"panel-%s-%s-%s\"><h3>%s · %.1f px</h3><span class=\"badge\">%s</span>", VISUAL_ROWS[row].sample_id, VISUAL_ROWS[row].shape_name,
-                          columns[column].id, columns[column].id, columns[column].tolerance, panel->result ? "PASS" : "FAIL");
+            const double denominator = panel->proof.opaque_area2 > 0U ? (double)panel->proof.opaque_area2 : 1.0;
+            const double base_overdraw = ((double)panel->proof.base_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
+            const double added_area = (double)panel->proof.added_area2 * 100.0 / denominator;
+            const double total_overdraw = ((double)panel->proof.selected_area2 - (double)panel->proof.opaque_area2) * 100.0 / denominator;
+            (void)fprintf(file, "<article class=\"panel\" id=\"panel-%s-%s-%s\"><h3>%s · %.1f%% added-area limit</h3><span class=\"badge\">%s</span>", VISUAL_ROWS[row].sample_id,
+                          VISUAL_ROWS[row].shape_name, columns[column].id, columns[column].id, columns[column].percent, panel->result ? "PASS" : "FAIL");
             write_svg(file, panel);
             if (panel->hull_infeasible) {
                 (void)fputs("<p>Expected HULL_INFEASIBLE: no covering polygon fits the hard vertex ceiling.</p>", file);
             }
             (void)fprintf(file,
-                          "<table><tr><td>Vertex count / budget</td><td>%u / %u</td></tr><tr><td>Lost pixels / ratio</td><td>%u / %.5f</td></tr><tr><td>Extra pixels</td><td>%u</td></tr>"
-                          "<tr><td>Fidelity px</td><td>%.4f</td></tr><tr><td>Self intersection</td><td>%s</td></tr><tr><td>Signed area / winding</td><td>%.1f / %s</td></tr><tr><td>Triangles "
+                          "<table><tr><td>Vertex count / budget</td><td>%u / %u</td></tr><tr><td>Opaque / baseline / selected area</td><td>%.1f / %.1f / %.1f</td></tr>"
+                          "<tr><td>Base / added / total overdraw</td><td>%.3f%% / %.3f%% / %.3f%%</td></tr><tr><td>Exact lost area</td><td>%.1f</td></tr>"
+                          "<tr><td>Self intersection</td><td>%s</td></tr><tr><td>Signed area / winding</td><td>%.1f / %s</td></tr><tr><td>Triangles "
                           "valid</td><td>%s</td></tr></table></article>",
-                          panel->vertex_count, VISUAL_ROWS[row].budget, panel->coverage.lost_retained_pixels, lost_ratio, panel->coverage.extra_covered_pixels, panel->fidelity,
-                          panel->validity == NT_POLYGON_INVALID_SELF_INTERSECTION ? "yes" : "no", (double)panel->signed_twice_area * 0.5, panel->signed_twice_area > 0 ? "valid y-down" : "invalid",
-                          panel->triangles_valid ? "yes" : "no");
+                          panel->vertex_count, VISUAL_ROWS[row].budget, (double)panel->proof.opaque_area2 * 0.5, (double)panel->proof.base_area2 * 0.5, (double)panel->proof.selected_area2 * 0.5,
+                          base_overdraw, added_area, total_overdraw, (double)panel->lost_area2 * 0.5, panel->validity == NT_POLYGON_INVALID_SELF_INTERSECTION ? "yes" : "no",
+                          (double)panel->signed_twice_area * 0.5, panel->signed_twice_area > 0 ? "valid y-down" : "invalid", panel->triangles_valid ? "yes" : "no");
         }
         (void)fputs("</div></section>", file);
     }
@@ -854,8 +871,9 @@ static bool required_rows_present(const char *manifest, const char *html, const 
 
 int nt_hull_visual_validate(const char *manifest_path, const char *html_path, const char *required_samples) {
     static const char *panel_fields[] = {
-        "\"effective_alpha_mask\"", "\"original_alpha_values\"", "\"polygon\"",           "\"numbered_vertices\"", "\"vertex_count\"",  "\"lost_pixels\"",   "\"lost_ratio\"",       "\"extra_pixels\"",
-        "\"extra_ratio\"",          "\"fidelity_px\"",           "\"self_intersection\"", "\"signed_area\"",       "\"winding_valid\"", "\"vertex_budget\"", "\"production_gates\"",
+        "\"effective_alpha_mask\"", "\"original_alpha_values\"", "\"baseline_polygon\"", "\"polygon\"",          "\"numbered_vertices\"",     "\"vertex_count\"",       "\"opaque_area2\"",
+        "\"base_area2\"",           "\"selected_area2\"",        "\"added_area2\"",      "\"exact_lost_area2\"", "\"base_overdraw_percent\"", "\"added_area_percent\"", "\"total_overdraw_percent\"",
+        "\"self_intersection\"",    "\"signed_area\"",           "\"winding_valid\"",    "\"vertex_budget\"",    "\"production_gates\"",
     };
     size_t manifest_size = 0;
     size_t html_size = 0;
@@ -872,13 +890,14 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
     const char *baseline = strstr(manifest, "\"column_id\":\"baseline\"");
     const char *candidate = strstr(manifest, "\"column_id\":\"candidate\"");
     const char *recommended = strstr(manifest, "\"column_id\":\"recommended\"");
-    bool ok = strstr(manifest, "\"schema_version\": 1") != NULL && strstr(manifest, "\"overall_pass\": true") != NULL && strstr(manifest, "\"result\":\"FAIL\"") == NULL &&
+    bool ok = strstr(manifest, "\"schema_version\": 2") != NULL && strstr(manifest, "\"overall_pass\": true") != NULL && strstr(manifest, "\"result\":\"FAIL\"") == NULL &&
               strstr(manifest, "\"failing_panel_ids\": []") != NULL && count_substring(manifest, "\"panel_id\"") == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT &&
               count_substring(manifest, "\"sweep_source\"") == VISUAL_COLUMN_COUNT && count_substring(manifest, "\"sweep_sha256\"") == VISUAL_COLUMN_COUNT &&
               count_substring(manifest, "\"measurement_source_commit\"") == VISUAL_COLUMN_COUNT && strstr(manifest, "\"sweep_source\":\"\"") == NULL &&
               strstr(manifest, "\"sweep_sha256\":\"\"") == NULL && baseline != NULL && candidate != NULL && recommended != NULL && baseline < candidate && candidate < recommended &&
-              strstr(html, "<!doctype html>") != NULL && strstr(html, "Vertex count / budget") != NULL && strstr(html, "Lost pixels / ratio") != NULL && strstr(html, "Fidelity px") != NULL &&
-              strstr(html, "<script") == NULL && strstr(html, "http://") == NULL && strstr(html, "https://") == NULL && required_rows_present(manifest, html, required_samples);
+              strstr(html, "<!doctype html>") != NULL && strstr(html, "Vertex count / budget") != NULL && strstr(html, "Base / added / total overdraw") != NULL &&
+              strstr(html, "Exact lost area") != NULL && strstr(html, "<script") == NULL && strstr(html, "http://") == NULL && strstr(html, "https://") == NULL &&
+              required_rows_present(manifest, html, required_samples);
     for (uint32_t field = 0; ok && field < (uint32_t)(sizeof(panel_fields) / sizeof(panel_fields[0])); field++) {
         ok = count_substring(manifest, panel_fields[field]) == VISUAL_ROW_COUNT * VISUAL_COLUMN_COUNT;
     }

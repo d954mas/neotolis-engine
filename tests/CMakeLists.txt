@@ -468,6 +468,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_bench_parse PRIVATE unity)
     target_include_directories(test_atlas_bench_parse PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
     target_compile_definitions(test_atlas_bench_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -721,6 +722,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_atlas_hull_visual_report
         unit/test_atlas_hull_visual_report.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
     )
     target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity)
     target_include_directories(test_atlas_hull_visual_report PRIVATE
@@ -754,6 +756,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_pack_determinism PRIVATE nt_builder nt_log unity)
     target_include_directories(test_atlas_pack_determinism PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)

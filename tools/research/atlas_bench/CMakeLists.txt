@@ -14,7 +14,7 @@ set_target_properties(atlas_bench PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}"
 )
 
-add_executable(atlas_hull_visual_report hull_visual_main.c hull_visual_report.c)
+add_executable(atlas_hull_visual_report hull_visual_main.c hull_visual_report.c ntpack_parse.c)
 target_link_libraries(atlas_hull_visual_report PRIVATE nt_builder nt_log)
 target_include_directories(atlas_hull_visual_report PRIVATE
     ${CMAKE_SOURCE_DIR}/shared/include

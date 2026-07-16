@@ -233,6 +233,83 @@ static void reject_missing_page_texture(void) {
     TEST_ASSERT_TRUE(rc < 0);
 }
 
+static void selected_geometry_is_owned_and_y_down(void) {
+    const char *path = "test_atlas_bench_selected.ntpack";
+    const NtAtlasVertex vertices[4] = {
+        {.local_x = 0, .local_y = 4},
+        {.local_x = 0, .local_y = 0},
+        {.local_x = 4, .local_y = 0},
+        {.local_x = 4, .local_y = 4},
+    };
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    NtAtlasRegion region = {0};
+    region.source_w = 6;
+    region.source_h = 7;
+    region.trim_offset_x = 1;
+    region.trim_offset_y = 2;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    uint8_t atlas_blob[512];
+    const mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = vertices,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+    };
+    const uint32_t atlas_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
+    NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
+    header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
+    header.total_size = header.header_size + atlas_size;
+    NtAssetEntry entry = {.offset = header.header_size, .size = atlas_size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
+    TEST_ASSERT_EQUAL_size_t(sizeof(entry), fwrite(&entry, 1, sizeof(entry), file));
+    TEST_ASSERT_EQUAL_size_t(atlas_size, fwrite(atlas_blob, 1, atlas_size, file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+
+    nt_bench_selected_geometry_t geometry = {0};
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_selected_geometry(path, 0, 4, &geometry));
+    TEST_ASSERT_EQUAL_UINT32(4, geometry.vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(6, geometry.triangle_index_count);
+    TEST_ASSERT_EQUAL_INT32(0, geometry.polygon[0].y);
+    TEST_ASSERT_EQUAL_INT32(4, geometry.polygon[1].y);
+    TEST_ASSERT_EQUAL_UINT16(2, geometry.triangle_indices[1]);
+    TEST_ASSERT_EQUAL_UINT16(1, geometry.triangle_indices[2]);
+    TEST_ASSERT_EQUAL_UINT16(6, geometry.source_w);
+    TEST_ASSERT_EQUAL_INT16(2, geometry.trim_offset_y);
+    nt_bench_selected_geometry_destroy(&geometry);
+    TEST_ASSERT_NULL(geometry.polygon);
+    TEST_ASSERT_NULL(geometry.triangle_indices);
+    (void)remove(path);
+}
+
+static void selected_geometry_rejects_corrupt_index_window(void) {
+    const char *path = "test_atlas_bench_selected_corrupt.ntpack";
+    uint8_t blob[512];
+    const NtAtlasVertex vertices[3] = {0};
+    NtAtlasRegion region = {.vertex_count = 3, .index_count = 3, .index_start = UINT32_MAX};
+    const mock_atlas_spec_t spec = {.regions = &region, .region_count = 1, .vertices = vertices, .total_vertex_count = 3};
+    const uint32_t size = build_mock_atlas_blob(blob, sizeof(blob), &spec);
+    NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
+    header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
+    header.total_size = header.header_size + size;
+    NtAssetEntry entry = {.offset = header.header_size, .size = size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
+    TEST_ASSERT_EQUAL_size_t(sizeof(entry), fwrite(&entry, 1, sizeof(entry), file));
+    TEST_ASSERT_EQUAL_size_t(size, fwrite(blob, 1, size, file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    nt_bench_selected_geometry_t geometry = {0};
+    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, &geometry) < 0);
+    TEST_ASSERT_NULL(geometry.polygon);
+    TEST_ASSERT_NULL(geometry.triangle_indices);
+    (void)remove(path);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(region_and_vertex_counts);
@@ -241,5 +318,7 @@ int main(void) {
     RUN_TEST(reject_bad_version);
     RUN_TEST(reject_oob_vertex_offset);
     RUN_TEST(reject_missing_page_texture);
+    RUN_TEST(selected_geometry_is_owned_and_y_down);
+    RUN_TEST(selected_geometry_rejects_corrupt_index_window);
     return UNITY_END();
 }

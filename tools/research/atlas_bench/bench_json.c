@@ -68,7 +68,7 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
     (void)fprintf(f, "      \"max_vertices\": %u,\n", run->opts_max_vertices);
     (void)fprintf(f, "      \"allow_transform\": %s,\n", run->opts_allow_transform ? "true" : "false");
     (void)fprintf(f, "      \"alpha_threshold\": %u,\n", run->opts_alpha_threshold);
-    (void)fprintf(f, "      \"tracer_tolerance\": %.9g,\n", (double)run->opts_tracer_tolerance);
+    (void)fprintf(f, "      \"max_added_area_percent\": %.9g,\n", (double)run->opts_max_added_area_percent);
     (void)fprintf(f, "      \"power_of_two\": %s\n", run->opts_power_of_two ? "true" : "false");
     (void)fputs("    },\n", f);
     (void)fprintf(f, "    \"cache_hits\": %llu,\n", (unsigned long long)run->cache_hits);
@@ -98,7 +98,32 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
         (void)fputs("      }\n", f);
         (void)fputs(i + 1 < run->atlas_count ? "    },\n" : "    }\n", f);
     }
-    (void)fputs("  ]\n", f);
+    (void)fputs("  ],\n", f);
+
+    const nt_bench_geometry_proof_t *proof = &run->proof;
+    (void)fputs("  \"selected_geometry_proof\": {\n", f);
+    (void)fputs("    \"source\": ", f);
+    json_str(f, proof->source);
+    (void)fputs(",\n    \"baseline_pack_sha256\": ", f);
+    json_str(f, proof->baseline_pack_sha256);
+    (void)fputs(",\n    \"selected_pack_sha256\": ", f);
+    json_str(f, proof->selected_pack_sha256);
+    (void)fprintf(f, ",\n    \"valid\": %s,\n", proof->valid ? "true" : "false");
+    (void)fprintf(f, "    \"retained_cell_count\": %u,\n", proof->retained_cell_count);
+    (void)fprintf(f, "    \"base_vertex_count\": %u,\n", proof->base_vertex_count);
+    (void)fprintf(f, "    \"selected_vertex_count\": %u,\n", proof->selected_vertex_count);
+    (void)fprintf(f, "    \"opaque_area2\": %llu,\n", (unsigned long long)proof->opaque_area2);
+    (void)fprintf(f, "    \"base_area2\": %llu,\n", (unsigned long long)proof->base_area2);
+    (void)fprintf(f, "    \"selected_area2\": %llu,\n", (unsigned long long)proof->selected_area2);
+    (void)fprintf(f, "    \"added_area2\": %llu,\n", (unsigned long long)proof->added_area2);
+    (void)fprintf(f, "    \"lost_area2\": %llu,\n", (unsigned long long)proof->lost_area2);
+    (void)fprintf(f, "    \"base_overdraw_percent\": %.8f,\n", proof->base_overdraw_percent);
+    (void)fprintf(f, "    \"added_area_percent\": %.8f,\n", proof->added_area_percent);
+    (void)fprintf(f, "    \"total_overdraw_percent\": %.8f,\n", proof->total_overdraw_percent);
+    (void)fputs("    \"gates\": {", f);
+    (void)fprintf(f, "\"full_cell_coverage\":%s,\"topology\":%s,\"triangulation\":%s,\"allowance\":%s,\"ceiling\":%s}\n", proof->full_cell_coverage ? "true" : "false",
+                  proof->topology_valid ? "true" : "false", proof->triangulation_valid ? "true" : "false", proof->allowance_valid ? "true" : "false", proof->ceiling_valid ? "true" : "false");
+    (void)fputs("  }\n", f);
 
     (void)fputs("}\n", f);
 

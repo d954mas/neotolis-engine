@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "measurement_source_commit": "fb4a28c57bff9b3fefd0d283df1383cf299ef80e",
+  "tool_version": "2.0.0",
+  "corpus_sha256": "86be6b0b73e16011beff9a100fc724c978023369b57b2209f4563f8f6bc37934",
+  "settings_sha256": "505ae789ba9da7898353558fc7c0e074238ffef84e67a586a91da39aa8415132",
+  "selection_rationale": "10% remains the provisional knee: it is the first default candidate evaluated against the deterministic six-point production frontier.",
+  "default_max_added_area_percent": 10,
+  "sweep_values": [0, 2, 5, 10, 15, 25],
+  "sweep": [
+    {"max_added_area_percent": 0, "sweep_source": "build/bench/hull-area-mixed-aa/00-percent-0.json", "sweep_sha256": "d5facc0f7dd4a152c4edfd47821afc8ae6afc75c5a59d2215b49eb596d391a0f", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781"}
+    ,{"max_added_area_percent": 2, "sweep_source": "build/bench/hull-area-mixed-aa/01-percent-2.json", "sweep_sha256": "883317e8e94884797858b560556874aaa3fd244aa2f888e0a85a3d5dcfc81832", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "2c1c53d6d4b8e0862c0046983d41a92007dd30abe5d68d26ca57273d00eb35a4"}
+    ,{"max_added_area_percent": 5, "sweep_source": "build/bench/hull-area-mixed-aa/02-percent-5.json", "sweep_sha256": "f11d441e7d552570f10d9d00b465f5cc3f1148848b367a18cbd9eac879f0cb55", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "2c1c53d6d4b8e0862c0046983d41a92007dd30abe5d68d26ca57273d00eb35a4"}
+    ,{"max_added_area_percent": 10, "sweep_source": "build/bench/hull-area-mixed-aa/03-percent-10.json", "sweep_sha256": "91c5211b58ae89297026e9874dfa24724eb17daf0e6e2f1a980a8e097796e58f", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "63e6eaa47d7c67a6a135c97c7b50fd127a884b18de917d90fd2c6abeb39a636e"}
+    ,{"max_added_area_percent": 15, "sweep_source": "build/bench/hull-area-mixed-aa/04-percent-15.json", "sweep_sha256": "4ea28b723affdc5aff0cef993ce3949fa33d6da8ca40963ca6857012770a6001", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "63e6eaa47d7c67a6a135c97c7b50fd127a884b18de917d90fd2c6abeb39a636e"}
+    ,{"max_added_area_percent": 25, "sweep_source": "build/bench/hull-area-mixed-aa/05-percent-25.json", "sweep_sha256": "20c4c24de422120016b97b7b581b7bdfb62eb3fdb3cfe5bf58884d5a7e5e3e8d", "baseline_pack_sha256": "6229cdd34661fb3a53c08002a0eb8eb469839c36229e55952119911b0b877781", "selected_pack_sha256": "63e6eaa47d7c67a6a135c97c7b50fd127a884b18de917d90fd2c6abeb39a636e"}
+  ],
+  "columns": [
+    {"column_id": "baseline", "max_added_area_percent": 0, "sweep_source": "build/bench/hull-area-mixed-aa/00-percent-0.json", "sweep_sha256": "d5facc0f7dd4a152c4edfd47821afc8ae6afc75c5a59d2215b49eb596d391a0f"}
+    ,{"column_id": "candidate", "max_added_area_percent": 5, "sweep_source": "build/bench/hull-area-mixed-aa/02-percent-5.json", "sweep_sha256": "f11d441e7d552570f10d9d00b465f5cc3f1148848b367a18cbd9eac879f0cb55"}
+    ,{"column_id": "recommended", "max_added_area_percent": 10, "sweep_source": "build/bench/hull-area-mixed-aa/03-percent-10.json", "sweep_sha256": "91c5211b58ae89297026e9874dfa24724eb17daf0e6e2f1a980a8e097796e58f"}
+  ]
+}

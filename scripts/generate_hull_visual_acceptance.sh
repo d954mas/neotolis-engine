@@ -5,9 +5,9 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-FRONTIER="tools/research/atlas_bench/hull_tolerance_frontier.json"
+FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
 CORPUS="tests/fixtures/hull_visual_acceptance/corpus.json"
-SWEEP_DIR="build/bench/hull-tolerance-mixed-aa"
+SWEEP_DIR="build/bench/hull-area-mixed-aa"
 FINAL_DIR="build/reports/phase80-hull-visual-acceptance"
 TEMP_DIR="${FINAL_DIR}.tmp"
 PREVIOUS_DIR="${FINAL_DIR}.previous"
@@ -46,16 +46,16 @@ frontier_number() {
 frontier_valid() {
     [[ -f "$FRONTIER" ]] || return 1
     grep -q '"measurement_source_commit": "bd379927abc66d5a850f779e445584d902e84d7e"' "$FRONTIER" || return 1
-    local column source expected actual tolerance json_tolerance
+    local column source expected actual percent json_percent
     for column in baseline candidate recommended; do
         source="$(frontier_string "$column" sweep_source)"
         expected="$(frontier_string "$column" sweep_sha256)"
-        tolerance="$(frontier_number "$column" tolerance_px)"
-        [[ -n "$source" && -n "$expected" && -n "$tolerance" && -f "$source" ]] || return 1
+        percent="$(frontier_number "$column" max_added_area_percent)"
+        [[ -n "$source" && -n "$expected" && -n "$percent" && -f "$source" ]] || return 1
         actual="$(sha256sum "$source" | awk '{print $1}')"
         [[ "$actual" == "$expected" ]] || return 1
-        json_tolerance="${tolerance%.0}"
-        grep -Eq "\"tracer_tolerance\"[[:space:]]*:[[:space:]]*${json_tolerance}([,.]|[[:space:]]|$)" "$source" || return 1
+        json_percent="${percent%.0}"
+        grep -Eq "\"max_added_area_percent\"[[:space:]]*:[[:space:]]*${json_percent}([,.]|[[:space:]]|$)" "$source" || return 1
         grep -Fq '"corpus": "C:\\projects\\neotolis-engine\\assets\\sprites\\bigatlas\\*.png"' "$source" || return 1
         grep -q '"sprites": 4812' "$source" || return 1
     done
@@ -66,7 +66,7 @@ if frontier_valid; then
 else
     echo "ERROR: measured Phase 80-05 sweep provenance is missing or stale." >&2
     echo "       It must be reproduced from source commit bd379927 on all 4,812 mixed-AA assets," >&2
-    echo "       with primary/repeat pack SHA equality for tolerances 0, 1.5, and 2.0." >&2
+    echo "       with primary/repeat production proof equality for 0%, 5%, and 10%." >&2
     echo "       The current post-Phase-80 builder is not an equivalent measurement tool; refusing substitution." >&2
     exit 1
 fi

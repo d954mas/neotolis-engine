@@ -14,7 +14,7 @@
 #include "unity.h"
 
 #define CORPUS_PATH "tests/fixtures/hull_visual_acceptance/corpus.json"
-#define FRONTIER_PATH "tools/research/atlas_bench/hull_tolerance_frontier.json"
+#define FRONTIER_PATH "tools/research/atlas_bench/hull_area_frontier.json"
 #define REPORT_A "build/reports/test-hull-visual-a"
 #define REPORT_B "build/reports/test-hull-visual-b"
 
@@ -34,7 +34,8 @@ static uint8_t *read_bytes(const char *path, size_t *out_size) {
     long length = ftell(file);
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, length);
     TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_SET));
-    uint8_t *bytes = (uint8_t *)malloc((size_t)length + 1U);
+    const size_t allocation_size = length > 0 ? (size_t)length + 1U : 1U;
+    uint8_t *bytes = (uint8_t *)malloc(allocation_size);
     TEST_ASSERT_NOT_NULL(bytes);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)length, fread(bytes, 1, (size_t)length, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
@@ -70,6 +71,7 @@ static void assert_same_file(const char *left_path, const char *right_path) {
     free(right);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void assert_manifest_schema_and_html(void) {
     size_t manifest_size = 0;
     size_t html_size = 0;
@@ -77,7 +79,7 @@ static void assert_manifest_schema_and_html(void) {
     uint8_t *html_bytes = read_bytes(REPORT_A "/index.html", &html_size);
     const char *manifest = (const char *)manifest_bytes;
     const char *html = (const char *)html_bytes;
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 1"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 2"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"overall_pass\": true"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"failing_panel_ids\": []"));
     TEST_ASSERT_EQUAL_UINT32(21, count_text(manifest, "\"panel_id\""));
@@ -93,8 +95,16 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_EQUAL_UINT32(3, count_text(manifest, "\"measurement_source_commit\""));
 
     static const char *fields[] = {
-        "\"effective_alpha_mask\"", "\"original_alpha_values\"", "\"polygon\"",           "\"numbered_vertices\"", "\"vertex_count\"",  "\"lost_pixels\"",   "\"lost_ratio\"",       "\"extra_pixels\"",
-        "\"extra_ratio\"",          "\"fidelity_px\"",           "\"self_intersection\"", "\"signed_area\"",       "\"winding_valid\"", "\"vertex_budget\"", "\"production_gates\"", "\"result\"",
+        "\"effective_alpha_mask\"", "\"original_alpha_values\"",
+        "\"baseline_polygon\"",     "\"polygon\"",
+        "\"numbered_vertices\"",    "\"vertex_count\"",
+        "\"opaque_area2\"",         "\"base_area2\"",
+        "\"selected_area2\"",       "\"added_area2\"",
+        "\"exact_lost_area2\"",     "\"base_overdraw_percent\"",
+        "\"added_area_percent\"",   "\"total_overdraw_percent\"",
+        "\"self_intersection\"",    "\"signed_area\"",
+        "\"winding_valid\"",        "\"vertex_budget\"",
+        "\"production_gates\"",     "\"result\"",
     };
     for (uint32_t i = 0; i < (uint32_t)(sizeof(fields) / sizeof(fields[0])); i++) {
         TEST_ASSERT_GREATER_OR_EQUAL_UINT32_MESSAGE(21, count_text(manifest, fields[i]), fields[i]);
@@ -105,8 +115,9 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NULL(strstr(html, "http://"));
     TEST_ASSERT_NULL(strstr(html, "https://"));
     TEST_ASSERT_NOT_NULL(strstr(html, "Vertex count / budget"));
-    TEST_ASSERT_NOT_NULL(strstr(html, "Lost pixels / ratio"));
-    TEST_ASSERT_NOT_NULL(strstr(html, "Fidelity px"));
+    TEST_ASSERT_NOT_NULL(strstr(html, "Base / added / total overdraw"));
+    TEST_ASSERT_NOT_NULL(strstr(html, "Exact lost area"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_counts\":[6,7,8]"));
 
     for (uint32_t row = 0; row < (uint32_t)(sizeof(REQUIRED_ROWS) / sizeof(REQUIRED_ROWS[0])); row++) {
         char row_id[256];
@@ -163,14 +174,20 @@ static void test_validation_and_provenance_fail_closed(void) {
     uint8_t *manifest = read_bytes(REPORT_A "/manifest.json", &manifest_size);
     char *result = strstr((char *)manifest, "\"result\":\"PASS\"");
     TEST_ASSERT_NOT_NULL(result);
-    memcpy(result + strlen("\"result\":\""), "FAIL", 4);
+    result += strlen("\"result\":\"");
+    result[0] = 'F';
+    result[1] = 'A';
+    result[2] = 'I';
+    result[3] = 'L';
     write_bytes(REPORT_A "/corrupt-manifest.json", manifest, manifest_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_validate(REPORT_A "/corrupt-manifest.json", REPORT_A "/index.html", NULL));
     free(manifest);
 
     size_t frontier_size = 0;
     uint8_t *frontier = read_bytes(FRONTIER_PATH, &frontier_size);
-    char *hash = strstr((char *)frontier, "\"sweep_sha256\": \"");
+    char *column = strstr((char *)frontier, "\"column_id\": \"baseline\"");
+    TEST_ASSERT_NOT_NULL(column);
+    char *hash = strstr(column, "\"sweep_sha256\": \"");
     TEST_ASSERT_NOT_NULL(hash);
     hash += strlen("\"sweep_sha256\": \"");
     *hash = *hash == '0' ? '1' : '0';

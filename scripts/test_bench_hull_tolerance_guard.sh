@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-NT_HULL_TOLERANCE_GUARD_LIB_ONLY=1 source scripts/bench_hull_tolerance.sh
+NT_HULL_AREA_GUARD_LIB_ONLY=1 source scripts/bench_hull_tolerance.sh
 
 BASELINE="tools/research/atlas_bench/baseline"
 PLATFORM="MSYS_NT-10.0-22631"
@@ -28,7 +28,7 @@ expect_protected "TOOLS/RESEARCH/ATLAS_BENCH/BASELINE"
 expect_protected "TOOLS\\RESEARCH\\ATLAS_BENCH\\BASELINE\\mixed-case"
 expect_protected "$BASELINE/../baseline/dot-dot"
 expect_allowed "tools/research/atlas_bench/baseline-copy"
-expect_allowed "build/bench/hull-tolerance"
+expect_allowed "build/bench/hull-area"
 if hull_path_is_protected "$BASELINE" "TOOLS/RESEARCH/ATLAS_BENCH/BASELINE" "Linux"; then
     echo "POSIX path comparison unexpectedly ignored case" >&2
     exit 1
@@ -39,12 +39,28 @@ if ! hull_path_is_protected "build/space baseline" "build/space baseline/run" "L
 fi
 
 OUT_ALIAS="TOOLS/RESEARCH/ATLAS_BENCH/BASELINE/guard-no-write-${$}"
-if NT_HULL_TOLERANCE_PLATFORM="$PLATFORM" scripts/bench_hull_tolerance.sh --out "$OUT_ALIAS" --samples 0 >/dev/null 2>&1; then
+if NT_HULL_AREA_PLATFORM="$PLATFORM" scripts/bench_hull_tolerance.sh --out "$OUT_ALIAS" --samples 0 >/dev/null 2>&1; then
     echo "mixed-case protected output was accepted" >&2
     exit 1
 fi
 if [[ -e "$OUT_ALIAS" ]]; then
     echo "protected output was created before rejection: $OUT_ALIAS" >&2
+    exit 1
+fi
+
+BENCH_EXE="build/tools/research/native-debug/atlas_bench.exe"
+if [[ ! -x "$BENCH_EXE" ]]; then
+    echo "atlas_bench must be built before the guard" >&2
+    exit 1
+fi
+for invalid in -1 nan inf 1px ''; do
+    if "$BENCH_EXE" "build/bench/hull-area-invalid-${$}.json" 'missing/*.png' guard concave 64 1 --max-added-area-percent "$invalid" >/dev/null 2>&1; then
+        echo "invalid area percentage was accepted: '${invalid}'" >&2
+        exit 1
+    fi
+done
+if [[ -e "build/bench/hull-area-invalid-${$}.json" || -e "build/bench/hull-area-invalid-${$}.json.ntpack" ]]; then
+    echo "invalid CLI input wrote evidence" >&2
     exit 1
 fi
 

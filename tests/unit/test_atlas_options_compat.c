@@ -9,7 +9,11 @@ _Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_a
 _Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "sprite presence must stay in the Phase-80 tail");
 
 int main(void) {
-    const nt_tex_compress_opts_t compress = {0};
+    const nt_tex_compress_opts_t compress = {.mode = NT_TEX_COMPRESS_ETC1S};
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#endif
     const nt_atlas_opts_t atlas = {
         &compress,
         NT_TEXTURE_FORMAT_RG8,
@@ -34,6 +38,9 @@ int main(void) {
     const nt_atlas_sprite_opts_t sprite = {
         "legacy", 0.25F, 0.75F, 11, 12, 13, 14, NT_ATLAS_SPRITE_SHAPE_CONVEX, NT_ATLAS_SPRITE_ROTATE_NO, 9, 15, 16,
     };
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     if (atlas.compress != &compress || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 101 || atlas.padding != 102 || atlas.margin != 103 || atlas.extrude != 104 ||
         atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL || atlas.allow_transform || !atlas.power_of_two || atlas.debug_png ||
