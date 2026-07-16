@@ -465,6 +465,9 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
+enum { ATLAS_CACHE_KEY_VERSION = 14 };
+_Static_assert(ATLAS_CACHE_KEY_VERSION > 13, "area-percent controls require a fresh atlas cache key");
+
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
      * the shape enum ordering — otherwise cached atlases would silently bind
@@ -477,8 +480,6 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    enum { ATLAS_CACHE_KEY_VERSION = 14 };
-
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
@@ -873,13 +874,14 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
  * Slice9 borders auto-force RECT shape + no rotation. The cross-field contract
  * is asserted earlier on the add path (before content checks), not here. */
-static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts) {
+static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
     sprite->slice9_top = sopts->slice9_top;
     sprite->slice9_bottom = sopts->slice9_bottom;
     sprite->max_added_area_percent_override = sopts->max_added_area_percent;
     sprite->has_max_added_area_percent_override = sopts->has_max_added_area_percent;
+    sprite->effective_max_added_area_percent = sopts->has_max_added_area_percent ? sopts->max_added_area_percent : atlas_opts->max_added_area_percent;
     sprite->alpha_threshold_override = sopts->alpha_threshold;
     sprite->shape_override = sopts->shape;
     sprite->rotate_override = sopts->allow_rotate;
@@ -973,7 +975,7 @@ void nt_atlas_add(NtAtlasBuild *atlas, const char *path, const nt_atlas_sprite_o
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
     sprite->add_seq = add_seq;
-    atlas_apply_sprite_overrides(sprite, &sopts);
+    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1035,7 +1037,7 @@ void nt_atlas_add_raw(NtAtlasBuild *atlas, const uint8_t *rgba_pixels, uint32_t 
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
     sprite->add_seq = add_seq;
-    atlas_apply_sprite_overrides(sprite, &sopts);
+    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
 }
 
 /* --- Glob callback for atlas --- */
@@ -1087,7 +1089,7 @@ void nt_atlas_add_glob(NtAtlasBuild *atlas, const char *pattern, const nt_atlas_
 /* --- Pipeline state: carries data between pipeline steps --- */
 
 typedef struct {
-    uint8_t alpha_threshold;
+    uint8_t effective_alpha_threshold;
     float max_added_area_percent;
     uint8_t max_vertices;
     nt_atlas_shape_t shape;
@@ -1095,8 +1097,8 @@ typedef struct {
 
 static AtlasGeometryOpts resolve_geometry_opts(const NtAtlasSpriteInput *sprite, const nt_atlas_opts_t *atlas) {
     AtlasGeometryOpts resolved = {
-        .alpha_threshold = sprite->alpha_threshold_override ? sprite->alpha_threshold_override : atlas->alpha_threshold,
-        .max_added_area_percent = sprite->has_max_added_area_percent_override ? sprite->max_added_area_percent_override : atlas->max_added_area_percent,
+        .effective_alpha_threshold = sprite->alpha_threshold_override ? sprite->alpha_threshold_override : atlas->alpha_threshold,
+        .max_added_area_percent = sprite->effective_max_added_area_percent,
         .max_vertices = sprite->max_verts_override ? sprite->max_verts_override : atlas->max_vertices,
         .shape = atlas->shape,
     };
@@ -1170,7 +1172,8 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
 
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
-        bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->geometry_opts[i].alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
+        bool has_pixels =
+            alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->geometry_opts[i].effective_alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
         if (!has_pixels) {
             /* Accumulate and keep validating the rest of this atlas. */
             nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM, .w = p->sprites[i].width, .h = p->sprites[i].height};
@@ -1807,7 +1810,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
-                    if (a >= geometry_opts->alpha_threshold) {
+                    if (a >= geometry_opts->effective_alpha_threshold) {
                         binary[((size_t)y * tw) + x] = 1;
                     }
                 }
@@ -2057,7 +2060,7 @@ static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t i
     for (uint32_t y = 0; y < th; y++) {
         for (uint32_t x = 0; x < tw; x++) {
             uint8_t alpha = p->alpha_planes[idx][((size_t)(p->trim_y[idx] + y) * source_w) + p->trim_x[idx] + x];
-            binary[((size_t)y * tw) + x] = alpha >= p->geometry_opts[idx].alpha_threshold ? 1 : 0;
+            binary[((size_t)y * tw) + x] = alpha >= p->geometry_opts[idx].effective_alpha_threshold ? 1 : 0;
         }
     }
     return binary;

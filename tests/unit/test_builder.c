@@ -6449,6 +6449,19 @@ void test_atlas_added_area_percent_defaults_and_validation(void) {
     nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
     TEST_ASSERT_FALSE(signbit(atlas->sprites[0].max_added_area_percent_override));
     TEST_ASSERT_TRUE(atlas->sprites[0].has_max_added_area_percent_override);
+    TEST_ASSERT_TRUE(atlas->sprites[0].effective_max_added_area_percent == 0.0F);
+    nt_builder_free_pack(ctx);
+
+    ctx = nt_builder_start_pack(TMP_DIR "/area_percent_presence.ntpack");
+    atlas = nt_atlas_begin(ctx, "presence", NULL);
+    sprite_opts = nt_atlas_sprite_opts_defaults();
+    sprite_opts.name = "inherited";
+    nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
+    sprite_opts.name = "explicit_zero";
+    sprite_opts.has_max_added_area_percent = true;
+    nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
+    TEST_ASSERT_TRUE(atlas->sprites[0].effective_max_added_area_percent == 10.0F);
+    TEST_ASSERT_TRUE(atlas->sprites[1].effective_max_added_area_percent == 0.0F);
     nt_builder_free_pack(ctx);
 
     static const float values[] = {0.0F, 2.0F, 5.0F, 10.0F, 15.0F, 25.0F};
@@ -6463,6 +6476,7 @@ void test_atlas_added_area_percent_defaults_and_validation(void) {
         sprite_opts.has_max_added_area_percent = true;
         nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
         TEST_ASSERT_TRUE(values[i] == atlas->sprites[i].max_added_area_percent_override);
+        TEST_ASSERT_TRUE(values[i] == atlas->sprites[i].effective_max_added_area_percent);
         TEST_ASSERT_TRUE(atlas->sprites[i].has_max_added_area_percent_override);
     }
     nt_builder_free_pack(ctx);
