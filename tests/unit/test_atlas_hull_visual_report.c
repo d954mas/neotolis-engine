@@ -286,8 +286,9 @@ static void assert_frontier_declares_portable_proofs(void) {
     size_t frontier_size = 0;
     uint8_t *frontier = read_bytes(FRONTIER_PATH, &frontier_size);
     TEST_ASSERT_NOT_NULL(frontier);
-    TEST_ASSERT_TRUE(strstr((char *)frontier, "\"schema_version\": 2") != NULL || strstr((char *)frontier, "\"schema_version\": 3") != NULL);
+    TEST_ASSERT_NOT_NULL(strstr((char *)frontier, "\"schema_version\": 3"));
     TEST_ASSERT_NOT_NULL(strstr((char *)frontier, "\"proof_format\": \"portable-v1\""));
+    TEST_ASSERT_NOT_NULL(strstr((char *)frontier, "\"builder_binary_sha256\": \""));
     free(frontier);
 }
 
@@ -400,6 +401,14 @@ static void assert_generation_rejects_corrupt_frontier(void) {
     *hash = *hash == '0' ? '1' : '0';
     write_bytes(REPORT_A "/corrupt-frontier.json", frontier, frontier_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, REPORT_A "/corrupt-frontier.json", REPORT_A "/provenance-must-fail"));
+    free(frontier);
+
+    frontier = read_bytes(FRONTIER_PATH, &frontier_size);
+    char *schema = strstr((char *)frontier, "\"schema_version\": 3");
+    TEST_ASSERT_NOT_NULL(schema);
+    schema[strlen("\"schema_version\": ")] = '2';
+    write_bytes(REPORT_A "/legacy-frontier.json", frontier, frontier_size);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, REPORT_A "/legacy-frontier.json", REPORT_A "/legacy-must-fail"));
     free(frontier);
 }
 

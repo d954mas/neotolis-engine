@@ -377,12 +377,11 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
     }
     const char *cursor = strstr((const char *)bytes, "\"sweep\": [");
     char source_commit[41];
-    const bool schema_v2 = strstr((const char *)bytes, "\"schema_version\": 2") != NULL;
     const bool schema_v3 = strstr((const char *)bytes, "\"schema_version\": 3") != NULL;
-    bool ok = cursor != NULL && (schema_v2 || schema_v3) && strstr((const char *)bytes, "\"proof_format\": \"portable-v1\"") != NULL &&
+    bool ok = cursor != NULL && schema_v3 && strstr((const char *)bytes, "\"proof_format\": \"portable-v1\"") != NULL &&
               text_value((const char *)bytes, "measurement_source_commit", source_commit, sizeof(source_commit)) && strlen(source_commit) == 40U &&
               strstr((const char *)bytes, "\"sweep_values\": [0, 2, 5, 10, 15, 25]") != NULL;
-    if (ok && schema_v3) {
+    if (ok) {
         char builder_sha256[65];
         ok = text_value((const char *)bytes, "builder_binary_sha256", builder_sha256, sizeof(builder_sha256)) && strlen(builder_sha256) == 64U;
     }
