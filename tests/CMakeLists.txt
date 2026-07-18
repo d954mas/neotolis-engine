@@ -474,6 +474,17 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_bench_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_parse)
 
+    add_executable(test_atlas_bench_cli
+        unit/test_atlas_bench_cli.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/atlas_bench_cli.c
+    )
+    target_link_libraries(test_atlas_bench_cli PRIVATE unity)
+    target_include_directories(test_atlas_bench_cli PRIVATE
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_bench_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_bench_cli WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE

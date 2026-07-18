@@ -6486,6 +6486,29 @@ void test_opaque_square_corner_cut_search_is_logarithmic(void) {
     TEST_ASSERT_LESS_THAN_UINT32(128, evaluations);
 }
 
+void test_concave_frontier_builds_convex_source_once(void) {
+    enum { W = 64, H = 64, BUDGET = 8 };
+    uint8_t binary[W * H];
+    memset(binary, 1, sizeof(binary));
+
+    const uint32_t build_count = nt_atlas_test_concave_convex_source_build_count(binary, W, H, BUDGET);
+
+    TEST_ASSERT_EQUAL_UINT32(1, build_count);
+}
+
+void test_disjoint_component_merge_has_small_work_bound(void) {
+    enum { W = 4096, H = 1 };
+    uint8_t binary[W * H] = {0};
+    binary[0] = 1U;
+    binary[W - 1U] = 1U;
+    uint32_t pass_count = 0U;
+
+    const bool merged = nt_atlas_test_merge_disjoint_components(binary, W, H, &pass_count);
+
+    TEST_ASSERT_FALSE(merged);
+    TEST_ASSERT_EQUAL_UINT32(8, pass_count);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_concave_added_area_percent_respects_budget_and_coverage(void) {
     (void)MKDIR(TMP_DIR);
@@ -8297,6 +8320,8 @@ int main(void) {
     RUN_TEST(test_aa_triangle_added_area_percent_preserves_full_cell_coverage);
     RUN_TEST(test_connected_mask_serializes_simple_exact_triangulation);
     RUN_TEST(test_opaque_square_corner_cut_search_is_logarithmic);
+    RUN_TEST(test_concave_frontier_builds_convex_source_once);
+    RUN_TEST(test_disjoint_component_merge_has_small_work_bound);
     RUN_TEST(test_concave_added_area_percent_respects_budget_and_coverage);
     RUN_TEST(test_convex_added_area_percent_does_not_increase_vertex_count);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);

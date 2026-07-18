@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Measures the production area-budget frontier without replacing Phase 78 baselines.
+# Measures the production area-budget frontier without replacing established baselines.
 # Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV] [--publish]
 
 set -euo pipefail
@@ -45,6 +45,84 @@ hull_require_clean_tree() {
 
 hull_write_portable_proof() {
     sed '/"pack_ms"/d;/"cpu"/d;/"os"/d' "$1" > "$2"
+}
+
+HULL_PUBLISH_TXN_DIR="${HULL_PUBLISH_TXN_DIR:-build/bench/hull-area-publication-transaction}"
+
+hull_publish_restore_file() {
+    local target="$1"
+    local backup="$2"
+    local restore_tmp="${target}.restore.${$}"
+    mkdir -p "$(dirname "$target")"
+    cp -p -- "$backup" "$restore_tmp" || return 1
+    mv -- "$restore_tmp" "$target"
+}
+
+hull_publish_transaction_rollback() {
+    local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
+    local target had_original result=0
+    [[ -f "$manifest" ]] || { rm -rf -- "$HULL_PUBLISH_TXN_DIR"; return 0; }
+    while IFS='|' read -r target had_original; do
+        if [[ "$had_original" == 1 ]]; then
+            hull_publish_restore_file "$target" "${HULL_PUBLISH_TXN_DIR}/backup/${target}" || result=1
+        else
+            rm -f -- "$target" || result=1
+        fi
+    done < "$manifest"
+    if [[ $result -eq 0 ]]; then
+        rm -rf -- "$HULL_PUBLISH_TXN_DIR"
+    fi
+    return "$result"
+}
+
+hull_recover_publication() {
+    [[ -e "$HULL_PUBLISH_TXN_DIR" ]] || return 0
+    hull_publish_transaction_rollback
+}
+
+hull_publish_install_file() {
+    mv -- "$1" "$2"
+}
+
+hull_publish_staged_set() {
+    local stage_root="$1"
+    shift
+    local target source had_original
+    local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
+
+    hull_recover_publication || return 1
+    for target in "$@"; do
+        case "$target" in
+            /*|[A-Za-z]:*|../*|*/../*) echo "ERROR: publication target must be repository-relative: ${target}" >&2; return 1 ;;
+        esac
+        [[ -f "${stage_root}/${target}" ]] || { echo "ERROR: staged publication file is missing: ${stage_root}/${target}" >&2; return 1; }
+    done
+
+    mkdir -p "${HULL_PUBLISH_TXN_DIR}/backup"
+    : > "$manifest"
+    for target in "$@"; do
+        had_original=0
+        if [[ -f "$target" ]]; then
+            had_original=1
+            mkdir -p "${HULL_PUBLISH_TXN_DIR}/backup/$(dirname "$target")"
+            if ! cp -p -- "$target" "${HULL_PUBLISH_TXN_DIR}/backup/${target}"; then
+                rm -rf -- "$HULL_PUBLISH_TXN_DIR"
+                return 1
+            fi
+        fi
+        printf '%s|%s\n' "$target" "$had_original" >> "$manifest"
+    done
+
+    for target in "$@"; do
+        source="${stage_root}/${target}"
+        mkdir -p "$(dirname "$target")"
+        if ! hull_publish_install_file "$source" "$target"; then
+            echo "ERROR: publication failed while installing ${target}; restoring the previous evidence set." >&2
+            hull_publish_transaction_rollback || echo "ERROR: publication rollback failed; rerun --publish to recover before retrying." >&2
+            return 1
+        fi
+    done
+    rm -rf -- "$HULL_PUBLISH_TXN_DIR"
 }
 
 if [[ "${NT_HULL_AREA_GUARD_LIB_ONLY:-0}" == 1 ]]; then
@@ -126,11 +204,12 @@ if [[ $PUBLISH -eq 1 ]]; then
         echo "ERROR: canonical publication requires mixed_aa, samples 0,2,5,10,15,25, native-release, and one builder thread." >&2
         exit 1
     fi
+    hull_recover_publication || { echo "ERROR: could not recover an interrupted hull evidence publication." >&2; exit 1; }
     hull_require_clean_tree
 fi
 
 if hull_path_is_protected "tools/research/atlas_bench/baseline" "$OUT_DIR"; then
-    echo "ERROR: sweep output must not be inside the Phase 78 baseline directory." >&2
+    echo "ERROR: sweep output must not be inside the protected baseline directory." >&2
     exit 1
 fi
 if [[ -d "$OUT_DIR" ]] && [[ -n "$(find "$OUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
@@ -220,9 +299,11 @@ done
 
 if [[ $PUBLISH -eq 1 ]]; then
     FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
-    FRONTIER_TMP="${FRONTIER}.tmp.${$}"
     PROOF_DIR="tests/fixtures/hull_visual_acceptance/proof"
-    mkdir -p "$PROOF_DIR"
+    PUBLISH_STAGE="${OUT_DIR}/.publish-stage-${$}"
+    STAGED_FRONTIER="${PUBLISH_STAGE}/${FRONTIER}"
+    mkdir -p "$(dirname "$STAGED_FRONTIER")" "${PUBLISH_STAGE}/${PROOF_DIR}"
+    trap 'rm -rf -- "$PUBLISH_STAGE"' EXIT
     commit="$(git rev-parse HEAD)"
     builder_sha="$(sha256sum "$BENCH_EXE" | awk '{print $1}')"
     corpus_sha="$(sha256sum "${matches[@]}" | sha256sum | awk '{print $1}')"
@@ -237,7 +318,8 @@ if [[ $PUBLISH -eq 1 ]]; then
             sample="${SAMPLES[$i]}"
             safe_sample="${sample//./p}"
             source="${OUT_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
-            proof_source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
+            published_source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
+            proof_source="${PUBLISH_STAGE}/${published_source}"
             hull_write_portable_proof "$source" "$proof_source"
             source="$proof_source"
             source_sha="$(sha256sum "$source" | awk '{print $1}')"
@@ -245,21 +327,29 @@ if [[ $PUBLISH -eq 1 ]]; then
             baseline_pack_sha="$(sed -n 's/.*"baseline_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$source")"
             [[ ${#selected_pack_sha} -eq 64 && ${#baseline_pack_sha} -eq 64 ]] || { echo "ERROR: missing production pack hashes in ${source}" >&2; exit 1; }
             printf '    %s{"max_added_area_percent": %s, "hull_vertices_total": %s, "hull_vertices_mean": %s, "density_fill_frontier": %s, "representative_total_overdraw_percent": %s, "sweep_source": "%s", "sweep_sha256": "%s", "baseline_pack_sha256": "%s", "selected_pack_sha256": "%s"}\n' \
-                "$([[ $i -eq 0 ]] && printf '' || printf ',')" "$sample" "${HULL_TOTALS[$i]}" "${HULL_MEANS[$i]}" "${FRONTIER_DENSITIES[$i]}" "${SELECTED_OVERDRAW[$i]}" "$source" "$source_sha" \
+                "$([[ $i -eq 0 ]] && printf '' || printf ',')" "$sample" "${HULL_TOTALS[$i]}" "${HULL_MEANS[$i]}" "${FRONTIER_DENSITIES[$i]}" "${SELECTED_OVERDRAW[$i]}" "$published_source" "$source_sha" \
                 "$baseline_pack_sha" "$selected_pack_sha"
         done
         printf '  ],\n  "columns": [\n'
         for spec in 'baseline|0' 'candidate|2' 'recommended|3'; do
             IFS='|' read -r id i <<< "$spec"
             sample="${SAMPLES[$i]}"
-            source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "${sample//./p}").json"
+            published_source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "${sample//./p}").json"
+            source="${PUBLISH_STAGE}/${published_source}"
             source_sha="$(sha256sum "$source" | awk '{print $1}')"
             printf '    %s{"column_id": "%s", "max_added_area_percent": %s, "sweep_source": "%s", "sweep_sha256": "%s"}\n' \
-                "$([[ "$id" == baseline ]] && printf '' || printf ',')" "$id" "$sample" "$source" "$source_sha"
+                "$([[ "$id" == baseline ]] && printf '' || printf ',')" "$id" "$sample" "$published_source" "$source_sha"
         done
         printf '  ]\n}\n'
-    } > "$FRONTIER_TMP"
-    mv "$FRONTIER_TMP" "$FRONTIER"
+    } > "$STAGED_FRONTIER"
+    PUBLISH_TARGETS=("$FRONTIER")
+    for i in "${!SAMPLES[@]}"; do
+        sample="${SAMPLES[$i]}"
+        PUBLISH_TARGETS+=("${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "${sample//./p}").json")
+    done
+    hull_publish_staged_set "$PUBLISH_STAGE" "${PUBLISH_TARGETS[@]}"
+    rm -rf -- "$PUBLISH_STAGE"
+    trap - EXIT
     echo "=== Published deterministic frontier: ${FRONTIER} ==="
 fi
 

@@ -16,6 +16,7 @@ typedef struct {
     uint32_t destroy_count;
     uint32_t cleared_source_count;
     uint32_t corner_cut_evaluation_count;
+    uint32_t convex_source_build_count;
     uint64_t opaque_area2;
     uint64_t base_area2;
     uint64_t selected_area2;
@@ -34,5 +35,7 @@ bool nt_atlas_test_frontier_lifecycle_stress(void);
 void nt_atlas_test_frontier_selection_proof_mismatch(void);
 uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
 uint32_t nt_atlas_test_concave_corner_cut_evaluation_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
+uint32_t nt_atlas_test_concave_convex_source_build_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
+bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count);
 
 #endif

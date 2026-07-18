@@ -473,8 +473,8 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 17 };
-_Static_assert(ATLAS_CACHE_KEY_VERSION > 16, "alpha-threshold compose changes require a fresh atlas cache key");
+enum { ATLAS_CACHE_KEY_VERSION = 18 };
+_Static_assert(ATLAS_CACHE_KEY_VERSION > 17, "bounded concave closing requires a fresh atlas cache key");
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Atlas cache stores raw page pixels + placements; post-pack texture
@@ -1356,6 +1356,7 @@ typedef struct {
     uint32_t destroy_count;
     uint32_t cleared_source_count;
     uint32_t corner_cut_evaluation_count;
+    uint32_t convex_source_build_count;
 } GeometryFrontier;
 
 typedef struct {
@@ -1961,13 +1962,18 @@ static GeometryCandidate strategy_rect(uint32_t tw, uint32_t th) {
 /* Strategy 4: convex hull of the binary mask via Andrew's monotone chain,
  * simplified down to target vertices. Wins on convex-ish shapes where the
  * hull is already within max_vertices. */
-static GeometryCandidate strategy_convex(const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t target) {
+static GeometryCandidate strategy_convex(const Point2D *source, uint32_t source_count, uint32_t target, const uint8_t *binary_source, uint32_t tw, uint32_t th) {
     GeometryCandidate result = {0};
-    uint32_t count = 0;
-    Point2D *poly = binary_build_convex_polygon(binary_source, tw, th, target, &count);
-    if (!poly || count < 3) {
-        free(poly);
+    if (!source || source_count < 3U) {
         return result; /* invalid */
+    }
+    Point2D *poly = (Point2D *)malloc((size_t)source_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "strategy_convex: alloc failed");
+    uint32_t count = source_count;
+    if (source_count > target) {
+        count = hull_simplify(source, source_count, target, poly);
+    } else {
+        memcpy(poly, source, (size_t)source_count * sizeof(Point2D));
     }
     double max_outside = polygon_max_outside_pixel_distance(poly, count, binary_source, tw, th);
 
@@ -2072,6 +2078,9 @@ static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, u
         .max_vertices = max_vertices,
         .opaque_area2 = geometry_retained_area2(binary_source, tw, th),
     };
+    uint32_t convex_source_count = 0U;
+    Point2D *convex_source = binary_build_convex_polygon(binary_source, tw, th, UINT32_MAX, &convex_source_count);
+    frontier.convex_source_build_count = 1U;
     for (uint32_t target = 3; target <= max_vertices; target++) {
         GeometryCandidate rdp = strategy_rdp(clean, clean_count, target);
         rdp.generator_ordinal = 0;
@@ -2089,13 +2098,14 @@ static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, u
             geometry_frontier_adopt(&frontier, &rect);
         }
 
-        GeometryCandidate convex = strategy_convex(binary_source, tw, th, target);
+        GeometryCandidate convex = strategy_convex(convex_source, convex_source_count, target, binary_source, tw, th);
         convex.generator_ordinal = 3;
         (void)geometry_finalize_candidate(&convex, clean, clean_count, binary_source, tw, th, max_vertices);
         geometry_frontier_adopt(&frontier, &convex);
 
         geometry_frontier_add_corner_cuts(&frontier, target);
     }
+    free(convex_source);
     for (uint32_t count = max_vertices; count > 3; count--) {
         geometry_frontier_enumerate_covering_removals(&frontier, &frontier.slots[count], 4);
         geometry_frontier_enumerate_covering_pair_removals(&frontier, &frontier.slots[count], 5);
@@ -2105,6 +2115,7 @@ static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, u
             .opaque_area2 = frontier.opaque_area2,
             .base_area2 = geometry_frontier_base_area2(&frontier),
             .corner_cut_evaluation_count = frontier.corner_cut_evaluation_count,
+            .convex_source_build_count = frontier.convex_source_build_count,
         };
         for (uint32_t count = 3; count <= max_vertices; count++) {
             if (frontier.slots[count].valid) {
@@ -2126,6 +2137,8 @@ static GeometrySelection geometry_build_concave_fallback_frontier(const uint8_t 
         .max_vertices = max_vertices,
         .opaque_area2 = geometry_retained_area2(binary_source, tw, th),
     };
+    uint32_t convex_source_count = 0U;
+    Point2D *convex_source = binary_build_convex_polygon(binary_source, tw, th, UINT32_MAX, &convex_source_count);
     for (uint32_t target = 3; target <= max_vertices; target++) {
         if (target >= 4) {
             GeometryCandidate rect = strategy_rect(tw, th);
@@ -2133,11 +2146,12 @@ static GeometrySelection geometry_build_concave_fallback_frontier(const uint8_t 
             geometry_frontier_adopt(&frontier, &rect);
         }
 
-        GeometryCandidate convex = strategy_convex(binary_source, tw, th, target);
+        GeometryCandidate convex = strategy_convex(convex_source, convex_source_count, target, binary_source, tw, th);
         convex.generator_ordinal = 3;
         (void)geometry_finalize_candidate(&convex, NULL, 0, binary_source, tw, th, max_vertices);
         geometry_frontier_adopt(&frontier, &convex);
     }
+    free(convex_source);
     GeometrySelection selected = geometry_frontier_take_selection(&frontier, max_added_area_percent);
     geometry_frontier_destroy(&frontier);
     return selected;
@@ -2181,6 +2195,26 @@ uint32_t nt_atlas_test_concave_corner_cut_evaluation_count(const uint8_t *binary
     free(clean);
     free(contour);
     return result.corner_cut_evaluation_count;
+}
+
+uint32_t nt_atlas_test_concave_convex_source_build_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices) {
+    uint32_t retained_count = 0U;
+    for (size_t i = 0; i < (size_t)width * height; i++) {
+        retained_count += binary[i] != 0U ? 1U : 0U;
+    }
+    const uint32_t contour_capacity = (2U * retained_count) + 2U;
+    Point2D *contour = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
+    Point2D *clean = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
+    NT_BUILD_ASSERT(contour && clean && "nt_atlas_test_concave_convex_source_build_count: alloc failed");
+    bool overflow = false;
+    const uint32_t contour_count = trace_contour(binary, width, height, contour, contour_capacity, &overflow);
+    const uint32_t clean_count = overflow ? 0U : remove_collinear(contour, contour_count, clean);
+    NtAtlasFrontierTestResult result = {0};
+    GeometrySelection selection = geometry_build_concave_frontier(clean, clean_count, binary, width, height, max_vertices, 0.0F, &result);
+    geometry_selection_discard(&selection);
+    free(clean);
+    free(contour);
+    return result.convex_source_build_count;
 }
 
 uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
@@ -2351,6 +2385,36 @@ static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, 
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx);
 
+static bool geometry_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
+    uint8_t *visited = (uint8_t *)calloc((size_t)width * height, 1);
+    int32_t *stack = (int32_t *)malloc((size_t)width * height * 2U * sizeof(int32_t));
+    NT_BUILD_ASSERT(visited && stack && "component merge scratch alloc failed");
+    uint32_t component_count = binary_count_components(binary, width, height, visited, stack);
+    uint32_t pass_count = 0U;
+    if (component_count > 1U) {
+        uint8_t *scratch = (uint8_t *)malloc((size_t)width * height);
+        NT_BUILD_ASSERT(scratch && "component merge mask alloc failed");
+        const uint32_t max_pass_count = 8U;
+        while (component_count > 1U && pass_count < max_pass_count) {
+            binary_dilate_4conn(binary, scratch, width, height);
+            memcpy(binary, scratch, (size_t)width * height);
+            pass_count++;
+            component_count = binary_count_components(binary, width, height, visited, stack);
+        }
+        free(scratch);
+    }
+    free(stack);
+    free(visited);
+    if (out_pass_count) {
+        *out_pass_count = pass_count;
+    }
+    return component_count <= 1U;
+}
+
+bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
+    return geometry_merge_disjoint_components(binary, width, height, out_pass_count);
+}
+
 /* --- pipeline_geometry: contour trace + simplification + inflation per unique sprite --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2417,37 +2481,16 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
 
             // #region Morphological closing — merge disjoint components into one
-            /* If sprite has multiple disjoint opaque regions, iteratively dilate the
-             * binary mask until they form one connected component, so a single contour
-             * trace can produce one simple polygon containing all pixels.
+            /* Nearby components share one contour; distant components use the fallback.
              * The resulting polygon will be K pixels wider on every side (acceptable —
              * acts like extra padding). Limit K to avoid pathological cases. */
             uint8_t *binary_source = (uint8_t *)malloc((size_t)tw * th);
             NT_BUILD_ASSERT(binary_source && "pipeline_geometry: alloc failed");
             memcpy(binary_source, binary, (size_t)tw * th);
             const char *convex_reason = NULL;
-            uint8_t *cc_visited = (uint8_t *)calloc((size_t)tw * th, 1);
-            int32_t *cc_stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
-            NT_BUILD_ASSERT(cc_visited && cc_stack && "pipeline_geometry: alloc failed");
-            uint32_t comp_count = binary_count_components(binary, tw, th, cc_visited, cc_stack);
-            uint32_t closing_k = 0;
-            if (comp_count > 1) {
-                uint8_t *scratch = (uint8_t *)malloc((size_t)tw * th);
-                NT_BUILD_ASSERT(scratch && "pipeline_geometry: alloc failed");
-                uint32_t max_iter = ((tw > th ? tw : th) / 2) + 1;
-                while (comp_count > 1 && closing_k < max_iter) {
-                    binary_dilate_4conn(binary, scratch, tw, th);
-                    memcpy(binary, scratch, (size_t)tw * th);
-                    closing_k++;
-                    comp_count = binary_count_components(binary, tw, th, cc_visited, cc_stack);
-                }
-                free(scratch);
-                if (comp_count > 1) {
-                    convex_reason = "disjoint components";
-                }
+            if (!geometry_merge_disjoint_components(binary, tw, th, NULL)) {
+                convex_reason = "disjoint components";
             }
-            free(cc_stack);
-            free(cc_visited);
             // #endregion
 
             if (!convex_reason) {

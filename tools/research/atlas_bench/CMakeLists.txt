@@ -1,4 +1,4 @@
-add_executable(atlas_bench main.c ntpack_parse.c bench_json.c)
+add_executable(atlas_bench main.c atlas_bench_cli.c ntpack_parse.c bench_json.c)
 # The executable selects the real logger; nt_builder keeps an interface-only dependency.
 target_link_libraries(atlas_bench PRIVATE nt_builder nt_log)
 target_include_directories(atlas_bench PRIVATE

@@ -334,8 +334,8 @@ typedef struct {
 } nt_atlas_sprite_opts_t;
 ```
 
-The Phase 80 area-budget and per-sprite threshold controls are appended after each
-complete pre-Phase-80 field list. Legal legacy positional initializers therefore
+The area-budget and per-sprite threshold controls are appended after each
+complete legacy field list. Legal positional initializers therefore
 retain every existing field mapping when recompiled; this is source-recompile
 compatibility, not a binary-ABI promise for stale object files. For per-sprite
 options, zero-initialized appended controls preserve inherit semantics. For
@@ -353,7 +353,7 @@ The current deterministic frontier evidence uses six public area-budget values. 
 
 Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. The report records the declarative corpus-manifest hash separately from `visual_input_sha256`, which hashes the actual decoded RGBA plus resolved row controls used by the builder.
 
-| Added area budget | Hull vertices total | Mean | Texture fill | Representative total overdraw | Sweep SHA-256 |
+| Added area budget | Hull vertices total | Mean | Frontier fill | Representative total overdraw | Sweep SHA-256 |
 | ---: | ---: | ---: | ---: | ---: | --- |
 | 0% | 926 | 7.2344 | 0.5383 | 0.15990160% | `4ab00d82587f4b9e8c9b11c05092310ea3e3ec7c522846583fa7215157c22c42` |
 | 2% | 782 | 6.1094 | 0.5971 | 0.76260763% | `97f874de5334a9096d6c042226e616a34ea3c88b6aa46bac4dba7811ebdaaed2` |
@@ -377,7 +377,7 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 17. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area presence bit even when they currently resolve to inherited values. The max-added-area payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 18. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area presence bit even when they currently resolve to inherited values. The max-added-area payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 

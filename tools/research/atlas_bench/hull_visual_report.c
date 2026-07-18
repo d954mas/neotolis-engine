@@ -1010,8 +1010,7 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
     if (file == NULL) {
         return false;
     }
-    (void)fputs("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Phase 80 Hull Visual Acceptance</title>",
-                file);
+    (void)fputs("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Hull Visual Acceptance</title>", file);
     (void)fputs("<style>:root{color-scheme:dark;--bg:#09121d;--panel:#122235;--ink:#e8f3ff;--muted:#9eb4c9;--cyan:#38d9ff;--green:#53df89}*{box-sizing:border-box}body{margin:0;background:var(--bg);"
                 "color:var(--ink);font:14px system-ui,sans-serif}main{max-width:1500px;margin:auto;padding:24px}h1{font-size:clamp(24px,4vw,44px);margin:0 0 8px}.lede{color:var(--muted);margin:0 0 "
                 "28px}.row{margin:30px 0}.grid{display:grid;grid-template-columns:repeat(6,minmax(250px,1fr));gap:14px;overflow-x:auto}.panel{background:var(--panel);border:1px solid "
@@ -1022,7 +1021,7 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
                 ".35}.selected{fill:#38d9ff22;stroke:var(--cyan);stroke-width:.18}.triangle{fill:none;stroke:#8bdff9;stroke-width:.05}"
                 "@media(max-width:900px){.grid{grid-template-columns:1fr;overflow:visible}}</style></head><body><main>",
                 file);
-    (void)fputs("<h1>Phase 80 Hull Visual Acceptance</h1><p class=\"lede\">Every panel rebuilds the retained mask, reads baseline and selected polygons plus triangles from real production packs, "
+    (void)fputs("<h1>Hull Visual Acceptance</h1><p class=\"lede\">Every panel rebuilds the retained mask, reads baseline and selected polygons plus triangles from real production packs, "
                 "then applies the same native selected-geometry validator used by serialization. Orange dashed = Abase polygon; cyan = selected polygon.</p>",
                 file);
     for (uint32_t row = 0; row < VISUAL_ROW_COUNT; row++) {

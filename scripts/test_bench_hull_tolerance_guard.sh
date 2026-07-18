@@ -33,7 +33,80 @@ if grep -Eq '"(os|cpu|pack_ms)"' "$PORTABLE_PROOF" || ! grep -q 'selected_geomet
 fi
 rm -f "$PORTABLE_SOURCE" "$PORTABLE_PROOF"
 
+PUBLISH_TEST_ROOT="build/tests/tmp/hull-publication-${$}"
+PUBLISH_STAGE="${PUBLISH_TEST_ROOT}/stage"
+PUBLISH_TXN="${PUBLISH_TEST_ROOT}/transaction"
+PUBLISH_TARGET_A="${PUBLISH_TEST_ROOT}/tracked/a.json"
+PUBLISH_TARGET_B="${PUBLISH_TEST_ROOT}/tracked/b.json"
+mkdir -p "$PUBLISH_STAGE/$(dirname "$PUBLISH_TARGET_A")" "$(dirname "$PUBLISH_TARGET_A")"
+printf 'old-a\n' > "$PUBLISH_TARGET_A"
+printf 'old-b\n' > "$PUBLISH_TARGET_B"
+printf 'new-a\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_A"
+printf 'new-b\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_B"
+HULL_PUBLISH_TXN_DIR="$PUBLISH_TXN"
+if (
+    install_count=0
+    hull_publish_install_file() {
+        install_count=$((install_count + 1))
+        [[ $install_count -lt 2 ]] || return 1
+        mv -- "$1" "$2"
+    }
+    hull_publish_staged_set "$PUBLISH_STAGE" "$PUBLISH_TARGET_A" "$PUBLISH_TARGET_B"
+); then
+    echo "injected publication failure unexpectedly succeeded" >&2
+    exit 1
+fi
+if [[ "$(<"$PUBLISH_TARGET_A")" != old-a || "$(<"$PUBLISH_TARGET_B")" != old-b || -e "$PUBLISH_TXN" ]]; then
+    echo "failed publication did not roll back the complete tracked set" >&2
+    exit 1
+fi
+rm -rf -- "$PUBLISH_STAGE"
+mkdir -p "$PUBLISH_STAGE/$(dirname "$PUBLISH_TARGET_A")"
+printf 'retry-a\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_A"
+printf 'retry-b\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_B"
+hull_publish_staged_set "$PUBLISH_STAGE" "$PUBLISH_TARGET_A" "$PUBLISH_TARGET_B"
+if [[ "$(<"$PUBLISH_TARGET_A")" != retry-a || "$(<"$PUBLISH_TARGET_B")" != retry-b || -e "$PUBLISH_TXN" ]]; then
+    echo "clean retry did not publish the complete tracked set" >&2
+    exit 1
+fi
+rm -rf -- "$PUBLISH_TEST_ROOT"
+
 NT_HULL_VISUAL_GUARD_LIB_ONLY=1 source scripts/generate_hull_visual_acceptance.sh
+FRONTIER_TEST_ROOT="build/tests/tmp/hull-frontier-${$}"
+VALID_FRONTIER="${FRONTIER_TEST_ROOT}/valid.json"
+EXPECTED_BUILDER_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+mkdir -p "$FRONTIER_TEST_ROOT"
+sed \
+    -e 's/"schema_version": [0-9][0-9]*/"schema_version": 3/' \
+    -e '/"builder_binary_sha256":/d' \
+    -e "/\"builder_threads\": 1/a\\  \"builder_binary_sha256\": \"${EXPECTED_BUILDER_SHA}\"," \
+    tools/research/atlas_bench/hull_area_frontier.json > "$VALID_FRONTIER"
+FRONTIER="$VALID_FRONTIER"
+if ! frontier_valid "$EXPECTED_BUILDER_SHA"; then
+    echo "valid schema-3 frontier was rejected" >&2
+    exit 1
+fi
+SCHEMA2_FRONTIER="${FRONTIER_TEST_ROOT}/schema2.json"
+sed 's/"schema_version": 3/"schema_version": 2/' "$VALID_FRONTIER" > "$SCHEMA2_FRONTIER"
+FRONTIER="$SCHEMA2_FRONTIER"
+if frontier_valid "$EXPECTED_BUILDER_SHA"; then
+    echo "legacy schema-2 frontier was accepted" >&2
+    exit 1
+fi
+FRONTIER="$VALID_FRONTIER"
+if frontier_valid "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"; then
+    echo "frontier from a different production builder was accepted" >&2
+    exit 1
+fi
+TAMPERED_FRONTIER="${FRONTIER_TEST_ROOT}/tampered-metric.json"
+sed '0,/"hull_vertices_total": 926/s//"hull_vertices_total": 927/' "$VALID_FRONTIER" > "$TAMPERED_FRONTIER"
+FRONTIER="$TAMPERED_FRONTIER"
+if frontier_valid "$EXPECTED_BUILDER_SHA"; then
+    echo "frontier metric inconsistent with its hashed proof was accepted" >&2
+    exit 1
+fi
+rm -rf -- "$FRONTIER_TEST_ROOT"
+
 FINAL_DIR="build/tests/tmp/hull-visual-final-${$}"
 TEMP_DIR="${FINAL_DIR}.tmp"
 REPEAT_DIR="${FINAL_DIR}.repeat"

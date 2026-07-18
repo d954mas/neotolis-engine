@@ -114,7 +114,7 @@ static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
 /* Pack the whole mini-corpus with nt_atlas_opts_defaults() (NO cache dir → real
  * default path) to `path`, then parse the produced .ntpack into `out`.
  * Returns true on a clean pack + parse. */
-static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape_t shape, float added_area_percent, bool sprite_override, nt_bench_atlas_metrics_t *out) {
+static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape_t shape, bool use_default_added_area, float added_area_percent, bool sprite_override, nt_bench_atlas_metrics_t *out) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -126,7 +126,9 @@ static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = shape;
-    opts.max_added_area_percent = added_area_percent;
+    if (!use_default_added_area) {
+        opts.max_added_area_percent = added_area_percent;
+    }
     NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
     uint8_t *bufs[CORPUS_COUNT] = {0};
@@ -162,10 +164,10 @@ static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape
 }
 
 static bool pack_and_parse_corpus_with_added_area(const char *path, float added_area_percent, nt_bench_atlas_metrics_t *out) {
-    return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, added_area_percent, false, out);
+    return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, false, added_area_percent, false, out);
 }
 
-static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *out) { return pack_and_parse_corpus_with_added_area(path, 0.0F, out); }
+static bool pack_and_parse_default_corpus(const char *path, nt_bench_atlas_metrics_t *out) { return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, true, 0.0F, false, out); }
 
 /* Round a density to 1e-6 fixed point — exact-integer equality across two packs
  * avoids raw double-bit comparison flagging benign last-ULP noise as regression. */
@@ -239,11 +241,25 @@ static bool pack_default_corpus_with_threads(const char *path, uint32_t thread_c
 
 /* Two in-process packs of the SAME corpus at default opts must produce identical
  * region/page/vertex/hull counts and a bit-stable density. */
-void test_metrics_stable_across_two_packs(void) {
+void test_default_metrics_stable_across_two_packs(void) {
     nt_bench_atlas_metrics_t a;
     nt_bench_atlas_metrics_t b;
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_a.ntpack", &a), "pack/parse A failed");
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_b.ntpack", &b), "pack/parse B failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_a.ntpack", &a), "default pack/parse A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_b.ntpack", &b), "default pack/parse B failed");
+
+    TEST_ASSERT_EQUAL_UINT16(a.region_count, b.region_count);
+    TEST_ASSERT_EQUAL_UINT16(a.page_count, b.page_count);
+    TEST_ASSERT_EQUAL_UINT32(a.total_vertex_count, b.total_vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
+    TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_texture), density_fixed(b.density_fill_texture));
+    TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_frontier), density_fixed(b.density_fill_frontier));
+}
+
+void test_zero_added_area_metrics_stable_across_two_packs(void) {
+    nt_bench_atlas_metrics_t a;
+    nt_bench_atlas_metrics_t b;
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_added_area(TMP_DIR "/det_zero_a.ntpack", 0.0F, &a), "0% pack/parse A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_added_area(TMP_DIR "/det_zero_b.ntpack", 0.0F, &b), "0% pack/parse B failed");
 
     TEST_ASSERT_EQUAL_UINT16(a.region_count, b.region_count);
     TEST_ASSERT_EQUAL_UINT16(a.page_count, b.page_count);
@@ -260,8 +276,8 @@ void test_positive_added_area_pack_bytes_repeat(void) {
     for (uint32_t shape = 0; shape < 2; shape++) {
         nt_bench_atlas_metrics_t a;
         nt_bench_atlas_metrics_t b;
-        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(a_paths[shape], shapes[shape], 1.5F, true, &a), "positive pack/parse A failed");
-        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(b_paths[shape], shapes[shape], 1.5F, true, &b), "positive pack/parse B failed");
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(a_paths[shape], shapes[shape], false, 1.5F, true, &a), "positive pack/parse A failed");
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(b_paths[shape], shapes[shape], false, 1.5F, true, &b), "positive pack/parse B failed");
         TEST_ASSERT_TRUE_MESSAGE(files_are_identical(a_paths[shape], b_paths[shape]), "positive-area atlas bytes are not deterministic");
         TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
     }
@@ -285,7 +301,7 @@ void test_default_added_area_threads_are_byte_deterministic(void) {
 
 void test_metrics_match_pinned_baseline(void) {
     nt_bench_atlas_metrics_t m;
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_pin.ntpack", &m), "pack/parse failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_pin.ntpack", &m), "default pack/parse failed");
 
     TEST_ASSERT_EQUAL_UINT16(PIN_REGION_COUNT, m.region_count);
     TEST_ASSERT_EQUAL_UINT16(PIN_PAGE_COUNT, m.page_count);
@@ -552,7 +568,8 @@ void test_margin_override_content_centered(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_metrics_stable_across_two_packs);
+    RUN_TEST(test_default_metrics_stable_across_two_packs);
+    RUN_TEST(test_zero_added_area_metrics_stable_across_two_packs);
     RUN_TEST(test_positive_added_area_pack_bytes_repeat);
     RUN_TEST(test_default_added_area_threads_are_byte_deterministic);
     RUN_TEST(test_metrics_match_pinned_baseline);

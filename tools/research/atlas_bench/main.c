@@ -4,6 +4,7 @@
 #define GLOB_MAX_MATCHES 8192
 #include "nt_builder.h"
 
+#include "atlas_bench_cli.h"
 #include "bench_json.h"
 #include "nt_builder_atlas_geometry.h"
 #include "ntpack_parse.h"
@@ -71,17 +72,6 @@ typedef struct {
     double pack_ms;
     char first_path[1024];
 } bench_pack_result_t;
-
-static void remove_temporary_pack(const char *path) {
-    char header[1024];
-    (void)snprintf(header, sizeof(header), "%s", path);
-    char *extension = strstr(header, ".ntpack");
-    if (extension != NULL && extension[7] == '\0') {
-        (void)snprintf(extension, 8U, ".h");
-        (void)remove(header);
-    }
-    (void)remove(path);
-}
 
 static bool build_production_pack(const char *pack_path, const char *corpus_glob, const char *atlas_name, nt_atlas_shape_t shape, uint32_t max_size, uint32_t max_sprites, float percent,
                                   bench_pack_result_t *out) {
@@ -193,6 +183,7 @@ static uint8_t *build_retained_mask(const char *path, uint8_t threshold, uint32_
     return mask;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- CLI validation and one cleanup path stay linear.
 int main(int argc, char *argv[]) {
     if (argc < 6) {
         (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites] [--max-added-area-percent <percent>]\n");
@@ -202,11 +193,18 @@ int main(int argc, char *argv[]) {
     const char *corpus_glob = argv[2];
     const char *atlas_name = argv[3];
     const char *shape_arg = argv[4];
-    const uint32_t max_size = (uint32_t)strtoul(argv[5], NULL, 10);
+    uint32_t max_size = 0U;
+    if (!atlas_bench_parse_max_size(argv[5], &max_size)) {
+        (void)fprintf(stderr, "atlas_bench: max_size must be an integer in 1..%u\n", ATLAS_BENCH_MAX_ATLAS_SIZE);
+        return 1;
+    }
     uint32_t max_sprites = 0U;
     int next_arg = 6;
     if (next_arg < argc && strncmp(argv[next_arg], "--", 2) != 0) {
-        max_sprites = (uint32_t)strtoul(argv[next_arg], NULL, 10);
+        if (!atlas_bench_parse_u32_strict(argv[next_arg], &max_sprites)) {
+            (void)fprintf(stderr, "atlas_bench: max_sprites must be an integer in 0..%u\n", UINT32_MAX);
+            return 1;
+        }
         next_arg++;
     }
     nt_atlas_opts_t default_opts = nt_atlas_opts_defaults();
@@ -232,31 +230,31 @@ int main(int argc, char *argv[]) {
         (void)fprintf(stderr, "atlas_bench: bad shape '%s' (want rect|convex|concave)\n", shape_arg);
         return 1;
     }
-    if (max_size == 0) {
-        (void)fprintf(stderr, "atlas_bench: max_size must be > 0\n");
-        return 1;
-    }
-
     /* The 0% pack is the authoritative baseline; the requested pack differs only by percent. */
     char pack_path[1024];
     char baseline_pack_path[1024];
     (void)snprintf(pack_path, sizeof(pack_path), "%s.ntpack", out_json);
     (void)snprintf(baseline_pack_path, sizeof(baseline_pack_path), "%s.baseline.ntpack", out_json);
-    bench_pack_result_t baseline_run;
-    bench_pack_result_t selected_run;
+    bench_pack_result_t baseline_run = {0};
+    bench_pack_result_t selected_run = {0};
+    nt_bench_atlas_metrics_t m = {0};
+    uint8_t *mask = NULL;
+    nt_bench_selected_geometry_t baseline_geometry = {0};
+    nt_bench_selected_geometry_t selected_geometry = {0};
+    int exit_code = 1;
+    bool keep_selected_pack = false;
+    bool json_write_started = false;
     if (!build_production_pack(baseline_pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, 0.0F, &baseline_run) ||
         !build_production_pack(pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, max_added_area_percent, &selected_run) || baseline_run.sprite_count != selected_run.sprite_count ||
         strcmp(baseline_run.first_path, selected_run.first_path) != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to build matching production baseline/selected packs\n");
-        remove_temporary_pack(baseline_pack_path);
-        return 1;
+        goto cleanup;
     }
 
-    nt_bench_atlas_metrics_t m;
     const int prc = nt_bench_parse_ntpack(pack_path, &m);
     if (prc != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to parse produced pack %s (%d)\n", pack_path, prc);
-        return 1;
+        goto cleanup;
     }
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
@@ -267,16 +265,10 @@ int main(int argc, char *argv[]) {
     uint32_t mask_w = 0U;
     uint32_t mask_h = 0U;
     uint32_t retained = 0U;
-    uint8_t *mask = build_retained_mask(selected_run.first_path, opts.alpha_threshold, &mask_w, &mask_h, &retained);
-    nt_bench_selected_geometry_t baseline_geometry = {0};
-    nt_bench_selected_geometry_t selected_geometry = {0};
+    mask = build_retained_mask(selected_run.first_path, opts.alpha_threshold, &mask_w, &mask_h, &retained);
     if (mask == NULL || nt_bench_parse_selected_geometry(baseline_pack_path, 0U, mask_h, &baseline_geometry) != 0 || nt_bench_parse_selected_geometry(pack_path, 0U, mask_h, &selected_geometry) != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to reconstruct selected geometry from production packs\n");
-        nt_bench_selected_geometry_destroy(&selected_geometry);
-        nt_bench_selected_geometry_destroy(&baseline_geometry);
-        free(mask);
-        remove_temporary_pack(baseline_pack_path);
-        return 1;
+        goto cleanup;
     }
     const uint64_t opaque_area2 = (uint64_t)retained * 2U;
     const uint64_t base_area2 = polygon_abs_twice_area(baseline_geometry.polygon, baseline_geometry.vertex_count);
@@ -288,11 +280,7 @@ int main(int argc, char *argv[]) {
     const nt_polygon_feasibility_t selected_feasibility = nt_polygon_feasibility(selected_geometry.polygon, selected_geometry.vertex_count, mask, mask_w, mask_h, BENCH_MAX_VERTICES);
     if (!reconstructed.valid) {
         (void)fprintf(stderr, "atlas_bench: reconstructed production proof failed\n");
-        nt_bench_selected_geometry_destroy(&selected_geometry);
-        nt_bench_selected_geometry_destroy(&baseline_geometry);
-        free(mask);
-        remove_temporary_pack(baseline_pack_path);
-        return 1;
+        goto cleanup;
     }
 
     nt_bench_run_t run;
@@ -347,11 +335,7 @@ int main(int argc, char *argv[]) {
     (void)snprintf(proof->source, sizeof(proof->source), "%s", selected_run.first_path);
     if (nt_bench_file_sha256_hex(baseline_pack_path, proof->baseline_pack_sha256) != 0 || nt_bench_file_sha256_hex(pack_path, proof->selected_pack_sha256) != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to hash production packs\n");
-        nt_bench_selected_geometry_destroy(&selected_geometry);
-        nt_bench_selected_geometry_destroy(&baseline_geometry);
-        free(mask);
-        remove_temporary_pack(baseline_pack_path);
-        return 1;
+        goto cleanup;
     }
     proof->valid = reconstructed.valid;
     proof->full_cell_coverage = reconstructed.base_coverage_valid && reconstructed.selected_coverage_valid;
@@ -371,18 +355,25 @@ int main(int argc, char *argv[]) {
     proof->added_area_percent = opaque_area2 > 0U ? ((double)reconstructed.added_area2 * 100.0) / (double)opaque_area2 : 0.0;
     proof->total_overdraw_percent = opaque_area2 > 0U ? ((double)(selected_area2 - opaque_area2) * 100.0) / (double)opaque_area2 : 0.0;
 
+    json_write_started = true;
     const int wrc = nt_bench_write_json(out_json, &run);
     if (wrc != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to write JSON %s (%d)\n", out_json, wrc);
-        return 1;
+        goto cleanup;
     }
 
+    exit_code = 0;
+    keep_selected_pack = true;
+
+cleanup:
     nt_bench_selected_geometry_destroy(&selected_geometry);
     nt_bench_selected_geometry_destroy(&baseline_geometry);
     free(mask);
-    remove_temporary_pack(baseline_pack_path);
+    atlas_bench_cleanup_outputs(out_json, baseline_pack_path, pack_path, keep_selected_pack, json_write_started && exit_code != 0);
 
-    (void)printf("atlas_bench: %s shape=%s percent=%.3g pages=%u sprites=%u pack_ms=%.2f fill_texture=%.4f fill_frontier=%.4f -> %s\n", atlas_name, shape_to_name(opts.shape),
-                 (double)max_added_area_percent, m.page_count, m.region_count, selected_run.pack_ms, m.density_fill_texture, m.density_fill_frontier, out_json);
-    return 0;
+    if (exit_code == 0) {
+        (void)printf("atlas_bench: %s shape=%s percent=%.3g pages=%u sprites=%u pack_ms=%.2f fill_texture=%.4f fill_frontier=%.4f -> %s\n", atlas_name, shape_to_name(opts.shape),
+                     (double)max_added_area_percent, m.page_count, m.region_count, selected_run.pack_ms, m.density_fill_texture, m.density_fill_frontier, out_json);
+    }
+    return exit_code;
 }
