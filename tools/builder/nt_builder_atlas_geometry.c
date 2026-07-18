@@ -240,6 +240,7 @@ static bool segment_crosses_open_cell(Point2D a, Point2D b, uint32_t x, uint32_t
     return (lower.numerator * upper.denominator) < (upper.numerator * lower.denominator);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact coverage stays single-pass.
 bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells) {
     uint32_t retained_cells = 0;
     uint32_t lost_cells = 0;
@@ -264,7 +265,12 @@ bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, 
             for (uint32_t edge = 0; covered && edge < poly_count; edge++) {
                 covered = !segment_crosses_open_cell(poly[edge], poly[(edge + 1U) % poly_count], x, y);
             }
-            lost_cells += covered ? 0U : 1U;
+            if (!covered) {
+                lost_cells++;
+                if (!out_retained_cells && !out_lost_cells) {
+                    return false;
+                }
+            }
         }
     }
 
@@ -1588,7 +1594,11 @@ uint32_t remove_collinear(const Point2D *in, uint32_t n, Point2D *out) {
             out[count++] = in[i];
         }
     }
-    return (count >= 3) ? count : n; /* keep all if degenerate */
+    if (count >= 3) {
+        return count;
+    }
+    memcpy(out, in, (size_t)n * sizeof(Point2D));
+    return n;
 }
 
 /* --- Ramer-Douglas-Peucker simplification for closed polygons --- */

@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_builder_atlas_vpack.h"
 #include "nt_clipper2_bridge.h"
 #include "hash/nt_hash.h"
@@ -120,7 +121,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
     case NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': degenerate hull (no usable outline)", err->atlas, err->sprite);
         break;
-    case NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE:
+    case NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE: {
         const char *shape = "concave";
         if (err->detail_b == NT_ATLAS_SHAPE_RECT) {
             shape = "rect";
@@ -129,6 +130,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
         }
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': no covering %s hull fits the hard ceiling of %u vertices", err->atlas, err->sprite, shape, err->detail_a);
         break;
+    }
     case NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW:
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': contour exceeds vertex budget", err->atlas, err->sprite);
         break;
@@ -142,7 +144,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
         (void)snprintf(buf, len, "atlas '%s', sprite '%s': %ux%u exceeds 65535px", err->atlas, err->sprite, err->w, err->h);
         break;
     case NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW:
-        (void)snprintf(buf, len, "atlas '%s', sprite '%s': trim offset overflow", err->atlas, err->sprite);
+        (void)snprintf(buf, len, "atlas '%s', sprite '%s': trim offset exceeds int16 range (x=%u, y=%u)", err->atlas, err->sprite, err->w, err->h);
         break;
     case NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED:
         (void)snprintf(buf, len, "atlas '%s': ran out of pages (max_size=%u)", err->atlas, err->max_size);
@@ -270,10 +272,9 @@ static void pack_stats_measure_payload(PackStats *stats, const uint32_t *trim_w,
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — two-path blit (rotation 0 fast path + generic) is inherent to the hot-path design
 static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
-                        uint32_t dest_y, uint8_t rotation) {
-    /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
-     * Rotation 0: fast row-scan with run-length memcpy for opaque spans.
-     * Rotations 1/2/3: pixel-by-pixel with coordinate transform + alpha skip. */
+                        uint32_t dest_y, uint8_t rotation, uint8_t alpha_threshold) {
+    /* Only retained pixels may touch the page; polygon packing leaves neighbor
+     * pixels inside the same trim rect unowned. */
     // #region Rotation 0 fast path: row-wise scan with opaque span memcpy
     if (rotation == 0) {
         for (uint32_t sy = 0; sy < trim_h; sy++) {
@@ -281,16 +282,14 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
             uint8_t *dst_row = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
             uint32_t sx = 0;
             while (sx < trim_w) {
-                /* Skip transparent pixels */
-                while (sx < trim_w && src_row[(sx * 4) + 3] == 0) {
+                while (sx < trim_w && src_row[(sx * 4) + 3] < alpha_threshold) {
                     sx++;
                 }
                 if (sx >= trim_w) {
                     break;
                 }
-                /* Find end of opaque run */
                 uint32_t run_start = sx;
-                while (sx < trim_w && src_row[(sx * 4) + 3] != 0) {
+                while (sx < trim_w && src_row[(sx * 4) + 3] >= alpha_threshold) {
                     sx++;
                 }
                 memcpy(&dst_row[(size_t)run_start * 4], &src_row[(size_t)run_start * 4], (size_t)(sx - run_start) * 4);
@@ -302,8 +301,8 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
     for (uint32_t sy = 0; sy < trim_h; sy++) {
         for (uint32_t sx = 0; sx < trim_w; sx++) {
             const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
-            if (src[3] == 0) {
-                continue; /* skip fully transparent pixels */
+            if (src[3] < alpha_threshold) {
+                continue;
             }
             int32_t tx;
             int32_t ty;
@@ -474,20 +473,12 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 16 };
-_Static_assert(ATLAS_CACHE_KEY_VERSION > 15, "raw alpha-threshold cache identity requires a fresh atlas cache key");
+enum { ATLAS_CACHE_KEY_VERSION = 17 };
+_Static_assert(ATLAS_CACHE_KEY_VERSION > 16, "alpha-threshold compose changes require a fresh atlas cache key");
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
-    /* Bump on any change to the byte layout below, the flag-bit ordering, or
-     * the shape enum ordering — otherwise cached atlases would silently bind
-     * to a different pack behaviour. v8: remove format, premultiplied,
-     * debug_png, compress from key — those are post-pack and handled by the
-     * texture cache (nt_builder_compute_opts_hash). The atlas cache stores
-     * raw RGBA page pixels + placements; encoding options don't affect them.
-     * Note: NT_BUILDER_VERSION is ALSO mixed into the key below, so content
-     * changes inside the atlas pipeline (blit/extrude/compose tweaks that
-     * don't touch the byte layout of this hash input) only need a
-     * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
+    /* Atlas cache stores raw page pixels + placements; post-pack texture
+     * encoding knobs belong to the texture cache. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
@@ -837,15 +828,14 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     return state;
 }
 
-/* Resolve effective per-sprite opts: fall back to defaults when caller
- * passes NULL, then validate the origin values. Always returns a struct
- * whose fields are safe to use downstream. Trivial function; clang-tidy
- * counts the NT_BUILD_ASSERT macro expansion as high cognitive complexity. */
+/* NOLINT: macro-expanded asserts look branch-heavy to clang-tidy. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_opts_t *opts) {
     nt_atlas_sprite_opts_t resolved = opts ? *opts : nt_atlas_sprite_opts_defaults();
     NT_BUILD_ASSERT(isfinite(resolved.origin_x) && isfinite(resolved.origin_y) && "atlas_add*: origin must be finite (no NaN/inf)");
-    NT_BUILD_ASSERT(isfinite(resolved.max_added_area_percent) && resolved.max_added_area_percent >= 0.0F && "atlas_add*: max_added_area_percent must be finite and non-negative");
+    if (resolved.has_max_added_area_percent) {
+        NT_BUILD_ASSERT(isfinite(resolved.max_added_area_percent) && resolved.max_added_area_percent >= 0.0F && "atlas_add*: max_added_area_percent must be finite and non-negative");
+    }
     if (!resolved.has_max_added_area_percent || resolved.max_added_area_percent == 0.0F) {
         resolved.max_added_area_percent = 0.0F;
     }
@@ -1328,7 +1318,6 @@ typedef struct {
     uint32_t triangle_index_count;
     uint32_t count;     /* vertex count */
     double inflate_amt; /* required Clipper2 inflate amount (pixels) */
-    double fidelity_error;
     uint32_t generator_ordinal;
     uint64_t exact_abs_twice_area;
     double est_area; /* scoring key — lower is better */
@@ -1366,6 +1355,7 @@ typedef struct {
     uint32_t replacement_count;
     uint32_t destroy_count;
     uint32_t cleared_source_count;
+    uint32_t corner_cut_evaluation_count;
 } GeometryFrontier;
 
 typedef struct {
@@ -1374,30 +1364,6 @@ typedef struct {
     nt_selected_geometry_proof_t proof;
     bool valid;
 } GeometrySelection;
-
-typedef struct {
-    uint32_t slot_mask;
-    uint32_t selected_count;
-    uint32_t selected_index_count;
-    uint32_t transfer_count;
-    uint32_t reject_count;
-    uint32_t replacement_count;
-    uint32_t destroy_count;
-    uint32_t cleared_source_count;
-    uint64_t opaque_area2;
-    uint64_t base_area2;
-    uint64_t selected_area2;
-    uint64_t slot_area2[NT_POLYGON_MAX_VERTICES + 1];
-    Point2D selected_poly[NT_POLYGON_MAX_VERTICES];
-    uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-    double base_overdraw_percent;
-    double added_area_percent;
-    double total_overdraw_percent;
-} NtAtlasFrontierTestResult;
-
-static _Thread_local uint32_t geometry_test_forced_frontier_count;
-
-void nt_atlas_test_force_frontier_count(uint32_t count) { geometry_test_forced_frontier_count = count; }
 
 static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
 
@@ -1497,13 +1463,25 @@ static void geometry_frontier_clamp_to_trim(const GeometryFrontier *frontier, Ge
 
 static void geometry_frontier_adopt(GeometryFrontier *frontier, GeometryCandidate *source) {
     geometry_frontier_clamp_to_trim(frontier, source);
+    geometry_candidate_canonicalize(source);
+    GeometryCandidate *slot = source->count <= NT_POLYGON_MAX_VERTICES ? &frontier->slots[source->count] : NULL;
+    if (slot && slot->valid && source->generator_ordinal == 6U && source->poly && polygon_validate(source->poly, source->count) == NT_POLYGON_VALID) {
+        source->exact_abs_twice_area = polygon_abs_twice_area(source->poly, source->count);
+        if (!geometry_frontier_candidate_better(source, slot)) {
+            geometry_candidate_discard(source);
+            frontier->reject_count++;
+            frontier->cleared_source_count++;
+            return;
+        }
+        source->exact_abs_twice_area = 0U;
+    }
     if (!geometry_frontier_finalize(frontier, source)) {
         geometry_candidate_discard(source);
         frontier->reject_count++;
         frontier->cleared_source_count++;
         return;
     }
-    GeometryCandidate *slot = &frontier->slots[source->count];
+    slot = &frontier->slots[source->count];
     if (!geometry_frontier_candidate_better(source, slot)) {
         geometry_candidate_discard(source);
         frontier->reject_count++;
@@ -1604,13 +1582,11 @@ static void geometry_frontier_destroy(GeometryFrontier *frontier) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static GeometrySelection geometry_frontier_take_selection(GeometryFrontier *frontier, float max_added_area_percent) {
     GeometrySelection result = {0};
     uint64_t base_area2 = geometry_frontier_base_area2(frontier);
     uint32_t selected_count = geometry_frontier_select(frontier, (double)max_added_area_percent);
-    if (geometry_test_forced_frontier_count != 0U) {
-        selected_count = geometry_test_forced_frontier_count <= frontier->max_vertices && frontier->slots[geometry_test_forced_frontier_count].valid ? geometry_test_forced_frontier_count : UINT32_MAX;
-    }
     if (base_area2 == UINT64_MAX || selected_count == UINT32_MAX) {
         return result;
     }
@@ -1621,18 +1597,14 @@ static GeometrySelection geometry_frontier_take_selection(GeometryFrontier *fron
             break;
         }
     }
-    if (base_count == UINT32_MAX) {
-        return result;
-    }
+    NT_BUILD_ASSERT(base_count != UINT32_MAX && "geometry frontier base candidate missing");
 
     const GeometryCandidate *base = &frontier->slots[base_count];
     const GeometryCandidate *selected = &frontier->slots[selected_count];
     result.proof = nt_selected_geometry_validate(frontier->binary, frontier->width, frontier->height, frontier->opaque_area2, base->poly, base->count, base->exact_abs_twice_area,
                                                  base->triangle_indices, base->triangle_index_count, selected->poly, selected->count, selected->exact_abs_twice_area, selected->triangle_indices,
                                                  selected->triangle_index_count, max_added_area_percent, frontier->max_vertices);
-    if (!result.proof.valid) {
-        return result;
-    }
+    NT_BUILD_ASSERT(result.proof.valid && "selected geometry proof mismatch");
 
     result.baseline.count = base->count;
     result.baseline.exact_abs_twice_area = base->exact_abs_twice_area;
@@ -1648,6 +1620,28 @@ static GeometrySelection geometry_frontier_take_selection(GeometryFrontier *fron
     frontier->slots[selected_count] = (GeometryCandidate){0};
     result.valid = true;
     return result;
+}
+
+void nt_atlas_test_frontier_selection_proof_mismatch(void) {
+    const uint8_t binary[1] = {1};
+    Point2D quad[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    uint16_t corrupt_indices[6] = {0};
+    GeometryFrontier frontier = {
+        .binary = binary,
+        .width = 1,
+        .height = 1,
+        .max_vertices = 4,
+        .opaque_area2 = 2,
+    };
+    frontier.slots[4] = (GeometryCandidate){
+        .poly = quad,
+        .triangle_indices = corrupt_indices,
+        .triangle_index_count = 6,
+        .count = 4,
+        .exact_abs_twice_area = 2,
+        .valid = true,
+    };
+    (void)geometry_frontier_take_selection(&frontier, 0.0F);
 }
 
 static void geometry_selection_discard(GeometrySelection *selection) {
@@ -1837,7 +1831,6 @@ static bool geometry_finalize_candidate(GeometryCandidate *candidate, const Poin
         return false;
     }
 
-    candidate->fidelity_error = polygon_max_boundary_distance(reference, reference_count, candidate->poly, candidate->count);
     candidate->exact_abs_twice_area = polygon_abs_twice_area(candidate->poly, candidate->count);
     candidate->est_area = geometry_estimate_inflated_area(candidate->poly, candidate->count, 0.0);
     candidate->inflate_amt = 0.0;
@@ -2027,13 +2020,33 @@ static void geometry_frontier_add_corner_cut_depth(GeometryFrontier *frontier, u
     NT_BUILD_ASSERT(candidate.poly && "geometry_frontier_add_corner_cut_depth: alloc failed");
     const uint32_t out = geometry_write_corner_cut_polygon(candidate.poly, mask, (int32_t)frontier->width, (int32_t)frontier->height, (int32_t)depth);
     NT_BUILD_ASSERT(out == target_count);
+    frontier->corner_cut_evaluation_count++;
     geometry_frontier_adopt(frontier, &candidate);
 }
 
+static bool geometry_frontier_corner_cut_depth_is_feasible(GeometryFrontier *frontier, uint32_t target_count, uint32_t mask, uint32_t depth) {
+    Point2D poly[NT_POLYGON_MAX_VERTICES];
+    const uint32_t count = geometry_write_corner_cut_polygon(poly, mask, (int32_t)frontier->width, (int32_t)frontier->height, (int32_t)depth);
+    NT_BUILD_ASSERT(count == target_count);
+    frontier->corner_cut_evaluation_count++;
+    return nt_polygon_feasibility(poly, count, frontier->binary, frontier->width, frontier->height, frontier->max_vertices).valid;
+}
+
 static void geometry_frontier_add_corner_cut_mask(GeometryFrontier *frontier, uint32_t target_count, uint32_t mask, uint32_t max_depth) {
-    for (uint32_t depth = 1U; depth <= max_depth; depth++) {
-        geometry_frontier_add_corner_cut_depth(frontier, target_count, mask, depth);
+    if (max_depth == 0U || !geometry_frontier_corner_cut_depth_is_feasible(frontier, target_count, mask, 1U)) {
+        return;
     }
+    uint32_t low = 1U;
+    uint32_t high = max_depth;
+    while (low < high) {
+        const uint32_t middle = low + ((high - low + 1U) / 2U);
+        if (geometry_frontier_corner_cut_depth_is_feasible(frontier, target_count, mask, middle)) {
+            low = middle;
+        } else {
+            high = middle - 1U;
+        }
+    }
+    geometry_frontier_add_corner_cut_depth(frontier, target_count, mask, low);
 }
 
 static void geometry_frontier_add_corner_cuts(GeometryFrontier *frontier, uint32_t target_count) {
@@ -2088,13 +2101,42 @@ static GeometrySelection geometry_build_concave_frontier(const Point2D *clean, u
         geometry_frontier_enumerate_covering_pair_removals(&frontier, &frontier.slots[count], 5);
     }
     if (out_frontier) {
-        *out_frontier = (NtAtlasFrontierTestResult){.opaque_area2 = frontier.opaque_area2, .base_area2 = geometry_frontier_base_area2(&frontier)};
+        *out_frontier = (NtAtlasFrontierTestResult){
+            .opaque_area2 = frontier.opaque_area2,
+            .base_area2 = geometry_frontier_base_area2(&frontier),
+            .corner_cut_evaluation_count = frontier.corner_cut_evaluation_count,
+        };
         for (uint32_t count = 3; count <= max_vertices; count++) {
             if (frontier.slots[count].valid) {
                 out_frontier->slot_mask |= 1U << count;
                 out_frontier->slot_area2[count] = frontier.slots[count].exact_abs_twice_area;
             }
         }
+    }
+    GeometrySelection selected = geometry_frontier_take_selection(&frontier, max_added_area_percent);
+    geometry_frontier_destroy(&frontier);
+    return selected;
+}
+
+static GeometrySelection geometry_build_concave_fallback_frontier(const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t max_vertices, float max_added_area_percent) {
+    GeometryFrontier frontier = {
+        .binary = binary_source,
+        .width = tw,
+        .height = th,
+        .max_vertices = max_vertices,
+        .opaque_area2 = geometry_retained_area2(binary_source, tw, th),
+    };
+    for (uint32_t target = 3; target <= max_vertices; target++) {
+        if (target >= 4) {
+            GeometryCandidate rect = strategy_rect(tw, th);
+            rect.generator_ordinal = 2;
+            geometry_frontier_adopt(&frontier, &rect);
+        }
+
+        GeometryCandidate convex = strategy_convex(binary_source, tw, th, target);
+        convex.generator_ordinal = 3;
+        (void)geometry_finalize_candidate(&convex, NULL, 0, binary_source, tw, th, max_vertices);
+        geometry_frontier_adopt(&frontier, &convex);
     }
     GeometrySelection selected = geometry_frontier_take_selection(&frontier, max_added_area_percent);
     geometry_frontier_destroy(&frontier);
@@ -2121,10 +2163,7 @@ uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_
     return result.slot_mask;
 }
 
-bool nt_atlas_test_concave_frontier_required_percent(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices, uint32_t target_count, float *out_percent) {
-    if (!binary || !out_percent || target_count < 3U || target_count > max_vertices || max_vertices > NT_POLYGON_MAX_VERTICES) {
-        return false;
-    }
+uint32_t nt_atlas_test_concave_corner_cut_evaluation_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices) {
     uint32_t retained_count = 0U;
     for (size_t i = 0; i < (size_t)width * height; i++) {
         retained_count += binary[i] != 0U ? 1U : 0U;
@@ -2132,7 +2171,7 @@ bool nt_atlas_test_concave_frontier_required_percent(const uint8_t *binary, uint
     const uint32_t contour_capacity = (2U * retained_count) + 2U;
     Point2D *contour = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
     Point2D *clean = (Point2D *)malloc((size_t)contour_capacity * sizeof(Point2D));
-    NT_BUILD_ASSERT(contour && clean && "nt_atlas_test_concave_frontier_required_percent: alloc failed");
+    NT_BUILD_ASSERT(contour && clean && "nt_atlas_test_concave_corner_cut_evaluation_count: alloc failed");
     bool overflow = false;
     const uint32_t contour_count = trace_contour(binary, width, height, contour, contour_capacity, &overflow);
     const uint32_t clean_count = overflow ? 0U : remove_collinear(contour, contour_count, clean);
@@ -2141,28 +2180,14 @@ bool nt_atlas_test_concave_frontier_required_percent(const uint8_t *binary, uint
     geometry_selection_discard(&selection);
     free(clean);
     free(contour);
-    if ((result.slot_mask & (1U << target_count)) == 0U || result.opaque_area2 == 0U || result.slot_area2[target_count] < result.base_area2) {
-        return false;
-    }
-    const double required = ((double)(result.slot_area2[target_count] - result.base_area2) * 100.0) / (double)result.opaque_area2;
-    float percent = (float)required;
-    for (uint32_t attempt = 0; attempt < 8U; attempt++) {
-        const double allowed = (double)result.opaque_area2 * (double)percent;
-        const double added = (double)(result.slot_area2[target_count] - result.base_area2) * 100.0;
-        if (added <= allowed) {
-            *out_percent = percent;
-            return true;
-        }
-        percent = nextafterf(percent, INFINITY);
-    }
-    return false;
+    return result.corner_cut_evaluation_count;
 }
 
 uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
                                           uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal) {
     GeometryCandidate candidate = strategy_rdp_perp(clean, clean_count, target, tolerance, rdp_out, rdp_count, perp_out, perp_count);
     candidate.generator_ordinal = 0;
-    if (!geometry_finalize_candidate(&candidate, clean, clean_count, binary, width, height, target) || candidate.fidelity_error > tolerance) {
+    if (!geometry_finalize_candidate(&candidate, clean, clean_count, binary, width, height, target) || polygon_max_boundary_distance(clean, clean_count, candidate.poly, candidate.count) > tolerance) {
         geometry_candidate_discard(&candidate);
         return 0;
     }
@@ -2301,11 +2326,12 @@ static void pipeline_push_hull_infeasible(AtlasPipeline *p, uint32_t idx) {
 }
 
 static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, GeometrySelection *selection) {
-    if (!selection->valid || !selection->proof.valid) {
+    if (!selection->valid) {
         geometry_selection_discard(selection);
         pipeline_push_hull_infeasible(p, idx);
         return false;
     }
+    NT_BUILD_ASSERT(selection->proof.valid && "pipeline geometry selection proof missing");
     p->hull_vertices[idx] = selection->selected.poly;
     p->vertex_counts[idx] = selection->selected.count;
     p->triangle_indices[idx] = selection->selected.triangle_indices;
@@ -2467,7 +2493,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 }
             }
             if (convex_reason) {
-                pipeline_push_hull_infeasible(p, idx);
+                GeometrySelection selection = geometry_build_concave_fallback_frontier(binary_source, tw, th, effective_max_verts, geometry_opts->max_added_area_percent);
+                (void)pipeline_install_geometry_selection(p, idx, &selection);
             }
             free(binary_source);
             free(binary);
@@ -2518,19 +2545,7 @@ static void pipeline_geometry_acceptance_gate(AtlasPipeline *p) {
             p->baseline_triangle_indices[idx], p->baseline_triangle_index_counts[idx], p->hull_vertices[idx], p->vertex_counts[idx], p->geometry_proofs[idx].selected_area2, p->triangle_indices[idx],
             p->triangle_index_counts[idx], p->geometry_opts[idx].max_added_area_percent, p->geometry_opts[idx].max_vertices);
         free(binary);
-        if (proof.valid && nt_selected_geometry_proof_equal(&proof, &p->geometry_proofs[idx])) {
-            continue;
-        }
-        free(p->hull_vertices[idx]);
-        free(p->triangle_indices[idx]);
-        free(p->baseline_vertices[idx]);
-        free(p->baseline_triangle_indices[idx]);
-        p->hull_vertices[idx] = NULL;
-        p->triangle_indices[idx] = NULL;
-        p->baseline_vertices[idx] = NULL;
-        p->baseline_triangle_indices[idx] = NULL;
-        p->vertex_counts[idx] = 0;
-        pipeline_push_hull_infeasible(p, idx);
+        NT_BUILD_ASSERT(proof.valid && nt_selected_geometry_proof_equal(&proof, &p->geometry_proofs[idx]) && "selected geometry proof mismatch");
     }
 }
 
@@ -2677,7 +2692,7 @@ static void pipeline_validate(AtlasPipeline *p) {
         }
         int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
         if (p->trim_x[i] > INT16_MAX || trim_offset_y_up < INT16_MIN || trim_offset_y_up > INT16_MAX) {
-            push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, 0, 0);
+            push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, p->trim_x[i], (uint32_t)trim_offset_y_up);
         }
     }
 }
@@ -2825,7 +2840,8 @@ static void pipeline_compose(AtlasPipeline *p) {
         uint32_t inner_x = pl->x + sprite_extrude + extra_margin;
         uint32_t inner_y = pl->y + sprite_extrude + extra_margin;
 
-        blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform);
+        blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform,
+                    p->geometry_opts[idx].effective_alpha_threshold);
 
         uint32_t blit_w = (pl->transform & 4) ? pl->trimmed_h : pl->trimmed_w;
         uint32_t blit_h = (pl->transform & 4) ? pl->trimmed_w : pl->trimmed_h;
@@ -3127,9 +3143,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
                                           p->geometry_proofs[i].base_area2, p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], reconstructed, p->vertex_counts[i],
                                           p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
         free(binary);
-        if (!serialized_proof.valid || !nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i])) {
-            pipeline_push_hull_infeasible(p, i);
-        }
+        NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
     }
 
     NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");

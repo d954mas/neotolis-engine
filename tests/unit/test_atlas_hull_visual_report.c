@@ -83,9 +83,12 @@ static void assert_manifest_schema_and_html(void) {
     uint8_t *html_bytes = read_bytes(REPORT_A "/index.html", &html_size);
     const char *manifest = (const char *)manifest_bytes;
     const char *html = (const char *)html_bytes;
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 2"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 3"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"overall_pass\": true"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"failing_panel_ids\": []"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"visual_corpus_manifest_sha256\""));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"visual_input_sha256\""));
+    TEST_ASSERT_NULL(strstr(manifest, "\"visual_corpus_sha256\""));
     const uint32_t row_count = (uint32_t)(sizeof(REQUIRED_ROWS) / sizeof(REQUIRED_ROWS[0]));
     const uint32_t real_art_row_count = (uint32_t)(sizeof(REAL_ART_ROWS) / sizeof(REAL_ART_ROWS[0]));
     const uint32_t column_count = (uint32_t)(sizeof(COLUMNS) / sizeof(COLUMNS[0]));
@@ -155,14 +158,32 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NOT_NULL(strstr(html, "Base / added / total overdraw"));
     TEST_ASSERT_NOT_NULL(strstr(html, "Full retained-cell coverage"));
     TEST_ASSERT_NOT_NULL(strstr(html, "Exact lost area"));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_counts\":[6,7,8]"));
+    TEST_ASSERT_NULL(strstr(manifest, "connected_frontier_counts"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"real_art_rows\""));
     TEST_ASSERT_EQUAL_UINT32(real_art_row_count * column_count, count_text(manifest, "\"real_art_sample\":true"));
     TEST_ASSERT_NOT_NULL(strstr(html, "Real art"));
-    TEST_ASSERT_EQUAL_UINT32(3, count_text(manifest, "\"connected_frontier_vertex_count\""));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_vertex_count\":6"));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_vertex_count\":7"));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"connected_frontier_vertex_count\":8"));
+    TEST_ASSERT_NULL(strstr(manifest, "connected_frontier_evidence"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"production_selected_count_evidence\""));
+    TEST_ASSERT_EQUAL_UINT32(3, count_text(manifest, "\"source_panel_id\""));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"source_panel_id\":\"transparent-donut:concave:percent-10\",\"selected_vertex_count\":6"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"source_panel_id\":\"concave-notch:concave:percent-15\",\"selected_vertex_count\":7"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"source_panel_id\":\"concave-notch:concave:percent-10\",\"selected_vertex_count\":8"));
+    static const char *synthetic_10_pins[][4] = {
+        {"\"panel_id\":\"sq9-aa-triangle:convex:percent-10\"", "\"selected_vertex_count\":5", "\"selected_area2\":759", "\"opaque_area2\":732"},
+        {"\"panel_id\":\"concave-notch:concave:percent-10\"", "\"selected_vertex_count\":8", "\"selected_area2\":314", "\"opaque_area2\":314"},
+        {"\"panel_id\":\"connected-mask-adversarial:concave:percent-10\"", "\"selected_vertex_count\":9", "\"selected_area2\":206", "\"opaque_area2\":144"},
+    };
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(synthetic_10_pins) / sizeof(synthetic_10_pins[0])); i++) {
+        const char *panel = strstr(manifest, synthetic_10_pins[i][0]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(panel, synthetic_10_pins[i][0]);
+        const char *panel_end = strstr(panel, "\"result\":\"PASS\"");
+        TEST_ASSERT_NOT_NULL(panel_end);
+        for (uint32_t j = 1; j < 4; j++) {
+            const char *pin = strstr(panel, synthetic_10_pins[i][j]);
+            TEST_ASSERT_NOT_NULL_MESSAGE(pin, synthetic_10_pins[i][j]);
+            TEST_ASSERT_TRUE_MESSAGE(pin < panel_end, synthetic_10_pins[i][j]);
+        }
+    }
     const char *donut = strstr(manifest, "\"panel_id\":\"transparent-donut:concave:percent-0\"");
     TEST_ASSERT_NOT_NULL(donut);
     const char *donut_end = strstr(donut, "\"result\":\"PASS\"");
@@ -210,6 +231,10 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NULL(strstr(manifest, "lost_pixels"));
     TEST_ASSERT_NULL(strstr(html, "Fidelity"));
     TEST_ASSERT_NULL(strstr(html, "2 px"));
+    TEST_ASSERT_NULL(strstr(html, "real 0% production pack"));
+    TEST_ASSERT_NOT_NULL(strstr(html, "Public selector evidence"));
+    TEST_ASSERT_NULL(strstr(html, "В·"));
+    TEST_ASSERT_NULL(strstr(html, "Р’В·"));
 
     for (uint32_t row = 0; row < (uint32_t)(sizeof(REQUIRED_ROWS) / sizeof(REQUIRED_ROWS[0])); row++) {
         char row_id[256];
@@ -249,6 +274,44 @@ static void assert_manifest_schema_and_html(void) {
     }
     free(manifest_bytes);
     free(html_bytes);
+
+    size_t source_size = 0;
+    uint8_t *source = read_bytes("tools/research/atlas_bench/hull_visual_report.c", &source_size);
+    TEST_ASSERT_NOT_NULL(source);
+    TEST_ASSERT_NULL(strstr((char *)source, "nt_atlas_test_"));
+    free(source);
+}
+
+static void assert_frontier_declares_portable_proofs(void) {
+    size_t frontier_size = 0;
+    uint8_t *frontier = read_bytes(FRONTIER_PATH, &frontier_size);
+    TEST_ASSERT_NOT_NULL(frontier);
+    TEST_ASSERT_TRUE(strstr((char *)frontier, "\"schema_version\": 2") != NULL || strstr((char *)frontier, "\"schema_version\": 3") != NULL);
+    TEST_ASSERT_NOT_NULL(strstr((char *)frontier, "\"proof_format\": \"portable-v1\""));
+    free(frontier);
+}
+
+static void assert_proof_is_portable(const char *path) {
+    size_t proof_size = 0;
+    uint8_t *proof = read_bytes(path, &proof_size);
+    TEST_ASSERT_NOT_NULL_MESSAGE(proof, path);
+    TEST_ASSERT_NULL_MESSAGE(strstr((char *)proof, "\"os\""), path);
+    TEST_ASSERT_NULL_MESSAGE(strstr((char *)proof, "\"cpu\""), path);
+    TEST_ASSERT_NULL_MESSAGE(strstr((char *)proof, "\"pack_ms\""), path);
+    free(proof);
+}
+
+static void assert_frontier_proofs_are_portable(void) {
+    assert_frontier_declares_portable_proofs();
+
+    static const char *proofs[] = {
+        "tests/fixtures/hull_visual_acceptance/proof/00-percent-0.json",  "tests/fixtures/hull_visual_acceptance/proof/01-percent-2.json",
+        "tests/fixtures/hull_visual_acceptance/proof/02-percent-5.json",  "tests/fixtures/hull_visual_acceptance/proof/03-percent-10.json",
+        "tests/fixtures/hull_visual_acceptance/proof/04-percent-15.json", "tests/fixtures/hull_visual_acceptance/proof/05-percent-25.json",
+    };
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(proofs) / sizeof(proofs[0])); i++) {
+        assert_proof_is_portable(proofs[i]);
+    }
 }
 
 static void assert_basic_geometry_helpers(void) {
@@ -260,7 +323,6 @@ static void assert_basic_geometry_helpers(void) {
     TEST_ASSERT_EQUAL_UINT32(0, coverage.extra_covered_pixels);
     TEST_ASSERT_TRUE(fabs(polygon_max_boundary_distance(square, 4, square, 4)) < 0.000001);
     TEST_ASSERT_EQUAL_UINT64(32, polygon_abs_twice_area(square, 4));
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32(4, 4);
     const Point2D crossing[] = {{0, 0}, {4, 4}, {0, 4}, {4, 0}};
     TEST_ASSERT_NOT_EQUAL(NT_POLYGON_VALID, polygon_validate(crossing, 4));
 }
@@ -307,12 +369,13 @@ static void test_report_schema_production_gates_and_determinism(void) {
                                    "pixel-art-threshold-control:rect,real-rhombus-outline:concave,real-resource-wood:concave,real-card-down-outline:concave,real-d12-outline:concave,"
                                    "real-flask-empty:concave,real-tile-sparse:concave"));
     assert_manifest_schema_and_html();
+    assert_frontier_proofs_are_portable();
     assert_production_gate_helpers();
     assert_same_file(REPORT_A "/manifest.json", REPORT_B "/manifest.json");
     assert_same_file(REPORT_A "/index.html", REPORT_B "/index.html");
 }
 
-static void test_validation_and_provenance_fail_closed(void) {
+static void assert_validation_rejects_corrupt_manifest(void) {
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_validate(REPORT_A "/missing.json", REPORT_A "/index.html", NULL));
     size_t manifest_size = 0;
     uint8_t *manifest = read_bytes(REPORT_A "/manifest.json", &manifest_size);
@@ -326,7 +389,9 @@ static void test_validation_and_provenance_fail_closed(void) {
     write_bytes(REPORT_A "/corrupt-manifest.json", manifest, manifest_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_validate(REPORT_A "/corrupt-manifest.json", REPORT_A "/index.html", NULL));
     free(manifest);
+}
 
+static void assert_generation_rejects_corrupt_frontier(void) {
     size_t frontier_size = 0;
     uint8_t *frontier = read_bytes(FRONTIER_PATH, &frontier_size);
     char *hash = strstr((char *)frontier, "\"sweep_sha256\": \"");
@@ -336,6 +401,23 @@ static void test_validation_and_provenance_fail_closed(void) {
     write_bytes(REPORT_A "/corrupt-frontier.json", frontier, frontier_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, REPORT_A "/corrupt-frontier.json", REPORT_A "/provenance-must-fail"));
     free(frontier);
+}
+
+static void assert_generation_rejects_corrupt_corpus(void) {
+    size_t corpus_size = 0;
+    uint8_t *corpus = read_bytes(CORPUS_PATH, &corpus_size);
+    char *fixture = strstr((char *)corpus, "asymmetric-aa-triangle");
+    TEST_ASSERT_NOT_NULL(fixture);
+    fixture[0] = 'x';
+    write_bytes(REPORT_A "/corrupt-corpus.json", corpus, corpus_size);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(REPORT_A "/corrupt-corpus.json", FRONTIER_PATH, REPORT_A "/corpus-must-fail"));
+    free(corpus);
+}
+
+static void test_validation_and_provenance_fail_closed(void) {
+    assert_validation_rejects_corrupt_manifest();
+    assert_generation_rejects_corrupt_frontier();
+    assert_generation_rejects_corrupt_corpus();
 }
 
 static void test_panel_ownership_failure_paths_balance(void) {

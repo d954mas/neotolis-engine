@@ -205,6 +205,38 @@ static bool files_are_identical(const char *a_path, const char *b_path) {
     return equal;
 }
 
+static bool pack_default_corpus_with_threads(const char *path, uint32_t thread_count) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, thread_count);
+
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_default_threads", NULL);
+    uint8_t *bufs[CORPUS_COUNT] = {0};
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        const spr_spec_t *s = &k_corpus[i];
+        bufs[i] = (uint8_t *)malloc((size_t)s->w * s->h * 4);
+        TEST_ASSERT_NOT_NULL(bufs[i]);
+        gen_sprite(bufs[i], s);
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        nt_atlas_add_raw(atlas, bufs[i], s->w, s->h, &sprite_opts);
+    }
+
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        free(bufs[i]);
+    }
+    return result == NT_BUILD_OK;
+}
+
 /* Two in-process packs of the SAME corpus at default opts must produce identical
  * region/page/vertex/hull counts and a bit-stable density. */
 void test_metrics_stable_across_two_packs(void) {
@@ -233,6 +265,14 @@ void test_positive_added_area_pack_bytes_repeat(void) {
         TEST_ASSERT_TRUE_MESSAGE(files_are_identical(a_paths[shape], b_paths[shape]), "positive-area atlas bytes are not deterministic");
         TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
     }
+}
+
+void test_default_added_area_threads_are_byte_deterministic(void) {
+    const char *single = TMP_DIR "/det_default_threads_1.ntpack";
+    const char *parallel = TMP_DIR "/det_default_threads_4.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_default_corpus_with_threads(single, 1), "default 10% single-thread pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_default_corpus_with_threads(parallel, 4), "default 10% four-thread pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(files_are_identical(single, parallel), "default 10% atlas bytes differ between 1 and 4 threads");
 }
 
 /* These pins move only with an intentional default-output or cache-key change. */
@@ -514,6 +554,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_metrics_stable_across_two_packs);
     RUN_TEST(test_positive_added_area_pack_bytes_repeat);
+    RUN_TEST(test_default_added_area_threads_are_byte_deterministic);
     RUN_TEST(test_metrics_match_pinned_baseline);
     RUN_TEST(test_margin_override_content_centered);
     return UNITY_END();

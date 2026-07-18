@@ -27,6 +27,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 #include "nt_blob_format.h"
 #include "nt_builder.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
@@ -4228,31 +4229,6 @@ uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_c
                                           uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
 uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal);
 
-typedef struct {
-    uint32_t slot_mask;
-    uint32_t selected_count;
-    uint32_t selected_index_count;
-    uint32_t transfer_count;
-    uint32_t reject_count;
-    uint32_t replacement_count;
-    uint32_t destroy_count;
-    uint32_t cleared_source_count;
-    uint64_t opaque_area2;
-    uint64_t base_area2;
-    uint64_t selected_area2;
-    uint64_t slot_area2[NT_POLYGON_MAX_VERTICES + 1];
-    Point2D selected_poly[NT_POLYGON_MAX_VERTICES];
-    uint16_t selected_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-    double base_overdraw_percent;
-    double added_area_percent;
-    double total_overdraw_percent;
-} NtAtlasFrontierTestResult;
-
-bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
-                                     float max_added_area_percent, NtAtlasFrontierTestResult *out_result);
-uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_t slot_mask, uint64_t opaque_area2, uint32_t max_vertices, float max_added_area_percent);
-uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
-
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
     uint8_t rgba[4 * 4 * 4];
@@ -4763,6 +4739,12 @@ void test_geometry_frontier_selector_rejects_zero_area_and_avoids_overflow(void)
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, nt_atlas_test_frontier_select_areas(areas, slots, 0, 4, 100.0F));
     TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_frontier_select_areas(areas, slots, 100, 4, 9.99F));
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_frontier_select_areas(areas, slots, 100, 4, 10.0F));
+}
+
+void test_geometry_frontier_selection_proof_mismatch_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/frontier-proof-mismatch.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_test_frontier_selection_proof_mismatch(), "selected geometry proof mismatch");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -5795,9 +5777,11 @@ void test_atlas_round_trip_vertices(void) {
     free(buf);
 }
 
-void test_atlas_shape_concave_disjoint_sprite_is_hull_infeasible(void) {
+static uint8_t *read_atlas_blob(const char *path, const NtAtlasRegion **out_regions, uint32_t *out_region_count);
+
+void test_atlas_shape_concave_disjoint_sprite_uses_fallback_frontier(void) {
     (void)MKDIR(TMP_DIR);
-    const char *path = TMP_DIR "/atlas_rt_disjoint_concave_infeasible.ntpack";
+    const char *path = TMP_DIR "/atlas_rt_disjoint_concave_fallback.ntpack";
     (void)remove(path);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -5808,29 +5792,28 @@ void test_atlas_shape_concave_disjoint_sprite_is_hull_infeasible(void) {
 
     NtAtlasBuild *atlas_build_5176 = nt_atlas_begin(ctx, "sprites", NULL);
     nt_atlas_add_raw(atlas_build_5176, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "split.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_atlas_commit(atlas_build_5176));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas_build_5176));
 
     uint32_t error_count = 0;
     const nt_build_error_t *errors = nt_builder_get_errors(ctx, &error_count);
-    TEST_ASSERT_EQUAL_UINT32(1, error_count);
-    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE, errors[0].kind);
-    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, errors[0].detail_b);
+    TEST_ASSERT_EQUAL_UINT32(0, error_count);
+    (void)errors;
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, result);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
     nt_builder_free_pack(ctx);
     free(s);
 
-    FILE *published = fopen(path, "rb");
-    TEST_ASSERT_NULL(published);
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL_UINT32(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].vertex_count >= 4);
+    free(buf);
 }
 
-/* Verify NT_ATLAS_SHAPE_CONVEX_HULL produces a polygon (>4 verts) for a shape
- * whose convex hull is strictly larger than the trim rect, proving that the
- * mode actually runs the convex hull builder and not the rect fallback. An
- * opaque triangle fills the top-left half of the bounding box, so its hull
- * is a 3-vertex triangle within a 32x32 trim; the builder inflates that up
- * to max_vertices but it must stay ≥ 4 and ≠ the trim rect. */
+/* Convex mode must not silently fall back to the trim rect. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_shape_convex_hull_produces_polygon(void) {
     (void)MKDIR(TMP_DIR);
@@ -5839,8 +5822,6 @@ void test_atlas_shape_convex_hull_produces_polygon(void) {
 
     enum { W = 32, H = 32 };
     uint8_t *s = make_test_sprite(W, H, 255, 255, 255, 0);
-    /* Upper-left triangle: pixels where x + y < W are opaque. Its convex hull
-     * is a 3-vertex triangle. */
     for (uint32_t y = 0; y < H; y++) {
         for (uint32_t x = 0; x < W; x++) {
             if (x + y < W) {
@@ -5970,7 +5951,6 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     (void)remove(repeat_path);
 }
 
-static uint8_t *read_atlas_blob(const char *path, const NtAtlasRegion **out_regions, uint32_t *out_region_count);
 static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf);
 static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]);
 
@@ -6495,6 +6475,17 @@ void test_connected_mask_serializes_simple_exact_triangulation(void) {
     (void)remove(path);
 }
 
+void test_opaque_square_corner_cut_search_is_logarithmic(void) {
+    enum { W = 64, H = 64, BUDGET = 8 };
+    uint8_t binary[W * H];
+    memset(binary, 1, sizeof(binary));
+
+    const uint32_t evaluations = nt_atlas_test_concave_corner_cut_evaluation_count(binary, W, H, BUDGET);
+
+    TEST_ASSERT_GREATER_THAN_UINT32(0, evaluations);
+    TEST_ASSERT_LESS_THAN_UINT32(128, evaluations);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_concave_added_area_percent_respects_budget_and_coverage(void) {
     (void)MKDIR(TMP_DIR);
@@ -6655,6 +6646,17 @@ void test_atlas_added_area_percent_defaults_and_validation(void) {
     nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
     TEST_ASSERT_TRUE(atlas->sprites[0].effective_max_added_area_percent == 10.0F);
     TEST_ASSERT_TRUE(atlas->sprites[1].effective_max_added_area_percent == 0.0F);
+    nt_builder_free_pack(ctx);
+
+    ctx = nt_builder_start_pack(TMP_DIR "/area_percent_ignored_field.ntpack");
+    atlas = nt_atlas_begin(ctx, "ignored", NULL);
+    sprite_opts = nt_atlas_sprite_opts_defaults();
+    sprite_opts.name = "ignored";
+    sprite_opts.max_added_area_percent = NAN;
+    sprite_opts.has_max_added_area_percent = false;
+    nt_atlas_add_raw(atlas, pixel, 1, 1, &sprite_opts);
+    TEST_ASSERT_FALSE(atlas->sprites[0].has_max_added_area_percent_override);
+    TEST_ASSERT_TRUE(atlas->sprites[0].effective_max_added_area_percent == 10.0F);
     nt_builder_free_pack(ctx);
 
     static const float values[] = {0.0F, 2.0F, 5.0F, 10.0F, 15.0F, 25.0F};
@@ -8221,6 +8223,7 @@ int main(void) {
     RUN_TEST(test_geometry_frontier_base_area_is_global_and_zero_selects_smallest_base_tie);
     RUN_TEST(test_geometry_frontier_percent_boundaries_are_exact);
     RUN_TEST(test_geometry_frontier_selector_rejects_zero_area_and_avoids_overflow);
+    RUN_TEST(test_geometry_frontier_selection_proof_mismatch_asserts);
     RUN_TEST(test_geometry_frontier_donut_metrics_cancel_hole_from_added_area);
     RUN_TEST(test_selected_geometry_validator_rejects_corrupt_claims);
     RUN_TEST(test_rect_budget_three_is_graceful_hull_infeasible);
@@ -8265,7 +8268,7 @@ int main(void) {
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);
-    RUN_TEST(test_atlas_shape_concave_disjoint_sprite_is_hull_infeasible);
+    RUN_TEST(test_atlas_shape_concave_disjoint_sprite_uses_fallback_frontier);
     RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
     RUN_TEST(test_convex_budget_preserves_all_retained_pixels);
     RUN_TEST(test_atlas_duplicate_detection);
@@ -8293,6 +8296,7 @@ int main(void) {
     RUN_TEST(test_atlas_dedup_distinguishes_area_override_presence);
     RUN_TEST(test_aa_triangle_added_area_percent_preserves_full_cell_coverage);
     RUN_TEST(test_connected_mask_serializes_simple_exact_triangulation);
+    RUN_TEST(test_opaque_square_corner_cut_search_is_logarithmic);
     RUN_TEST(test_concave_added_area_percent_respects_budget_and_coverage);
     RUN_TEST(test_convex_added_area_percent_does_not_increase_vertex_count);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);

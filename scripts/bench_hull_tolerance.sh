@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Measures the production area-budget frontier without replacing Phase 78 baselines.
-# Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV]
+# Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV] [--publish]
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ hull_path_key() {
     local resolved
     resolved="$(realpath -m -- "$raw_path")"
     case "$platform" in
-        MSYS*|MINGW*|CYGWIN*) printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]' ;;
+        MSYS*|MINGW*|CYGWIN*|Darwin*) printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]' ;;
         *) printf '%s' "$resolved" ;;
     esac
 }
@@ -25,6 +25,28 @@ hull_path_is_protected() {
     esac
 }
 
+hull_is_canonical_publication() {
+    [[ "$1" == "mixed_aa" && "$2" == "0,2,5,10,15,25" && "$3" == "native-release" && "$4" == "1" ]]
+}
+
+hull_status_is_clean() {
+    [[ -z "$1" ]]
+}
+
+hull_require_clean_tree() {
+    local status
+    status="$(git status --porcelain=v1 --untracked-files=all)"
+    if ! hull_status_is_clean "$status"; then
+        echo "ERROR: canonical hull evidence requires a clean worktree." >&2
+        printf '%s\n' "$status" >&2
+        return 1
+    fi
+}
+
+hull_write_portable_proof() {
+    sed '/"pack_ms"/d;/"cpu"/d;/"os"/d' "$1" > "$2"
+}
+
 if [[ "${NT_HULL_AREA_GUARD_LIB_ONLY:-0}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -36,6 +58,7 @@ CORPUS="mixed_aa"
 OUT_DIR="build/bench/hull-area"
 SAMPLE_CSV="0,2,5,10,15,25"
 VERIFY_REPEAT=0
+PUBLISH=0
 HULL_TOTALS=()
 HULL_MEANS=()
 FRONTIER_DENSITIES=()
@@ -55,6 +78,7 @@ while [[ $# -gt 0 ]]; do
         --out) OUT_DIR="$2"; shift 2 ;;
         --samples) SAMPLE_CSV="$2"; shift 2 ;;
         --verify-repeat) VERIFY_REPEAT=1; shift ;;
+        --publish) PUBLISH=1; shift ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -96,6 +120,14 @@ if [[ -z "$CORPUS_SPEC" ]]; then
     exit 1
 fi
 IFS='|' read -r name glob shape max_size max_sprites <<< "$CORPUS_SPEC"
+
+if [[ $PUBLISH -eq 1 ]]; then
+    if ! hull_is_canonical_publication "$CORPUS" "$SAMPLE_CSV" "$PRESET" "$BENCH_THREADS"; then
+        echo "ERROR: canonical publication requires mixed_aa, samples 0,2,5,10,15,25, native-release, and one builder thread." >&2
+        exit 1
+    fi
+    hull_require_clean_tree
+fi
 
 if hull_path_is_protected "tools/research/atlas_bench/baseline" "$OUT_DIR"; then
     echo "ERROR: sweep output must not be inside the Phase 78 baseline directory." >&2
@@ -165,8 +197,8 @@ for sample in "${SAMPLES[@]}"; do
     fi
     primary_portable="${OUT_DIR}/.${sample_name}-portable.json"
     repeat_portable="${OUT_DIR}/.${sample_name}-repeat-portable.json"
-    sed '/"pack_ms"/d;/"cpu"/d' "$out_json" > "$primary_portable"
-    sed '/"pack_ms"/d;/"cpu"/d' "$repeat_json" > "$repeat_portable"
+    hull_write_portable_proof "$out_json" "$primary_portable"
+    hull_write_portable_proof "$repeat_json" "$repeat_portable"
     if ! cmp -s "$primary_portable" "$repeat_portable"; then
         echo "ERROR: repeated portable proof/metric mismatch at ${sample}%." >&2
         exit 1
@@ -186,17 +218,18 @@ for sample in "${SAMPLES[@]}"; do
     index=$((index + 1))
 done
 
-if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
+if [[ $PUBLISH -eq 1 ]]; then
     FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
     FRONTIER_TMP="${FRONTIER}.tmp.${$}"
     PROOF_DIR="tests/fixtures/hull_visual_acceptance/proof"
     mkdir -p "$PROOF_DIR"
     commit="$(git rev-parse HEAD)"
+    builder_sha="$(sha256sum "$BENCH_EXE" | awk '{print $1}')"
     corpus_sha="$(sha256sum "${matches[@]}" | sha256sum | awk '{print $1}')"
     settings_sha="$(printf '%s\n' "$name|$glob|$shape|$max_size|$max_sprites|$SAMPLE_CSV|threads=$BENCH_THREADS" | sha256sum | awk '{print $1}')"
     {
-        printf '{\n  "schema_version": 2,\n  "measurement_source_commit": "%s",\n' "$commit"
-        printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$BENCH_THREADS" "$corpus_sha" "$settings_sha"
+        printf '{\n  "schema_version": 3,\n  "proof_format": "portable-v1",\n  "measurement_source_commit": "%s",\n' "$commit"
+        printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "builder_binary_sha256": "%s",\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$BENCH_THREADS" "$builder_sha" "$corpus_sha" "$settings_sha"
         printf '  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are %s/%s/%s/%s/%s/%s at 0/2/5/10/15/25%%; 10%% is the production default, while larger allowances remain available for corpora that continue trading area for fewer vertices.",\n' \
             "${HULL_TOTALS[0]}" "${HULL_TOTALS[1]}" "${HULL_TOTALS[2]}" "${HULL_TOTALS[3]}" "${HULL_TOTALS[4]}" "${HULL_TOTALS[5]}"
         printf '  "default_max_added_area_percent": 10,\n  "sweep_values": [0, 2, 5, 10, 15, 25],\n  "sweep": [\n'
@@ -205,7 +238,7 @@ if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
             safe_sample="${sample//./p}"
             source="${OUT_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
             proof_source="${PROOF_DIR}/$(printf '%02d-percent-%s' "$i" "$safe_sample").json"
-            cp "$source" "$proof_source"
+            hull_write_portable_proof "$source" "$proof_source"
             source="$proof_source"
             source_sha="$(sha256sum "$source" | awk '{print $1}')"
             selected_pack_sha="$(sed -n 's/.*"selected_pack_sha256": "\([0-9a-f]*\)".*/\1/p' "$source")"
@@ -228,9 +261,6 @@ if [[ "$SAMPLE_CSV" == "0,2,5,10,15,25" ]]; then
     } > "$FRONTIER_TMP"
     mv "$FRONTIER_TMP" "$FRONTIER"
     echo "=== Published deterministic frontier: ${FRONTIER} ==="
-elif [[ $VERIFY_REPEAT -eq 1 ]]; then
-    echo "ERROR: --verify-repeat publication requires exact samples 0,2,5,10,15,25." >&2
-    exit 1
 fi
 
 echo "=== Done: ${#SAMPLES[@]} area-budget JSON(s) under ${OUT_DIR}/ ==="

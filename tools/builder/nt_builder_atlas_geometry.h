@@ -51,7 +51,7 @@ uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertic
 /* Fan triangulation from vertex 0. Returns triangle count. */
 uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices);
 
-/* Triangulate via Clipper2 CDT, fall back to fan on failure.
+/* Triangulate via Clipper2 CDT and fail closed on invalid output.
  * Returns triangle count; indices holds tri_count*3 local indices. */
 uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices);
 

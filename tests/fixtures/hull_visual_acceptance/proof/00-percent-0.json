@@ -3,8 +3,6 @@
     "tool_version": "2.0.0",
     "builder_version": 1,
     "corpus": "assets/sprites/bigatlas/*.png",
-    "os": "windows",
-    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
     "atlas_opts": {
       "shape": "concave",
       "max_size": 4096,
@@ -25,7 +23,6 @@
       "unique": 0,
       "pages": 1,
       "region_count": 128,
-      "pack_ms": 27349.0246,
       "density_fill_frontier": 0.5383,
       "density_fill_texture": 0.4353,
       "hull_verts": {

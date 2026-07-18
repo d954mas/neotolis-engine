@@ -96,7 +96,7 @@ Builder must check: references between assets, resource types, mesh/material/sha
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, degenerate hulls, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, hull-infeasible geometry, and unfittable sprites. `ATLAS_DEGENERATE_HULL` remains a formatted legacy kind, but the current geometry pipeline classifies publishable geometry failures as either transparent-after-trim, contour overflow, or hull-infeasible.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
@@ -283,19 +283,23 @@ typedef struct {
 **Silhouette modes (`nt_atlas_shape_t`):**
 
 - `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
-- `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified to `max_vertices`. Skips morphological closing, contour tracing, RDP, and the 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
-- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs a deterministic multi-strategy frontier, and selects by the area-budget contract below. Degenerate or impossible hard ceilings report graceful atlas content errors instead of clipping or publishing fallback geometry. Densest packing, highest cost.
+- `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified by a bounded frontier of convex reduction, covering simplification, and the trim AABB. With enough area allowance, the selector may therefore choose the 4-vertex AABB. Skips morphological closing, contour tracing, RDP, and the concave 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
+- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs a deterministic multi-strategy frontier, and selects by the area-budget contract below. It may use a simpler covering RECT/convex candidate when the traced contour is unusable; only the full fallback set failing the hard ceiling reports a graceful content error. Densest packing, highest cost.
 
 **Threshold, area budget, and selected-geometry proof:**
 
-- `alpha_threshold` defines retained pixels for both trimming and geometry. A pixel is retained when `alpha >= effective_alpha_threshold`; per-sprite `0` inherits the atlas value. Anti-aliased fringe pixels therefore participate when their alpha reaches the configured threshold.
+RECT and slice9 geometry serialize as 4-corner rectangles; if the effective `max_vertices` is below 4, the builder reports `ATLAS_HULL_INFEASIBLE` instead of emitting a non-rectangular substitute. `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` still tries simpler covering candidates such as RECT and convex hull when the concave contour path cannot produce a valid candidate; only the full fallback set failing the hard ceiling becomes `ATLAS_HULL_INFEASIBLE`.
+
+- `alpha_threshold` defines retained pixels for trimming, geometry, and page composition. A pixel is retained and copied into the atlas page when `alpha >= effective_alpha_threshold`; below-threshold pixels inside the trim rectangle compose as transparent. Per-sprite `0` inherits the atlas value. Anti-aliased fringe pixels therefore participate when their alpha reaches the configured threshold.
 - `max_vertices` is a hard ceiling for serialized region polygons. The atlas default is 8; the range is 3..16. Per-sprite `0` inherits the atlas value.
 - `max_added_area_percent` is the user-facing simplification tolerance. It is finite and non-negative; the atlas default is 10%. Per-sprite overrides use `has_max_added_area_percent` so an explicit `0%` remains representable, while zero-initialized sprite options still inherit the atlas value.
-- Geometry uses one retained-cell set after effective alpha resolution and trim. `Aopaque` is the total retained unit-cell area. For every feasible vertex count up to the ceiling, the builder keeps the tightest exact candidate. `Abase` is the smallest exact area among those feasible candidates. A candidate is eligible when `(Acandidate - Abase) / Aopaque * 100 <= max_added_area_percent`; the selector then chooses the fewest vertices, then smaller exact area, then stable generator/coordinate ties.
+- Geometry uses one retained-cell set after effective alpha resolution and trim. `Aopaque` is the total retained unit-cell area. For every vertex count populated by the deterministic candidate generators, the builder keeps the tightest proven candidate. `Abase` is the smallest exact area among those feasible candidates. A candidate is eligible when `(Acandidate - Abase) / Aopaque * 100 <= max_added_area_percent`; the selector then chooses the fewest vertices, then smaller exact area, then stable generator/coordinate ties.
 - `0%` means "no simplification-added area beyond the exact baseline", not "zero transparent area". Example: if `Aopaque=100`, `Abase=110`, and `max_added_area_percent=10`, the selected candidate may have `Aselected<=120`. The unavoidable 10 area of base overdraw is reported separately from the allowed simplification-added area.
 - Donut-style transparent holes are not subtracted as "lost" pixels. The retained pixels around the hole must be covered; the simple polygon may also cover the transparent interior, and that contributes to base/total overdraw.
+- Candidate generators may temporarily produce points outside the trim rectangle while searching for a covering simplification. Before selection/publish, every candidate is clamped back to trim-local bounds and re-proved; if the clamp breaks retained-cell coverage or topology, that candidate is rejected.
+- Corner-cut candidates are nested as depth increases, so the builder finds the deepest covering cut with a monotonic search instead of testing every pixel depth. This preserves the tightest candidate for the mask without making cost linear in sprite dimensions.
 - Candidate and serialized geometry both pass the same selected-geometry proof: inputs valid, opaque area valid, base/selected bounds, topology, full retained-cell coverage, triangulation, metric order, allowance, and ceiling. Corrupt area, allowance, ceiling, polygon, or triangle data fails the proof.
-- These controls affect builder geometry and atlas cache identity only. They do not change the runtime API or the on-disk atlas blob format.
+- These controls affect builder geometry, composed page pixels, and atlas cache identity. They do not change the runtime API or the on-disk atlas blob format.
 
 **Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format` is a hard assert.
 
@@ -303,7 +307,7 @@ typedef struct {
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.
 - `max_added_area_percent` must be finite and non-negative at atlas and per-sprite boundaries. NaN, infinity, and negative values are caller bugs and assert; signed zero is canonicalized to positive zero.
 - `3 ≤ max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`; below 3 the simplified hull degenerates to a line/point. The per-sprite override is `0` (atlas default) or `3..16`.
-- Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
+- Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` the validated CDT triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
 - Per-atlas `vertex_start` / `index_start` are `uint32_t`.
 
 ### Per-sprite options (`nt_atlas_sprite_opts_t`)
@@ -332,8 +336,12 @@ typedef struct {
 
 The Phase 80 area-budget and per-sprite threshold controls are appended after each
 complete pre-Phase-80 field list. Legal legacy positional initializers therefore
-retain every existing field mapping when recompiled; the appended controls are
-zero-initialized and preserve their default/inherit semantics.
+retain every existing field mapping when recompiled; this is source-recompile
+compatibility, not a binary-ABI promise for stale object files. For per-sprite
+options, zero-initialized appended controls preserve inherit semantics. For
+atlas-level `nt_atlas_opts_t`, use `nt_atlas_opts_defaults()` when defaults matter:
+a zero-initialized atlas options struct means `max_added_area_percent = 0%`, not
+the public 10% default returned by the defaults helper.
 
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
@@ -341,16 +349,18 @@ zero-initialized and preserve their default/inherit semantics.
 
 **Measured area-budget guidance (`mixed_aa`, native release):**
 
-The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. The atlas default is 10%; higher budgets are exposed because some corpora continue trading extra area for fewer vertices.
+The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
+
+Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. The report records the declarative corpus-manifest hash separately from `visual_input_sha256`, which hashes the actual decoded RGBA plus resolved row controls used by the builder.
 
 | Added area budget | Hull vertices total | Mean | Texture fill | Representative total overdraw | Sweep SHA-256 |
 | ---: | ---: | ---: | ---: | ---: | --- |
-| 0% | 926 | 7.2344 | 0.5383 | 0.15990160% | `df0d411fdb72592b640f799f42110f257f582e6901eae2c3a4343550509568e4` |
-| 2% | 782 | 6.1094 | 0.5971 | 0.76260763% | `46ca8fd26e4efaa0ba671e6c9c0d9109c69ab01efd315c12bb84e84513aa167c` |
-| 5% | 738 | 5.7656 | 0.5751 | 0.76260763% | `816478b07e25d8556553d5d26a35da431f8c85023327552ef56a50087a805ca3` |
-| 10% | 682 | 5.3281 | 0.5799 | 0.76260763% | `64ba268d0823ba323be1eba9903333b0bea2d85c70076c79afbc50bcf04e165f` |
-| 15% | 656 | 5.1250 | 0.5730 | 0.76260763% | `2fd82e93c821593386aeb9f1057f784fa7b869b338abb839ae87dc8b75637ce5` |
-| 25% | 604 | 4.7188 | 0.5546 | 0.76260763% | `a970842967baf1dd34042166ca07af12339f05b5a5f7b6a9ba886b11d1edc4ac` |
+| 0% | 926 | 7.2344 | 0.5383 | 0.15990160% | `4ab00d82587f4b9e8c9b11c05092310ea3e3ec7c522846583fa7215157c22c42` |
+| 2% | 782 | 6.1094 | 0.5971 | 0.76260763% | `97f874de5334a9096d6c042226e616a34ea3c88b6aa46bac4dba7811ebdaaed2` |
+| 5% | 738 | 5.7656 | 0.5751 | 0.76260763% | `3bc7579986fb845643d24bf7ef9f3989bbe8e0d32ed2a396675014774d853819` |
+| 10% | 682 | 5.3281 | 0.5799 | 0.76260763% | `8df159cd3654af5ecf4d7a740211ac8dd4bde4cf73303eee2bd0ed1620869e16` |
+| 15% | 656 | 5.1250 | 0.5730 | 0.76260763% | `b7f826ea6185fa4432882de1dcea356c8716746ac8335fc710b74ca5b39725d1` |
+| 25% | 604 | 4.7188 | 0.5546 | 0.76260763% | `16fafc85bec5b356adfcd9376662d8846596c114810c34ca68ee8a5040a24188` |
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
@@ -359,7 +369,7 @@ The current deterministic frontier evidence uses six public area-budget values. 
 
 **Glob rule:** `nt_atlas_add_glob` asserts `opts->name == NULL` — a single name cannot apply to N matched files without hash collisions. Each matched file derives its own name from its path, and the `origin_x/y` fields propagate to all of them. For per-file name overrides within a glob, call `nt_builder_glob_iterate` with a custom callback that calls `nt_atlas_add` per match.
 
-**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on pixel hash + byte-level pixel compare (origin is not considered), so the geometry/pixel data is stored once; each logical region stores its own pivot. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
+**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on decoded pixel hash, trim-local byte compare, and geometry-affecting controls: slice9, effective alpha threshold, shape/rotation/max-vertices/margin/extrude overrides, and the max-added-area override value plus presence bit. Origin is not considered, so each logical region stores its own pivot while sharing geometry/pixels. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
 
 **Zero-init footgun:** C99 designated-initialiser compound literals (`&(nt_atlas_sprite_opts_t){.origin_y = 1.0F}`) zero-init unset fields — so `origin_x` becomes `0.0`, not the default `0.5`. Always start from `nt_atlas_sprite_opts_defaults()` for partial overrides, or set every field explicitly in the literal.
 
@@ -367,7 +377,7 @@ The current deterministic frontier evidence uses six public area-budget values. 
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 16. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, max-added-area value, and the explicit presence bit even when they currently resolve to an inherited value. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 17. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area presence bit even when they currently resolve to inherited values. The max-added-area payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 

@@ -772,6 +772,25 @@ if(NOT EMSCRIPTEN)
         )
     endif()
     nt_setup_test_target(test_atlas_options_compat)
+
+    if(WIN32)
+        find_program(NT_GIT_BASH_EXECUTABLE bash
+            PATHS "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin"
+            NO_DEFAULT_PATH
+        )
+    else()
+        find_program(NT_GIT_BASH_EXECUTABLE bash)
+    endif()
+    if(NT_GIT_BASH_EXECUTABLE)
+        add_test(
+            NAME test_bench_hull_tolerance_guard
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
+    else()
+        message(STATUS "bash not found; skipping CTest registration for test_bench_hull_tolerance_guard")
+    endif()
+
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.
