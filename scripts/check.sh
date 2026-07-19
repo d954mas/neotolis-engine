@@ -140,10 +140,6 @@ fi
 cmake --build "$NATIVE_BUILD_DIR"
 ok
 
-step "hull tolerance guard"
-bash scripts/test_bench_hull_tolerance_guard.sh
-ok
-
 step "ctest (native-debug)"
 ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
 ok

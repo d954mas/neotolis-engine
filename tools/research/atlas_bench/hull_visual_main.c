@@ -18,10 +18,9 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "generate") == 0) {
-        const char *corpus = arg_value(argc, argv, "--corpus");
         const char *frontier = arg_value(argc, argv, "--frontier");
         const char *out = arg_value(argc, argv, "--out");
-        return nt_hull_visual_generate(corpus, frontier, out);
+        return nt_hull_visual_generate(frontier, out);
     }
     if (strcmp(argv[1], "validate") == 0) {
         const char *manifest = arg_value(argc, argv, "--manifest");

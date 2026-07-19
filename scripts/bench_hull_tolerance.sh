@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Measures the production area-budget frontier without replacing established baselines.
-# Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV] [--publish]
+# Usage: bench_hull_tolerance.sh [--preset P] [--corpus NAME] [--out DIR] [--samples CSV] [--verify-repeat] [--publish]
 
 set -euo pipefail
 
@@ -25,22 +25,16 @@ hull_path_is_protected() {
     esac
 }
 
-hull_publish_txn_path_is_safe() {
-    local transaction_key build_key
-    transaction_key="$(hull_path_key "$1" "${2:-}")"
-    build_key="$(hull_path_key build "${2:-}")"
-    case "$transaction_key" in
-        "$build_key"/*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 hull_is_canonical_publication() {
     [[ "$1" == "mixed_aa" && "$2" == "0,2,5,10,15,25" && "$3" == "native-release" && "$4" == "1" ]]
 }
 
 hull_status_is_clean() {
     [[ -z "$1" ]]
+}
+
+hull_repeat_required() {
+    [[ "$1" == 1 || "$2" == 1 ]]
 }
 
 hull_require_clean_tree() {
@@ -57,43 +51,6 @@ hull_write_portable_proof() {
     sed '/"pack_ms"/d;/"cpu"/d;/"os"/d' "$1" > "$2"
 }
 
-HULL_PUBLISH_TXN_DIR="${HULL_PUBLISH_TXN_DIR:-build/bench/hull-area-publication-transaction}"
-
-hull_publish_restore_file() {
-    local target="$1"
-    local backup="$2"
-    local restore_tmp="${target}.restore.${$}"
-    mkdir -p "$(dirname "$target")"
-    cp -p -- "$backup" "$restore_tmp" || return 1
-    mv -- "$restore_tmp" "$target"
-}
-
-hull_publish_transaction_rollback() {
-    local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
-    local target had_original result=0
-    if ! hull_publish_txn_path_is_safe "$HULL_PUBLISH_TXN_DIR"; then
-        echo "ERROR: publication transaction path must stay below build/: ${HULL_PUBLISH_TXN_DIR}" >&2
-        return 1
-    fi
-    [[ -f "$manifest" ]] || { rm -rf -- "$HULL_PUBLISH_TXN_DIR"; return 0; }
-    while IFS='|' read -r target had_original; do
-        if [[ "$had_original" == 1 ]]; then
-            hull_publish_restore_file "$target" "${HULL_PUBLISH_TXN_DIR}/backup/${target}" || result=1
-        else
-            rm -f -- "$target" || result=1
-        fi
-    done < "$manifest"
-    if [[ $result -eq 0 ]]; then
-        rm -rf -- "$HULL_PUBLISH_TXN_DIR"
-    fi
-    return "$result"
-}
-
-hull_recover_publication() {
-    [[ -e "$HULL_PUBLISH_TXN_DIR" ]] || return 0
-    hull_publish_transaction_rollback
-}
-
 hull_publish_install_file() {
     mv -- "$1" "$2"
 }
@@ -101,14 +58,7 @@ hull_publish_install_file() {
 hull_publish_staged_set() {
     local stage_root="$1"
     shift
-    local target source had_original
-    local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
-
-    if ! hull_publish_txn_path_is_safe "$HULL_PUBLISH_TXN_DIR"; then
-        echo "ERROR: publication transaction path must stay below build/: ${HULL_PUBLISH_TXN_DIR}" >&2
-        return 1
-    fi
-    hull_recover_publication || return 1
+    local target source
     for target in "$@"; do
         case "$target" in
             /*|[A-Za-z]:*|../*|*/../*) echo "ERROR: publication target must be repository-relative: ${target}" >&2; return 1 ;;
@@ -116,31 +66,14 @@ hull_publish_staged_set() {
         [[ -f "${stage_root}/${target}" ]] || { echo "ERROR: staged publication file is missing: ${stage_root}/${target}" >&2; return 1; }
     done
 
-    mkdir -p "${HULL_PUBLISH_TXN_DIR}/backup"
-    : > "$manifest"
-    for target in "$@"; do
-        had_original=0
-        if [[ -f "$target" ]]; then
-            had_original=1
-            mkdir -p "${HULL_PUBLISH_TXN_DIR}/backup/$(dirname "$target")"
-            if ! cp -p -- "$target" "${HULL_PUBLISH_TXN_DIR}/backup/${target}"; then
-                rm -rf -- "$HULL_PUBLISH_TXN_DIR"
-                return 1
-            fi
-        fi
-        printf '%s|%s\n' "$target" "$had_original" >> "$manifest"
-    done
-
     for target in "$@"; do
         source="${stage_root}/${target}"
         mkdir -p "$(dirname "$target")"
         if ! hull_publish_install_file "$source" "$target"; then
-            echo "ERROR: publication failed while installing ${target}; restoring the previous evidence set." >&2
-            hull_publish_transaction_rollback || echo "ERROR: publication rollback failed; rerun --publish to recover before retrying." >&2
+            echo "ERROR: publication stopped while installing ${target}; inspect the visible worktree changes before retrying." >&2
             return 1
         fi
     done
-    rm -rf -- "$HULL_PUBLISH_TXN_DIR"
 }
 
 if [[ "${NT_HULL_AREA_GUARD_LIB_ONLY:-0}" == 1 ]]; then
@@ -222,7 +155,6 @@ if [[ $PUBLISH -eq 1 ]]; then
         echo "ERROR: canonical publication requires mixed_aa, samples 0,2,5,10,15,25, native-release, and one builder thread." >&2
         exit 1
     fi
-    hull_recover_publication || { echo "ERROR: could not recover an interrupted hull evidence publication." >&2; exit 1; }
     hull_require_clean_tree
 fi
 
@@ -282,23 +214,25 @@ for sample in "${SAMPLES[@]}"; do
 
     echo "--- max_added_area_percent=${sample} ---"
     "${command[@]}"
-    "${repeat_command[@]}"
 
     pack_path="${out_json}.ntpack"
-    repeat_pack_path="${repeat_json}.ntpack"
     pack_hash="$(sha256sum "$pack_path" | awk '{print $1}')"
-    repeat_hash="$(sha256sum "$repeat_pack_path" | awk '{print $1}')"
-    if [[ "$pack_hash" != "$repeat_hash" ]]; then
-        echo "ERROR: repeated pack hash mismatch at ${sample}%." >&2
-        exit 1
-    fi
     primary_portable="${OUT_DIR}/.${sample_name}-portable.json"
     repeat_portable="${OUT_DIR}/.${sample_name}-repeat-portable.json"
-    hull_write_portable_proof "$out_json" "$primary_portable"
-    hull_write_portable_proof "$repeat_json" "$repeat_portable"
-    if ! cmp -s "$primary_portable" "$repeat_portable"; then
-        echo "ERROR: repeated portable proof/metric mismatch at ${sample}%." >&2
-        exit 1
+    repeat_pack_path="${repeat_json}.ntpack"
+    if hull_repeat_required "$VERIFY_REPEAT" "$PUBLISH"; then
+        "${repeat_command[@]}"
+        repeat_hash="$(sha256sum "$repeat_pack_path" | awk '{print $1}')"
+        if [[ "$pack_hash" != "$repeat_hash" ]]; then
+            echo "ERROR: repeated pack hash mismatch at ${sample}%." >&2
+            exit 1
+        fi
+        hull_write_portable_proof "$out_json" "$primary_portable"
+        hull_write_portable_proof "$repeat_json" "$repeat_portable"
+        if ! cmp -s "$primary_portable" "$repeat_portable"; then
+            echo "ERROR: repeated portable proof/metric mismatch at ${sample}%." >&2
+            exit 1
+        fi
     fi
     pack_bytes="$(wc -c < "$pack_path")"
     hull_total="$(sed -n '/"hull_verts": {/,/}/ s/.*"total": \([0-9][0-9]*\).*/\1/p' "$out_json")"

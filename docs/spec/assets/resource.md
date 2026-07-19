@@ -303,7 +303,7 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets indices by vertex_start when building GPU buffers.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure).
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
 - common regions update metadata in place and rewrite their copied vertex/index payload

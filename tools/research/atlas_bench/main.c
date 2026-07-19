@@ -82,7 +82,12 @@ static bool build_production_pack(const char *pack_path, const char *corpus_glob
     // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded CLI reads configuration before workers start
     const char *threads_env = getenv("NT_BUILDER_THREADS");
     if (threads_env != NULL && threads_env[0] != '\0') {
-        const uint32_t threads = (uint32_t)strtoul(threads_env, NULL, 10);
+        uint32_t threads = 0U;
+        if (!atlas_bench_parse_u32_strict(threads_env, &threads)) {
+            (void)fprintf(stderr, "atlas_bench: NT_BUILDER_THREADS must be an integer in 0..%u\n", UINT32_MAX);
+            nt_builder_free_pack(ctx);
+            return false;
+        }
         if (threads > 0U) {
             nt_builder_set_threads(ctx, threads);
         } else {

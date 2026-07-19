@@ -6,17 +6,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// #region test_access
+#ifdef NT_TEST_ACCESS
 typedef struct {
     uint32_t slot_mask;
     uint32_t selected_count;
     uint32_t selected_index_count;
-    uint32_t transfer_count;
-    uint32_t reject_count;
-    uint32_t replacement_count;
-    uint32_t destroy_count;
-    uint32_t cleared_source_count;
-    uint32_t corner_cut_evaluation_count;
-    uint32_t convex_source_build_count;
     uint64_t opaque_area2;
     uint64_t base_area2;
     uint64_t selected_area2;
@@ -31,11 +26,13 @@ typedef struct {
 bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint32_t *counts, uint32_t candidate_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices,
                                      float max_added_area_percent, NtAtlasFrontierTestResult *out_result);
 uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_t slot_mask, uint64_t opaque_area2, uint32_t max_vertices, float max_added_area_percent);
-bool nt_atlas_test_frontier_lifecycle_stress(void);
 void nt_atlas_test_frontier_selection_proof_mismatch(void);
 uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
-uint32_t nt_atlas_test_concave_corner_cut_evaluation_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
-uint32_t nt_atlas_test_concave_convex_source_build_count(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
 bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count);
+uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
+                                          uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
+uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal);
+#endif
+// #endregion
 
 #endif

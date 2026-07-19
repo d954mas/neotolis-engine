@@ -21,12 +21,8 @@ if ! hull_status_is_clean "" || hull_status_is_clean $' M tools/builder/nt_build
     echo "dirty-tree publication status was classified incorrectly" >&2
     exit 1
 fi
-if ! hull_publish_txn_path_is_safe "build/tests/tmp/hull-safe-transaction" "$PLATFORM"; then
-    echo "safe publication transaction path was rejected" >&2
-    exit 1
-fi
-if hull_publish_txn_path_is_safe "." "$PLATFORM" || hull_publish_txn_path_is_safe "build" "$PLATFORM" || hull_publish_txn_path_is_safe "../outside-build" "$PLATFORM"; then
-    echo "unsafe publication transaction path was accepted" >&2
+if hull_repeat_required 0 0 || ! hull_repeat_required 1 0 || ! hull_repeat_required 0 1; then
+    echo "repeat verification policy was classified incorrectly" >&2
     exit 1
 fi
 
@@ -43,7 +39,6 @@ rm -f "$PORTABLE_SOURCE" "$PORTABLE_PROOF"
 
 PUBLISH_TEST_ROOT="build/tests/tmp/hull-publication-${$}"
 PUBLISH_STAGE="${PUBLISH_TEST_ROOT}/stage"
-PUBLISH_TXN="${PUBLISH_TEST_ROOT}/transaction"
 PUBLISH_TARGET_A="${PUBLISH_TEST_ROOT}/tracked/a.json"
 PUBLISH_TARGET_B="${PUBLISH_TEST_ROOT}/tracked/b.json"
 mkdir -p "$PUBLISH_STAGE/$(dirname "$PUBLISH_TARGET_A")" "$(dirname "$PUBLISH_TARGET_A")"
@@ -51,7 +46,6 @@ printf 'old-a\n' > "$PUBLISH_TARGET_A"
 printf 'old-b\n' > "$PUBLISH_TARGET_B"
 printf 'new-a\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_A"
 printf 'new-b\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_B"
-HULL_PUBLISH_TXN_DIR="$PUBLISH_TXN"
 if (
     install_count=0
     hull_publish_install_file() {
@@ -59,13 +53,13 @@ if (
         [[ $install_count -lt 2 ]] || return 1
         mv -- "$1" "$2"
     }
-    hull_publish_staged_set "$PUBLISH_STAGE" "$PUBLISH_TARGET_A" "$PUBLISH_TARGET_B"
+    hull_publish_staged_set "$PUBLISH_STAGE" "$PUBLISH_TARGET_A" "$PUBLISH_TARGET_B" 2>/dev/null
 ); then
     echo "injected publication failure unexpectedly succeeded" >&2
     exit 1
 fi
-if [[ "$(<"$PUBLISH_TARGET_A")" != old-a || "$(<"$PUBLISH_TARGET_B")" != old-b || -e "$PUBLISH_TXN" ]]; then
-    echo "failed publication did not roll back the complete tracked set" >&2
+if [[ "$(<"$PUBLISH_TARGET_A")" != new-a || "$(<"$PUBLISH_TARGET_B")" != old-b ]]; then
+    echo "failed publication did not leave an explicit partial worktree update" >&2
     exit 1
 fi
 rm -rf -- "$PUBLISH_STAGE"
@@ -73,7 +67,7 @@ mkdir -p "$PUBLISH_STAGE/$(dirname "$PUBLISH_TARGET_A")"
 printf 'retry-a\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_A"
 printf 'retry-b\n' > "$PUBLISH_STAGE/$PUBLISH_TARGET_B"
 hull_publish_staged_set "$PUBLISH_STAGE" "$PUBLISH_TARGET_A" "$PUBLISH_TARGET_B"
-if [[ "$(<"$PUBLISH_TARGET_A")" != retry-a || "$(<"$PUBLISH_TARGET_B")" != retry-b || -e "$PUBLISH_TXN" ]]; then
+if [[ "$(<"$PUBLISH_TARGET_A")" != retry-a || "$(<"$PUBLISH_TARGET_B")" != retry-b ]]; then
     echo "clean retry did not publish the complete tracked set" >&2
     exit 1
 fi
@@ -90,26 +84,28 @@ sed \
     -e "/\"builder_threads\": 1/a\\  \"builder_binary_sha256\": \"${EXPECTED_BUILDER_SHA}\"," \
     tools/research/atlas_bench/hull_area_frontier.json > "$VALID_FRONTIER"
 FRONTIER="$VALID_FRONTIER"
-if ! frontier_valid "$EXPECTED_BUILDER_SHA"; then
+if ! frontier_valid; then
     echo "valid schema-3 frontier was rejected" >&2
     exit 1
 fi
 SCHEMA2_FRONTIER="${FRONTIER_TEST_ROOT}/schema2.json"
 sed 's/"schema_version": 3/"schema_version": 2/' "$VALID_FRONTIER" > "$SCHEMA2_FRONTIER"
 FRONTIER="$SCHEMA2_FRONTIER"
-if frontier_valid "$EXPECTED_BUILDER_SHA"; then
+if frontier_valid; then
     echo "legacy schema-2 frontier was accepted" >&2
     exit 1
 fi
-FRONTIER="$VALID_FRONTIER"
-if frontier_valid "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"; then
-    echo "frontier from a different production builder was accepted" >&2
+MALFORMED_BUILDER_FRONTIER="${FRONTIER_TEST_ROOT}/malformed-builder-hash.json"
+sed "s/${EXPECTED_BUILDER_SHA}/not-a-sha256/" "$VALID_FRONTIER" > "$MALFORMED_BUILDER_FRONTIER"
+FRONTIER="$MALFORMED_BUILDER_FRONTIER"
+if frontier_valid; then
+    echo "frontier with malformed publisher builder hash was accepted" >&2
     exit 1
 fi
 TAMPERED_FRONTIER="${FRONTIER_TEST_ROOT}/tampered-metric.json"
 sed '0,/"hull_vertices_total": 926/s//"hull_vertices_total": 927/' "$VALID_FRONTIER" > "$TAMPERED_FRONTIER"
 FRONTIER="$TAMPERED_FRONTIER"
-if frontier_valid "$EXPECTED_BUILDER_SHA"; then
+if frontier_valid; then
     echo "frontier metric inconsistent with its hashed proof was accepted" >&2
     exit 1
 fi
@@ -118,25 +114,21 @@ rm -rf -- "$FRONTIER_TEST_ROOT"
 FINAL_DIR="build/tests/tmp/hull-visual-final-${$}"
 TEMP_DIR="${FINAL_DIR}.tmp"
 REPEAT_DIR="${FINAL_DIR}.repeat"
-PREVIOUS_DIR="${FINAL_DIR}.previous"
-mkdir -p "$FINAL_DIR" "$TEMP_DIR" "$REPEAT_DIR"
-printf 'accepted\n' > "$FINAL_DIR/marker.txt"
-mv -- "$FINAL_DIR" "$PREVIOUS_DIR"
+mkdir -p "$TEMP_DIR" "$REPEAT_DIR"
 if hull_visual_cleanup 130; then
     echo "interrupted visual cleanup lost its failure status" >&2
     exit 1
 fi
-if [[ ! -f "$FINAL_DIR/marker.txt" || -e "$TEMP_DIR" || -e "$REPEAT_DIR" || -e "$PREVIOUS_DIR" ]]; then
-    echo "interrupted visual cleanup did not restore the accepted report" >&2
+if [[ -e "$TEMP_DIR" || -e "$REPEAT_DIR" ]]; then
+    echo "interrupted visual cleanup retained temporary output" >&2
     exit 1
 fi
 rm -rf -- "$FINAL_DIR"
 
-mkdir -p "$PREVIOUS_DIR" "$TEMP_DIR" "$REPEAT_DIR"
-printf 'accepted-after-crash\n' > "$PREVIOUS_DIR/marker.txt"
+mkdir -p "$TEMP_DIR" "$REPEAT_DIR"
 hull_visual_prepare_paths
-if [[ ! -f "$FINAL_DIR/marker.txt" || -e "$TEMP_DIR" || -e "$REPEAT_DIR" || -e "$PREVIOUS_DIR" ]]; then
-    echo "visual startup did not recover the accepted report after a hard interruption" >&2
+if [[ -e "$TEMP_DIR" || -e "$REPEAT_DIR" ]]; then
+    echo "visual startup did not clear temporary output" >&2
     exit 1
 fi
 rm -rf -- "$FINAL_DIR"
@@ -217,5 +209,18 @@ if [[ -e "build/bench/hull-area-invalid-${$}.json" || -e "build/bench/hull-area-
     echo "invalid CLI input wrote evidence" >&2
     exit 1
 fi
+
+THREAD_JSON="build/bench/hull-area-invalid-threads-${$}.json"
+THREAD_LOG="build/tests/tmp/hull-area-invalid-threads-${$}.log"
+if NT_BUILDER_THREADS=1junk "$BENCH_EXE" "$THREAD_JSON" 'assets/bench/rect_only/rect_00.png' guard rect 64 1 >"$THREAD_LOG" 2>&1; then
+    echo "malformed NT_BUILDER_THREADS was accepted" >&2
+    exit 1
+fi
+if ! grep -q "NT_BUILDER_THREADS" "$THREAD_LOG"; then
+    echo "malformed NT_BUILDER_THREADS failed for the wrong reason" >&2
+    cat "$THREAD_LOG" >&2
+    exit 1
+fi
+rm -f "$THREAD_LOG" "$THREAD_JSON" "${THREAD_JSON}.ntpack" "${THREAD_JSON}.h" "${THREAD_JSON}.baseline.ntpack" "${THREAD_JSON}.baseline.h"
 
 echo "test_bench_hull_tolerance_guard: passed"

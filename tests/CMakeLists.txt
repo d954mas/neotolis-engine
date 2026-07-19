@@ -735,7 +735,7 @@ if(NOT EMSCRIPTEN)
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
     )
-    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity)
+    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity cjson)
     target_include_directories(test_atlas_hull_visual_report PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder

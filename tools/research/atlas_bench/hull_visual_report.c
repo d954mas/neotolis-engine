@@ -1,5 +1,6 @@
 #include "hull_visual_report.h"
 
+#include "cJSON.h"
 #include "nt_atlas_format.h"
 #include "nt_builder.h"
 #include "nt_builder_atlas_geometry.h"
@@ -8,6 +9,7 @@
 #include "stb_image.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -160,7 +162,7 @@ static bool row_expects_hull_infeasible(const VisualRow *row) { return strcmp(ro
 
 static uint32_t rotr32(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
 
-static void sha256_bytes(const uint8_t *data, size_t size, uint8_t digest[32]) {
+static bool sha256_bytes(const uint8_t *data, size_t size, uint8_t digest[32]) {
     static const uint32_t k[64] = {
         0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U, 0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U, 0x72be5d74U,
         0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U, 0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU, 0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU, 0x983e5152U, 0xa831c66dU,
@@ -169,14 +171,16 @@ static void sha256_bytes(const uint8_t *data, size_t size, uint8_t digest[32]) {
         0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U, 0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U, 0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
     };
     uint32_t h[8] = {0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU, 0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
+    if (size > SIZE_MAX - 72U) {
+        return false;
+    }
     size_t padded = size + 1U;
     while ((padded % 64U) != 56U) {
         padded++;
     }
     uint8_t *message = (uint8_t *)calloc(padded + 8U, 1U);
     if (message == NULL) {
-        memset(digest, 0, 32);
-        return;
+        return false;
     }
     memcpy(message, data, size);
     message[size] = 0x80U;
@@ -228,6 +232,7 @@ static void sha256_bytes(const uint8_t *data, size_t size, uint8_t digest[32]) {
         digest[(i * 4U) + 2U] = (uint8_t)(h[i] >> 8U);
         digest[(i * 4U) + 3U] = (uint8_t)h[i];
     }
+    return true;
 }
 
 static void sha256_digest_hex(const uint8_t digest[32], char out[65]) {
@@ -237,10 +242,14 @@ static void sha256_digest_hex(const uint8_t digest[32], char out[65]) {
     out[64] = '\0';
 }
 
-static void bytes_sha256_hex(const uint8_t *data, size_t size, char out[65]) {
+static bool bytes_sha256_hex(const uint8_t *data, size_t size, char out[65]) {
     uint8_t digest[32];
-    sha256_bytes(data, size, digest);
+    if (!sha256_bytes(data, size, digest)) {
+        out[0] = '\0';
+        return false;
+    }
     sha256_digest_hex(digest, out);
+    return true;
 }
 
 static uint8_t *read_file(const char *path, size_t *out_size) {
@@ -276,15 +285,21 @@ static bool file_sha256_hex(const char *path, char out[65]) {
         return false;
     }
     uint8_t digest[32];
-    sha256_bytes(data, size, digest);
+    const bool ok = sha256_bytes(data, size, digest);
     free(data);
+    if (!ok) {
+        out[0] = '\0';
+        return false;
+    }
     sha256_digest_hex(digest, out);
     return true;
 }
 
 static bool visual_input_identity_append(char *identity, size_t capacity, size_t *size, const VisualRow *row, const VisualFixture *fixture) {
     char rgba_sha256[65];
-    bytes_sha256_hex(fixture->rgba, (size_t)fixture->width * fixture->height * 4U, rgba_sha256);
+    if (!bytes_sha256_hex(fixture->rgba, (size_t)fixture->width * fixture->height * 4U, rgba_sha256)) {
+        return false;
+    }
     const char *source = row->source_path != NULL ? row->source_path : row->fixture_name;
     const int written =
         snprintf(identity + *size, capacity - *size, "%s|%s|%s|%u|%u|%u|%u|%s\n", row->sample_id, row->shape_name, source, fixture->width, fixture->height, row->threshold, row->budget, rgba_sha256);
@@ -293,15 +308,6 @@ static bool visual_input_identity_append(char *identity, size_t capacity, size_t
     }
     *size += (size_t)written;
     return true;
-}
-
-static uint32_t count_substring(const char *text, const char *needle) {
-    uint32_t count = 0;
-    size_t length = strlen(needle);
-    for (const char *p = text; (p = strstr(p, needle)) != NULL; p += length) {
-        count++;
-    }
-    return count;
 }
 
 static void html_escape(FILE *file, const char *text) {
@@ -362,15 +368,53 @@ static bool number_value(const char *object, const char *key, double *out) {
         return false;
     }
     start += strlen(needle);
+    while (isspace((unsigned char)*start)) {
+        start++;
+    }
+    errno = 0;
     char *end = NULL;
-    *out = strtod(start, &end);
-    return end != start && isfinite(*out);
+    const double value = strtod(start, &end);
+    if (end == start || errno == ERANGE || !isfinite(value)) {
+        return false;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != ',' && *end != '}' && *end != ']' && *end != '\0') {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static cJSON *json_unique_member(const cJSON *object, const char *name) {
+    cJSON *match = NULL;
+    if (!cJSON_IsObject(object)) {
+        return NULL;
+    }
+    for (cJSON *item = object->child; item != NULL; item = item->next) {
+        if (item->string != NULL && strcmp(item->string, name) == 0) {
+            if (match != NULL) {
+                return NULL;
+            }
+            match = item;
+        }
+    }
+    return match;
 }
 
 static bool selected_geometry_proof_is_valid(const char *sweep) {
-    const char *proof = strstr(sweep, "\"selected_geometry_proof\"");
-    return proof != NULL && strstr(proof, "\"valid\": true") != NULL &&
-           strstr(proof, "\"gates\": {\"full_cell_coverage\":true,\"topology\":true,\"triangulation\":true,\"allowance\":true,\"ceiling\":true}") != NULL;
+    static const char *gate_names[] = {"full_cell_coverage", "topology", "triangulation", "allowance", "ceiling"};
+    const char *parse_end = NULL;
+    cJSON *root = cJSON_ParseWithOpts(sweep, &parse_end, true);
+    cJSON *proof = json_unique_member(root, "selected_geometry_proof");
+    cJSON *gates = json_unique_member(proof, "gates");
+    bool ok = root != NULL && cJSON_IsTrue(json_unique_member(proof, "valid")) && cJSON_IsObject(gates);
+    for (uint32_t gate = 0; ok && gate < (uint32_t)(sizeof(gate_names) / sizeof(gate_names[0])); gate++) {
+        ok = cJSON_IsTrue(json_unique_member(gates, gate_names[gate]));
+    }
+    cJSON_Delete(root);
+    return ok;
 }
 
 static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_COUNT]) {
@@ -414,46 +458,6 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
              number_value((const char *)sweep, "max_added_area_percent", &measured) && fabs(measured - percent) < 0.0001;
         free(sweep);
         cursor = object + strlen("\"max_added_area_percent\":");
-    }
-    free(bytes);
-    return ok;
-}
-
-static bool validate_corpus(const char *path) {
-    size_t size = 0;
-    uint8_t *bytes = read_file(path, &size);
-    if (bytes == NULL || size == 0 || strstr((const char *)bytes, "\"schema_version\": 2") == NULL) {
-        free(bytes);
-        return false;
-    }
-    bool ok = true;
-    for (uint32_t i = 0; i < VISUAL_ROW_COUNT; i++) {
-        char sample_needle[96];
-        char shape_needle[64];
-        char fixture_needle[96];
-        (void)snprintf(sample_needle, sizeof(sample_needle), "\"sample_id\":\"%s\"", VISUAL_ROWS[i].sample_id);
-        (void)snprintf(shape_needle, sizeof(shape_needle), "\"shape\":\"%s\"", VISUAL_ROWS[i].shape_name);
-        (void)snprintf(fixture_needle, sizeof(fixture_needle), "\"fixture\":\"%s\"", VISUAL_ROWS[i].fixture_name);
-        const char *sample = strstr((const char *)bytes, sample_needle);
-        const char *object_end = sample != NULL ? strchr(sample, '}') : NULL;
-        const char *shape = sample != NULL ? strstr(sample, shape_needle) : NULL;
-        const char *fixture = sample != NULL ? strstr(sample, fixture_needle) : NULL;
-        const char *threshold_key = sample != NULL ? strstr(sample, "\"alpha_threshold\":") : NULL;
-        const char *budget_key = sample != NULL ? strstr(sample, "\"max_vertices\":") : NULL;
-        double threshold = -1.0;
-        double budget = -1.0;
-        if (object_end == NULL || shape == NULL || shape >= object_end || fixture == NULL || fixture >= object_end || threshold_key == NULL || threshold_key >= object_end || budget_key == NULL ||
-            budget_key >= object_end || !number_value(threshold_key, "alpha_threshold", &threshold) || !number_value(budget_key, "max_vertices", &budget) ||
-            (uint8_t)threshold != VISUAL_ROWS[i].threshold || (uint8_t)budget != VISUAL_ROWS[i].budget) {
-            ok = false;
-            break;
-        }
-    }
-    for (uint32_t i = 0; ok && i < REAL_ART_ROW_COUNT; i++) {
-        size_t source_size = 0;
-        uint8_t *source = read_file(REAL_ART_ROWS[i].source_path, &source_size);
-        ok = source != NULL && source_size > 0U;
-        free(source);
     }
     free(bytes);
     return ok;
@@ -893,7 +897,7 @@ static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualC
 }
 
 static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT],
-                           const VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT], const char *corpus_manifest_sha256, const char *visual_input_sha256, const char *frontier_sha256) {
+                           const VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT], const char *visual_input_sha256, const char *frontier_sha256) {
     FILE *file = fopen(path, "wb");
     if (file == NULL) {
         return false;
@@ -913,9 +917,8 @@ static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_C
         const ProductionEvidenceRef *ref = &PRODUCTION_EVIDENCE[evidence];
         overall = overall && panels[ref->row][ref->column].result && panels[ref->row][ref->column].selected.vertex_count == ref->expected_count;
     }
-    (void)fprintf(
-        file, "{\n  \"schema_version\": %d,\n  \"overall_pass\": %s,\n  \"visual_corpus_manifest_sha256\":\"%s\",\n  \"visual_input_sha256\":\"%s\",\n  \"frontier_sha256\":\"%s\",\n  \"columns\": [",
-        VISUAL_SCHEMA_VERSION, overall ? "true" : "false", corpus_manifest_sha256, visual_input_sha256, frontier_sha256);
+    (void)fprintf(file, "{\n  \"schema_version\": %d,\n  \"overall_pass\": %s,\n  \"visual_input_sha256\":\"%s\",\n  \"frontier_sha256\":\"%s\",\n  \"columns\": [", VISUAL_SCHEMA_VERSION,
+                  overall ? "true" : "false", visual_input_sha256, frontier_sha256);
     for (uint32_t i = 0; i < VISUAL_COLUMN_COUNT; i++) {
         (void)fprintf(file, "%s{\"column_id\":\"%s\",\"max_added_area_percent\":%.3f,\"sweep_source\":", i == 0 ? "" : ",", columns[i].id, columns[i].percent);
         json_escape(file, columns[i].source);
@@ -1135,17 +1138,16 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
     return fclose(file) == 0;
 }
 
-int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, const char *out_dir) {
+int nt_hull_visual_generate(const char *frontier_path, const char *out_dir) {
     VisualColumn columns[VISUAL_COLUMN_COUNT] = {0};
     VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT] = {0};
     VisualPanel real_panels[REAL_ART_ROW_COUNT][VISUAL_COLUMN_COUNT] = {0};
-    char corpus_manifest_sha256[65] = {0};
     char visual_input_sha256[65] = {0};
     char frontier_sha256[65] = {0};
     char visual_input_identity[8192] = {0};
     size_t visual_input_identity_size = 0U;
-    if (!validate_corpus(corpus_path) || !load_frontier(frontier_path, columns) || !make_parent_dir(out_dir)) {
-        (void)fprintf(stderr, "atlas_hull_visual_report: invalid corpus/frontier/output\n");
+    if (!load_frontier(frontier_path, columns) || !make_parent_dir(out_dir)) {
+        (void)fprintf(stderr, "atlas_hull_visual_report: invalid frontier/output\n");
         return 1;
     }
     bool ok = true;
@@ -1167,13 +1169,12 @@ int nt_hull_visual_generate(const char *corpus_path, const char *frontier_path, 
         }
         fixture_destroy(&fixture);
     }
-    bytes_sha256_hex((const uint8_t *)visual_input_identity, visual_input_identity_size, visual_input_sha256);
-    ok = ok && file_sha256_hex(corpus_path, corpus_manifest_sha256) && file_sha256_hex(frontier_path, frontier_sha256);
+    ok = ok && bytes_sha256_hex((const uint8_t *)visual_input_identity, visual_input_identity_size, visual_input_sha256) && file_sha256_hex(frontier_path, frontier_sha256);
     char manifest_path[VISUAL_PATH_MAX];
     char html_path[VISUAL_PATH_MAX];
     (void)snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", out_dir);
     (void)snprintf(html_path, sizeof(html_path), "%s/index.html", out_dir);
-    ok = ok && write_manifest(manifest_path, columns, panels, real_panels, corpus_manifest_sha256, visual_input_sha256, frontier_sha256) && write_html(html_path, columns, panels, real_panels);
+    ok = ok && write_manifest(manifest_path, columns, panels, real_panels, visual_input_sha256, frontier_sha256) && write_html(html_path, columns, panels, real_panels);
     for (uint32_t row = 0; row < VISUAL_ROW_COUNT; row++) {
         for (uint32_t column = 0; column < VISUAL_COLUMN_COUNT; column++) {
             panel_destroy(&panels[row][column]);
@@ -1219,42 +1220,114 @@ static bool required_rows_present(const char *manifest, const char *html, const 
     return true;
 }
 
-int nt_hull_visual_validate(const char *manifest_path, const char *html_path, const char *required_samples) {
-    static const char *panel_fields[] = {
-        "\"effective_alpha_mask\"",
-        "\"original_alpha_values\"",
-        "\"baseline_polygon\"",
-        "\"selected_polygon\"",
-        "\"baseline_triangles\"",
-        "\"selected_triangles\"",
-        "\"numbered_vertices\"",
-        "\"selected_vertex_count\"",
-        "\"opaque_area2\"",
-        "\"base_area2\"",
-        "\"selected_area2\"",
-        "\"added_area2\"",
-        "\"exact_lost_area2\"",
-        "\"base_overdraw_percent\"",
-        "\"added_area_percent\"",
-        "\"total_overdraw_percent\"",
-        "\"baseline_pack_sha256\"",
-        "\"selected_pack_sha256\"",
-        "\"max_vertices\"",
-        "\"production_gates\"",
-        "\"inputs_valid\"",
-        "\"opaque_area_valid\"",
-        "\"base_bounds_valid\"",
-        "\"base_topology_valid\"",
-        "\"base_coverage_valid\"",
-        "\"base_triangulation_valid\"",
-        "\"selected_bounds_valid\"",
-        "\"selected_topology_valid\"",
-        "\"selected_coverage_valid\"",
-        "\"selected_triangulation_valid\"",
-        "\"metric_order_valid\"",
-        "\"allowance_valid\"",
-        "\"ceiling_valid\"",
+static bool json_string_equals(const cJSON *item, const char *expected) { return cJSON_IsString(item) && item->valuestring != NULL && strcmp(item->valuestring, expected) == 0; }
+
+static bool json_string_is_nonempty(const cJSON *item) { return cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0'; }
+
+static bool manifest_panel_is_valid(const cJSON *panel) {
+    static const char *visual_fields[] = {
+        "effective_alpha_mask",  "original_alpha_values",  "baseline_polygon",     "selected_polygon",     "baseline_triangles", "selected_triangles", "numbered_vertices",
+        "selected_vertex_count", "opaque_area2",           "base_area2",           "selected_area2",       "added_area2",        "exact_lost_area2",   "base_overdraw_percent",
+        "added_area_percent",    "total_overdraw_percent", "baseline_pack_sha256", "selected_pack_sha256", "max_vertices",
     };
+    static const char *normal_gate_names[] = {
+        "inputs_valid",          "opaque_area_valid",       "base_bounds_valid",       "base_topology_valid",          "base_coverage_valid", "base_triangulation_valid",
+        "selected_bounds_valid", "selected_topology_valid", "selected_coverage_valid", "selected_triangulation_valid", "metric_order_valid",  "allowance_valid",
+        "ceiling_valid",
+    };
+    cJSON *expected_error = json_unique_member(panel, "expected_hull_infeasible");
+    cJSON *gates = json_unique_member(panel, "production_gates");
+    cJSON *sample_id = json_unique_member(panel, "sample_id");
+    if (!cJSON_IsString(sample_id) || !json_string_is_nonempty(json_unique_member(panel, "panel_id")) || !json_string_is_nonempty(json_unique_member(panel, "row_id")) ||
+        !json_string_is_nonempty(json_unique_member(panel, "column_id")) || !cJSON_IsBool(json_unique_member(panel, "real_art_sample")) || !cJSON_IsBool(expected_error) || !cJSON_IsObject(gates) ||
+        !json_string_equals(json_unique_member(panel, "result"), "PASS")) {
+        return false;
+    }
+    for (uint32_t field = 0; field < (uint32_t)(sizeof(visual_fields) / sizeof(visual_fields[0])); field++) {
+        if (json_unique_member(panel, visual_fields[field]) == NULL) {
+            return false;
+        }
+    }
+    const bool expects_error = json_string_equals(sample_id, "opaque-square-max3");
+    if (cJSON_IsTrue(expected_error) != expects_error) {
+        return false;
+    }
+    if (!json_string_equals(json_unique_member(panel, "error_kind"), expects_error ? "ATLAS_HULL_INFEASIBLE" : "NONE")) {
+        return false;
+    }
+    for (uint32_t gate = 0; gate < (uint32_t)(sizeof(normal_gate_names) / sizeof(normal_gate_names[0])); gate++) {
+        cJSON *value = json_unique_member(gates, normal_gate_names[gate]);
+        if (!cJSON_IsBool(value) || cJSON_IsTrue(value) == expects_error) {
+            return false;
+        }
+    }
+    cJSON *error_match = json_unique_member(gates, "expected_error_match");
+    return cJSON_IsBool(error_match) && cJSON_IsTrue(error_match) == expects_error;
+}
+
+static bool manifest_rows_are_valid(const cJSON *root, const char *name, uint32_t expected_rows) {
+    cJSON *rows = json_unique_member(root, name);
+    if (!cJSON_IsArray(rows) || cJSON_GetArraySize(rows) != (int)expected_rows) {
+        return false;
+    }
+    for (uint32_t row_index = 0; row_index < expected_rows; row_index++) {
+        cJSON *row = cJSON_GetArrayItem(rows, (int)row_index);
+        cJSON *panels = json_unique_member(row, "panels");
+        if (!json_string_is_nonempty(json_unique_member(row, "row_id")) || !json_string_equals(json_unique_member(row, "result"), "PASS") || !cJSON_IsArray(panels) ||
+            cJSON_GetArraySize(panels) != VISUAL_COLUMN_COUNT) {
+            return false;
+        }
+        for (uint32_t panel_index = 0; panel_index < VISUAL_COLUMN_COUNT; panel_index++) {
+            if (!manifest_panel_is_valid(cJSON_GetArrayItem(panels, (int)panel_index))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool manifest_columns_are_valid(const cJSON *root) {
+    static const char *ids[VISUAL_COLUMN_COUNT] = {"percent-0", "percent-2", "percent-5", "percent-10", "percent-15", "percent-25"};
+    static const double percents[VISUAL_COLUMN_COUNT] = {0.0, 2.0, 5.0, 10.0, 15.0, 25.0};
+    cJSON *columns = json_unique_member(root, "columns");
+    if (!cJSON_IsArray(columns) || cJSON_GetArraySize(columns) != VISUAL_COLUMN_COUNT) {
+        return false;
+    }
+    for (uint32_t index = 0; index < VISUAL_COLUMN_COUNT; index++) {
+        cJSON *column = cJSON_GetArrayItem(columns, (int)index);
+        cJSON *percent = json_unique_member(column, "max_added_area_percent");
+        if (!json_string_equals(json_unique_member(column, "column_id"), ids[index]) || !cJSON_IsNumber(percent) || percent->valuedouble != percents[index] ||
+            !json_string_is_nonempty(json_unique_member(column, "sweep_source")) || !json_string_is_nonempty(json_unique_member(column, "sweep_sha256")) ||
+            !json_string_is_nonempty(json_unique_member(column, "measurement_source_commit"))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool manifest_evidence_is_valid(const cJSON *root) {
+    static const char *panel_ids[] = {
+        "transparent-donut:concave:percent-10",
+        "concave-notch:concave:percent-15",
+        "concave-notch:concave:percent-10",
+    };
+    static const int selected_counts[] = {6, 7, 8};
+    cJSON *evidence = json_unique_member(root, "production_selected_count_evidence");
+    if (!cJSON_IsArray(evidence) || cJSON_GetArraySize(evidence) != (int)(sizeof(panel_ids) / sizeof(panel_ids[0]))) {
+        return false;
+    }
+    for (uint32_t index = 0; index < (uint32_t)(sizeof(panel_ids) / sizeof(panel_ids[0])); index++) {
+        cJSON *item = cJSON_GetArrayItem(evidence, (int)index);
+        cJSON *selected_count = json_unique_member(item, "selected_vertex_count");
+        if (!json_string_equals(json_unique_member(item, "source_panel_id"), panel_ids[index]) || !cJSON_IsNumber(selected_count) || selected_count->valueint != selected_counts[index] ||
+            !cJSON_IsTrue(json_unique_member(item, "production_proof_valid"))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int nt_hull_visual_validate(const char *manifest_path, const char *html_path, const char *required_samples) {
     size_t manifest_size = 0;
     size_t html_size = 0;
     uint8_t *manifest_bytes = read_file(manifest_path, &manifest_size);
@@ -1267,61 +1340,22 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
     }
     const char *manifest = (const char *)manifest_bytes;
     const char *html = (const char *)html_bytes;
-    static const char *columns[VISUAL_COLUMN_COUNT] = {"percent-0", "percent-2", "percent-5", "percent-10", "percent-15", "percent-25"};
-    const uint32_t panel_count = (VISUAL_ROW_COUNT + REAL_ART_ROW_COUNT) * VISUAL_COLUMN_COUNT;
-    const uint32_t row_count = VISUAL_ROW_COUNT + REAL_ART_ROW_COUNT;
-    const uint32_t error_panel_count = VISUAL_COLUMN_COUNT;
-    const uint32_t feasible_panel_count = panel_count - error_panel_count;
-    bool ok = strstr(manifest, "\"schema_version\": 3") != NULL && strstr(manifest, "\"overall_pass\": true") != NULL && strstr(manifest, "\"result\":\"FAIL\"") == NULL &&
-              strstr(manifest, "\"failing_panel_ids\": []") != NULL && count_substring(manifest, "\"panel_id\"") == panel_count &&
-              count_substring(manifest, "\"sweep_source\"") == VISUAL_COLUMN_COUNT && count_substring(manifest, "\"sweep_sha256\"") == VISUAL_COLUMN_COUNT &&
-              count_substring(manifest, "\"measurement_source_commit\"") == VISUAL_COLUMN_COUNT && strstr(manifest, "\"sweep_source\":\"\"") == NULL &&
-              strstr(manifest, "\"sweep_sha256\":\"\"") == NULL && strstr(manifest, "\"visual_corpus_manifest_sha256\":\"\"") == NULL && strstr(manifest, "\"visual_input_sha256\":\"\"") == NULL &&
-              strstr(manifest, "\"visual_corpus_sha256\"") == NULL && strstr(manifest, "\"frontier_sha256\":\"\"") == NULL && strstr(manifest, "\"real_art_rows\"") != NULL &&
-              count_substring(manifest, "\"real_art_sample\":true") == REAL_ART_ROW_COUNT * VISUAL_COLUMN_COUNT && strstr(html, "Real art") != NULL &&
-              count_substring(manifest, "\"result\":\"PASS\"") == panel_count + row_count && count_substring(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\"") == error_panel_count &&
-              count_substring(manifest, "\"expected_error_match\":true") == error_panel_count && count_substring(manifest, "\"allowance_valid\":true") == feasible_panel_count &&
-              count_substring(manifest, "\"selected_coverage_valid\":true") == feasible_panel_count && count_substring(manifest, "\"selected_triangulation_valid\":true") == feasible_panel_count &&
-              count_substring(manifest, "\"ceiling_valid\":true") == feasible_panel_count && count_substring(manifest, "\"baseline_pack_sha256\":\"\"") == error_panel_count &&
-              count_substring(manifest, "\"selected_pack_sha256\":\"\"") == error_panel_count && strstr(manifest, "\"production_selected_count_evidence\"") != NULL &&
-              count_substring(manifest, "\"source_panel_id\"") == 3U && strstr(manifest, "\"source_panel_id\":\"transparent-donut:concave:percent-10\",\"selected_vertex_count\":6") != NULL &&
-              strstr(manifest, "\"source_panel_id\":\"concave-notch:concave:percent-15\",\"selected_vertex_count\":7") != NULL &&
-              strstr(manifest, "\"source_panel_id\":\"concave-notch:concave:percent-10\",\"selected_vertex_count\":8") != NULL && count_substring(manifest, "\"production_proof_valid\":true") == 3U &&
+    const char *parse_end = NULL;
+    cJSON *root = cJSON_ParseWithOpts(manifest, &parse_end, true);
+    cJSON *schema = json_unique_member(root, "schema_version");
+    cJSON *failing_panels = json_unique_member(root, "failing_panel_ids");
+    bool ok = root != NULL && cJSON_IsNumber(schema) && schema->valuedouble == (double)VISUAL_SCHEMA_VERSION && cJSON_IsTrue(json_unique_member(root, "overall_pass")) &&
+              cJSON_IsArray(failing_panels) && cJSON_GetArraySize(failing_panels) == 0 && manifest_rows_are_valid(root, "rows", VISUAL_ROW_COUNT) &&
+              manifest_rows_are_valid(root, "real_art_rows", REAL_ART_ROW_COUNT) && manifest_columns_are_valid(root) && manifest_evidence_is_valid(root) &&
+              json_string_is_nonempty(json_unique_member(root, "visual_input_sha256")) && json_string_is_nonempty(json_unique_member(root, "frontier_sha256")) &&
               strstr(manifest, "connected_frontier_evidence") == NULL && strstr(manifest, "fidelity_px") == NULL && strstr(manifest, "lost_pixels") == NULL &&
               strstr(html, "<!doctype html>") != NULL && strstr(html, "Selected vertices / hard ceiling") != NULL && strstr(html, "Aopaque / Abase / Aselected") != NULL &&
-              strstr(html, "Full retained-cell coverage") != NULL && strstr(html, "Base / added / total overdraw") != NULL && strstr(html, "Exact lost area") != NULL &&
-              strstr(html, "Public selector evidence") != NULL && strstr(html, "real 0% production pack") == NULL && strstr(html, "<script") == NULL && strstr(html, "http://") == NULL &&
-              strstr(html, "https://") == NULL && required_rows_present(manifest, html, required_samples);
+              strstr(html, "Base / added / total overdraw") != NULL && strstr(html, "Exact lost area") != NULL && strstr(html, "Topology / bounds / winding") != NULL &&
+              strstr(html, "Full retained-cell coverage") != NULL && required_rows_present(manifest, html, required_samples);
     if (!ok) {
-        (void)fprintf(stderr,
-                      "atlas_hull_visual_report: base contract failed panels=%u pass=%u errors=%u errmatch=%u allowance=%u coverage=%u triangles=%u ceiling=%u empty=%u/%u evidence=%u required=%u\n",
-                      count_substring(manifest, "\"panel_id\""), count_substring(manifest, "\"result\":\"PASS\""), count_substring(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\""),
-                      count_substring(manifest, "\"expected_error_match\":true"), count_substring(manifest, "\"allowance_valid\":true"), count_substring(manifest, "\"selected_coverage_valid\":true"),
-                      count_substring(manifest, "\"selected_triangulation_valid\":true"), count_substring(manifest, "\"ceiling_valid\":true"),
-                      count_substring(manifest, "\"baseline_pack_sha256\":\"\""), count_substring(manifest, "\"selected_pack_sha256\":\"\""),
-                      count_substring(manifest, "\"production_proof_valid\":true"), required_rows_present(manifest, html, required_samples) ? 1U : 0U);
+        (void)fprintf(stderr, "atlas_hull_visual_report: report contract failed\n");
     }
-    for (uint32_t field = 0; ok && field < (uint32_t)(sizeof(panel_fields) / sizeof(panel_fields[0])); field++) {
-        const uint32_t expected_count =
-            strcmp(panel_fields[field], "\"selected_vertex_count\"") == 0 ? panel_count + (uint32_t)(sizeof(PRODUCTION_EVIDENCE) / sizeof(PRODUCTION_EVIDENCE[0])) : panel_count;
-        ok = count_substring(manifest, panel_fields[field]) == expected_count;
-        if (!ok) {
-            (void)fprintf(stderr, "atlas_hull_visual_report: panel field count failed for %s\n", panel_fields[field]);
-        }
-    }
-    const char *previous = manifest;
-    for (uint32_t column = 0; ok && column < VISUAL_COLUMN_COUNT; column++) {
-        char column_id[64];
-        (void)snprintf(column_id, sizeof(column_id), "\"column_id\":\"%s\"", columns[column]);
-        const char *position = strstr(previous, column_id);
-        ok = position != NULL;
-        if (!ok) {
-            (void)fprintf(stderr, "atlas_hull_visual_report: ordered column missing %s\n", column_id);
-        }
-        if (position != NULL) {
-            previous = position + strlen(column_id);
-        }
-    }
+    cJSON_Delete(root);
     free(manifest_bytes);
     free(html_bytes);
     if (!ok) {

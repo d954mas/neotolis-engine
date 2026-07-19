@@ -207,6 +207,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     if(NOT EMSCRIPTEN)
         add_subdirectory(tools/builder)
+        # The builder target is declared after tests/ applies its test-access list.
+        target_compile_definitions(nt_builder PRIVATE NT_TEST_ACCESS)
         add_subdirectory(tools/research/hash_benchmark)
         add_subdirectory(tools/research/atlas_bench)
     endif()

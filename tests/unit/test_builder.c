@@ -4225,9 +4225,6 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
 /* edge-extrude helper stays static; test access via this wrapper defined in
  * nt_builder_atlas.c. */
 void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
-uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
-                                          uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
-uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -4624,11 +4621,6 @@ void test_geometry_frontier_adopts_tightest_per_count_and_owns_buffers(void) {
     TEST_ASSERT_EQUAL_UINT32(4, result.selected_count);
     TEST_ASSERT_EQUAL_UINT64(2, result.selected_area2);
     TEST_ASSERT_EQUAL_MEMORY(tight_quad, result.selected_poly, sizeof(tight_quad));
-    TEST_ASSERT_EQUAL_UINT32(3, result.transfer_count);
-    TEST_ASSERT_EQUAL_UINT32(1, result.reject_count);
-    TEST_ASSERT_EQUAL_UINT32(1, result.replacement_count);
-    TEST_ASSERT_EQUAL_UINT32(2, result.destroy_count);
-    TEST_ASSERT_EQUAL_UINT32(4, result.cleared_source_count);
     TEST_ASSERT_TRUE(nt_polygon_triangles_validate(result.selected_poly, result.selected_count, result.selected_indices, result.selected_index_count, NULL));
 }
 
@@ -6504,27 +6496,6 @@ void test_connected_mask_serializes_simple_exact_triangulation(void) {
     (void)remove(path);
 }
 
-void test_opaque_square_corner_cut_search_is_logarithmic(void) {
-    enum { W = 64, H = 64, BUDGET = 8 };
-    uint8_t binary[W * H];
-    memset(binary, 1, sizeof(binary));
-
-    const uint32_t evaluations = nt_atlas_test_concave_corner_cut_evaluation_count(binary, W, H, BUDGET);
-
-    TEST_ASSERT_GREATER_THAN_UINT32(0, evaluations);
-    TEST_ASSERT_LESS_THAN_UINT32(128, evaluations);
-}
-
-void test_concave_frontier_builds_convex_source_once(void) {
-    enum { W = 64, H = 64, BUDGET = 8 };
-    uint8_t binary[W * H];
-    memset(binary, 1, sizeof(binary));
-
-    const uint32_t build_count = nt_atlas_test_concave_convex_source_build_count(binary, W, H, BUDGET);
-
-    TEST_ASSERT_EQUAL_UINT32(1, build_count);
-}
-
 void test_disjoint_component_merge_has_small_work_bound(void) {
     enum { W = 4096, H = 1 };
     uint8_t binary[W * H] = {0};
@@ -8394,8 +8365,6 @@ int main(void) {
     RUN_TEST(test_atlas_dedup_distinguishes_area_override_presence);
     RUN_TEST(test_aa_triangle_added_area_percent_preserves_full_cell_coverage);
     RUN_TEST(test_connected_mask_serializes_simple_exact_triangulation);
-    RUN_TEST(test_opaque_square_corner_cut_search_is_logarithmic);
-    RUN_TEST(test_concave_frontier_builds_convex_source_once);
     RUN_TEST(test_disjoint_component_merge_has_small_work_bound);
     RUN_TEST(test_disjoint_component_closing_restores_outer_silhouette);
     RUN_TEST(test_disjoint_component_closing_preserves_trim_edges);

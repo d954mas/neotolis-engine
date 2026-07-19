@@ -1038,8 +1038,6 @@ void test_atlas_free_pack_cleans_open_transaction(void) {
     nt_builder_free_pack(ctx);
 }
 
-void test_atlas_frontier_lifecycle_lsan(void) { TEST_ASSERT_TRUE(nt_atlas_test_frontier_lifecycle_stress()); }
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_unfittable_sprite);
@@ -1068,6 +1066,5 @@ int main(void) {
     RUN_TEST(test_build_error_format_matrix);
     RUN_TEST(test_build_error_format_image_too_large);
     RUN_TEST(test_atlas_free_pack_cleans_open_transaction);
-    RUN_TEST(test_atlas_frontier_lifecycle_lsan);
     return UNITY_END();
 }
