@@ -1676,6 +1676,11 @@ bool nt_atlas_test_frontier_evaluate(const Point2D *const *polygons, const uint3
     if (selected_count != UINT32_MAX) {
         const GeometryCandidate *selected = &frontier.slots[selected_count];
         NT_BUILD_ASSERT(base >= frontier.opaque_area2 && selected->exact_abs_twice_area >= base);
+        if (!selected->poly || !selected->triangle_indices) {
+            NT_BUILD_ASSERT(false && "selected frontier storage missing");
+            geometry_frontier_destroy(&frontier);
+            return false;
+        }
         out_result->selected_count = selected_count;
         out_result->selected_index_count = selected->triangle_index_count;
         out_result->selected_area2 = selected->exact_abs_twice_area;
