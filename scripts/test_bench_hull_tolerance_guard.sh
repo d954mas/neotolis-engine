@@ -185,7 +185,7 @@ if [[ -e "$OUT_ALIAS" ]]; then
 fi
 rm -f "$GUARD_LOG"
 
-BENCH_EXE="build/tools/research/native-debug/atlas_bench"
+BENCH_EXE="${NT_ATLAS_BENCH_EXE:-build/tools/research/native-debug/atlas_bench}"
 if [[ -x "${BENCH_EXE}.exe" ]]; then
     BENCH_EXE="${BENCH_EXE}.exe"
 elif [[ ! -x "$BENCH_EXE" ]]; then

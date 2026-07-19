@@ -798,6 +798,9 @@ if(NOT EMSCRIPTEN)
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
+        set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
+            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
+        )
     else()
         message(STATUS "bash not found; skipping CTest registration for test_bench_hull_tolerance_guard")
     endif()
