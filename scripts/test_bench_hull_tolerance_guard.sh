@@ -21,6 +21,14 @@ if ! hull_status_is_clean "" || hull_status_is_clean $' M tools/builder/nt_build
     echo "dirty-tree publication status was classified incorrectly" >&2
     exit 1
 fi
+if ! hull_publish_txn_path_is_safe "build/tests/tmp/hull-safe-transaction" "$PLATFORM"; then
+    echo "safe publication transaction path was rejected" >&2
+    exit 1
+fi
+if hull_publish_txn_path_is_safe "." "$PLATFORM" || hull_publish_txn_path_is_safe "build" "$PLATFORM" || hull_publish_txn_path_is_safe "../outside-build" "$PLATFORM"; then
+    echo "unsafe publication transaction path was accepted" >&2
+    exit 1
+fi
 
 PORTABLE_SOURCE="build/tests/tmp/hull-area-portable-source-${$}.json"
 PORTABLE_PROOF="build/tests/tmp/hull-area-portable-proof-${$}.json"
@@ -193,11 +201,18 @@ elif [[ ! -x "$BENCH_EXE" ]]; then
     exit 1
 fi
 for invalid in -1 nan inf 1px ''; do
-    if "$BENCH_EXE" "build/bench/hull-area-invalid-${$}.json" 'missing/*.png' guard concave 64 1 --max-added-area-percent "$invalid" >/dev/null 2>&1; then
+    INVALID_LOG="build/tests/tmp/hull-area-invalid-${$}.log"
+    if "$BENCH_EXE" "build/bench/hull-area-invalid-${$}.json" 'assets/bench/rect_only/rect_00.png' guard concave 64 1 --max-added-area-percent "$invalid" >"$INVALID_LOG" 2>&1; then
         echo "invalid area percentage was accepted: '${invalid}'" >&2
         exit 1
     fi
+    if ! grep -q "atlas_bench: bad argument near" "$INVALID_LOG"; then
+        echo "invalid area percentage failed for the wrong reason: '${invalid}'" >&2
+        cat "$INVALID_LOG" >&2
+        exit 1
+    fi
 done
+rm -f "$INVALID_LOG"
 if [[ -e "build/bench/hull-area-invalid-${$}.json" || -e "build/bench/hull-area-invalid-${$}.json.ntpack" ]]; then
     echo "invalid CLI input wrote evidence" >&2
     exit 1

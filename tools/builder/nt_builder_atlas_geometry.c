@@ -605,7 +605,7 @@ uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out) {
     return k;
 }
 /* --- Convex hull simplification: min-area vertex removal --- */
-/* Iteratively remove the vertex with the smallest adjacent triangle area. */
+/* Strict comparison preserves the earliest vertex on equal-area ties. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
@@ -979,11 +979,7 @@ uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
 }
 /* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
 
-/* Triangulates a simple polygon (convex or concave). Uses Clipper2 CDT
- * and publishes only a fully validated result.
- * Input:  polygon vertices (CCW winding), vertex count n.
- * Output: triangle indices (local 0..n-1) written to 'indices'.
- * Returns number of triangles. */
+/* Validated CDT prevents malformed triangle lists from reaching serialization. */
 uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices) {
     uint32_t index_count = 0;
     return nt_polygon_triangulate_validated(poly, n, indices, &index_count, NULL) ? index_count / 3U : 0U;
@@ -1053,7 +1049,6 @@ static double polygon_point_edge_distance_sq(const Point2D *poly, uint32_t poly_
     return min_d_sq;
 }
 
-/* Distance from point (cx,cy) to the nearest polygon edge. */
 static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) { return sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy)); }
 
 nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
@@ -1320,6 +1315,19 @@ void binary_dilate_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t 
             uint8_t up = (y > 0) ? in[i - tw] : 0;
             uint8_t down = (y + 1 < th) ? in[i + tw] : 0;
             out[i] = (v | left | right | up | down) ? (uint8_t)1 : (uint8_t)0;
+        }
+    }
+}
+
+void binary_erode_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t th) {
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            size_t i = ((size_t)y * tw) + x;
+            uint8_t left = (x > 0) ? in[i - 1] : 0;
+            uint8_t right = (x + 1 < tw) ? in[i + 1] : 0;
+            uint8_t up = (y > 0) ? in[i - tw] : 0;
+            uint8_t down = (y + 1 < th) ? in[i + tw] : 0;
+            out[i] = (in[i] && left && right && up && down) ? (uint8_t)1 : (uint8_t)0;
         }
     }
 }

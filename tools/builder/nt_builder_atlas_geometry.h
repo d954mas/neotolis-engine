@@ -34,7 +34,7 @@ bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t threshold,
 /* Andrew's monotone chain convex hull. out must hold at least 2*n points. */
 uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out);
 
-/* Min-area vertex removal simplification of a convex polygon. */
+/* May cut inside the source hull; use hull_simplify_covering when enclosure is required. */
 uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out);
 
 /* Reduce a CCW convex polygon while keeping every prior point enclosed.
@@ -179,7 +179,6 @@ double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_cou
 /* Polygon area in pixels (absolute value). */
 uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count);
 
-/* Exact absolute doubled polygon area. */
 uint64_t polygon_abs_twice_area(const Point2D *poly, uint32_t count);
 
 /* --- Polygon inflation (Clipper2) ------------------------------------ */
@@ -211,6 +210,9 @@ void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw
 
 /* 4-connected dilation by one pixel. in and out must be distinct. */
 void binary_dilate_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t th);
+
+/* 4-connected erosion by one pixel. in and out must be distinct. */
+void binary_erode_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t th);
 
 /* Count 4-connected opaque components. Caller provides scratch buffers:
  *   visited[tw*th]

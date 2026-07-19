@@ -33,11 +33,25 @@ bool atlas_bench_parse_max_size(const char *text, uint32_t *out_value) {
     return true;
 }
 
+bool atlas_bench_derive_pack_paths(const char *out_json, char *selected, size_t selected_size, char *baseline, size_t baseline_size) {
+    if (out_json == NULL || selected == NULL || selected_size == 0U || baseline == NULL || baseline_size == 0U) {
+        return false;
+    }
+    const int selected_length = snprintf(selected, selected_size, "%s.ntpack", out_json);
+    const int baseline_length = snprintf(baseline, baseline_size, "%s.baseline.ntpack", out_json);
+    if (selected_length < 0 || (size_t)selected_length >= selected_size || baseline_length < 0 || (size_t)baseline_length >= baseline_size) {
+        selected[0] = '\0';
+        baseline[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
 static void remove_temporary_pack(const char *path) {
     char header[1024];
-    (void)snprintf(header, sizeof(header), "%s", path);
-    char *extension = strstr(header, ".ntpack");
-    if (extension != NULL && extension[7] == '\0') {
+    const int path_length = snprintf(header, sizeof(header), "%s", path);
+    char *extension = strrchr(header, '.');
+    if (path_length >= 0 && (size_t)path_length < sizeof(header) && extension != NULL && strcmp(extension, ".ntpack") == 0) {
         (void)snprintf(extension, 8U, ".h");
         (void)remove(header);
     }

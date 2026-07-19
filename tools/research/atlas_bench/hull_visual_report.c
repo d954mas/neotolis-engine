@@ -367,6 +367,12 @@ static bool number_value(const char *object, const char *key, double *out) {
     return end != start && isfinite(*out);
 }
 
+static bool selected_geometry_proof_is_valid(const char *sweep) {
+    const char *proof = strstr(sweep, "\"selected_geometry_proof\"");
+    return proof != NULL && strstr(proof, "\"valid\": true") != NULL &&
+           strstr(proof, "\"gates\": {\"full_cell_coverage\":true,\"topology\":true,\"triangulation\":true,\"allowance\":true,\"ceiling\":true}") != NULL;
+}
+
 static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_COUNT]) {
     static const uint32_t expected[VISUAL_COLUMN_COUNT] = {0, 2, 5, 10, 15, 25};
     size_t size = 0;
@@ -404,8 +410,7 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
         size_t sweep_size = 0;
         uint8_t *sweep = read_file(columns[i].source, &sweep_size);
         double measured = -1.0;
-        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep != NULL && strstr((const char *)sweep, "\"selected_geometry_proof\"") != NULL &&
-             strstr((const char *)sweep, "\"valid\": true") != NULL && strstr((const char *)sweep, "\"full_cell_coverage\":true") != NULL &&
+        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep != NULL && selected_geometry_proof_is_valid((const char *)sweep) &&
              number_value((const char *)sweep, "max_added_area_percent", &measured) && fabs(measured - percent) < 0.0001;
         free(sweep);
         cursor = object + strlen("\"max_added_area_percent\":");
@@ -624,13 +629,31 @@ typedef struct {
 
 static void panel_remove_pack(const char *path) {
     char header[VISUAL_PATH_MAX];
-    (void)snprintf(header, sizeof(header), "%s", path);
-    char *extension = strstr(header, ".ntpack");
-    if (extension != NULL && extension[7] == '\0') {
+    const int path_length = snprintf(header, sizeof(header), "%s", path);
+    char *extension = strrchr(header, '.');
+    if (path_length >= 0 && (size_t)path_length < sizeof(header) && extension != NULL && strcmp(extension, ".ntpack") == 0) {
         (void)snprintf(extension, 8U, ".h");
         (void)remove(header);
     }
     (void)remove(path);
+}
+
+static bool panel_pack_paths(const char *out_dir, uint32_t ordinal, char *baseline, size_t baseline_size, char *selected, size_t selected_size) {
+    if (out_dir == NULL || baseline == NULL || baseline_size == 0U || selected == NULL || selected_size == 0U) {
+        return false;
+    }
+    const int baseline_length = snprintf(baseline, baseline_size, "%s/panel-%02u-base.ntpack", out_dir, ordinal);
+    const int selected_length = snprintf(selected, selected_size, "%s/panel-%02u-selected.ntpack", out_dir, ordinal);
+    if (baseline_length < 0 || (size_t)baseline_length >= baseline_size || selected_length < 0 || (size_t)selected_length >= selected_size) {
+        baseline[0] = '\0';
+        selected[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
+bool nt_hull_visual_test_panel_pack_paths(const char *out_dir, uint32_t ordinal, char *baseline, size_t baseline_size, char *selected, size_t selected_size) {
+    return panel_pack_paths(out_dir, ordinal, baseline, baseline_size, selected, selected_size);
 }
 
 static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixture *fixture, const char *path, float percent, uint8_t max_vertices) {
@@ -700,8 +723,9 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
 
     char base_path[VISUAL_PATH_MAX];
     char pack_path[VISUAL_PATH_MAX];
-    (void)snprintf(base_path, sizeof(base_path), "%s/panel-%02u-base.ntpack", out_dir, ordinal);
-    (void)snprintf(pack_path, sizeof(pack_path), "%s/panel-%02u-selected.ntpack", out_dir, ordinal);
+    if (!panel_pack_paths(out_dir, ordinal, base_path, sizeof(base_path), pack_path, sizeof(pack_path))) {
+        return false;
+    }
     panel_remove_pack(base_path);
     panel_remove_pack(pack_path);
     const PanelPackResult baseline_pack = panel_write_pack(row, fixture, base_path, 0.0F, row->budget);

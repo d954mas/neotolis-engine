@@ -310,6 +310,40 @@ static void selected_geometry_rejects_corrupt_index_window(void) {
     (void)remove(path);
 }
 
+static void selected_geometry_rejects_overlapping_sections(void) {
+    const char *path = "test_atlas_bench_selected_overlap.ntpack";
+    uint8_t blob[512];
+    const NtAtlasVertex vertices[3] = {0};
+    const uint16_t indices[3] = {0, 1, 2};
+    NtAtlasRegion region = {.vertex_count = 3, .index_count = 3};
+    const mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = vertices,
+        .total_vertex_count = 3,
+        .indices = indices,
+        .total_index_count = 3,
+    };
+    const uint32_t size = build_mock_atlas_blob(blob, sizeof(blob), &spec);
+    NtAtlasHeader *atlas = (NtAtlasHeader *)blob;
+    atlas->index_offset = atlas->vertex_offset;
+    NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
+    header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
+    header.total_size = header.header_size + size;
+    NtAssetEntry entry = {.offset = header.header_size, .size = size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
+    TEST_ASSERT_EQUAL_size_t(sizeof(entry), fwrite(&entry, 1, sizeof(entry), file));
+    TEST_ASSERT_EQUAL_size_t(size, fwrite(blob, 1, size, file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    nt_bench_selected_geometry_t geometry = {0};
+    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, &geometry) < 0);
+    TEST_ASSERT_NULL(geometry.polygon);
+    TEST_ASSERT_NULL(geometry.triangle_indices);
+    (void)remove(path);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(region_and_vertex_counts);
@@ -320,5 +354,6 @@ int main(void) {
     RUN_TEST(reject_missing_page_texture);
     RUN_TEST(selected_geometry_is_owned_and_y_down);
     RUN_TEST(selected_geometry_rejects_corrupt_index_window);
+    RUN_TEST(selected_geometry_rejects_overlapping_sections);
     return UNITY_END();
 }

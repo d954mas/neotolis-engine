@@ -233,8 +233,10 @@ int main(int argc, char *argv[]) {
     /* The 0% pack is the authoritative baseline; the requested pack differs only by percent. */
     char pack_path[1024];
     char baseline_pack_path[1024];
-    (void)snprintf(pack_path, sizeof(pack_path), "%s.ntpack", out_json);
-    (void)snprintf(baseline_pack_path, sizeof(baseline_pack_path), "%s.baseline.ntpack", out_json);
+    if (!atlas_bench_derive_pack_paths(out_json, pack_path, sizeof(pack_path), baseline_pack_path, sizeof(baseline_pack_path))) {
+        (void)fprintf(stderr, "atlas_bench: output path is too long\n");
+        return 1;
+    }
     bench_pack_result_t baseline_run = {0};
     bench_pack_result_t selected_run = {0};
     nt_bench_atlas_metrics_t m = {0};

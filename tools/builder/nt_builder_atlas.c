@@ -1307,10 +1307,7 @@ static void pipeline_dedup(AtlasPipeline *p) {
     }
 }
 
-/* --- pipeline_geometry: bounded candidate sources --------------------------
- *
- * Each source owns its candidate until the exact frontier adopts or rejects it.
- * Only the frontier may select geometry for the pipeline. */
+/* Candidate ownership transfers only through the frontier. */
 
 typedef struct {
     Point2D *poly; /* heap-allocated, caller frees if not adopted */
@@ -1320,8 +1317,8 @@ typedef struct {
     double inflate_amt; /* required Clipper2 inflate amount (pixels) */
     uint32_t generator_ordinal;
     uint64_t exact_abs_twice_area;
-    double est_area; /* scoring key — lower is better */
-    bool valid;      /* false = strategy declined / produced degenerate output */
+    double est_area;
+    bool valid; /* false = strategy declined / produced degenerate output */
 } GeometryCandidate;
 
 static double geometry_estimate_inflated_area(const Point2D *poly, uint32_t count, double inflate_amt) {
@@ -2362,7 +2359,11 @@ static void pipeline_push_hull_infeasible(AtlasPipeline *p, uint32_t idx) {
 static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, GeometrySelection *selection) {
     if (!selection->valid) {
         geometry_selection_discard(selection);
-        pipeline_push_hull_infeasible(p, idx);
+        /* Any int16-local overflow is necessarily larger than the maximum page;
+         * pipeline_validate reports the actionable UNFITTABLE error. */
+        if (p->trim_w[idx] <= INT16_MAX && p->trim_h[idx] <= INT16_MAX) {
+            pipeline_push_hull_infeasible(p, idx);
+        }
         return false;
     }
     NT_BUILD_ASSERT(selection->proof.valid && "pipeline geometry selection proof missing");
@@ -2386,25 +2387,49 @@ static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx);
 
 static bool geometry_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
-    uint8_t *visited = (uint8_t *)calloc((size_t)width * height, 1);
-    int32_t *stack = (int32_t *)malloc((size_t)width * height * 2U * sizeof(int32_t));
-    NT_BUILD_ASSERT(visited && stack && "component merge scratch alloc failed");
-    uint32_t component_count = binary_count_components(binary, width, height, visited, stack);
+    enum { MAX_PASS_COUNT = 8U };
+    const uint32_t padded_width = width + (MAX_PASS_COUNT * 2U);
+    const uint32_t padded_height = height + (MAX_PASS_COUNT * 2U);
+    const size_t padded_size = (size_t)padded_width * padded_height;
+    uint8_t *padded = (uint8_t *)calloc(padded_size, 1);
+    uint8_t *scratch = (uint8_t *)calloc(padded_size, 1);
+    uint8_t *visited = (uint8_t *)calloc(padded_size, 1);
+    int32_t *stack = (int32_t *)malloc(padded_size * 2U * sizeof(int32_t));
+    NT_BUILD_ASSERT(padded && scratch && visited && stack && "component closing scratch alloc failed");
+    for (uint32_t y = 0; y < height; y++) {
+        memcpy(padded + ((size_t)(y + MAX_PASS_COUNT) * padded_width) + MAX_PASS_COUNT, binary + ((size_t)y * width), width);
+    }
+
+    uint32_t component_count = binary_count_components(padded, padded_width, padded_height, visited, stack);
     uint32_t pass_count = 0U;
-    if (component_count > 1U) {
-        uint8_t *scratch = (uint8_t *)malloc((size_t)width * height);
-        NT_BUILD_ASSERT(scratch && "component merge mask alloc failed");
-        const uint32_t max_pass_count = 8U;
-        while (component_count > 1U && pass_count < max_pass_count) {
-            binary_dilate_4conn(binary, scratch, width, height);
-            memcpy(binary, scratch, (size_t)width * height);
-            pass_count++;
-            component_count = binary_count_components(binary, width, height, visited, stack);
+    uint8_t *current = padded;
+    uint8_t *next = scratch;
+    while (component_count > 1U && pass_count < MAX_PASS_COUNT) {
+        binary_dilate_4conn(current, next, padded_width, padded_height);
+        uint8_t *swap = current;
+        current = next;
+        next = swap;
+        pass_count++;
+        component_count = binary_count_components(current, padded_width, padded_height, visited, stack);
+    }
+    if (component_count <= 1U) {
+        for (uint32_t pass = 0; pass < pass_count; pass++) {
+            binary_erode_4conn(current, next, padded_width, padded_height);
+            uint8_t *swap = current;
+            current = next;
+            next = swap;
         }
-        free(scratch);
+        component_count = binary_count_components(current, padded_width, padded_height, visited, stack);
+        if (component_count <= 1U) {
+            for (uint32_t y = 0; y < height; y++) {
+                memcpy(binary + ((size_t)y * width), current + ((size_t)(y + MAX_PASS_COUNT) * padded_width) + MAX_PASS_COUNT, width);
+            }
+        }
     }
     free(stack);
     free(visited);
+    free(scratch);
+    free(padded);
     if (out_pass_count) {
         *out_pass_count = pass_count;
     }
@@ -2481,9 +2506,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
 
             // #region Morphological closing — merge disjoint components into one
-            /* Nearby components share one contour; distant components use the fallback.
-             * The resulting polygon will be K pixels wider on every side (acceptable —
-             * acts like extra padding). Limit K to avoid pathological cases. */
+            /* Padding avoids trim-edge clipping; components still split after closing use the convex fallback. */
             uint8_t *binary_source = (uint8_t *)malloc((size_t)tw * th);
             NT_BUILD_ASSERT(binary_source && "pipeline_geometry: alloc failed");
             memcpy(binary_source, binary, (size_t)tw * th);
@@ -2508,8 +2531,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 bool contour_overflow = false;
                 uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour, &contour_overflow);
                 if (contour_overflow) {
-                    /* Vertex-budget overflow is a content error; it cannot bypass
-                     * the hard ceiling through another source. */
+                    /* Contour-capacity overflow is a content error, not a fallback candidate. */
                     free(contour);
                     free(binary_source);
                     free(binary);
@@ -2600,7 +2622,7 @@ static void atlas_fit_hull(const AtlasPipeline *p, uint32_t oi, Point2D quad[4],
     uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
     uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
     uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
-    if (extra_margin > 0 || extra_extrude > 0) {
+    if (extra_margin > 0 || extra_extrude > 0 || p->hull_vertices[oi] == NULL) {
         uint32_t tw = p->trim_w[oi] + ((extra_margin + extra_extrude) * 2);
         uint32_t th = p->trim_h[oi] + ((extra_margin + extra_extrude) * 2);
         quad[0] = (Point2D){0, 0};
@@ -2650,10 +2672,6 @@ static void pipeline_validate(AtlasPipeline *p) {
         /* A sprite that failed alpha_trim has no hull (already reported); skip it
          * so the fit test never dereferences a NULL/degenerate hull. */
         if (p->trim_w[oi] == 0 || p->trim_h[oi] == 0) {
-            continue;
-        }
-        /* Geometry failures have no hull and already carry their own error. */
-        if (p->hull_vertices[oi] == NULL) {
             continue;
         }
         Point2D quad[4];

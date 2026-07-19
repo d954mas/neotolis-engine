@@ -474,8 +474,8 @@ int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_inde
     const uint64_t regions_end = regions_offset + ((uint64_t)atlas->region_count * sizeof(NtAtlasRegion));
     const uint64_t vertices_end = (uint64_t)atlas->vertex_offset + ((uint64_t)atlas->total_vertex_count * sizeof(NtAtlasVertex));
     const uint64_t indices_end = (uint64_t)atlas->index_offset + ((uint64_t)atlas->total_index_count * sizeof(uint16_t));
-    if (atlas->magic != NT_ATLAS_MAGIC || atlas->version != NT_ATLAS_VERSION || region_index >= atlas->region_count || regions_end > atlas_entry->size || vertices_end > atlas_entry->size ||
-        indices_end > atlas_entry->size) {
+    if (atlas->magic != NT_ATLAS_MAGIC || atlas->version != NT_ATLAS_VERSION || region_index >= atlas->region_count || regions_end > atlas_entry->size || atlas->vertex_offset < regions_end ||
+        vertices_end > atlas_entry->size || atlas->index_offset < vertices_end || indices_end > atlas_entry->size) {
         free(bytes);
         return -7;
     }

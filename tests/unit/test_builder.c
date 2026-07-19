@@ -4856,6 +4856,35 @@ void test_convex_budget_three_is_graceful_hull_infeasible(void) {
     TEST_ASSERT_NULL(published);
 }
 
+void test_oversized_trim_reports_unfittable_before_hull_selection(void) {
+    enum { W = 32768, H = 1 };
+    const char *path = TMP_DIR "/oversized_trim_unfittable.ntpack";
+    (void)remove(path);
+    uint8_t *rgba = (uint8_t *)malloc((size_t)W * H * 4U);
+    TEST_ASSERT_NOT_NULL(rgba);
+    memset(rgba, 255, (size_t)W * H * 4U);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "oversized_trim", &opts);
+    nt_atlas_add_raw(atlas, rgba, W, H, &(nt_atlas_sprite_opts_t){.name = "wide.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    free(rgba);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_atlas_commit(atlas));
+    uint32_t error_count = 0U;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &error_count);
+    TEST_ASSERT_EQUAL_UINT32(1U, error_count);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, errors[0].kind);
+    TEST_ASSERT_EQUAL_UINT32(W, errors[0].w);
+    TEST_ASSERT_EQUAL_UINT32(H, errors[0].h);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_LIMIT, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    FILE *published = fopen(path, "rb");
+    TEST_ASSERT_NULL(published);
+}
+
 /* fan_triangulate: 4 vertices produces 2 triangles */
 void test_fan_triangulate_quad(void) {
     uint16_t indices[32];
@@ -5813,7 +5842,7 @@ void test_atlas_shape_concave_disjoint_sprite_uses_fallback_frontier(void) {
     free(buf);
 }
 
-/* Convex mode must not silently fall back to the trim rect. */
+/* This half-square's trim rect exceeds the default 10% added-area budget. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_shape_convex_hull_produces_polygon(void) {
     (void)MKDIR(TMP_DIR);
@@ -6507,6 +6536,54 @@ void test_disjoint_component_merge_has_small_work_bound(void) {
 
     TEST_ASSERT_FALSE(merged);
     TEST_ASSERT_EQUAL_UINT32(8, pass_count);
+}
+
+void test_disjoint_component_closing_restores_outer_silhouette(void) {
+    enum { W = 9, H = 5 };
+    uint8_t binary[W * H] = {0};
+    uint8_t expected[W * H] = {0};
+    for (uint32_t y = 1; y <= 3; y++) {
+        for (uint32_t x = 1; x <= 3; x++) {
+            binary[(y * W) + x] = 1U;
+            expected[(y * W) + x] = 1U;
+        }
+        for (uint32_t x = 5; x <= 7; x++) {
+            binary[(y * W) + x] = 1U;
+            expected[(y * W) + x] = 1U;
+        }
+    }
+    expected[(2U * W) + 4U] = 1U;
+    uint32_t pass_count = 0U;
+
+    const bool merged = nt_atlas_test_merge_disjoint_components(binary, W, H, &pass_count);
+
+    TEST_ASSERT_TRUE(merged);
+    TEST_ASSERT_EQUAL_UINT32(1, pass_count);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, binary, W * H);
+}
+
+void test_disjoint_component_closing_preserves_trim_edges(void) {
+    enum { W = 7, H = 3 };
+    uint8_t binary[W * H] = {0};
+    uint8_t expected[W * H] = {0};
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x <= 2; x++) {
+            binary[(y * W) + x] = 1U;
+            expected[(y * W) + x] = 1U;
+        }
+        for (uint32_t x = 4; x < W; x++) {
+            binary[(y * W) + x] = 1U;
+            expected[(y * W) + x] = 1U;
+        }
+    }
+    expected[W + 3U] = 1U;
+    uint32_t pass_count = 0U;
+
+    const bool merged = nt_atlas_test_merge_disjoint_components(binary, W, H, &pass_count);
+
+    TEST_ASSERT_TRUE(merged);
+    TEST_ASSERT_EQUAL_UINT32(1, pass_count);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, binary, W * H);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -7381,10 +7458,7 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     }
 }
 
-/* Two pixel-identical sprites with DIFFERENT origins:
- *   - dedup shares vertex/index data (same vertex_start, same index_start)
- *   - each region keeps its own origin_x/y verbatim
- * This is the walk-cycle reuse pattern. */
+/* Pixel-identical sprites share geometry while each region keeps its serialized pivot. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_pixels_different_origin(void) {
     (void)MKDIR(TMP_DIR);
@@ -8251,6 +8325,7 @@ int main(void) {
     RUN_TEST(test_selected_geometry_validator_rejects_corrupt_claims);
     RUN_TEST(test_rect_budget_three_is_graceful_hull_infeasible);
     RUN_TEST(test_convex_budget_three_is_graceful_hull_infeasible);
+    RUN_TEST(test_oversized_trim_reports_unfittable_before_hull_selection);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
@@ -8322,6 +8397,8 @@ int main(void) {
     RUN_TEST(test_opaque_square_corner_cut_search_is_logarithmic);
     RUN_TEST(test_concave_frontier_builds_convex_source_once);
     RUN_TEST(test_disjoint_component_merge_has_small_work_bound);
+    RUN_TEST(test_disjoint_component_closing_restores_outer_silhouette);
+    RUN_TEST(test_disjoint_component_closing_preserves_trim_edges);
     RUN_TEST(test_concave_added_area_percent_respects_budget_and_coverage);
     RUN_TEST(test_convex_added_area_percent_does_not_increase_vertex_count);
     RUN_TEST(test_atlas_cache_hit_rebuild_is_byte_identical);

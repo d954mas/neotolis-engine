@@ -25,6 +25,16 @@ hull_path_is_protected() {
     esac
 }
 
+hull_publish_txn_path_is_safe() {
+    local transaction_key build_key
+    transaction_key="$(hull_path_key "$1" "${2:-}")"
+    build_key="$(hull_path_key build "${2:-}")"
+    case "$transaction_key" in
+        "$build_key"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 hull_is_canonical_publication() {
     [[ "$1" == "mixed_aa" && "$2" == "0,2,5,10,15,25" && "$3" == "native-release" && "$4" == "1" ]]
 }
@@ -61,6 +71,10 @@ hull_publish_restore_file() {
 hull_publish_transaction_rollback() {
     local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
     local target had_original result=0
+    if ! hull_publish_txn_path_is_safe "$HULL_PUBLISH_TXN_DIR"; then
+        echo "ERROR: publication transaction path must stay below build/: ${HULL_PUBLISH_TXN_DIR}" >&2
+        return 1
+    fi
     [[ -f "$manifest" ]] || { rm -rf -- "$HULL_PUBLISH_TXN_DIR"; return 0; }
     while IFS='|' read -r target had_original; do
         if [[ "$had_original" == 1 ]]; then
@@ -90,6 +104,10 @@ hull_publish_staged_set() {
     local target source had_original
     local manifest="${HULL_PUBLISH_TXN_DIR}/manifest"
 
+    if ! hull_publish_txn_path_is_safe "$HULL_PUBLISH_TXN_DIR"; then
+        echo "ERROR: publication transaction path must stay below build/: ${HULL_PUBLISH_TXN_DIR}" >&2
+        return 1
+    fi
     hull_recover_publication || return 1
     for target in "$@"; do
         case "$target" in

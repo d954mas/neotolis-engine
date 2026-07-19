@@ -11,12 +11,14 @@
 
 #include "hull_visual_report.h"
 #include "nt_builder_atlas_geometry.h"
+#include "ntpack_parse.h"
 #include "unity.h"
 
 #define CORPUS_PATH "tests/fixtures/hull_visual_acceptance/corpus.json"
 #define FRONTIER_PATH "tools/research/atlas_bench/hull_area_frontier.json"
 #define REPORT_A "build/reports/test-hull-visual-a"
 #define REPORT_B "build/reports/test-hull-visual-b"
+#define REPORT_NTPACK_DIR "build/reports/test-hull-visual.ntpack-path"
 
 static const char *REQUIRED_ROWS[] = {
     "sq9-aa-triangle:convex",           "rotated-diamond:convex", "concave-notch:concave", "transparent-donut:concave", "opaque-square-max3:convex", "connected-mask-adversarial:concave",
@@ -29,7 +31,19 @@ static const char *COLUMNS[] = {"percent-0", "percent-2", "percent-5", "percent-
 static const uint32_t COLUMN_VALUES[] = {0, 2, 5, 10, 15, 25};
 
 void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void) {
+    (void)remove(REPORT_NTPACK_DIR "/panel-00-base.h");
+    (void)remove(REPORT_NTPACK_DIR "/panel-00-selected.h");
+}
+
+static bool file_exists(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        return false;
+    }
+    (void)fclose(file);
+    return true;
+}
 
 static uint8_t *read_bytes(const char *path, size_t *out_size) {
     FILE *file = fopen(path, "rb");
@@ -53,6 +67,27 @@ static void write_bytes(const char *path, const uint8_t *bytes, size_t size) {
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
     TEST_ASSERT_EQUAL_UINT64(size, fwrite(bytes, 1, size, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+static uint8_t *replace_text_once(const uint8_t *input, size_t input_size, const char *needle, const char *replacement, size_t *out_size) {
+    enum { REPLACEMENT_CAPACITY = 65536U };
+    const char *match = strstr((const char *)input, needle);
+    TEST_ASSERT_NOT_NULL_MESSAGE(match, needle);
+    const size_t prefix_size = (size_t)(match - (const char *)input);
+    const size_t needle_size = strlen(needle);
+    const size_t replacement_size = strlen(replacement);
+    if (input_size > REPLACEMENT_CAPACITY || prefix_size > input_size || needle_size > input_size - prefix_size || replacement_size > REPLACEMENT_CAPACITY - (input_size - needle_size)) {
+        TEST_FAIL_MESSAGE("replacement fixture exceeds test buffer");
+        return NULL;
+    }
+    *out_size = input_size - needle_size + replacement_size;
+    uint8_t *output = (uint8_t *)malloc(REPLACEMENT_CAPACITY + 1U);
+    TEST_ASSERT_NOT_NULL(output);
+    memcpy(output, input, prefix_size);
+    memcpy(output + prefix_size, replacement, replacement_size);
+    memcpy(output + prefix_size + replacement_size, input + prefix_size + needle_size, input_size - prefix_size - needle_size);
+    output[*out_size] = 0U;
+    return output;
 }
 
 static uint32_t count_text(const char *text, const char *needle) {
@@ -410,6 +445,32 @@ static void assert_generation_rejects_corrupt_frontier(void) {
     write_bytes(REPORT_A "/legacy-frontier.json", frontier, frontier_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, REPORT_A "/legacy-frontier.json", REPORT_A "/legacy-must-fail"));
     free(frontier);
+
+    static const char *source_path = "tests/fixtures/hull_visual_acceptance/proof/00-percent-0.json";
+    static const char *corrupt_proof_path = REPORT_A "/corrupt-proof-source.json";
+    size_t proof_size = 0;
+    uint8_t *proof = read_bytes(source_path, &proof_size);
+    size_t corrupt_proof_size = 0;
+    uint8_t *corrupt_proof = replace_text_once(proof, proof_size, "\"topology\":true", "\"topology\":false", &corrupt_proof_size);
+    write_bytes(corrupt_proof_path, corrupt_proof, corrupt_proof_size);
+    free(corrupt_proof);
+    free(proof);
+
+    char corrupt_hash[65];
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_file_sha256_hex(corrupt_proof_path, corrupt_hash));
+    frontier = read_bytes(FRONTIER_PATH, &frontier_size);
+    size_t corrupt_frontier_size = 0;
+    uint8_t *corrupt_frontier = replace_text_once(frontier, frontier_size, source_path, corrupt_proof_path, &corrupt_frontier_size);
+    free(frontier);
+    char *frontier_hash = strstr((char *)corrupt_frontier, "\"sweep_sha256\": \"");
+    TEST_ASSERT_NOT_NULL(frontier_hash);
+    frontier_hash += strlen("\"sweep_sha256\": \"");
+    memcpy(frontier_hash, corrupt_hash, 64U);
+    write_bytes(REPORT_A "/corrupt-proof-frontier.json", corrupt_frontier, corrupt_frontier_size);
+    free(corrupt_frontier);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, REPORT_A "/corrupt-proof-frontier.json", REPORT_A "/corrupt-proof-must-fail"));
+    (void)remove(REPORT_A "/corrupt-proof-frontier.json");
+    (void)remove(corrupt_proof_path);
 }
 
 static void assert_generation_rejects_corrupt_corpus(void) {
@@ -438,10 +499,33 @@ static void test_panel_ownership_failure_paths_balance(void) {
     nt_hull_visual_test_fail_after_stage(0);
 }
 
+static void test_panel_cleanup_removes_headers_when_directory_contains_ntpack(void) {
+    nt_hull_visual_test_fail_after_stage(3);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(CORPUS_PATH, FRONTIER_PATH, REPORT_NTPACK_DIR));
+    nt_hull_visual_test_fail_after_stage(0);
+    TEST_ASSERT_FALSE(file_exists(REPORT_NTPACK_DIR "/panel-00-base.h"));
+    TEST_ASSERT_FALSE(file_exists(REPORT_NTPACK_DIR "/panel-00-selected.h"));
+}
+
+static void test_panel_pack_paths_reject_truncation(void) {
+    char baseline[64];
+    char selected[64];
+    TEST_ASSERT_TRUE(nt_hull_visual_test_panel_pack_paths("report", 7U, baseline, sizeof(baseline), selected, sizeof(selected)));
+    TEST_ASSERT_EQUAL_STRING("report/panel-07-base.ntpack", baseline);
+    TEST_ASSERT_EQUAL_STRING("report/panel-07-selected.ntpack", selected);
+
+    char too_small[12] = "marker";
+    TEST_ASSERT_FALSE(nt_hull_visual_test_panel_pack_paths("report", 7U, too_small, sizeof(too_small), selected, sizeof(selected)));
+    TEST_ASSERT_EQUAL_STRING("", too_small);
+    TEST_ASSERT_EQUAL_STRING("", selected);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_report_schema_production_gates_and_determinism);
     RUN_TEST(test_validation_and_provenance_fail_closed);
     RUN_TEST(test_panel_ownership_failure_paths_balance);
+    RUN_TEST(test_panel_cleanup_removes_headers_when_directory_contains_ntpack);
+    RUN_TEST(test_panel_pack_paths_reject_truncation);
     return UNITY_END();
 }
