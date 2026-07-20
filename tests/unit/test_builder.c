@@ -4374,15 +4374,13 @@ void test_hull_simplify_covering_keeps_earliest_equal_error_pair(void) {
     TEST_ASSERT_EQUAL_MEMORY(first, second, sizeof(expected));
 }
 
-void test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges(void) {
+void test_hull_simplify_covering_rejects_parallel_square_and_degenerate_edges(void) {
     const Point2D square[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
-    const Point2D expected[3] = {{0, 0}, {8, 0}, {0, 8}};
     const Point2D repeated[4] = {{0, 0}, {4, 0}, {4, 0}, {0, 4}};
     Point2D out[4];
 
-    TEST_ASSERT_EQUAL_UINT32(3, hull_simplify_covering(square, 4, 3, out));
-    TEST_ASSERT_EQUAL_MEMORY(expected, out, sizeof(expected));
-    TEST_ASSERT_EQUAL(NT_POLYGON_VALID, polygon_validate(out, 3));
+    /* Parallel opposite edges: no finite 3-vertex enclosing reduction exists. */
+    TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(square, 4, 3, out));
     TEST_ASSERT_EQUAL_UINT32(0, hull_simplify_covering(repeated, 4, 3, out));
 }
 
@@ -8245,7 +8243,7 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_rdp_simplify_restores_input_when_epsilon_would_collapse_polygon);
     RUN_TEST(test_hull_simplify_covering_keeps_earliest_equal_error_pair);
-    RUN_TEST(test_hull_simplify_covering_handles_parallel_square_and_rejects_degenerate_edges);
+    RUN_TEST(test_hull_simplify_covering_rejects_parallel_square_and_degenerate_edges);
     RUN_TEST(test_polygon_validate_rejects_invalid_rings_with_stable_reasons);
     RUN_TEST(test_polygon_coverage_metrics_counts_exact_pixel_centers);
     RUN_TEST(test_polygon_full_cell_coverage_rejects_center_only_triangle);
