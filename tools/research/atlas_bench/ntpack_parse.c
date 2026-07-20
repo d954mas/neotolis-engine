@@ -424,8 +424,8 @@ int nt_bench_file_sha256_hex(const char *path, char out_hex[65]) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — each serialized read stays adjacent to its fail-closed bounds guard
-int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_height, nt_bench_selected_geometry_t *out) {
-    if (pack_path == NULL || out == NULL || trim_height == 0U) {
+int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_width, uint32_t trim_height, nt_bench_selected_geometry_t *out) {
+    if (pack_path == NULL || out == NULL || trim_width == 0U || trim_height == 0U) {
         return -1;
     }
     memset(out, 0, sizeof(*out));
@@ -501,7 +501,7 @@ int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_inde
     for (uint32_t i = 0; i < region->vertex_count; i++) {
         const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
         const int32_t y = (int32_t)trim_height - vertex->local_y;
-        if (vertex->local_x < 0 || y < 0 || (uint32_t)y > trim_height) {
+        if (vertex->local_x < 0 || (uint32_t)vertex->local_x > trim_width || y < 0 || (uint32_t)y > trim_height) {
             free(indices);
             free(polygon);
             free(bytes);

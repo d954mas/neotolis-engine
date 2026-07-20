@@ -15,6 +15,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
+        nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -785,8 +786,15 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_atlas_options_compat)
 
     if(WIN32)
+        # NO_DEFAULT_PATH avoids System32 bash.exe (WSL); derive candidates from git.exe too.
+        find_package(Git QUIET)
+        set(_nt_git_bash_paths "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin" "$ENV{ProgramFiles}/Git/bin" "$ENV{ProgramFiles}/Git/usr/bin")
+        if(GIT_EXECUTABLE)
+            get_filename_component(_nt_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
+            list(APPEND _nt_git_bash_paths "${_nt_git_bin_dir}" "${_nt_git_bin_dir}/../bin" "${_nt_git_bin_dir}/../usr/bin")
+        endif()
         find_program(NT_GIT_BASH_EXECUTABLE bash
-            PATHS "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin"
+            PATHS ${_nt_git_bash_paths}
             NO_DEFAULT_PATH
         )
     else()
@@ -802,7 +810,7 @@ if(NOT EMSCRIPTEN)
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
     else()
-        message(STATUS "bash not found; skipping CTest registration for test_bench_hull_tolerance_guard")
+        message(WARNING "Git Bash not found; test_bench_hull_tolerance_guard is NOT registered — the hull evidence shell pins will not run")
     endif()
 
     # --- Basis encode + runtime transcode in one exe ---

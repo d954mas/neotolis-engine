@@ -167,13 +167,18 @@ if hull_path_is_protected "$BASELINE" "TOOLS/RESEARCH/ATLAS_BENCH/BASELINE" "Lin
     echo "POSIX path comparison unexpectedly ignored case" >&2
     exit 1
 fi
-if ! hull_path_is_protected "$BASELINE" "TOOLS/RESEARCH/ATLAS_BENCH/BASELINE" "Darwin"; then
-    echo "Darwin path comparison did not protect a case-only alias" >&2
-    exit 1
-fi
 if ! hull_path_is_protected "build/space baseline" "build/space baseline/run" "Linux"; then
     echo "quoted path containment failed" >&2
     exit 1
+fi
+
+# Non-fatal staleness signal: the published frontier must be re-published after
+# any geometry-source change, but a hard failure here would block every
+# geometry commit until an expensive canonical republish.
+RECORDED_GEOMETRY_SHA="$(sed -n 's/.*"geometry_source_sha256": "\([0-9a-f]*\)".*/\1/p' tools/research/atlas_bench/hull_area_frontier.json)"
+if [[ "$RECORDED_GEOMETRY_SHA" != "$(hull_geometry_source_sha256)" ]]; then
+    echo "WARNING: hull frontier evidence is stale (geometry sources changed since publication)." >&2
+    echo "         Republish with: scripts/bench_hull_tolerance.sh --publish" >&2
 fi
 
 OUT_ALIAS="TOOLS/RESEARCH/ATLAS_BENCH/BASELINE/guard-no-write-${$}"

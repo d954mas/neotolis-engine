@@ -55,7 +55,7 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out);
 
 /* Extract one region in builder y-down trim-local coordinates. The result owns
  * both arrays and is released only by nt_bench_selected_geometry_destroy(). */
-int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_height, nt_bench_selected_geometry_t *out);
+int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_width, uint32_t trim_height, nt_bench_selected_geometry_t *out);
 
 void nt_bench_selected_geometry_destroy(nt_bench_selected_geometry_t *geometry);
 

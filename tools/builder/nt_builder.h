@@ -72,7 +72,7 @@ typedef enum {
     NT_BUILD_ERR_KIND_IMAGE_TOO_LARGE = 3,
     NT_BUILD_ERR_KIND_ATLAS_TRANSPARENT_AFTER_TRIM = 4,
     NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG = 5,
-    NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL = 6,
+    NT_BUILD_ERR_KIND_ATLAS_DEGENERATE_HULL = 6, /* legacy: formatted but no longer produced */
     NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW = 7,
     NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME = 8,
     NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS = 9,
@@ -80,7 +80,7 @@ typedef enum {
     NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW = 11,
     NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED = 12,
     NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE = 13,
-    NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE = 14,
+    NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE = 14, /* legacy: formatted but no longer produced (selection is total at max_vertices >= 4) */
 } nt_build_error_kind;
 
 /* Pure-data error detail. Names are COPIED into fixed buffers, never
@@ -314,7 +314,7 @@ typedef struct {
     uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                        /* atlas edge margin (default: 0) */
     uint32_t extrude;                       /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
-    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1) */
+    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
     uint8_t max_vertices;                   /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
@@ -430,8 +430,9 @@ typedef struct {
     uint8_t extrude;
     /* New public controls stay after the complete legacy positional field list. */
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
-    uint8_t alpha_threshold;         /* 0 = atlas default */
+    uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */
+    bool has_alpha_threshold;        /* false = inherit atlas value; true preserves an explicit 0 */
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

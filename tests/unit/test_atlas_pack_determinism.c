@@ -144,6 +144,7 @@ static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape
             sprite_opts.max_added_area_percent = 2.0F;
             sprite_opts.has_max_added_area_percent = true;
             sprite_opts.alpha_threshold = 128;
+            sprite_opts.has_alpha_threshold = true;
         }
         nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &sprite_opts);
     }

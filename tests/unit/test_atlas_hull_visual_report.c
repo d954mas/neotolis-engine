@@ -11,6 +11,7 @@
 
 #include "hull_visual_report.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "ntpack_parse.h"
 #include "unity.h"
 
@@ -20,8 +21,7 @@
 #define REPORT_NTPACK_DIR "build/reports/test-hull-visual.ntpack-path"
 
 static const char *REQUIRED_ROWS[] = {
-    "sq9-aa-triangle:convex",           "rotated-diamond:convex", "concave-notch:concave", "transparent-donut:concave", "opaque-square-max3:convex", "connected-mask-adversarial:concave",
-    "pixel-art-threshold-control:rect",
+    "sq9-aa-triangle:convex", "rotated-diamond:convex", "concave-notch:concave", "transparent-donut:concave", "connected-mask-adversarial:concave", "pixel-art-threshold-control:rect",
 };
 static const char *REAL_ART_ROWS[] = {
     "real-rhombus-outline:concave", "real-resource-wood:concave", "real-card-down-outline:concave", "real-d12-outline:concave", "real-flask-empty:concave", "real-tile-sparse:concave",
@@ -33,6 +33,10 @@ void setUp(void) {}
 void tearDown(void) {
     (void)remove(REPORT_NTPACK_DIR "/panel-00-base.h");
     (void)remove(REPORT_NTPACK_DIR "/panel-00-selected.h");
+    (void)remove(REPORT_A "/corrupt-manifest.json");
+    (void)remove(REPORT_A "/corrupt-frontier.json");
+    (void)remove(REPORT_A "/trailing-frontier.json");
+    (void)remove(REPORT_A "/legacy-frontier.json");
 }
 
 static bool file_exists(const char *path) {
@@ -117,7 +121,7 @@ static void assert_manifest_schema_and_html(void) {
     uint8_t *html_bytes = read_bytes(REPORT_A "/index.html", &html_size);
     const char *manifest = (const char *)manifest_bytes;
     const char *html = (const char *)html_bytes;
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 3"));
+    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"schema_version\": 4"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"overall_pass\": true"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"failing_panel_ids\": []"));
     TEST_ASSERT_NOT_NULL(strstr(manifest, "\"visual_input_sha256\""));
@@ -254,10 +258,8 @@ static void assert_manifest_schema_and_html(void) {
     TEST_ASSERT_NOT_NULL(d12_selected);
     TEST_ASSERT_TRUE(d12_base < d12_10_end);
     TEST_ASSERT_TRUE(d12_selected < d12_10_end);
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_kind\":\"ATLAS_HULL_INFEASIBLE\""));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_atlas\":\"visual\""));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_sprite\":\"fixture\""));
-    TEST_ASSERT_NOT_NULL(strstr(manifest, "\"error_invariant\":\"no covering polygon within hard vertex ceiling\""));
+    TEST_ASSERT_NULL(strstr(manifest, "ATLAS_HULL_INFEASIBLE"));
+    TEST_ASSERT_NULL(strstr(manifest, "expected_hull_infeasible"));
     TEST_ASSERT_NULL(strstr(manifest, "fidelity_px"));
     TEST_ASSERT_NULL(strstr(manifest, "lost_pixels"));
     TEST_ASSERT_NULL(strstr(html, "Fidelity"));
@@ -389,11 +391,10 @@ static void assert_production_gate_helpers(void) {
 static void test_report_schema_production_gates_and_determinism(void) {
     TEST_ASSERT_EQUAL_INT(0, nt_hull_visual_generate(FRONTIER_PATH, REPORT_A));
     TEST_ASSERT_EQUAL_INT(0, nt_hull_visual_generate(FRONTIER_PATH, REPORT_B));
-    TEST_ASSERT_EQUAL_INT(
-        0, nt_hull_visual_validate(REPORT_A "/manifest.json", REPORT_A "/index.html",
-                                   "sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,opaque-square-max3:convex,connected-mask-adversarial:concave,"
-                                   "pixel-art-threshold-control:rect,real-rhombus-outline:concave,real-resource-wood:concave,real-card-down-outline:concave,real-d12-outline:concave,"
-                                   "real-flask-empty:concave,real-tile-sparse:concave"));
+    TEST_ASSERT_EQUAL_INT(0, nt_hull_visual_validate(REPORT_A "/manifest.json", REPORT_A "/index.html",
+                                                     "sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,connected-mask-adversarial:concave,"
+                                                     "pixel-art-threshold-control:rect,real-rhombus-outline:concave,real-resource-wood:concave,real-card-down-outline:concave,real-d12-outline:concave,"
+                                                     "real-flask-empty:concave,real-tile-sparse:concave"));
     assert_manifest_schema_and_html();
     assert_frontier_proofs_are_portable();
     assert_production_gate_helpers();

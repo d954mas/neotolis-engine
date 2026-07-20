@@ -48,13 +48,6 @@ uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertic
 
 /* --- Triangulation --------------------------------------------------- */
 
-/* Fan triangulation from vertex 0. Returns triangle count. */
-uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices);
-
-/* Triangulate via Clipper2 CDT and fail closed on invalid output.
- * Returns triangle count; indices holds tri_count*3 local indices. */
-uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices);
-
 /* --- Contour tracing and polygon simplification ---------------------- */
 
 /* Trace outer boundary of opaque pixels (CCW). Returns vertex count.
@@ -77,6 +70,7 @@ typedef enum {
     NT_POLYGON_INVALID_SELF_INTERSECTION,
     NT_POLYGON_INVALID_ZERO_AREA,
     NT_POLYGON_INVALID_WINDING,
+    NT_POLYGON_INVALID_COORD_RANGE,
 } nt_polygon_validity_t;
 
 typedef struct {
@@ -167,10 +161,6 @@ bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);
  * against an integer polygon. Avoids the off-by-one of integer corner tests
  * on polygon boundaries. */
 bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py);
-
-/* Directed Hausdorff distance from the full reference boundary to the
- * candidate boundary. Both polygons are closed implicitly. */
-double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count);
 
 /* Max distance from any opaque pixel center outside the polygon to the
  * polygon boundary. Returns 0 if every opaque pixel center is inside. */

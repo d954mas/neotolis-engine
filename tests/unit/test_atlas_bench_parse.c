@@ -271,7 +271,7 @@ static void selected_geometry_is_owned_and_y_down(void) {
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
 
     nt_bench_selected_geometry_t geometry = {0};
-    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_selected_geometry(path, 0, 4, &geometry));
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_selected_geometry(path, 0, 4, 4, &geometry));
     TEST_ASSERT_EQUAL_UINT32(4, geometry.vertex_count);
     TEST_ASSERT_EQUAL_UINT32(6, geometry.triangle_index_count);
     TEST_ASSERT_EQUAL_INT32(0, geometry.polygon[0].y);
@@ -304,7 +304,7 @@ static void selected_geometry_rejects_corrupt_index_window(void) {
     TEST_ASSERT_EQUAL_size_t(size, fwrite(blob, 1, size, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     nt_bench_selected_geometry_t geometry = {0};
-    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, &geometry) < 0);
+    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, 4, &geometry) < 0);
     TEST_ASSERT_NULL(geometry.polygon);
     TEST_ASSERT_NULL(geometry.triangle_indices);
     (void)remove(path);
@@ -338,7 +338,7 @@ static void selected_geometry_rejects_overlapping_sections(void) {
     TEST_ASSERT_EQUAL_size_t(size, fwrite(blob, 1, size, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     nt_bench_selected_geometry_t geometry = {0};
-    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, &geometry) < 0);
+    TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, 4, &geometry) < 0);
     TEST_ASSERT_NULL(geometry.polygon);
     TEST_ASSERT_NULL(geometry.triangle_indices);
     (void)remove(path);

@@ -5,8 +5,8 @@
 
 _Static_assert(offsetof(nt_atlas_opts_t, max_added_area_percent) > offsetof(nt_atlas_opts_t, gen_mipmaps), "atlas controls must be append-only");
 _Static_assert(offsetof(nt_atlas_sprite_opts_t, max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, extrude), "sprite controls must be append-only");
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "sprite threshold must stay in the Phase-80 tail");
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "sprite presence must stay in the Phase-80 tail");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "appended controls must stay after the legacy positional fields");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "appended controls must stay after the legacy positional fields");
 
 int main(void) {
     const nt_tex_compress_opts_t compress = {.mode = NT_TEX_COMPRESS_ETC1S};

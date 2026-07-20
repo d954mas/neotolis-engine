@@ -4,13 +4,16 @@
 
 set -euo pipefail
 
+# shellcheck source=scripts/lib/hull_geometry_sources.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/hull_geometry_sources.sh"
+
 hull_path_key() {
     local raw_path="${1//\\//}"
     local platform="${2:-${NT_HULL_AREA_PLATFORM:-$(uname -s)}}"
     local resolved
     resolved="$(realpath -m -- "$raw_path")"
     case "$platform" in
-        MSYS*|MINGW*|CYGWIN*|Darwin*) printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]' ;;
+        MSYS*|MINGW*|CYGWIN*) printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]' ;;
         *) printf '%s' "$resolved" ;;
     esac
 }
@@ -37,18 +40,6 @@ hull_repeat_required() {
     [[ "$1" == 1 || "$2" == 1 ]]
 }
 
-hull_geometry_source_sha256() {
-    local sources=(
-        tools/builder/nt_builder.h
-        tools/builder/nt_builder_atlas.c
-        tools/builder/nt_builder_atlas_geometry.c
-        tools/builder/nt_builder_atlas_geometry.h
-        tools/builder/nt_builder_atlas_vpack.c
-        tools/builder/nt_builder_atlas_vpack.h
-    )
-    sha256sum "${sources[@]}" | sha256sum | awk '{print $1}'
-}
-
 hull_require_clean_tree() {
     local status
     status="$(git status --porcelain=v1 --untracked-files=all)"
@@ -60,7 +51,7 @@ hull_require_clean_tree() {
 }
 
 hull_write_portable_proof() {
-    sed '/"pack_ms"/d;/"cpu"/d;/"os"/d' "$1" > "$2"
+    sed -E '/^[[:space:]]*"(os|cpu|pack_ms)":/d' "$1" > "$2"
 }
 
 hull_publish_install_file() {
@@ -91,6 +82,10 @@ hull_publish_staged_set() {
 if [[ "${NT_HULL_AREA_GUARD_LIB_ONLY:-0}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
+
+case "$(uname -s)" in
+    Darwin*) echo "ERROR: macOS is unsupported for hull evidence scripts; use Git Bash or Linux." >&2; exit 1 ;;
+esac
 
 cd "$(git rev-parse --show-toplevel)"
 

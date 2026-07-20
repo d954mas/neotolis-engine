@@ -273,7 +273,8 @@ int main(int argc, char *argv[]) {
     uint32_t mask_h = 0U;
     uint32_t retained = 0U;
     mask = build_retained_mask(selected_run.first_path, opts.alpha_threshold, &mask_w, &mask_h, &retained);
-    if (mask == NULL || nt_bench_parse_selected_geometry(baseline_pack_path, 0U, mask_h, &baseline_geometry) != 0 || nt_bench_parse_selected_geometry(pack_path, 0U, mask_h, &selected_geometry) != 0) {
+    if (mask == NULL || nt_bench_parse_selected_geometry(baseline_pack_path, 0U, mask_w, mask_h, &baseline_geometry) != 0 ||
+        nt_bench_parse_selected_geometry(pack_path, 0U, mask_w, mask_h, &selected_geometry) != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to reconstruct selected geometry from production packs\n");
         goto cleanup;
     }

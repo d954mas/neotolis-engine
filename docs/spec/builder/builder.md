@@ -96,7 +96,7 @@ Builder must check: references between assets, resource types, mesh/material/sha
 The builder distinguishes two failure classes:
 
 - **Programmer invariants, unexpected states, OOM, and missing/unreadable files** assert (`NT_BUILD_ASSERT`) — these are bugs or a broken environment, and crashing surfaces them instantly. The single-asset APIs (`nt_builder_add_texture`, `nt_builder_add_mesh`, `nt_builder_add_font`) also assert on a decode/parse failure of their input.
-- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, hull-infeasible geometry, and unfittable sprites. `ATLAS_DEGENERATE_HULL` remains a formatted legacy kind, but the current geometry pipeline classifies publishable geometry failures as either transparent-after-trim, contour overflow, or hull-infeasible.
+- **Content-dependent failures of sprite images inside the ATLAS builder** are recoverable and route to a graceful error channel instead of aborting: undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate region names, size/page limits, and unfittable sprites. `ATLAS_DEGENERATE_HULL` and `ATLAS_HULL_INFEASIBLE` remain formatted legacy kinds no longer produced: with `max_vertices >= 4` the trim-rect candidate makes geometry selection total, so an invalid selection is a programmer invariant (assert), not content.
 
 `NT_BUILD_ASSERT` is terminal: normal execution ends with `abort()`. Tests may install a non-local-jump hook to verify that an assertion fires, but the interrupted builder context is not reusable and has no rollback guarantee.
 
@@ -222,7 +222,7 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 
 `nt_atlas_commit` runs these stages in order:
 
-1. **alpha_trim** — resolve the per-sprite `alpha_threshold` (a zero override inherits the atlas value), extract the alpha plane, and find the tight retained-pixel bbox (rejects fully transparent inputs).
+1. **alpha_trim** — resolve the per-sprite `alpha_threshold` (inherit unless `has_alpha_threshold`), extract the alpha plane, and find the tight retained-pixel bbox (rejects fully transparent inputs unless the effective threshold is 0).
 2. **cache_check** — compute atlas-level cache key (per-sprite pixel hash, source dimensions, origins, raw overrides, pack-affecting opts, and version), then try loading cached placement and pages. The key is add-order-sensitive because cached placements reference sprite indices. Post-pack fields are excluded because the texture encode stage has its own cache.
 3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
 4. **geometry** — for each unique sprite, build the binary mask from the same effective alpha threshold and select the shape-specific geometry path. `RECT` emits the trim AABB. `CONVEX_HULL` starts from the opaque-pixel convex hull. `CONCAVE_CONTOUR` performs morphological closing when needed, traces the boundary, and evaluates concave simplifiers. Polygon candidates share full retained-cell coverage, topology, triangulation, area-budget, vertex-budget, and deterministic-selection checks described below.
@@ -284,14 +284,14 @@ typedef struct {
 
 - `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
 - `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified by a bounded frontier of convex reduction, covering simplification, and the trim AABB. With enough area allowance, the selector may therefore choose the 4-vertex AABB. Skips morphological closing, contour tracing, RDP, and the concave 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
-- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs a deterministic multi-strategy frontier, and selects by the area-budget contract below. It may use a simpler covering RECT/convex candidate when the traced contour is unusable; only the full fallback set failing the hard ceiling reports a graceful content error. Densest packing, highest cost.
+- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs a deterministic multi-strategy frontier, and selects by the area-budget contract below. It falls back to a covering RECT/convex frontier when the traced contour is unusable (logged as a warning), so selection always succeeds. Densest packing, highest cost.
 
 **Threshold, area budget, and selected-geometry proof:**
 
-RECT and slice9 geometry serialize as 4-corner rectangles; if the effective `max_vertices` is below 4, the builder reports `ATLAS_HULL_INFEASIBLE` instead of emitting a non-rectangular substitute. `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` still tries simpler covering candidates such as RECT and convex hull when the concave contour path cannot produce a valid candidate; only the full fallback set failing the hard ceiling becomes `ATLAS_HULL_INFEASIBLE`.
+Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geometry selection is provably total: there is no content-dependent geometry failure. An invalid selection for an in-range trim is a builder bug and asserts.
 
-- `alpha_threshold` defines retained pixels for trimming, geometry, and page composition. A pixel is retained and copied into the atlas page when `alpha >= effective_alpha_threshold`; below-threshold pixels inside the trim rectangle compose as transparent. Per-sprite `0` inherits the atlas value. Anti-aliased fringe pixels therefore participate when their alpha reaches the configured threshold.
-- `max_vertices` is a hard ceiling for serialized region polygons. The atlas default is 8; the range is 3..16. Per-sprite `0` inherits the atlas value.
+- `alpha_threshold` defines retained pixels for trimming, geometry, and page composition. A pixel is retained and copied into the atlas page when `alpha >= effective_alpha_threshold`; below-threshold pixels inside the trim rectangle compose as transparent. `0` is legal and means "retain every pixel": no trim, a fully transparent sprite still publishes (transparent-after-trim cannot fire), and the RGB of zero-alpha pixels composes into the page (observable with `premultiplied = false`). Per-sprite overrides use `has_alpha_threshold` so an explicit `0` remains representable; zero-initialized sprite options inherit the atlas value. Anti-aliased fringe pixels participate when their alpha reaches the configured threshold.
+- `max_vertices` is a hard ceiling for serialized region polygons. The atlas default is 8; the range is 4..16 — a trim-clamped triangle cannot cover any mask that touches all four sides of its (tight) trim rect, so 3 is rejected at the API boundary. Per-sprite `0` inherits the atlas value.
 - `max_added_area_percent` is the user-facing simplification tolerance. It is finite and non-negative; the atlas default is 10%. Per-sprite overrides use `has_max_added_area_percent` so an explicit `0%` remains representable, while zero-initialized sprite options still inherit the atlas value.
 - Geometry uses one retained-cell set after effective alpha resolution and trim. `Aopaque` is the total retained unit-cell area. For every vertex count populated by the deterministic candidate generators, the builder keeps the tightest proven candidate. `Abase` is the smallest exact area among those feasible candidates. A candidate is eligible when `(Acandidate - Abase) / Aopaque * 100 <= max_added_area_percent`; the selector then chooses the fewest vertices, then smaller exact area, then stable generator/coordinate ties.
 - `0%` means "no simplification-added area beyond the exact baseline", not "zero transparent area". Example: if `Aopaque=100`, `Abase=110`, and `max_added_area_percent=10`, the selected candidate may have `Aselected<=120`. The unavoidable 10 area of base overdraw is reported separately from the allowed simplification-added area.
@@ -306,7 +306,7 @@ RECT and slice9 geometry serialize as 4-corner rectangles; if the effective `max
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.
 - `max_added_area_percent` must be finite and non-negative at atlas and per-sprite boundaries. NaN, infinity, and negative values are caller bugs and assert; signed zero is canonicalized to positive zero.
-- `3 ≤ max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`; below 3 the simplified hull degenerates to a line/point. The per-sprite override is `0` (atlas default) or `3..16`.
+- `4 ≤ max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`; a trim-clamped triangle cannot cover a full-perimeter mask, so `3` asserts. The per-sprite override is `0` (atlas default) or `4..16`.
 - Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` the validated CDT triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
 - Per-atlas `vertex_start` / `index_start` are `uint32_t`.
 
@@ -325,12 +325,13 @@ typedef struct {
     uint16_t slice9_bottom;
     uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
     uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
-    uint8_t max_vertices; /* 0 = atlas default, max 16 */
+    uint8_t max_vertices; /* 0 = atlas default, else 4..16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
     uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
-    uint8_t alpha_threshold;         /* 0 = atlas default */
+    uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves explicit 0% */
+    bool has_alpha_threshold;        /* false = inherit atlas value; true preserves an explicit 0 */
 } nt_atlas_sprite_opts_t;
 ```
 
@@ -349,7 +350,7 @@ the public 10% default returned by the defaults helper.
 
 **Measured area-budget guidance (`mixed_aa`, native release):**
 
-The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. The frontier also records a deterministic hash of the production atlas-geometry sources; visual acceptance rejects evidence after any of those sources changes. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
+The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. The frontier also records a deterministic hash of the production atlas-geometry sources — the single list in `scripts/lib/hull_geometry_sources.sh`, which includes the Clipper2 bridge and the vendored Clipper2 sources; visual acceptance rejects evidence after any of those sources changes, and the CI guard prints a non-fatal staleness warning. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
 
 Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. `visual_input_sha256` hashes the actual decoded RGBA plus resolved row controls used by the builder.
 
@@ -377,7 +378,7 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 18. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area presence bit even when they currently resolve to inherited values. The max-added-area payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 18. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 

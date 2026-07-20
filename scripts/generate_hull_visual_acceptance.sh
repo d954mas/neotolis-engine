@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# shellcheck source=scripts/lib/hull_geometry_sources.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/hull_geometry_sources.sh"
+
 cd "$(git rev-parse --show-toplevel)"
 
 VERIFY_REPEAT=false
@@ -18,7 +21,7 @@ FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
 FINAL_DIR="build/reports/phase80-hull-visual-acceptance"
 TEMP_DIR="${FINAL_DIR}.tmp"
 REPEAT_DIR="${FINAL_DIR}.repeat"
-REQUIRED="sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,opaque-square-max3:convex,connected-mask-adversarial:concave,pixel-art-threshold-control:rect"
+REQUIRED="sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,connected-mask-adversarial:concave,pixel-art-threshold-control:rect"
 PERCENTS=(0 2 5 10 15 25)
 
 hull_visual_cleanup() {
@@ -29,18 +32,6 @@ hull_visual_cleanup() {
 
 hull_visual_prepare_paths() {
     rm -rf -- "$TEMP_DIR" "$REPEAT_DIR"
-}
-
-hull_geometry_source_sha256() {
-    local sources=(
-        tools/builder/nt_builder.h
-        tools/builder/nt_builder_atlas.c
-        tools/builder/nt_builder_atlas_geometry.c
-        tools/builder/nt_builder_atlas_geometry.h
-        tools/builder/nt_builder_atlas_vpack.c
-        tools/builder/nt_builder_atlas_vpack.h
-    )
-    sha256sum "${sources[@]}" | sha256sum | awk '{print $1}'
 }
 
 frontier_valid() {
@@ -101,6 +92,10 @@ frontier_valid() {
 if [[ "${NT_HULL_VISUAL_GUARD_LIB_ONLY:-0}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
+
+case "$(uname -s)" in
+    Darwin*) echo "ERROR: macOS is unsupported for hull evidence scripts; use Git Bash or Linux." >&2; exit 1 ;;
+esac
 
 if ! frontier_valid; then
     echo "ERROR: the six-column hull frontier or one of its measured proof artifacts is missing, stale, or corrupt." >&2

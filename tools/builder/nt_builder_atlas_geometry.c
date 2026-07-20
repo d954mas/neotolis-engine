@@ -125,9 +125,23 @@ static bool polygon_coordinates_widening_safe(const Point2D *poly, uint32_t coun
     return true;
 }
 
+/* |coord| <= 2^30 keeps every cross2d product within int64; wider than the
+ * int16 serialization domain because covering generators legally overshoot trim. */
+static bool polygon_coordinates_cross_safe(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < -(1 << 30) || poly[i].x > (1 << 30) || poly[i].y < -(1 << 30) || poly[i].y > (1 << 30)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count) {
     if (!poly || count < 3) {
         return NT_POLYGON_INVALID_TOO_FEW_VERTICES;
+    }
+    if (!polygon_coordinates_cross_safe(poly, count)) {
+        return NT_POLYGON_INVALID_COORD_RANGE;
     }
     for (uint32_t i = 0; i < count; i++) {
         for (uint32_t j = i + 1U; j < count; j++) {
@@ -481,6 +495,7 @@ nt_selected_geometry_proof_t nt_selected_geometry_validate(const uint8_t *binary
     proof.base_triangle_index_count = base_index_count;
     proof.selected_triangle_index_count = selected_index_count;
     proof.max_vertices = max_vertices;
+    /* -0.0F -> +0.0F so proof equality can memcmp-compare the stored percent. */
     proof.max_added_area_percent = max_added_area_percent == 0.0F ? 0.0F : max_added_area_percent;
     proof.opaque_area2 = claimed_opaque_area2;
     proof.base_area2 = claimed_base_area2;
@@ -963,28 +978,6 @@ uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertic
     return count;
 }
 
-/* --- Fan triangulation from vertex 0 --- */
-
-uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
-    if (vertex_count < 3) {
-        return 0;
-    }
-    uint32_t tri_count = vertex_count - 2;
-    for (uint32_t i = 0; i < tri_count; i++) {
-        indices[(i * 3) + 0] = 0;
-        indices[(i * 3) + 1] = (uint16_t)(i + 1);
-        indices[(i * 3) + 2] = (uint16_t)(i + 2);
-    }
-    return tri_count;
-}
-/* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
-
-/* Validated CDT prevents malformed triangle lists from reaching serialization. */
-uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices) {
-    uint32_t index_count = 0;
-    return nt_polygon_triangulate_validated(poly, n, indices, &index_count, NULL) ? index_count / 3U : 0U;
-}
-
 /* --- Point-in-polygon test (ray casting, even-odd rule) --- */
 
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
@@ -1069,6 +1062,8 @@ nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint
     return metrics;
 }
 
+// #region test_access
+#ifdef NT_TEST_ACCESS
 typedef struct {
     double a;
     double b;
@@ -1228,6 +1223,8 @@ double polygon_max_boundary_distance(const Point2D *reference, uint32_t referenc
     }
     return sqrt(max_distance_sq);
 }
+#endif
+// #endregion
 
 /* Scanline inside/outside classification — computes per-row x-intersections
  * using EXACTLY the same edge-crossing formula as point_in_polygon_f, then

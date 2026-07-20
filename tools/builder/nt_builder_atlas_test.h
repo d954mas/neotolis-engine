@@ -29,9 +29,10 @@ uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_
 void nt_atlas_test_frontier_selection_proof_mismatch(void);
 uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
 bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count);
-uint32_t nt_atlas_test_rdp_perp_candidate(const Point2D *clean, uint32_t clean_count, const uint8_t *binary, uint32_t width, uint32_t height, uint32_t target, double tolerance, Point2D *rdp_out,
-                                          uint32_t *rdp_count, Point2D *perp_out, uint32_t *perp_count, Point2D *final_out, uint32_t *generator_ordinal);
-uint32_t nt_atlas_test_select_positive_candidate(const Point2D *first, uint32_t first_count, uint32_t first_ordinal, const Point2D *second, uint32_t second_count, uint32_t second_ordinal);
+
+/* Directed Hausdorff distance from the full reference boundary to the
+ * candidate boundary. Both polygons are closed implicitly. */
+double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count);
 #endif
 // #endregion
 

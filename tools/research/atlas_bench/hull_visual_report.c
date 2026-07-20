@@ -25,8 +25,8 @@
 #define NT_MKDIR(path) mkdir(path, 0755)
 #endif
 
-#define VISUAL_SCHEMA_VERSION 3
-#define VISUAL_ROW_COUNT 7
+#define VISUAL_SCHEMA_VERSION 4
+#define VISUAL_ROW_COUNT 6
 #define REAL_ART_ROW_COUNT 6
 #define VISUAL_COLUMN_COUNT 6
 #define VISUAL_MAX_VERTICES 16
@@ -69,14 +69,11 @@ typedef struct {
     uint8_t *mask;
     uint32_t retained_pixels;
     bool commit_ok;
-    bool hull_infeasible;
     bool result;
     nt_selected_geometry_proof_t proof;
     uint64_t lost_area2;
     char baseline_pack_sha256[65];
     char selected_pack_sha256[65];
-    nt_build_error_t production_error;
-    bool has_production_error;
 } VisualPanel;
 
 typedef struct {
@@ -90,7 +87,6 @@ static const VisualRow VISUAL_ROWS[VISUAL_ROW_COUNT] = {
     {"rotated-diamond", "convex", NULL, "rotated-diamond", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 8, false},
     {"concave-notch", "concave", NULL, "concave-notch", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 10, false},
     {"transparent-donut", "concave", NULL, "transparent-donut", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 12, false},
-    {"opaque-square-max3", "convex", NULL, "opaque-square", NT_ATLAS_SHAPE_CONVEX_HULL, 1, 3, false},
     {"connected-mask-adversarial", "concave", NULL, "connected-mask", NT_ATLAS_SHAPE_CONCAVE_CONTOUR, 1, 13, false},
     {"pixel-art-threshold-control", "rect", NULL, "pixel-art-threshold", NT_ATLAS_SHAPE_RECT, 128, 4, false},
 };
@@ -113,8 +109,12 @@ static const ProductionEvidenceRef PRODUCTION_EVIDENCE[] = {
 static uint32_t visual_fail_stage;
 static uint32_t visual_live_buffers;
 
+// #region test_access
+#ifdef NT_TEST_ACCESS
 void nt_hull_visual_test_fail_after_stage(uint32_t stage) { visual_fail_stage = stage; }
 uint32_t nt_hull_visual_test_live_buffers(void) { return visual_live_buffers; }
+#endif
+// #endregion
 
 static bool fail_after(uint32_t stage) { return visual_fail_stage == stage; }
 
@@ -157,8 +157,6 @@ static void panel_destroy(VisualPanel *panel) {
     panel_free((void **)&panel->mask);
     panel_free((void **)&panel->alpha_values);
 }
-
-static bool row_expects_hull_infeasible(const VisualRow *row) { return strcmp(row->sample_id, "opaque-square-max3") == 0; }
 
 static uint32_t rotr32(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
 
@@ -550,9 +548,6 @@ static bool fixture_create(const VisualRow *row, VisualFixture *fixture) {
     } else if (strcmp(row->sample_id, "transparent-donut") == 0) {
         fixture->width = 20;
         fixture->height = 20;
-    } else if (strcmp(row->sample_id, "opaque-square-max3") == 0) {
-        fixture->width = 4;
-        fixture->height = 4;
     } else if (strcmp(row->sample_id, "connected-mask-adversarial") == 0) {
         fixture->width = 24;
         fixture->height = 24;
@@ -597,12 +592,6 @@ static bool fixture_create(const VisualRow *row, VisualFixture *fixture) {
                 set_pixel(fixture, x, y, radius2 <= 64.0 && radius2 >= 12.0 ? 255U : 0U);
             }
         }
-    } else if (strcmp(row->sample_id, "opaque-square-max3") == 0) {
-        for (uint32_t y = 0; y < fixture->height; y++) {
-            for (uint32_t x = 0; x < fixture->width; x++) {
-                set_pixel(fixture, x, y, 255);
-            }
-        }
     } else if (strcmp(row->sample_id, "connected-mask-adversarial") == 0) {
         static const Point2D source[] = {
             {15, 6},  {15, 7},  {16, 7},  {16, 6},  {17, 6},  {17, 7},  {19, 7},  {19, 6},  {20, 6},  {20, 7},  {21, 7},  {21, 8}, {19, 8}, {19, 9}, {22, 9}, {22, 7},  {23, 7}, {23, 10}, {18, 10},
@@ -636,7 +625,6 @@ static void fixture_destroy(VisualFixture *fixture) {
 
 typedef struct {
     bool ok;
-    bool hull_infeasible;
     bool has_error;
     nt_build_error_t error;
 } PanelPackResult;
@@ -666,9 +654,13 @@ static bool panel_pack_paths(const char *out_dir, uint32_t ordinal, char *baseli
     return true;
 }
 
+// #region test_access
+#ifdef NT_TEST_ACCESS
 bool nt_hull_visual_test_panel_pack_paths(const char *out_dir, uint32_t ordinal, char *baseline, size_t baseline_size, char *selected, size_t selected_size) {
     return panel_pack_paths(out_dir, ordinal, baseline, baseline_size, selected, selected_size);
 }
+#endif
+// #endregion
 
 static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixture *fixture, const char *path, float percent, uint8_t max_vertices) {
     PanelPackResult result = {0};
@@ -691,6 +683,7 @@ static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixtur
     sprite.name = "fixture";
     if (strcmp(row->sample_id, "pixel-art-threshold-control") == 0) {
         sprite.alpha_threshold = row->threshold;
+        sprite.has_alpha_threshold = true;
     }
     nt_atlas_add_raw(atlas, fixture->rgba, fixture->width, fixture->height, &sprite);
     const nt_build_result_t commit = nt_atlas_commit(atlas);
@@ -702,9 +695,6 @@ static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixtur
         result.has_error = true;
         result.error = errors[0];
     }
-    result.hull_infeasible = commit == NT_BUILD_ERR_VALIDATION && finish == NT_BUILD_ERR_VALIDATION && result.has_error && result.error.kind == NT_BUILD_ERR_KIND_ATLAS_HULL_INFEASIBLE &&
-                             strcmp(result.error.atlas, "visual") == 0 && strcmp(result.error.sprite, "fixture") == 0 && result.error.detail_a == max_vertices &&
-                             result.error.detail_b == (uint32_t)row->shape;
     nt_builder_free_pack(context);
     return result;
 }
@@ -754,27 +744,18 @@ static bool panel_build(const VisualRow *row, const VisualColumn *column, const 
         return false;
     }
     panel->commit_ok = baseline_pack.ok && selected_pack.ok;
-    if (row_expects_hull_infeasible(row)) {
-        panel->hull_infeasible = baseline_pack.hull_infeasible && selected_pack.hull_infeasible;
-        panel->has_production_error = selected_pack.has_error;
-        panel->production_error = selected_pack.error;
-        panel_remove_pack(base_path);
-        panel_remove_pack(pack_path);
-        panel->result = panel->hull_infeasible;
-        return true;
-    }
     if (!panel->commit_ok) {
         (void)fprintf(stderr, "atlas_hull_visual_report: production pack failed baseline=%u selected=%u selected_error=%u detail=%u/%u\n", baseline_pack.ok ? 1U : 0U, selected_pack.ok ? 1U : 0U,
                       selected_pack.has_error ? (uint32_t)selected_pack.error.kind : 0U, selected_pack.has_error ? selected_pack.error.detail_a : 0U,
                       selected_pack.has_error ? selected_pack.error.detail_b : 0U);
     }
-    if (!panel->commit_ok || nt_bench_parse_selected_geometry(base_path, 0U, panel->trim_h, &panel->baseline) != 0) {
+    if (!panel->commit_ok || nt_bench_parse_selected_geometry(base_path, 0U, panel->trim_w, panel->trim_h, &panel->baseline) != 0) {
         panel_remove_pack(base_path);
         panel_remove_pack(pack_path);
         return false;
     }
     panel_attach_geometry(&panel->baseline);
-    if (fail_after(4) || nt_bench_parse_selected_geometry(pack_path, 0U, panel->trim_h, &panel->selected) != 0) {
+    if (fail_after(4) || nt_bench_parse_selected_geometry(pack_path, 0U, panel->trim_w, panel->trim_h, &panel->selected) != 0) {
         panel_remove_pack(base_path);
         panel_remove_pack(pack_path);
         return false;
@@ -889,21 +870,17 @@ static void write_manifest_panel(FILE *file, const VisualRow *row, const VisualC
                   ",\"selected_vertex_count\":%u,\"baseline_vertex_count\":%u,\"opaque_area2\":%llu,\"base_area2\":%llu,\"selected_area2\":%llu,\"added_area2\":%llu,\"exact_lost_area2\":%llu,"
                   "\"base_overdraw_percent\":%.8f,\"added_area_percent\":%.8f,\"total_overdraw_percent\":%.8f,"
                   "\"baseline_pack_sha256\":\"%s\",\"selected_pack_sha256\":\"%s\","
-                  "\"max_vertices\":%u,\"expected_hull_infeasible\":%s,\"error_kind\":\"%s\",\"error_atlas\":\"%s\",\"error_sprite\":\"%s\","
-                  "\"error_ceiling\":%u,\"error_invariant\":\"%s\",\"production_gates\":{"
+                  "\"max_vertices\":%u,\"production_gates\":{"
                   "\"inputs_valid\":%s,\"opaque_area_valid\":%s,\"base_bounds_valid\":%s,\"base_topology_valid\":%s,\"base_coverage_valid\":%s,\"base_triangulation_valid\":%s,"
                   "\"selected_bounds_valid\":%s,\"selected_topology_valid\":%s,\"selected_coverage_valid\":%s,\"selected_triangulation_valid\":%s,"
-                  "\"metric_order_valid\":%s,\"allowance_valid\":%s,\"ceiling_valid\":%s,\"expected_error_match\":%s},\"result\":\"%s\"}",
+                  "\"metric_order_valid\":%s,\"allowance_valid\":%s,\"ceiling_valid\":%s},\"result\":\"%s\"}",
                   panel->selected.vertex_count, panel->baseline.vertex_count, (unsigned long long)panel->proof.opaque_area2, (unsigned long long)panel->proof.base_area2,
                   (unsigned long long)panel->proof.selected_area2, (unsigned long long)panel->proof.added_area2, (unsigned long long)panel->lost_area2, base_overdraw, added_area, total_overdraw,
-                  panel->baseline_pack_sha256, panel->selected_pack_sha256, row->budget, panel->hull_infeasible ? "true" : "false", panel->hull_infeasible ? "ATLAS_HULL_INFEASIBLE" : "NONE",
-                  panel->has_production_error ? panel->production_error.atlas : "", panel->has_production_error ? panel->production_error.sprite : "",
-                  panel->has_production_error ? panel->production_error.detail_a : 0U, panel->hull_infeasible ? "no covering polygon within hard vertex ceiling" : "",
-                  panel->proof.inputs_valid ? "true" : "false", panel->proof.opaque_area_valid ? "true" : "false", panel->proof.base_bounds_valid ? "true" : "false",
-                  panel->proof.base_topology_valid ? "true" : "false", panel->proof.base_coverage_valid ? "true" : "false", panel->proof.base_triangulation_valid ? "true" : "false",
-                  panel->proof.selected_bounds_valid ? "true" : "false", panel->proof.selected_topology_valid ? "true" : "false", panel->proof.selected_coverage_valid ? "true" : "false",
-                  panel->proof.selected_triangulation_valid ? "true" : "false", panel->proof.metric_order_valid ? "true" : "false", panel->proof.allowance_valid ? "true" : "false",
-                  panel->proof.ceiling_valid ? "true" : "false", panel->hull_infeasible ? "true" : "false", panel->result ? "PASS" : "FAIL");
+                  panel->baseline_pack_sha256, panel->selected_pack_sha256, row->budget, panel->proof.inputs_valid ? "true" : "false", panel->proof.opaque_area_valid ? "true" : "false",
+                  panel->proof.base_bounds_valid ? "true" : "false", panel->proof.base_topology_valid ? "true" : "false", panel->proof.base_coverage_valid ? "true" : "false",
+                  panel->proof.base_triangulation_valid ? "true" : "false", panel->proof.selected_bounds_valid ? "true" : "false", panel->proof.selected_topology_valid ? "true" : "false",
+                  panel->proof.selected_coverage_valid ? "true" : "false", panel->proof.selected_triangulation_valid ? "true" : "false", panel->proof.metric_order_valid ? "true" : "false",
+                  panel->proof.allowance_valid ? "true" : "false", panel->proof.ceiling_valid ? "true" : "false", panel->result ? "PASS" : "FAIL");
 }
 
 static bool write_manifest(const char *path, const VisualColumn columns[VISUAL_COLUMN_COUNT], const VisualPanel panels[VISUAL_ROW_COUNT][VISUAL_COLUMN_COUNT],
@@ -1075,9 +1052,6 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
             (void)fprintf(file, "<article class=\"panel\" id=\"panel-%s-%s-%s\"><h3>%s · %.1f%% added-area limit</h3><span class=\"badge\">%s</span>", VISUAL_ROWS[row].sample_id,
                           VISUAL_ROWS[row].shape_name, columns[column].id, columns[column].id, columns[column].percent, panel->result ? "PASS" : "FAIL");
             write_svg(file, panel);
-            if (panel->hull_infeasible) {
-                (void)fputs("<p>Expected ATLAS_HULL_INFEASIBLE: atlas <strong>visual</strong>, sprite <strong>fixture</strong>; no covering polygon fits the hard vertex ceiling.</p>", file);
-            }
             (void)fprintf(file,
                           "<table><tr><td>Selected vertices / hard ceiling</td><td>%u / %u</td></tr><tr><td>Aopaque / Abase / Aselected</td><td>%.1f / %.1f / %.1f</td></tr>"
                           "<tr><td>Base / added / total overdraw</td><td>%.3f%% / %.3f%% / %.3f%%</td></tr><tr><td>Exact lost area</td><td>%.1f</td></tr>"
@@ -1085,12 +1059,9 @@ static bool write_html(const char *path, const VisualColumn columns[VISUAL_COLUM
                           "<tr><td>Added-area allowance</td><td>%s</td></tr><tr><td>Baseline pack SHA-256</td><td><code>%s</code></td></tr><tr><td>Selected pack "
                           "SHA-256</td><td><code>%s</code></td></tr></table></article>",
                           panel->selected.vertex_count, VISUAL_ROWS[row].budget, (double)panel->proof.opaque_area2 * 0.5, (double)panel->proof.base_area2 * 0.5,
-                          (double)panel->proof.selected_area2 * 0.5, base_overdraw, added_area, total_overdraw, (double)panel->lost_area2 * 0.5,
-                          panel->proof.selected_coverage_valid ? "yes" : (panel->hull_infeasible ? "not applicable (expected error)" : "no"),
-                          (panel->proof.selected_topology_valid && panel->proof.selected_bounds_valid) ? "valid" : (panel->hull_infeasible ? "not applicable (expected error)" : "invalid"),
-                          panel->proof.selected_triangulation_valid ? "yes" : (panel->hull_infeasible ? "not applicable (expected error)" : "no"),
-                          panel->proof.allowance_valid ? "within limit" : (panel->hull_infeasible ? "not applicable (expected error)" : "exceeded"), panel->baseline_pack_sha256,
-                          panel->selected_pack_sha256);
+                          (double)panel->proof.selected_area2 * 0.5, base_overdraw, added_area, total_overdraw, (double)panel->lost_area2 * 0.5, panel->proof.selected_coverage_valid ? "yes" : "no",
+                          (panel->proof.selected_topology_valid && panel->proof.selected_bounds_valid) ? "valid" : "invalid", panel->proof.selected_triangulation_valid ? "yes" : "no",
+                          panel->proof.allowance_valid ? "within limit" : "exceeded", panel->baseline_pack_sha256, panel->selected_pack_sha256);
         }
         (void)fputs("</div></section>", file);
     }
@@ -1291,19 +1262,18 @@ static bool json_alpha_payload_is_valid(const cJSON *mask, const cJSON *values) 
     return true;
 }
 
-static bool manifest_panel_payload_is_valid(const cJSON *panel, bool expects_error) {
+static bool manifest_panel_payload_is_valid(const cJSON *panel) {
     cJSON *baseline_count = json_unique_member(panel, "baseline_vertex_count");
     cJSON *selected_count = json_unique_member(panel, "selected_vertex_count");
     cJSON *max_vertices = json_unique_member(panel, "max_vertices");
-    if (!json_number_is_uint(baseline_count) || !json_number_is_uint(selected_count) || !json_number_is_uint(max_vertices) || max_vertices->valuedouble < 3.0 ||
+    if (!json_number_is_uint(baseline_count) || !json_number_is_uint(selected_count) || !json_number_is_uint(max_vertices) || max_vertices->valuedouble < 4.0 ||
         max_vertices->valuedouble > VISUAL_MAX_VERTICES || baseline_count->valuedouble > max_vertices->valuedouble || selected_count->valuedouble > max_vertices->valuedouble) {
         return false;
     }
     const int baseline_vertices = baseline_count->valueint;
     const int selected_vertices = selected_count->valueint;
-    if ((!expects_error && (baseline_vertices < 3 || selected_vertices < 3)) || (expects_error && (baseline_vertices != 0 || selected_vertices != 0)) ||
-        !json_point_array_is_valid(json_unique_member(panel, "baseline_polygon"), baseline_vertices) || !json_point_array_is_valid(json_unique_member(panel, "selected_polygon"), selected_vertices) ||
-        !json_triangles_are_valid(json_unique_member(panel, "baseline_triangles"), baseline_vertices) ||
+    if (baseline_vertices < 3 || selected_vertices < 3 || !json_point_array_is_valid(json_unique_member(panel, "baseline_polygon"), baseline_vertices) ||
+        !json_point_array_is_valid(json_unique_member(panel, "selected_polygon"), selected_vertices) || !json_triangles_are_valid(json_unique_member(panel, "baseline_triangles"), baseline_vertices) ||
         !json_triangles_are_valid(json_unique_member(panel, "selected_triangles"), selected_vertices) || !cJSON_IsArray(json_unique_member(panel, "numbered_vertices")) ||
         cJSON_GetArraySize(json_unique_member(panel, "numbered_vertices")) != selected_vertices ||
         !json_alpha_payload_is_valid(json_unique_member(panel, "effective_alpha_mask"), json_unique_member(panel, "original_alpha_values"))) {
@@ -1331,7 +1301,7 @@ static bool manifest_panel_payload_is_valid(const cJSON *panel, bool expects_err
     }
     cJSON *baseline_sha = json_unique_member(panel, "baseline_pack_sha256");
     cJSON *selected_sha = json_unique_member(panel, "selected_pack_sha256");
-    return expects_error ? json_string_equals(baseline_sha, "") && json_string_equals(selected_sha, "") : json_string_is_lower_hex(baseline_sha, 64U) && json_string_is_lower_hex(selected_sha, 64U);
+    return json_string_is_lower_hex(baseline_sha, 64U) && json_string_is_lower_hex(selected_sha, 64U);
 }
 
 static bool manifest_panel_is_valid(const cJSON *panel) {
@@ -1340,29 +1310,23 @@ static bool manifest_panel_is_valid(const cJSON *panel) {
         "selected_bounds_valid", "selected_topology_valid", "selected_coverage_valid", "selected_triangulation_valid", "metric_order_valid",  "allowance_valid",
         "ceiling_valid",
     };
-    cJSON *expected_error = json_unique_member(panel, "expected_hull_infeasible");
     cJSON *gates = json_unique_member(panel, "production_gates");
     cJSON *sample_id = json_unique_member(panel, "sample_id");
     if (!cJSON_IsString(sample_id) || !json_string_is_nonempty(json_unique_member(panel, "panel_id")) || !json_string_is_nonempty(json_unique_member(panel, "row_id")) ||
-        !json_string_is_nonempty(json_unique_member(panel, "column_id")) || !cJSON_IsBool(json_unique_member(panel, "real_art_sample")) || !cJSON_IsBool(expected_error) || !cJSON_IsObject(gates) ||
+        !json_string_is_nonempty(json_unique_member(panel, "column_id")) || !cJSON_IsBool(json_unique_member(panel, "real_art_sample")) || !cJSON_IsObject(gates) ||
         !json_string_equals(json_unique_member(panel, "result"), "PASS")) {
         return false;
     }
-    const bool expects_error = json_string_equals(sample_id, "opaque-square-max3");
-    if (cJSON_IsTrue(expected_error) != expects_error || !manifest_panel_payload_is_valid(panel, expects_error)) {
-        return false;
-    }
-    if (!json_string_equals(json_unique_member(panel, "error_kind"), expects_error ? "ATLAS_HULL_INFEASIBLE" : "NONE")) {
+    if (!manifest_panel_payload_is_valid(panel)) {
         return false;
     }
     for (uint32_t gate = 0; gate < (uint32_t)(sizeof(normal_gate_names) / sizeof(normal_gate_names[0])); gate++) {
         cJSON *value = json_unique_member(gates, normal_gate_names[gate]);
-        if (!cJSON_IsBool(value) || cJSON_IsTrue(value) == expects_error) {
+        if (!cJSON_IsBool(value) || !cJSON_IsTrue(value)) {
             return false;
         }
     }
-    cJSON *error_match = json_unique_member(gates, "expected_error_match");
-    return cJSON_IsBool(error_match) && cJSON_IsTrue(error_match) == expects_error;
+    return true;
 }
 
 static bool manifest_rows_are_valid(const cJSON *root, const char *name, uint32_t expected_rows) {
