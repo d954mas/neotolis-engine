@@ -415,6 +415,31 @@ static void assert_validation_rejects_corrupt_manifest(void) {
     write_bytes(REPORT_A "/corrupt-manifest.json", manifest, manifest_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_validate(REPORT_A "/corrupt-manifest.json", REPORT_A "/index.html", NULL));
     free(manifest);
+
+    manifest = read_bytes(REPORT_A "/manifest.json", &manifest_size);
+    char *selected_area = strstr((char *)manifest, "\"selected_area2\":759");
+    TEST_ASSERT_NOT_NULL(selected_area);
+    selected_area += strlen("\"selected_area2\":");
+    selected_area[0] = '"';
+    selected_area[1] = 'x';
+    selected_area[2] = '"';
+    write_bytes(REPORT_A "/corrupt-manifest.json", manifest, manifest_size);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_validate(REPORT_A "/corrupt-manifest.json", REPORT_A "/index.html", NULL));
+    free(manifest);
+}
+
+static void assert_generation_rejects_trailing_frontier(void) {
+    size_t frontier_size = 0;
+    uint8_t *frontier = read_bytes(FRONTIER_PATH, &frontier_size);
+    static const char trailing[] = "\ntrailing garbage\n";
+    uint8_t *trailing_frontier = (uint8_t *)malloc(frontier_size + sizeof(trailing));
+    TEST_ASSERT_NOT_NULL(trailing_frontier);
+    memcpy(trailing_frontier, frontier, frontier_size);
+    memcpy(trailing_frontier + frontier_size, trailing, sizeof(trailing));
+    write_bytes(REPORT_A "/trailing-frontier.json", trailing_frontier, frontier_size + sizeof(trailing) - 1U);
+    TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(REPORT_A "/trailing-frontier.json", REPORT_A "/trailing-must-fail"));
+    free(trailing_frontier);
+    free(frontier);
 }
 
 static void assert_generation_rejects_corrupt_frontier(void) {
@@ -427,6 +452,8 @@ static void assert_generation_rejects_corrupt_frontier(void) {
     write_bytes(REPORT_A "/corrupt-frontier.json", frontier, frontier_size);
     TEST_ASSERT_NOT_EQUAL(0, nt_hull_visual_generate(REPORT_A "/corrupt-frontier.json", REPORT_A "/provenance-must-fail"));
     free(frontier);
+
+    assert_generation_rejects_trailing_frontier();
 
     frontier = read_bytes(FRONTIER_PATH, &frontier_size);
     char *schema = strstr((char *)frontier, "\"schema_version\": 3");

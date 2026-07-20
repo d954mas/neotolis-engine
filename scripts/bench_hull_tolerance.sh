@@ -37,6 +37,18 @@ hull_repeat_required() {
     [[ "$1" == 1 || "$2" == 1 ]]
 }
 
+hull_geometry_source_sha256() {
+    local sources=(
+        tools/builder/nt_builder.h
+        tools/builder/nt_builder_atlas.c
+        tools/builder/nt_builder_atlas_geometry.c
+        tools/builder/nt_builder_atlas_geometry.h
+        tools/builder/nt_builder_atlas_vpack.c
+        tools/builder/nt_builder_atlas_vpack.h
+    )
+    sha256sum "${sources[@]}" | sha256sum | awk '{print $1}'
+}
+
 hull_require_clean_tree() {
     local status
     status="$(git status --porcelain=v1 --untracked-files=all)"
@@ -258,11 +270,13 @@ if [[ $PUBLISH -eq 1 ]]; then
     trap 'rm -rf -- "$PUBLISH_STAGE"' EXIT
     commit="$(git rev-parse HEAD)"
     builder_sha="$(sha256sum "$BENCH_EXE" | awk '{print $1}')"
+    geometry_source_sha="$(hull_geometry_source_sha256)"
     corpus_sha="$(sha256sum "${matches[@]}" | sha256sum | awk '{print $1}')"
     settings_sha="$(printf '%s\n' "$name|$glob|$shape|$max_size|$max_sprites|$SAMPLE_CSV|threads=$BENCH_THREADS" | sha256sum | awk '{print $1}')"
     {
         printf '{\n  "schema_version": 3,\n  "proof_format": "portable-v1",\n  "measurement_source_commit": "%s",\n' "$commit"
-        printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "builder_binary_sha256": "%s",\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' "$BENCH_THREADS" "$builder_sha" "$corpus_sha" "$settings_sha"
+        printf '  "tool_version": "2.0.0",\n  "builder_threads": %s,\n  "builder_binary_sha256": "%s",\n  "geometry_source_sha256": "%s",\n  "corpus_sha256": "%s",\n  "settings_sha256": "%s",\n' \
+            "$BENCH_THREADS" "$builder_sha" "$geometry_source_sha" "$corpus_sha" "$settings_sha"
         printf '  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are %s/%s/%s/%s/%s/%s at 0/2/5/10/15/25%%; 10%% is the production default, while larger allowances remain available for corpora that continue trading area for fewer vertices.",\n' \
             "${HULL_TOTALS[0]}" "${HULL_TOTALS[1]}" "${HULL_TOTALS[2]}" "${HULL_TOTALS[3]}" "${HULL_TOTALS[4]}" "${HULL_TOTALS[5]}"
         printf '  "default_max_added_area_percent": 10,\n  "sweep_values": [0, 2, 5, 10, 15, 25],\n  "sweep": [\n'

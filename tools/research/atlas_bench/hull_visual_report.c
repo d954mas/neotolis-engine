@@ -343,23 +343,6 @@ static void json_escape(FILE *file, const char *text) {
     (void)fputc('"', file);
 }
 
-static bool text_value(const char *object, const char *key, char *out, size_t out_size) {
-    char needle[96];
-    (void)snprintf(needle, sizeof(needle), "\"%s\": \"", key);
-    const char *start = strstr(object, needle);
-    if (start == NULL) {
-        return false;
-    }
-    start += strlen(needle);
-    const char *end = strchr(start, '"');
-    if (end == NULL || (size_t)(end - start) >= out_size) {
-        return false;
-    }
-    memcpy(out, start, (size_t)(end - start));
-    out[end - start] = '\0';
-    return true;
-}
-
 static bool number_value(const char *object, const char *key, double *out) {
     char needle[96];
     (void)snprintf(needle, sizeof(needle), "\"%s\":", key);
@@ -403,6 +386,27 @@ static cJSON *json_unique_member(const cJSON *object, const char *name) {
     return match;
 }
 
+static bool json_string_equals(const cJSON *item, const char *expected) { return cJSON_IsString(item) && item->valuestring != NULL && strcmp(item->valuestring, expected) == 0; }
+
+static bool json_string_is_nonempty(const cJSON *item) { return cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0'; }
+
+static bool json_string_is_lower_hex(const cJSON *item, size_t length) {
+    if (!cJSON_IsString(item) || item->valuestring == NULL || strlen(item->valuestring) != length) {
+        return false;
+    }
+    for (size_t i = 0; i < length; i++) {
+        const char c = item->valuestring[i];
+        if (!isdigit((unsigned char)c) && (c < 'a' || c > 'f')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool json_number_is_nonnegative(const cJSON *item) { return cJSON_IsNumber(item) && isfinite(item->valuedouble) && item->valuedouble >= 0.0; }
+
+static bool json_number_is_uint(const cJSON *item) { return json_number_is_nonnegative(item) && floor(item->valuedouble) == item->valuedouble; }
+
 static bool selected_geometry_proof_is_valid(const char *sweep) {
     static const char *gate_names[] = {"full_cell_coverage", "topology", "triangulation", "allowance", "ceiling"};
     const char *parse_end = NULL;
@@ -425,40 +429,46 @@ static bool load_frontier(const char *path, VisualColumn columns[VISUAL_COLUMN_C
         free(bytes);
         return false;
     }
-    const char *cursor = strstr((const char *)bytes, "\"sweep\": [");
-    char source_commit[41];
-    const bool schema_v3 = strstr((const char *)bytes, "\"schema_version\": 3") != NULL;
-    bool ok = cursor != NULL && schema_v3 && strstr((const char *)bytes, "\"proof_format\": \"portable-v1\"") != NULL &&
-              text_value((const char *)bytes, "measurement_source_commit", source_commit, sizeof(source_commit)) && strlen(source_commit) == 40U &&
-              strstr((const char *)bytes, "\"sweep_values\": [0, 2, 5, 10, 15, 25]") != NULL;
-    if (ok) {
-        char builder_sha256[65];
-        ok = text_value((const char *)bytes, "builder_binary_sha256", builder_sha256, sizeof(builder_sha256)) && strlen(builder_sha256) == 64U;
-    }
+    const char *parse_end = NULL;
+    cJSON *root = cJSON_ParseWithOpts((const char *)bytes, &parse_end, true);
+    cJSON *schema = json_unique_member(root, "schema_version");
+    cJSON *source_commit = json_unique_member(root, "measurement_source_commit");
+    cJSON *sweep_values = json_unique_member(root, "sweep_values");
+    cJSON *sweep = json_unique_member(root, "sweep");
+    bool ok = cJSON_IsObject(root) && json_number_is_uint(schema) && schema->valuedouble == 3.0 && json_string_equals(json_unique_member(root, "proof_format"), "portable-v1") &&
+              json_string_is_lower_hex(source_commit, 40U) && json_string_equals(json_unique_member(root, "tool_version"), "2.0.0") &&
+              json_number_is_uint(json_unique_member(root, "builder_threads")) && json_unique_member(root, "builder_threads")->valuedouble == 1.0 &&
+              json_string_is_lower_hex(json_unique_member(root, "builder_binary_sha256"), 64U) && json_string_is_lower_hex(json_unique_member(root, "geometry_source_sha256"), 64U) &&
+              json_string_is_lower_hex(json_unique_member(root, "corpus_sha256"), 64U) && json_string_is_lower_hex(json_unique_member(root, "settings_sha256"), 64U) && cJSON_IsArray(sweep_values) &&
+              cJSON_GetArraySize(sweep_values) == VISUAL_COLUMN_COUNT && cJSON_IsArray(sweep) && cJSON_GetArraySize(sweep) == VISUAL_COLUMN_COUNT;
     for (uint32_t i = 0; ok && i < VISUAL_COLUMN_COUNT; i++) {
-        const char *object = strstr(cursor, "\"max_added_area_percent\":");
-        double percent = 0.0;
-        if (object == NULL || !number_value(object, "max_added_area_percent", &percent) || percent < 0.0 || !text_value(object, "sweep_source", columns[i].source, sizeof(columns[i].source)) ||
-            !text_value(object, "sweep_sha256", columns[i].sha256, sizeof(columns[i].sha256))) {
-            ok = false;
-            break;
-        }
-        if (fabs(percent - (double)expected[i]) > 0.0001) {
+        cJSON *expected_value = cJSON_GetArrayItem(sweep_values, (int)i);
+        cJSON *object = cJSON_GetArrayItem(sweep, (int)i);
+        cJSON *percent = json_unique_member(object, "max_added_area_percent");
+        cJSON *source = json_unique_member(object, "sweep_source");
+        cJSON *sha256 = json_unique_member(object, "sweep_sha256");
+        if (!json_number_is_uint(expected_value) || expected_value->valuedouble != (double)expected[i] || !json_number_is_nonnegative(percent) || percent->valuedouble != (double)expected[i] ||
+            !json_string_is_nonempty(source) || strlen(source->valuestring) >= sizeof(columns[i].source) || !json_string_is_lower_hex(sha256, 64U) ||
+            !json_number_is_uint(json_unique_member(object, "hull_vertices_total")) || !json_number_is_nonnegative(json_unique_member(object, "hull_vertices_mean")) ||
+            !json_number_is_nonnegative(json_unique_member(object, "density_fill_frontier")) || !json_number_is_nonnegative(json_unique_member(object, "representative_total_overdraw_percent")) ||
+            !json_string_is_lower_hex(json_unique_member(object, "baseline_pack_sha256"), 64U) || !json_string_is_lower_hex(json_unique_member(object, "selected_pack_sha256"), 64U)) {
             ok = false;
             break;
         }
         (void)snprintf(columns[i].id, sizeof(columns[i].id), "percent-%u", expected[i]);
-        columns[i].percent = percent;
-        (void)snprintf(columns[i].source_commit, sizeof(columns[i].source_commit), "%s", source_commit);
+        columns[i].percent = percent->valuedouble;
+        (void)snprintf(columns[i].source, sizeof(columns[i].source), "%s", source->valuestring);
+        (void)snprintf(columns[i].sha256, sizeof(columns[i].sha256), "%s", sha256->valuestring);
+        (void)snprintf(columns[i].source_commit, sizeof(columns[i].source_commit), "%s", source_commit->valuestring);
         char actual[65];
         size_t sweep_size = 0;
-        uint8_t *sweep = read_file(columns[i].source, &sweep_size);
+        uint8_t *sweep_bytes = read_file(columns[i].source, &sweep_size);
         double measured = -1.0;
-        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep != NULL && selected_geometry_proof_is_valid((const char *)sweep) &&
-             number_value((const char *)sweep, "max_added_area_percent", &measured) && fabs(measured - percent) < 0.0001;
-        free(sweep);
-        cursor = object + strlen("\"max_added_area_percent\":");
+        ok = file_sha256_hex(columns[i].source, actual) && strcmp(actual, columns[i].sha256) == 0 && sweep_bytes != NULL && selected_geometry_proof_is_valid((const char *)sweep_bytes) &&
+             number_value((const char *)sweep_bytes, "max_added_area_percent", &measured) && fabs(measured - percent->valuedouble) < 0.0001;
+        free(sweep_bytes);
     }
+    cJSON_Delete(root);
     free(bytes);
     return ok;
 }
@@ -1220,16 +1230,111 @@ static bool required_rows_present(const char *manifest, const char *html, const 
     return true;
 }
 
-static bool json_string_equals(const cJSON *item, const char *expected) { return cJSON_IsString(item) && item->valuestring != NULL && strcmp(item->valuestring, expected) == 0; }
+static bool json_point_is_valid(const cJSON *point) {
+    cJSON *x = json_unique_member(point, "x");
+    cJSON *y = json_unique_member(point, "y");
+    return cJSON_IsObject(point) && cJSON_IsNumber(x) && isfinite(x->valuedouble) && floor(x->valuedouble) == x->valuedouble && cJSON_IsNumber(y) && isfinite(y->valuedouble) &&
+           floor(y->valuedouble) == y->valuedouble;
+}
 
-static bool json_string_is_nonempty(const cJSON *item) { return cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0'; }
+static bool json_point_array_is_valid(const cJSON *array, int expected_count) {
+    if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != expected_count) {
+        return false;
+    }
+    for (int i = 0; i < expected_count; i++) {
+        if (!json_point_is_valid(cJSON_GetArrayItem(array, i))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool json_triangles_are_valid(const cJSON *array, int vertex_count) {
+    const int triangle_count = vertex_count >= 3 ? vertex_count - 2 : 0;
+    if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != triangle_count) {
+        return false;
+    }
+    for (int i = 0; i < triangle_count; i++) {
+        cJSON *triangle = cJSON_GetArrayItem(array, i);
+        cJSON *indices = json_unique_member(triangle, "indices");
+        cJSON *points = json_unique_member(triangle, "points");
+        if (!cJSON_IsObject(triangle) || !cJSON_IsArray(indices) || cJSON_GetArraySize(indices) != 3 || !json_point_array_is_valid(points, 3)) {
+            return false;
+        }
+        for (int index = 0; index < 3; index++) {
+            cJSON *value = cJSON_GetArrayItem(indices, index);
+            if (!json_number_is_uint(value) || value->valuedouble >= (double)vertex_count) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool json_alpha_payload_is_valid(const cJSON *mask, const cJSON *values) {
+    if (!cJSON_IsArray(mask) || !cJSON_IsArray(values) || cJSON_GetArraySize(mask) <= 0 || cJSON_GetArraySize(mask) != cJSON_GetArraySize(values)) {
+        return false;
+    }
+    for (int y = 0; y < cJSON_GetArraySize(mask); y++) {
+        cJSON *row_mask = cJSON_GetArrayItem(mask, y);
+        cJSON *row_values = cJSON_GetArrayItem(values, y);
+        if (!json_string_is_nonempty(row_mask) || !cJSON_IsArray(row_values) || cJSON_GetArraySize(row_values) != (int)strlen(row_mask->valuestring)) {
+            return false;
+        }
+        for (int x = 0; x < cJSON_GetArraySize(row_values); x++) {
+            cJSON *alpha = cJSON_GetArrayItem(row_values, x);
+            if (!json_number_is_uint(alpha) || alpha->valuedouble > 255.0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool manifest_panel_payload_is_valid(const cJSON *panel, bool expects_error) {
+    cJSON *baseline_count = json_unique_member(panel, "baseline_vertex_count");
+    cJSON *selected_count = json_unique_member(panel, "selected_vertex_count");
+    cJSON *max_vertices = json_unique_member(panel, "max_vertices");
+    if (!json_number_is_uint(baseline_count) || !json_number_is_uint(selected_count) || !json_number_is_uint(max_vertices) || max_vertices->valuedouble < 3.0 ||
+        max_vertices->valuedouble > VISUAL_MAX_VERTICES || baseline_count->valuedouble > max_vertices->valuedouble || selected_count->valuedouble > max_vertices->valuedouble) {
+        return false;
+    }
+    const int baseline_vertices = baseline_count->valueint;
+    const int selected_vertices = selected_count->valueint;
+    if ((!expects_error && (baseline_vertices < 3 || selected_vertices < 3)) || (expects_error && (baseline_vertices != 0 || selected_vertices != 0)) ||
+        !json_point_array_is_valid(json_unique_member(panel, "baseline_polygon"), baseline_vertices) || !json_point_array_is_valid(json_unique_member(panel, "selected_polygon"), selected_vertices) ||
+        !json_triangles_are_valid(json_unique_member(panel, "baseline_triangles"), baseline_vertices) ||
+        !json_triangles_are_valid(json_unique_member(panel, "selected_triangles"), selected_vertices) || !cJSON_IsArray(json_unique_member(panel, "numbered_vertices")) ||
+        cJSON_GetArraySize(json_unique_member(panel, "numbered_vertices")) != selected_vertices ||
+        !json_alpha_payload_is_valid(json_unique_member(panel, "effective_alpha_mask"), json_unique_member(panel, "original_alpha_values"))) {
+        return false;
+    }
+    cJSON *numbered = json_unique_member(panel, "numbered_vertices");
+    for (int i = 0; i < selected_vertices; i++) {
+        cJSON *vertex = cJSON_GetArrayItem(numbered, i);
+        cJSON *number = json_unique_member(vertex, "n");
+        if (!json_point_is_valid(vertex) || !json_number_is_uint(number) || number->valueint != i + 1) {
+            return false;
+        }
+    }
+    static const char *area_fields[] = {"opaque_area2", "base_area2", "selected_area2", "added_area2", "exact_lost_area2"};
+    static const char *percent_fields[] = {"base_overdraw_percent", "added_area_percent", "total_overdraw_percent"};
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(area_fields) / sizeof(area_fields[0])); i++) {
+        if (!json_number_is_uint(json_unique_member(panel, area_fields[i]))) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(percent_fields) / sizeof(percent_fields[0])); i++) {
+        if (!json_number_is_nonnegative(json_unique_member(panel, percent_fields[i]))) {
+            return false;
+        }
+    }
+    cJSON *baseline_sha = json_unique_member(panel, "baseline_pack_sha256");
+    cJSON *selected_sha = json_unique_member(panel, "selected_pack_sha256");
+    return expects_error ? json_string_equals(baseline_sha, "") && json_string_equals(selected_sha, "") : json_string_is_lower_hex(baseline_sha, 64U) && json_string_is_lower_hex(selected_sha, 64U);
+}
 
 static bool manifest_panel_is_valid(const cJSON *panel) {
-    static const char *visual_fields[] = {
-        "effective_alpha_mask",  "original_alpha_values",  "baseline_polygon",     "selected_polygon",     "baseline_triangles", "selected_triangles", "numbered_vertices",
-        "selected_vertex_count", "opaque_area2",           "base_area2",           "selected_area2",       "added_area2",        "exact_lost_area2",   "base_overdraw_percent",
-        "added_area_percent",    "total_overdraw_percent", "baseline_pack_sha256", "selected_pack_sha256", "max_vertices",
-    };
     static const char *normal_gate_names[] = {
         "inputs_valid",          "opaque_area_valid",       "base_bounds_valid",       "base_topology_valid",          "base_coverage_valid", "base_triangulation_valid",
         "selected_bounds_valid", "selected_topology_valid", "selected_coverage_valid", "selected_triangulation_valid", "metric_order_valid",  "allowance_valid",
@@ -1243,13 +1348,8 @@ static bool manifest_panel_is_valid(const cJSON *panel) {
         !json_string_equals(json_unique_member(panel, "result"), "PASS")) {
         return false;
     }
-    for (uint32_t field = 0; field < (uint32_t)(sizeof(visual_fields) / sizeof(visual_fields[0])); field++) {
-        if (json_unique_member(panel, visual_fields[field]) == NULL) {
-            return false;
-        }
-    }
     const bool expects_error = json_string_equals(sample_id, "opaque-square-max3");
-    if (cJSON_IsTrue(expected_error) != expects_error) {
+    if (cJSON_IsTrue(expected_error) != expects_error || !manifest_panel_payload_is_valid(panel, expects_error)) {
         return false;
     }
     if (!json_string_equals(json_unique_member(panel, "error_kind"), expects_error ? "ATLAS_HULL_INFEASIBLE" : "NONE")) {
@@ -1297,8 +1397,8 @@ static bool manifest_columns_are_valid(const cJSON *root) {
         cJSON *column = cJSON_GetArrayItem(columns, (int)index);
         cJSON *percent = json_unique_member(column, "max_added_area_percent");
         if (!json_string_equals(json_unique_member(column, "column_id"), ids[index]) || !cJSON_IsNumber(percent) || percent->valuedouble != percents[index] ||
-            !json_string_is_nonempty(json_unique_member(column, "sweep_source")) || !json_string_is_nonempty(json_unique_member(column, "sweep_sha256")) ||
-            !json_string_is_nonempty(json_unique_member(column, "measurement_source_commit"))) {
+            !json_string_is_nonempty(json_unique_member(column, "sweep_source")) || !json_string_is_lower_hex(json_unique_member(column, "sweep_sha256"), 64U) ||
+            !json_string_is_lower_hex(json_unique_member(column, "measurement_source_commit"), 40U)) {
             return false;
         }
     }
@@ -1347,7 +1447,7 @@ int nt_hull_visual_validate(const char *manifest_path, const char *html_path, co
     bool ok = root != NULL && cJSON_IsNumber(schema) && schema->valuedouble == (double)VISUAL_SCHEMA_VERSION && cJSON_IsTrue(json_unique_member(root, "overall_pass")) &&
               cJSON_IsArray(failing_panels) && cJSON_GetArraySize(failing_panels) == 0 && manifest_rows_are_valid(root, "rows", VISUAL_ROW_COUNT) &&
               manifest_rows_are_valid(root, "real_art_rows", REAL_ART_ROW_COUNT) && manifest_columns_are_valid(root) && manifest_evidence_is_valid(root) &&
-              json_string_is_nonempty(json_unique_member(root, "visual_input_sha256")) && json_string_is_nonempty(json_unique_member(root, "frontier_sha256")) &&
+              json_string_is_lower_hex(json_unique_member(root, "visual_input_sha256"), 64U) && json_string_is_lower_hex(json_unique_member(root, "frontier_sha256"), 64U) &&
               strstr(manifest, "connected_frontier_evidence") == NULL && strstr(manifest, "fidelity_px") == NULL && strstr(manifest, "lost_pixels") == NULL &&
               strstr(html, "<!doctype html>") != NULL && strstr(html, "Selected vertices / hard ceiling") != NULL && strstr(html, "Aopaque / Abase / Aselected") != NULL &&
               strstr(html, "Base / added / total overdraw") != NULL && strstr(html, "Exact lost area") != NULL && strstr(html, "Topology / bounds / winding") != NULL &&

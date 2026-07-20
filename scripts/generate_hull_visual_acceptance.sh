@@ -31,6 +31,18 @@ hull_visual_prepare_paths() {
     rm -rf -- "$TEMP_DIR" "$REPEAT_DIR"
 }
 
+hull_geometry_source_sha256() {
+    local sources=(
+        tools/builder/nt_builder.h
+        tools/builder/nt_builder_atlas.c
+        tools/builder/nt_builder_atlas_geometry.c
+        tools/builder/nt_builder_atlas_geometry.h
+        tools/builder/nt_builder_atlas_vpack.c
+        tools/builder/nt_builder_atlas_vpack.h
+    )
+    sha256sum "${sources[@]}" | sha256sum | awk '{print $1}'
+}
+
 frontier_valid() {
     [[ -f "$FRONTIER" ]] || return 1
     grep -Eq '"schema_version"[[:space:]]*:[[:space:]]*3([,[:space:]]|$)' "$FRONTIER" || return 1
@@ -38,6 +50,9 @@ frontier_valid() {
     grep -Eq '"tool_version"[[:space:]]*:[[:space:]]*"2\.0\.0"' "$FRONTIER" || return 1
     grep -Eq '"builder_threads"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$FRONTIER" || return 1
     grep -Eq '"builder_binary_sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"' "$FRONTIER" || return 1
+    local recorded_geometry_sha
+    recorded_geometry_sha="$(sed -n 's/.*"geometry_source_sha256": "\([0-9a-f]*\)".*/\1/p' "$FRONTIER")"
+    [[ ${#recorded_geometry_sha} -eq 64 && "$recorded_geometry_sha" == "$(hull_geometry_source_sha256)" ]] || return 1
     grep -Eq '"corpus_sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"' "$FRONTIER" || return 1
     grep -Eq '"settings_sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"' "$FRONTIER" || return 1
     grep -Eq '"sweep_values"[[:space:]]*:[[:space:]]*\[0,[[:space:]]*2,[[:space:]]*5,[[:space:]]*10,[[:space:]]*15,[[:space:]]*25\]' "$FRONTIER" || return 1

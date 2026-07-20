@@ -23,20 +23,20 @@
       "unique": 0,
       "pages": 1,
       "region_count": 128,
-      "density_fill_frontier": 0.5799,
-      "density_fill_texture": 0.4417,
+      "density_fill_frontier": 0.5547,
+      "density_fill_texture": 0.4444,
       "hull_verts": {
-        "total": 682,
+        "total": 666,
         "min": 4,
         "max": 8,
-        "mean": 5.3281
+        "mean": 5.2031
       }
     }
   ],
   "selected_geometry_proof": {
     "source": "assets/sprites/bigatlas/ages_ copy.png",
-    "baseline_pack_sha256": "be49168b46924485acf66f0e87f368c46a9b65fcc4664a08d4c42a4c30230094",
-    "selected_pack_sha256": "6dc163699f748f31c1b2ecb4f55d919de4873c7f4f44ba4435bb233dd1ea6661",
+    "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5",
+    "selected_pack_sha256": "7b6d316afd4fc75c6c16a86fe7dbab8516a28f2ead13bc798c59b1185d230061",
     "valid": true,
     "retained_cell_count": 16260,
     "base_vertex_count": 8,

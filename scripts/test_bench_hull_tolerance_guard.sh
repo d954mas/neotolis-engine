@@ -77,11 +77,13 @@ NT_HULL_VISUAL_GUARD_LIB_ONLY=1 source scripts/generate_hull_visual_acceptance.s
 FRONTIER_TEST_ROOT="build/tests/tmp/hull-frontier-${$}"
 VALID_FRONTIER="${FRONTIER_TEST_ROOT}/valid.json"
 EXPECTED_BUILDER_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+EXPECTED_GEOMETRY_SHA="$(hull_geometry_source_sha256)"
 mkdir -p "$FRONTIER_TEST_ROOT"
 sed \
     -e 's/"schema_version": [0-9][0-9]*/"schema_version": 3/' \
     -e '/"builder_binary_sha256":/d' \
-    -e "/\"builder_threads\": 1/a\\  \"builder_binary_sha256\": \"${EXPECTED_BUILDER_SHA}\"," \
+    -e '/"geometry_source_sha256":/d' \
+    -e "/\"builder_threads\": 1/a\\  \"builder_binary_sha256\": \"${EXPECTED_BUILDER_SHA}\",\n  \"geometry_source_sha256\": \"${EXPECTED_GEOMETRY_SHA}\"," \
     tools/research/atlas_bench/hull_area_frontier.json > "$VALID_FRONTIER"
 FRONTIER="$VALID_FRONTIER"
 if ! frontier_valid; then
@@ -102,8 +104,15 @@ if frontier_valid; then
     echo "frontier with malformed publisher builder hash was accepted" >&2
     exit 1
 fi
+STALE_GEOMETRY_FRONTIER="${FRONTIER_TEST_ROOT}/stale-geometry.json"
+sed "s/${EXPECTED_GEOMETRY_SHA}/0000000000000000000000000000000000000000000000000000000000000000/" "$VALID_FRONTIER" > "$STALE_GEOMETRY_FRONTIER"
+FRONTIER="$STALE_GEOMETRY_FRONTIER"
+if frontier_valid; then
+    echo "frontier from stale geometry sources was accepted" >&2
+    exit 1
+fi
 TAMPERED_FRONTIER="${FRONTIER_TEST_ROOT}/tampered-metric.json"
-sed '0,/"hull_vertices_total": 926/s//"hull_vertices_total": 927/' "$VALID_FRONTIER" > "$TAMPERED_FRONTIER"
+sed '0,/"hull_vertices_total": [0-9][0-9]*/s//"hull_vertices_total": 999999/' "$VALID_FRONTIER" > "$TAMPERED_FRONTIER"
 FRONTIER="$TAMPERED_FRONTIER"
 if frontier_valid; then
     echo "frontier metric inconsistent with its hashed proof was accepted" >&2

@@ -349,18 +349,18 @@ the public 10% default returned by the defaults helper.
 
 **Measured area-budget guidance (`mixed_aa`, native release):**
 
-The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
+The current deterministic frontier evidence uses six public area-budget values. Each row is reconstructed from real production packs and repeat-verified through the selected-geometry proof. Tracked proofs use `portable-v1`: platform, machine CPU, and timing fields are removed before hashing. The recorded builder binary hash identifies the publisher but is not a consumer-side byte-identity gate, so the portable proof remains consumable across supported platforms. The frontier also records a deterministic hash of the production atlas-geometry sources; visual acceptance rejects evidence after any of those sources changes. Canonical publication is explicit (`scripts/bench_hull_tolerance.sh --publish`), requires `native-release`, one builder thread, and the exact `mixed_aa` 0/2/5/10/15/25 sweep, and refuses a dirty worktree. Ordinary local sweeps only write under their output directory.
 
 Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. `visual_input_sha256` hashes the actual decoded RGBA plus resolved row controls used by the builder.
 
 | Added area budget | Hull vertices total | Mean | Frontier fill | Representative total overdraw | Sweep SHA-256 |
 | ---: | ---: | ---: | ---: | ---: | --- |
-| 0% | 926 | 7.2344 | 0.5383 | 0.15990160% | `4ab00d82587f4b9e8c9b11c05092310ea3e3ec7c522846583fa7215157c22c42` |
-| 2% | 782 | 6.1094 | 0.5971 | 0.76260763% | `97f874de5334a9096d6c042226e616a34ea3c88b6aa46bac4dba7811ebdaaed2` |
-| 5% | 738 | 5.7656 | 0.5751 | 0.76260763% | `3bc7579986fb845643d24bf7ef9f3989bbe8e0d32ed2a396675014774d853819` |
-| 10% | 682 | 5.3281 | 0.5799 | 0.76260763% | `8df159cd3654af5ecf4d7a740211ac8dd4bde4cf73303eee2bd0ed1620869e16` |
-| 15% | 656 | 5.1250 | 0.5730 | 0.76260763% | `b7f826ea6185fa4432882de1dcea356c8716746ac8335fc710b74ca5b39725d1` |
-| 25% | 604 | 4.7188 | 0.5546 | 0.76260763% | `16fafc85bec5b356adfcd9376662d8846596c114810c34ca68ee8a5040a24188` |
+| 0% | 896 | 7.0000 | 0.5465 | 0.15990160% | `cdcc56c66377ed8428ad9b743e9a204344bc98f0ee4ccc6718dbc9716b27967f` |
+| 2% | 752 | 5.8750 | 0.5857 | 0.76260763% | `39339f1b0dccb65d2c7ca9a4c43f017464e3bf2b9a79837770799791a1e4e471` |
+| 5% | 716 | 5.5938 | 0.5766 | 0.76260763% | `8e27e8bf34027deed6587898121a83b6ac9f84ef8b9dd77a1abf6b3dd1537165` |
+| 10% | 666 | 5.2031 | 0.5547 | 0.76260763% | `ae40d10f58d65ddcd4448d7e14e69cc506307689e3746525d22990715c8dce0c` |
+| 15% | 642 | 5.0156 | 0.5814 | 0.76260763% | `84e4ef521f145c7c44216be2687c2f2b9124f78aff19df6a304949e810aa0ff1` |
+| 25% | 598 | 4.6719 | 0.5565 | 0.76260763% | `d93d867da5b8d40344e2cd75172b12f6d90fd7738cdcb922f644f99e51000d77` |
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
