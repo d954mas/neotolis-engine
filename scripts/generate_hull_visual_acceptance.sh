@@ -18,7 +18,7 @@ if [[ ${1:-} == "--verify-repeat" ]]; then
 fi
 
 FRONTIER="tools/research/atlas_bench/hull_area_frontier.json"
-FINAL_DIR="build/reports/phase80-hull-visual-acceptance"
+FINAL_DIR="build/reports/hull-visual-acceptance"
 TEMP_DIR="${FINAL_DIR}.tmp"
 REPEAT_DIR="${FINAL_DIR}.repeat"
 REQUIRED="sq9-aa-triangle:convex,rotated-diamond:convex,concave-notch:concave,transparent-donut:concave,connected-mask-adversarial:concave,pixel-art-threshold-control:rect"
@@ -117,7 +117,7 @@ elif [[ ! -x "$REPORT_EXE" ]]; then
 fi
 
 case "$TEMP_DIR|$REPEAT_DIR" in
-    "build/reports/phase80-hull-visual-acceptance.tmp|build/reports/phase80-hull-visual-acceptance.repeat")
+    "build/reports/hull-visual-acceptance.tmp|build/reports/hull-visual-acceptance.repeat")
         hull_visual_prepare_paths
         ;;
     *) echo "ERROR: refusing to replace unexpected report paths" >&2; exit 1 ;;
