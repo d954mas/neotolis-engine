@@ -774,6 +774,24 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Transform-mask OUTPUT contract: byte-identity to the 81-01 master etalons,
+    # forbidden-orientation + intersection + slice9 read back from the unpacked
+    # atlas, and the partial-mask density inequality. Links ntpack_parse.c for the
+    # SHA + region probe; the fixture (test_helpers) is header-only.
+    add_executable(test_atlas_transform_mask
+        unit/test_atlas_transform_mask.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_transform_mask PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_transform_mask PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_transform_mask PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_transform_mask WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Compiles the complete pre-tolerance positional option lists as an external consumer would.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
     target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
