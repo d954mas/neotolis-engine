@@ -1,6 +1,6 @@
 {
   "meta": {
-    "tool_version": "1.0.0",
+    "tool_version": "2.0.0",
     "builder_version": 1,
     "corpus": "assets/bench/anim_heavy/*.png",
     "os": "windows",
@@ -10,8 +10,9 @@
       "max_size": 2048,
       "padding": 2,
       "max_vertices": 8,
-      "allow_transform": true,
+      "allowed_transforms": 255,
       "alpha_threshold": 1,
+      "max_added_area_percent": 10,
       "power_of_two": true
     },
     "cache_hits": 0,
@@ -24,15 +25,33 @@
       "unique": 0,
       "pages": 1,
       "region_count": 30,
-      "pack_ms": 40.2275,
-      "density_fill_frontier": 0.5877,
-      "density_fill_texture": 0.5471,
+      "pack_ms": 493.6729,
+      "density_fill_frontier": 0.5913,
+      "density_fill_texture": 0.5169,
       "hull_verts": {
-        "total": 240,
-        "min": 8,
-        "max": 8,
-        "mean": 8.0000
+        "total": 206,
+        "min": 6,
+        "max": 7,
+        "mean": 6.8667
       }
     }
-  ]
+  ],
+  "selected_geometry_proof": {
+    "source": "assets/bench/anim_heavy/orb_00.png",
+    "baseline_pack_sha256": "4d9eb533e3a1d5e3c56816ffb3a06880da9cc9ebf79defb6e7999285597d4316",
+    "selected_pack_sha256": "c7f4513aea2b0cd7f5975b63b2b9fbe06bf784bba0d8266c0b4730d244eb4b29",
+    "valid": true,
+    "retained_cell_count": 197,
+    "base_vertex_count": 8,
+    "selected_vertex_count": 7,
+    "opaque_area2": 394,
+    "base_area2": 478,
+    "selected_area2": 503,
+    "added_area2": 25,
+    "lost_area2": 0,
+    "base_overdraw_percent": 21.31979695,
+    "added_area_percent": 6.34517766,
+    "total_overdraw_percent": 27.66497462,
+    "gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}
+  }
 }

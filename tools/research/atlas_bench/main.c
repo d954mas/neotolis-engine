@@ -21,6 +21,14 @@
 /* Keep production defaults; corpus profiles vary only shape and page size. */
 #define BENCH_MAX_VERTICES 8
 
+/* The standalone CLI mirrors the builder's transform presets (atlas_bench_cli.h
+ * has no builder dependency); pin them to the single source so they cannot drift. */
+_Static_assert(ATLAS_BENCH_TRANSFORMS_ALL == NT_ATLAS_TRANSFORMS_ALL, "CLI ALL preset drifted");
+_Static_assert(ATLAS_BENCH_TRANSFORMS_IDENTITY == NT_ATLAS_TRANSFORMS_IDENTITY, "CLI IDENTITY preset drifted");
+_Static_assert(ATLAS_BENCH_TRANSFORMS_EXPORT == NT_ATLAS_TRANSFORMS_EXPORT, "CLI EXPORT preset drifted");
+_Static_assert(ATLAS_BENCH_TRANSFORMS_ROTATIONS == NT_ATLAS_TRANSFORMS_ROTATIONS, "CLI ROTATIONS preset drifted");
+_Static_assert(ATLAS_BENCH_TRANSFORMS_FLIPS == NT_ATLAS_TRANSFORMS_FLIPS, "CLI FLIPS preset drifted");
+
 typedef struct {
     NtAtlasBuild *atlas;
     uint32_t count;
@@ -74,7 +82,7 @@ typedef struct {
 } bench_pack_result_t;
 
 static bool build_production_pack(const char *pack_path, const char *corpus_glob, const char *atlas_name, nt_atlas_shape_t shape, uint32_t max_size, uint32_t max_sprites, float percent,
-                                  bench_pack_result_t *out) {
+                                  uint8_t allowed_transforms, bench_pack_result_t *out) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     if (ctx == NULL) {
         return false;
@@ -101,6 +109,7 @@ static bool build_production_pack(const char *pack_path, const char *corpus_glob
     opts.max_size = max_size;
     opts.max_vertices = BENCH_MAX_VERTICES;
     opts.max_added_area_percent = percent;
+    opts.allowed_transforms = allowed_transforms;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     bench_add_data_t add = {.atlas = atlas, .limit = max_sprites};
     (void)nt_builder_glob_iterate(corpus_glob, bench_add_callback, &add);
@@ -191,7 +200,8 @@ static uint8_t *build_retained_mask(const char *path, uint8_t threshold, uint32_
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- CLI validation and one cleanup path stay linear.
 int main(int argc, char *argv[]) {
     if (argc < 6) {
-        (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites] [--max-added-area-percent <percent>]\n");
+        (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites] [--max-added-area-percent <percent>] [--transforms "
+                              "<hex|all|identity|export|rotations|flips>]\n");
         return 1;
     }
     const char *out_json = argv[1];
@@ -214,14 +224,28 @@ int main(int argc, char *argv[]) {
     }
     nt_atlas_opts_t default_opts = nt_atlas_opts_defaults();
     float max_added_area_percent = default_opts.max_added_area_percent;
+    uint8_t allowed_transforms = default_opts.allowed_transforms;
     bool percent_seen = false;
+    bool transforms_seen = false;
     while (next_arg < argc) {
-        if (strcmp(argv[next_arg], "--max-added-area-percent") != 0 || percent_seen || next_arg + 1 >= argc || !parse_added_area_percent(argv[next_arg + 1], &max_added_area_percent)) {
+        if (strcmp(argv[next_arg], "--max-added-area-percent") == 0) {
+            if (percent_seen || next_arg + 1 >= argc || !parse_added_area_percent(argv[next_arg + 1], &max_added_area_percent)) {
+                (void)fprintf(stderr, "atlas_bench: bad argument near '%s'\n", argv[next_arg]);
+                return 1;
+            }
+            percent_seen = true;
+            next_arg += 2;
+        } else if (strcmp(argv[next_arg], "--transforms") == 0) {
+            if (transforms_seen || next_arg + 1 >= argc || !atlas_bench_parse_transforms(argv[next_arg + 1], &allowed_transforms)) {
+                (void)fprintf(stderr, "atlas_bench: bad argument near '%s'\n", argv[next_arg]);
+                return 1;
+            }
+            transforms_seen = true;
+            next_arg += 2;
+        } else {
             (void)fprintf(stderr, "atlas_bench: bad argument near '%s'\n", argv[next_arg]);
             return 1;
         }
-        percent_seen = true;
-        next_arg += 2;
     }
 
     nt_atlas_shape_t shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
@@ -251,9 +275,9 @@ int main(int argc, char *argv[]) {
     int exit_code = 1;
     bool keep_selected_pack = false;
     bool json_write_started = false;
-    if (!build_production_pack(baseline_pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, 0.0F, &baseline_run) ||
-        !build_production_pack(pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, max_added_area_percent, &selected_run) || baseline_run.sprite_count != selected_run.sprite_count ||
-        strcmp(baseline_run.first_path, selected_run.first_path) != 0) {
+    if (!build_production_pack(baseline_pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, 0.0F, allowed_transforms, &baseline_run) ||
+        !build_production_pack(pack_path, corpus_glob, atlas_name, shape, max_size, max_sprites, max_added_area_percent, allowed_transforms, &selected_run) ||
+        baseline_run.sprite_count != selected_run.sprite_count || strcmp(baseline_run.first_path, selected_run.first_path) != 0) {
         (void)fprintf(stderr, "atlas_bench: failed to build matching production baseline/selected packs\n");
         goto cleanup;
     }
@@ -264,11 +288,25 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
+    /* Self-check: every emitted region transform must lie inside the requested mask (D-11/D-13). */
+    uint32_t bad_region = 0U;
+    uint8_t bad_transform = 0U;
+    const int vrc = nt_bench_verify_region_transforms(pack_path, allowed_transforms, &bad_region, &bad_transform);
+    if (vrc != 0) {
+        if (vrc > 0) {
+            (void)fprintf(stderr, "atlas_bench: region %u emitted transform %u outside requested mask 0x%02X\n", bad_region, (unsigned)bad_transform, (unsigned)allowed_transforms);
+        } else {
+            (void)fprintf(stderr, "atlas_bench: failed to verify emitted transforms in %s (%d)\n", pack_path, vrc);
+        }
+        goto cleanup;
+    }
+
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = shape;
     opts.max_size = max_size;
     opts.max_vertices = BENCH_MAX_VERTICES;
     opts.max_added_area_percent = max_added_area_percent;
+    opts.allowed_transforms = allowed_transforms;
     uint32_t mask_w = 0U;
     uint32_t mask_h = 0U;
     uint32_t retained = 0U;

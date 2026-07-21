@@ -303,6 +303,78 @@ int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out) 
     return 0;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard-per-read pack walk; splitting detaches guards from reads
+int nt_bench_verify_region_transforms(const char *pack_path, uint8_t allowed_mask, uint32_t *out_bad_region, uint8_t *out_bad_transform) {
+    if (pack_path == NULL) {
+        return -1;
+    }
+    FILE *file = fopen(pack_path, "rb");
+    if (file == NULL || fseek(file, 0, SEEK_END) != 0) {
+        if (file != NULL) {
+            (void)fclose(file);
+        }
+        return -2;
+    }
+    const long length = ftell(file);
+    if (length < 0 || (uint64_t)length < sizeof(NtPackHeader) || fseek(file, 0, SEEK_SET) != 0) {
+        (void)fclose(file);
+        return -3;
+    }
+    const size_t size = (size_t)length;
+    uint8_t *bytes = (uint8_t *)malloc(size);
+    if (bytes == NULL || fread(bytes, 1, size, file) != size) {
+        free(bytes);
+        (void)fclose(file);
+        return -4;
+    }
+    (void)fclose(file);
+
+    const NtPackHeader *pack = (const NtPackHeader *)bytes;
+    const uint64_t entries_end = sizeof(NtPackHeader) + ((uint64_t)pack->asset_count * sizeof(NtAssetEntry));
+    if (pack->magic != NT_PACK_MAGIC || pack->version != NT_PACK_VERSION || entries_end > size) {
+        free(bytes);
+        return -5;
+    }
+    const NtAssetEntry *entries = (const NtAssetEntry *)(bytes + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint16_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS && entries[i].offset <= size && (uint64_t)entries[i].size <= size - entries[i].offset) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    if (atlas_entry == NULL || atlas_entry->size < sizeof(NtAtlasHeader)) {
+        free(bytes);
+        return -6;
+    }
+    const uint8_t *blob = bytes + atlas_entry->offset;
+    const NtAtlasHeader *atlas = (const NtAtlasHeader *)blob;
+    const uint64_t regions_offset = sizeof(NtAtlasHeader) + ((uint64_t)atlas->page_count * sizeof(uint64_t));
+    const uint64_t regions_end = regions_offset + ((uint64_t)atlas->region_count * sizeof(NtAtlasRegion));
+    if (atlas->magic != NT_ATLAS_MAGIC || atlas->version != NT_ATLAS_VERSION || regions_end > atlas_entry->size) {
+        free(bytes);
+        return -7;
+    }
+    /* Identity (value 0) is always permitted; a stored value >= 8 has no legal mask bit. */
+    const uint8_t effective = (uint8_t)(allowed_mask | 0x01U);
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)(blob + regions_offset);
+    for (uint16_t i = 0; i < atlas->region_count; i++) {
+        const uint8_t t = regions[i].transform;
+        if (t >= 8U || ((effective >> t) & 0x01U) == 0U) {
+            if (out_bad_region != NULL) {
+                *out_bad_region = i;
+            }
+            if (out_bad_transform != NULL) {
+                *out_bad_transform = t;
+            }
+            free(bytes);
+            return 1;
+        }
+    }
+    free(bytes);
+    return 0;
+}
+
 void nt_bench_selected_geometry_destroy(nt_bench_selected_geometry_t *geometry) {
     if (geometry == NULL) {
         return;

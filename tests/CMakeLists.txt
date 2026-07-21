@@ -482,6 +482,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_bench_cli PRIVATE unity)
     target_include_directories(test_atlas_bench_cli PRIVATE
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_SOURCE_DIR}/shared/include   # nt_atlas_format.h (transform value indices)
     )
     target_compile_definitions(test_atlas_bench_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_cli WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

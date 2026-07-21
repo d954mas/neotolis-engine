@@ -62,4 +62,10 @@ void nt_bench_selected_geometry_destroy(nt_bench_selected_geometry_t *geometry);
 /* Hash an actual produced pack. out_hex receives 64 lowercase digits plus NUL. */
 int nt_bench_file_sha256_hex(const char *path, char out_hex[65]);
 
+/* Read every region.transform back from the produced pack and confirm its bit is
+ * permitted by allowed_mask (identity, value 0, is always permitted). On the first
+ * violation returns 1 and sets *out_bad_region / *out_bad_transform (both optional).
+ * Returns 0 when all regions conform, negative on a malformed/unreadable pack. */
+int nt_bench_verify_region_transforms(const char *pack_path, uint8_t allowed_mask, uint32_t *out_bad_region, uint8_t *out_bad_transform);
+
 #endif /* NT_BENCH_NTPACK_PARSE_H */
