@@ -66,7 +66,7 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
     (void)fprintf(f, "      \"max_size\": %u,\n", run->opts_max_size);
     (void)fprintf(f, "      \"padding\": %u,\n", run->opts_padding);
     (void)fprintf(f, "      \"max_vertices\": %u,\n", run->opts_max_vertices);
-    (void)fprintf(f, "      \"allow_transform\": %s,\n", run->opts_allow_transform ? "true" : "false");
+    (void)fprintf(f, "      \"allowed_transforms\": %u,\n", (unsigned)run->opts_allowed_transforms);
     (void)fprintf(f, "      \"alpha_threshold\": %u,\n", run->opts_alpha_threshold);
     (void)fprintf(f, "      \"max_added_area_percent\": %.9g,\n", (double)run->opts_max_added_area_percent);
     (void)fprintf(f, "      \"power_of_two\": %s\n", run->opts_power_of_two ? "true" : "false");

@@ -241,7 +241,7 @@ The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each can
 
 - **Sub-pixel exact** — no quantization to a tile grid.
 - **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
-- **8 D4 orientations** — flipH, flipV, diagonal flip and combinations. Identity-equivalent orientations are deduplicated.
+- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the per-sprite effective `allowed_transforms` mask (atlas ∩ sprite, identity always permitted). Identity-equivalent orientations are deduplicated. (Full packer spec rewrite tracked in Phase 83.)
 - **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
 - **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
 - **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
@@ -266,7 +266,7 @@ typedef struct {
     uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    bool allow_transform;                   /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
+    uint8_t allowed_transforms;             /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); 0xFF = all (default), 0x01 = identity only. Identity is the implicit floor. */
     bool power_of_two;                      /* round atlas dims to POT (default true) */
     bool debug_png;                         /* write debug atlas page PNGs (default false) */
     bool premultiplied;                     /* premultiply RGB by alpha during texture encode (default true) */
@@ -323,9 +323,9 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
-    uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
-    uint8_t max_vertices; /* 0 = atlas default, else 4..16 */
+    uint8_t shape;              /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
+    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero intersects with it (identity floor applies) */
+    uint8_t max_vertices;       /* 0 = atlas default, else 4..16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
     uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */

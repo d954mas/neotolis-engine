@@ -316,7 +316,7 @@ int main(int argc, char *argv[]) {
     run.opts_max_size = opts.max_size;
     run.opts_padding = opts.padding;
     run.opts_max_vertices = opts.max_vertices;
-    run.opts_allow_transform = opts.allow_transform ? 1 : 0;
+    run.opts_allowed_transforms = opts.allowed_transforms;
     run.opts_alpha_threshold = opts.alpha_threshold;
     run.opts_max_added_area_percent = opts.max_added_area_percent;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;

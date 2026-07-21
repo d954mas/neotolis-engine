@@ -2,8 +2,8 @@
  * Build bunnymark demo packs:
  *   bunnymark_sd.ntpack -- sprite.vert + sprite.frag + atlas with 5 SD bunnies
  *
- * The atlas uses RECT shape (rect bunnies — fastest pack) with allow_transform
- * for D4 orientations, pixels_per_unit=1.0 (default; combined with the HD pack
+ * The atlas uses RECT shape (rect bunnies — fastest pack) with the default
+ * all-transforms mask for D4 orientations, pixels_per_unit=1.0 (default; combined with the HD pack
  * the on-screen size matches when both packs share the same Transform).
  *
  * Usage: build_bunnymark_packs <pack_dir>
@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
     // #region atlas: 5 SD bunny variants
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT; /* rectangular bunnies — fastest pack */
-    atlas_opts.allow_transform = true;
+    atlas_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
     atlas_opts.pixels_per_unit = 1.0F; /* default: 1 source pixel = 1 world unit */
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;
@@ -173,7 +173,7 @@ int main(int argc, char *argv[]) {
 
     nt_atlas_opts_t hd_opts = nt_atlas_opts_defaults();
     hd_opts.shape = NT_ATLAS_SHAPE_RECT;
-    hd_opts.allow_transform = true;
+    hd_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
     hd_opts.pixels_per_unit = 17.0F; /* HD trim_area / 5 ≈ 477x477 visible / 17 ≈ 28x28 world ≈ SD 25x32 */
     hd_opts.padding = 2;
     hd_opts.margin = 2;

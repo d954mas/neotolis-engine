@@ -1544,7 +1544,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
      * generation index — the two diverge once the mask gates generation. */
     uint32_t orient_count = 0;
     for (uint32_t v = 0; v < 8; v++) {
-        if (!(eff & (1u << v))) {
+        if (!(eff & (1U << v))) {
             continue;
         }
         if (v == 0) {

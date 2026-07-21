@@ -105,13 +105,13 @@ _Static_assert(sizeof(NtAtlasVertex) == 8, "NtAtlasVertex must be 8 bytes");
  * bit2=diagonal; apply order diagonal → flipH → flipV). A transform mask sets
  * bit i to permit stored value i, so these values double as mask bit indices.
  * Direction-neutral names — rot90/rot270 label quarter-turns, not a CW/CCW sense. */
-#define NT_ATLAS_XFORM_IDENTITY 0u      /* no change */
-#define NT_ATLAS_XFORM_FLIP_H 1u        /* flipH */
-#define NT_ATLAS_XFORM_FLIP_V 2u        /* flipV */
-#define NT_ATLAS_XFORM_ROT180 3u        /* flipH|flipV */
-#define NT_ATLAS_XFORM_TRANSPOSE 4u     /* diagonal */
-#define NT_ATLAS_XFORM_ROT90 5u         /* diagonal|flipH */
-#define NT_ATLAS_XFORM_ROT270 6u        /* diagonal|flipV */
-#define NT_ATLAS_XFORM_ANTITRANSPOSE 7u /* diagonal|flipH|flipV */
+#define NT_ATLAS_XFORM_IDENTITY 0U      /* no change */
+#define NT_ATLAS_XFORM_FLIP_H 1U        /* flipH */
+#define NT_ATLAS_XFORM_FLIP_V 2U        /* flipV */
+#define NT_ATLAS_XFORM_ROT180 3U        /* flipH|flipV */
+#define NT_ATLAS_XFORM_TRANSPOSE 4U     /* diagonal */
+#define NT_ATLAS_XFORM_ROT90 5U         /* diagonal|flipH */
+#define NT_ATLAS_XFORM_ROT270 6U        /* diagonal|flipV */
+#define NT_ATLAS_XFORM_ANTITRANSPOSE 7U /* diagonal|flipH|flipV */
 
 #endif /* NT_ATLAS_FORMAT_H */

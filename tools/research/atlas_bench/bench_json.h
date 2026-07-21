@@ -59,7 +59,7 @@ typedef struct {
     uint32_t opts_max_size;
     uint32_t opts_padding;
     uint32_t opts_max_vertices;
-    int opts_allow_transform; /* bool */
+    uint8_t opts_allowed_transforms; /* D4 transform mask */
     uint32_t opts_alpha_threshold;
     float opts_max_added_area_percent;
     int opts_power_of_two; /* bool */
