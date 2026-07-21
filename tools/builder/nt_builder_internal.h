@@ -67,7 +67,7 @@ typedef struct {
     bool has_alpha_threshold_override;
     uint8_t alpha_threshold_override; /* used only when presence flag is set */
     uint8_t shape_override;           /* 0 = atlas default */
-    uint8_t rotate_override;          /* 0 = atlas default */
+    uint8_t transforms_override;      /* 0 = inherit atlas mask; else per-sprite D4 mask */
     uint8_t max_verts_override;       /* 0 = atlas default */
     uint8_t margin_override;          /* 0 = atlas default */
     uint8_t extrude_override;         /* 0 = atlas default */

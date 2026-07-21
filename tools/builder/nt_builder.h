@@ -319,7 +319,7 @@ typedef enum {
 #define NT_ATLAS_TRANSFORM_ROT270 (1u << NT_ATLAS_XFORM_ROT270)
 #define NT_ATLAS_TRANSFORM_ANTITRANSPOSE (1u << NT_ATLAS_XFORM_ANTITRANSPOSE)
 
-/* Mask presets. ALL = old allow_transform=true; IDENTITY = old =false.
+/* Mask presets. ALL = every D4 orientation; IDENTITY = identity only.
  * EXPORT = one quarter-turn, the single-rotated-flag export target (e.g. Defold). */
 #define NT_ATLAS_TRANSFORMS_ALL 0xFFu
 #define NT_ATLAS_TRANSFORMS_IDENTITY NT_ATLAS_TRANSFORM_IDENTITY
@@ -336,10 +336,11 @@ typedef struct {
     uint32_t extrude;                       /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
     uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
     uint8_t max_vertices;                   /* max polygon vertices per region — range 3..16 (default 8; < 3 degenerates the simplified hull, 16 hard cap: downstream stack arrays limit to 32) */
+    float max_added_area_percent;           /* max simplification-added area relative to retained-pixel area (default: 10%) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
-                                             * false = identity only. Matches the transform field on AtlasPlacement /
-                                             * NtAtlasRegion (default: true) */
+    uint8_t allowed_transforms;             /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); identity is the implicit floor.
+                                             * 0xFF = all 8 orientations (default), 0x01 = identity only.
+                                             * A 0x00 zero-init behaves as identity-only. Bit i permits stored value i. */
     bool power_of_two;                      /* round atlas dims to POT (default: true) */
     bool debug_png;                         /* write debug atlas page PNGs (default: false) */
     bool premultiplied;                     /* true (default) = premultiply RGB by alpha during page encoding.
@@ -364,8 +365,6 @@ typedef struct {
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
     bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
-    /* New public controls stay after the complete legacy positional field list. */
-    float max_added_area_percent; /* max simplification-added area relative to retained-pixel area (default: 10%) */
 } nt_atlas_opts_t;
 
 /* Default atlas options */
@@ -381,7 +380,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .max_added_area_percent = 10.0F,
         .max_vertices = 8,
         .shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR,
-        .allow_transform = true,
+        .allowed_transforms = NT_ATLAS_TRANSFORMS_ALL,
         .power_of_two = true,
         .debug_png = false,
         .premultiplied = true,
@@ -400,7 +399,6 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
-#define NT_ATLAS_SPRITE_ROTATE_NO 1
 
 /* Per-sprite opts struct for nt_atlas_add / nt_atlas_add_raw / nt_atlas_add_glob.
  *
@@ -411,7 +409,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
  * overrides, or set every field explicitly in the literal.
  *
  * Slice9: when any slice9 border is non-zero, the pipeline auto-forces
- * shape=RECT and allow_rotate=NO at geometry/pack time. */
+ * shape=RECT and the effective transform mask to identity-only at geometry/pack time. */
 typedef struct {
     /* Optional region name.
      *   nt_atlas_add:      NULL = derive from file path (basename with extension)
@@ -438,17 +436,16 @@ typedef struct {
     uint16_t slice9_bottom;
 
     /* Per-sprite overrides (0 = use atlas default). */
-    uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
-    uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
-    uint8_t max_vertices; /* 0 = atlas default, else 3..16 */
-    uint8_t margin;       /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
+    uint8_t shape;              /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
+    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero intersects with it (identity floor still applies) */
+    uint8_t max_vertices;       /* 0 = atlas default, else 3..16 */
+    uint8_t margin;             /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
     /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed
      * (RECT only) and may be smaller OR larger than the atlas extrude. A zero
      * bleed cannot be expressed per-sprite (0 means inherit). Effective extrude,
      * whether inherited or overridden, requires the effective shape to be RECT.
      * The packing footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
-    /* New public controls stay after the complete legacy positional field list. */
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
     uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */
