@@ -30,6 +30,11 @@
 /* clang-format on */
 
 #define TMP_DIR "build/tests/tmp"
+#define GOLDEN_DIR "tests/fixtures/transform_mask_golden"
+
+/* Atlas name used by the Plan 81-01 capture harness. The name seeds the texture
+ * page resource ids, so byte-identity to the etalons requires the same name. */
+#define GOLDEN_ATLAS_NAME "transform_golden"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -72,6 +77,15 @@ static char *read_text_file(const char *path) {
     }
     txt[len] = '\0';
     return txt;
+}
+
+static void read_sha_file(const char *path, char out[65]) {
+    FILE *f = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL_MESSAGE(f, path);
+    size_t n = fread(out, 1, 64, f);
+    (void)fclose(f);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(64, (unsigned)n, "etalon sha file must hold 64 hex digits");
+    out[64] = '\0';
 }
 
 /* --- Pack builders --- */
@@ -302,6 +316,39 @@ void test_slice9_emits_identity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "slice9 sprite must emit identity");
 }
 
+/* --- XFORM-02: byte-identity to the Plan 81-01 master etalons --- */
+
+static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_path, const char *pack_path) {
+    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(mask, GOLDEN_ATLAS_NAME, pack_path), "golden pack build failed");
+
+    char actual_sha[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(pack_path, actual_sha), "hash produced pack");
+    char expected_sha[65];
+    read_sha_file(sha_path, expected_sha);
+
+    char *dump = dump_regions_text(pack_path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(dump, "produced pack dump");
+    char *etalon_dump = read_text_file(dump_path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(etalon_dump, "read etalon dump");
+
+    /* On any divergence, emit the current dump so the diff vs the committed
+     * etalon shows WHAT moved (D-14). */
+    if (strcmp(etalon_dump, dump) != 0 || strcmp(expected_sha, actual_sha) != 0) {
+        TEST_MESSAGE("current structural region dump (compare against the committed etalon dump):");
+        TEST_MESSAGE(dump);
+    }
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(etalon_dump, dump, "structural region dump diverged from etalon");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(expected_sha, actual_sha, "pack SHA-256 diverged from etalon (byte-identity broken)");
+    free(dump);
+    free(etalon_dump);
+}
+
+void test_golden_byte_identity_all(void) { assert_golden(NT_ATLAS_TRANSFORMS_ALL, GOLDEN_DIR "/etalon_all.sha256", GOLDEN_DIR "/etalon_all.dump.txt", TMP_DIR "/xform_golden_all.ntpack"); }
+
+void test_golden_byte_identity_identity(void) {
+    assert_golden(NT_ATLAS_TRANSFORMS_IDENTITY, GOLDEN_DIR "/etalon_identity.sha256", GOLDEN_DIR "/etalon_identity.dump.txt", TMP_DIR "/xform_golden_identity.ntpack");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_allowed_transforms);
@@ -309,5 +356,7 @@ int main(void) {
     RUN_TEST(test_export_density_at_least_identity);
     RUN_TEST(test_per_sprite_mask_intersection);
     RUN_TEST(test_slice9_emits_identity);
+    RUN_TEST(test_golden_byte_identity_all);
+    RUN_TEST(test_golden_byte_identity_identity);
     return UNITY_END();
 }
