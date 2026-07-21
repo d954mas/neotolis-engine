@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "hash/nt_hash.h"
+#include "nt_atlas_format.h"   /* NT_ATLAS_XFORM_* stored transform values */
 #include "nt_font_format.h"    /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
 #include "nt_mesh_format.h"    /* nt_stream_type_t */
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
@@ -306,6 +307,25 @@ typedef enum {
     NT_ATLAS_SHAPE_CONVEX_HULL = 1,
     NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,
 } nt_atlas_shape_t;
+
+/* D4 transform mask bits — bit i permits stored transform value NT_ATLAS_XFORM_i.
+ * Identity is the implicit floor (always permitted regardless of the mask). */
+#define NT_ATLAS_TRANSFORM_IDENTITY (1u << NT_ATLAS_XFORM_IDENTITY)
+#define NT_ATLAS_TRANSFORM_FLIP_H (1u << NT_ATLAS_XFORM_FLIP_H)
+#define NT_ATLAS_TRANSFORM_FLIP_V (1u << NT_ATLAS_XFORM_FLIP_V)
+#define NT_ATLAS_TRANSFORM_ROT180 (1u << NT_ATLAS_XFORM_ROT180)
+#define NT_ATLAS_TRANSFORM_TRANSPOSE (1u << NT_ATLAS_XFORM_TRANSPOSE)
+#define NT_ATLAS_TRANSFORM_ROT90 (1u << NT_ATLAS_XFORM_ROT90)
+#define NT_ATLAS_TRANSFORM_ROT270 (1u << NT_ATLAS_XFORM_ROT270)
+#define NT_ATLAS_TRANSFORM_ANTITRANSPOSE (1u << NT_ATLAS_XFORM_ANTITRANSPOSE)
+
+/* Mask presets. ALL = old allow_transform=true; IDENTITY = old =false.
+ * EXPORT = one quarter-turn, the single-rotated-flag export target (e.g. Defold). */
+#define NT_ATLAS_TRANSFORMS_ALL 0xFFu
+#define NT_ATLAS_TRANSFORMS_IDENTITY NT_ATLAS_TRANSFORM_IDENTITY
+#define NT_ATLAS_TRANSFORMS_EXPORT (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_ROT90)
+#define NT_ATLAS_TRANSFORMS_ROTATIONS (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_ROT90 | NT_ATLAS_TRANSFORM_ROT180 | NT_ATLAS_TRANSFORM_ROT270)
+#define NT_ATLAS_TRANSFORMS_FLIPS (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H | NT_ATLAS_TRANSFORM_FLIP_V | NT_ATLAS_TRANSFORM_ROT180)
 
 typedef struct {
     const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
