@@ -11,6 +11,7 @@
 
 /* clang-format off */
 #include "nt_builder.h"
+#include "nt_builder_atlas_test.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -716,6 +717,8 @@ void test_atlas_mid_pipeline_errors_lsan(void) {
     TEST_ASSERT_EQUAL_UINT32(2, n);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_SLICE9_TOO_BIG, errs[0].kind);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, errs[1].kind);
+    TEST_ASSERT_EQUAL_UINT32(35000, errs[1].w);
+    TEST_ASSERT_EQUAL_UINT32(0, errs[1].h);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_finish_pack(ctx));
 
     nt_builder_free_pack(ctx);
@@ -987,7 +990,7 @@ void test_build_error_format_matrix(void) {
         {NT_BUILD_ERR_KIND_ATLAS_DUPLICATE_REGION_NAME, "atlas 'atlas': duplicate region name 'sprite.png'"},
         {NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, "atlas 'atlas': region count exceeds 65535"},
         {NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, "atlas 'atlas', sprite 'sprite.png': 123x456 exceeds 65535px"},
-        {NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, "atlas 'atlas', sprite 'sprite.png': trim offset overflow"},
+        {NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, "atlas 'atlas', sprite 'sprite.png': trim offset exceeds int16 range (x=123, y=456)"},
         {NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, "atlas 'atlas': ran out of pages (max_size=2048)"},
         {NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE, "atlas 'atlas', sprite 'sprite.png': 123x456 + padding 3 + margin 5 + extrude 7 does not fit an empty page of max_size 2048"},
         {NT_BUILD_ERR_KIND_NONE, "no error"},

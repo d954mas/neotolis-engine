@@ -61,12 +61,17 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    uint8_t shape_override;     /* 0 = atlas default */
-    uint8_t rotate_override;    /* 0 = atlas default */
-    uint8_t max_verts_override; /* 0 = atlas default */
-    uint8_t margin_override;    /* 0 = atlas default */
-    uint8_t extrude_override;   /* 0 = atlas default */
-    uint32_t add_seq;           /* per-add sequence for stable add-order error reporting */
+    float max_added_area_percent_override;
+    float effective_max_added_area_percent;
+    bool has_max_added_area_percent_override;
+    bool has_alpha_threshold_override;
+    uint8_t alpha_threshold_override; /* used only when presence flag is set */
+    uint8_t shape_override;           /* 0 = atlas default */
+    uint8_t rotate_override;          /* 0 = atlas default */
+    uint8_t max_verts_override;       /* 0 = atlas default */
+    uint8_t margin_override;          /* 0 = atlas default */
+    uint8_t extrude_override;         /* 0 = atlas default */
+    uint32_t add_seq;                 /* per-add sequence for stable add-order error reporting */
 } NtAtlasSpriteInput;
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */

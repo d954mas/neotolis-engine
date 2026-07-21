@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "nt_builder_atlas_geometry.h"
+
 /* Metrics come from the produced atlas binary, never diagnostic log text. */
 
 /* Page-array cap; a corrupt header cannot force an unbounded page walk. */
@@ -32,6 +34,17 @@ typedef struct {
     double density_fill_frontier; /* Σ poly_px / Σ used-bbox_px (packer fill_frontier) */
 } nt_bench_atlas_metrics_t;
 
+typedef struct {
+    Point2D *polygon;
+    uint16_t *triangle_indices;
+    uint32_t vertex_count;
+    uint32_t triangle_index_count;
+    uint16_t source_w;
+    uint16_t source_h;
+    int16_t trim_offset_x;
+    int16_t trim_offset_y;
+} nt_bench_selected_geometry_t;
+
 /* Parse one atlas asset blob (NtAtlasHeader + pages + regions + verts).
  * Returns 0 on success, negative on malformed input. Hard-guards every offset
  * against blob_size — safe in every NT_ASSERT mode (asserts are void in OFF). */
@@ -39,5 +52,14 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
 
 /* Parse the atlas and its paired texture-page dimensions from a full pack. */
 int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out);
+
+/* Extract one region in builder y-down trim-local coordinates. The result owns
+ * both arrays and is released only by nt_bench_selected_geometry_destroy(). */
+int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_width, uint32_t trim_height, nt_bench_selected_geometry_t *out);
+
+void nt_bench_selected_geometry_destroy(nt_bench_selected_geometry_t *geometry);
+
+/* Hash an actual produced pack. out_hex receives 64 lowercase digits plus NUL. */
+int nt_bench_file_sha256_hex(const char *path, char out_hex[65]);
 
 #endif /* NT_BENCH_NTPACK_PARSE_H */

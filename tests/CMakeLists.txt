@@ -15,6 +15,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
+        nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -468,10 +469,22 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_bench_parse PRIVATE unity)
     target_include_directories(test_atlas_bench_parse PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
     target_compile_definitions(test_atlas_bench_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_parse)
+
+    add_executable(test_atlas_bench_cli
+        unit/test_atlas_bench_cli.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/atlas_bench_cli.c
+    )
+    target_link_libraries(test_atlas_bench_cli PRIVATE unity)
+    target_include_directories(test_atlas_bench_cli PRIVATE
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_bench_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_bench_cli WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
@@ -718,6 +731,20 @@ if(NOT EMSCRIPTEN)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
+    add_executable(test_atlas_hull_visual_report
+        unit/test_atlas_hull_visual_report.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/hull_visual_report.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_hull_visual_report PRIVATE nt_builder nt_log unity cjson)
+    target_include_directories(test_atlas_hull_visual_report PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_hull_visual_report PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Proves the graceful transparent-after-trim error path is leak-free:
     # runs under live LSan, no detect_leaks=0 masking.
     add_executable(test_atlas_transparent_trim unit/test_atlas_transparent_trim.c)
@@ -741,10 +768,51 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_pack_determinism PRIVATE nt_builder nt_log unity)
     target_include_directories(test_atlas_pack_determinism PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Compiles the complete pre-tolerance positional option lists as an external consumer would.
+    add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
+    target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(test_atlas_options_compat PRIVATE
+            -Wno-missing-field-initializers
+            -Wno-error=missing-field-initializers
+        )
+    endif()
+    nt_setup_test_target(test_atlas_options_compat)
+
+    if(WIN32)
+        # NO_DEFAULT_PATH avoids System32 bash.exe (WSL); derive candidates from git.exe too.
+        find_package(Git QUIET)
+        set(_nt_git_bash_paths "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin" "$ENV{ProgramFiles}/Git/bin" "$ENV{ProgramFiles}/Git/usr/bin")
+        if(GIT_EXECUTABLE)
+            get_filename_component(_nt_git_bin_dir "${GIT_EXECUTABLE}" DIRECTORY)
+            list(APPEND _nt_git_bash_paths "${_nt_git_bin_dir}" "${_nt_git_bin_dir}/../bin" "${_nt_git_bin_dir}/../usr/bin")
+        endif()
+        find_program(NT_GIT_BASH_EXECUTABLE bash
+            PATHS ${_nt_git_bash_paths}
+            NO_DEFAULT_PATH
+        )
+    else()
+        find_program(NT_GIT_BASH_EXECUTABLE bash)
+    endif()
+    if(NT_GIT_BASH_EXECUTABLE)
+        add_test(
+            NAME test_bench_hull_tolerance_guard
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
+        set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
+            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
+        )
+    else()
+        message(WARNING "Git Bash not found; test_bench_hull_tolerance_guard is NOT registered — the hull evidence shell pins will not run")
+    endif()
+
     # --- Basis encode + runtime transcode in one exe ---
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.

@@ -114,7 +114,7 @@ static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
 /* Pack the whole mini-corpus with nt_atlas_opts_defaults() (NO cache dir → real
  * default path) to `path`, then parse the produced .ntpack into `out`.
  * Returns true on a clean pack + parse. */
-static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *out) {
+static bool pack_and_parse_corpus_with_geometry(const char *path, nt_atlas_shape_t shape, bool use_default_added_area, float added_area_percent, bool sprite_override, nt_bench_atlas_metrics_t *out) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -125,6 +125,10 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
     }
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = shape;
+    if (!use_default_added_area) {
+        opts.max_added_area_percent = added_area_percent;
+    }
     NtAtlasBuild *atlas_build_128 = nt_atlas_begin(ctx, "det_corpus", &opts);
 
     uint8_t *bufs[CORPUS_COUNT] = {0};
@@ -134,7 +138,15 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
         TEST_ASSERT_NOT_NULL(bufs[i]);
         gen_sprite(bufs[i], s);
         /* raw sprites require an explicit name (no path to derive one from). */
-        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &(nt_atlas_sprite_opts_t){.name = s->name, .origin_x = 0.5F, .origin_y = 0.5F});
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        if (sprite_override && s->kind == SPR_TRI_RAMP) {
+            sprite_opts.max_added_area_percent = 2.0F;
+            sprite_opts.has_max_added_area_percent = true;
+            sprite_opts.alpha_threshold = 128;
+            sprite_opts.has_alpha_threshold = true;
+        }
+        nt_atlas_add_raw(atlas_build_128, bufs[i], s->w, s->h, &sprite_opts);
     }
 
     (void)nt_atlas_commit(atlas_build_128);
@@ -152,17 +164,89 @@ static bool pack_and_parse_corpus(const char *path, nt_bench_atlas_metrics_t *ou
     return nt_bench_parse_ntpack(path, out) == 0;
 }
 
+static bool pack_and_parse_corpus_with_added_area(const char *path, float added_area_percent, nt_bench_atlas_metrics_t *out) {
+    return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, false, added_area_percent, false, out);
+}
+
+static bool pack_and_parse_default_corpus(const char *path, nt_bench_atlas_metrics_t *out) { return pack_and_parse_corpus_with_geometry(path, NT_ATLAS_SHAPE_CONCAVE_CONTOUR, true, 0.0F, false, out); }
+
 /* Round a density to 1e-6 fixed point — exact-integer equality across two packs
  * avoids raw double-bit comparison flagging benign last-ULP noise as regression. */
 static int64_t density_fixed(double d) { return llround(d * 1000000.0); }
 
+static bool files_are_identical(const char *a_path, const char *b_path) {
+    FILE *a = fopen(a_path, "rb");
+    FILE *b = fopen(b_path, "rb");
+    if (!a || !b) {
+        if (a) {
+            (void)fclose(a);
+        }
+        if (b) {
+            (void)fclose(b);
+        }
+        return false;
+    }
+
+    bool equal = true;
+    uint8_t a_buf[4096];
+    uint8_t b_buf[4096];
+    for (;;) {
+        size_t a_size = fread(a_buf, 1, sizeof(a_buf), a);
+        size_t b_size = fread(b_buf, 1, sizeof(b_buf), b);
+        if (a_size != b_size || memcmp(a_buf, b_buf, a_size) != 0) {
+            equal = false;
+            break;
+        }
+        if (a_size < sizeof(a_buf)) {
+            equal = feof(a) != 0 && feof(b) != 0;
+            break;
+        }
+    }
+
+    (void)fclose(a);
+    (void)fclose(b);
+    return equal;
+}
+
+static bool pack_default_corpus_with_threads(const char *path, uint32_t thread_count) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, thread_count);
+
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_default_threads", NULL);
+    uint8_t *bufs[CORPUS_COUNT] = {0};
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        const spr_spec_t *s = &k_corpus[i];
+        bufs[i] = (uint8_t *)malloc((size_t)s->w * s->h * 4);
+        TEST_ASSERT_NOT_NULL(bufs[i]);
+        gen_sprite(bufs[i], s);
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        nt_atlas_add_raw(atlas, bufs[i], s->w, s->h, &sprite_opts);
+    }
+
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        free(bufs[i]);
+    }
+    return result == NT_BUILD_OK;
+}
+
 /* Two in-process packs of the SAME corpus at default opts must produce identical
  * region/page/vertex/hull counts and a bit-stable density. */
-void test_metrics_stable_across_two_packs(void) {
+void test_default_metrics_stable_across_two_packs(void) {
     nt_bench_atlas_metrics_t a;
     nt_bench_atlas_metrics_t b;
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_a.ntpack", &a), "pack/parse A failed");
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_b.ntpack", &b), "pack/parse B failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_a.ntpack", &a), "default pack/parse A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_b.ntpack", &b), "default pack/parse B failed");
 
     TEST_ASSERT_EQUAL_UINT16(a.region_count, b.region_count);
     TEST_ASSERT_EQUAL_UINT16(a.page_count, b.page_count);
@@ -172,23 +256,61 @@ void test_metrics_stable_across_two_packs(void) {
     TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_frontier), density_fixed(b.density_fill_frontier));
 }
 
+void test_zero_added_area_metrics_stable_across_two_packs(void) {
+    nt_bench_atlas_metrics_t a;
+    nt_bench_atlas_metrics_t b;
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_added_area(TMP_DIR "/det_zero_a.ntpack", 0.0F, &a), "0% pack/parse A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_added_area(TMP_DIR "/det_zero_b.ntpack", 0.0F, &b), "0% pack/parse B failed");
+
+    TEST_ASSERT_EQUAL_UINT16(a.region_count, b.region_count);
+    TEST_ASSERT_EQUAL_UINT16(a.page_count, b.page_count);
+    TEST_ASSERT_EQUAL_UINT32(a.total_vertex_count, b.total_vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
+    TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_texture), density_fixed(b.density_fill_texture));
+    TEST_ASSERT_EQUAL_INT64(density_fixed(a.density_fill_frontier), density_fixed(b.density_fill_frontier));
+}
+
+void test_positive_added_area_pack_bytes_repeat(void) {
+    const nt_atlas_shape_t shapes[] = {NT_ATLAS_SHAPE_CONCAVE_CONTOUR, NT_ATLAS_SHAPE_CONVEX_HULL};
+    const char *a_paths[] = {TMP_DIR "/det_concave_positive_a.ntpack", TMP_DIR "/det_convex_positive_a.ntpack"};
+    const char *b_paths[] = {TMP_DIR "/det_concave_positive_b.ntpack", TMP_DIR "/det_convex_positive_b.ntpack"};
+    for (uint32_t shape = 0; shape < 2; shape++) {
+        nt_bench_atlas_metrics_t a;
+        nt_bench_atlas_metrics_t b;
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(a_paths[shape], shapes[shape], false, 1.5F, true, &a), "positive pack/parse A failed");
+        TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus_with_geometry(b_paths[shape], shapes[shape], false, 1.5F, true, &b), "positive pack/parse B failed");
+        TEST_ASSERT_TRUE_MESSAGE(files_are_identical(a_paths[shape], b_paths[shape]), "positive-area atlas bytes are not deterministic");
+        TEST_ASSERT_EQUAL_UINT32(a.hull_vert_total, b.hull_vert_total);
+    }
+}
+
+void test_default_added_area_threads_are_byte_deterministic(void) {
+    const char *single = TMP_DIR "/det_default_threads_1.ntpack";
+    const char *parallel = TMP_DIR "/det_default_threads_4.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_default_corpus_with_threads(single, 1), "default 10% single-thread pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_default_corpus_with_threads(parallel, 4), "default 10% four-thread pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(files_are_identical(single, parallel), "default 10% atlas bytes differ between 1 and 4 threads");
+}
+
 /* These pins move only with an intentional default-output or cache-key change. */
 #define PIN_REGION_COUNT 7
 #define PIN_PAGE_COUNT 1
-#define PIN_HULL_VERT_TOTAL 36
-#define PIN_DENSITY_FILL_TEXTURE 0.363644
-#define PIN_DENSITY_FILL_FRONTIER 0.636539
+#define PIN_HULL_VERT_TOTAL 30
+#define PIN_DENSITY_FILL_TEXTURE 0.298702
+#define PIN_DENSITY_FILL_FRONTIER 0.428994
 #define PIN_DENSITY_TOL 1e-4
 
 void test_metrics_match_pinned_baseline(void) {
     nt_bench_atlas_metrics_t m;
-    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_corpus(TMP_DIR "/det_corpus_pin.ntpack", &m), "pack/parse failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_and_parse_default_corpus(TMP_DIR "/det_corpus_pin.ntpack", &m), "default pack/parse failed");
 
     TEST_ASSERT_EQUAL_UINT16(PIN_REGION_COUNT, m.region_count);
     TEST_ASSERT_EQUAL_UINT16(PIN_PAGE_COUNT, m.page_count);
     TEST_ASSERT_EQUAL_UINT32(PIN_HULL_VERT_TOTAL, m.hull_vert_total);
-    TEST_ASSERT_TRUE_MESSAGE(fabs(m.density_fill_texture - PIN_DENSITY_FILL_TEXTURE) < PIN_DENSITY_TOL, "density_fill_texture drifted from pinned baseline");
-    TEST_ASSERT_TRUE_MESSAGE(fabs(m.density_fill_frontier - PIN_DENSITY_FILL_FRONTIER) < PIN_DENSITY_TOL, "density_fill_frontier drifted from pinned baseline");
+    TEST_ASSERT_INT64_WITHIN_MESSAGE((int64_t)(PIN_DENSITY_TOL * 1000000.0), density_fixed(PIN_DENSITY_FILL_TEXTURE), density_fixed(m.density_fill_texture),
+                                     "density_fill_texture drifted from pinned baseline");
+    TEST_ASSERT_INT64_WITHIN_MESSAGE((int64_t)(PIN_DENSITY_TOL * 1000000.0), density_fixed(PIN_DENSITY_FILL_FRONTIER), density_fixed(m.density_fill_frontier),
+                                     "density_fill_frontier drifted from pinned baseline");
 }
 
 /* Extra per-sprite margin must be split evenly around content. */
@@ -447,7 +569,10 @@ void test_margin_override_content_centered(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_metrics_stable_across_two_packs);
+    RUN_TEST(test_default_metrics_stable_across_two_packs);
+    RUN_TEST(test_zero_added_area_metrics_stable_across_two_packs);
+    RUN_TEST(test_positive_added_area_pack_bytes_repeat);
+    RUN_TEST(test_default_added_area_threads_are_byte_deterministic);
     RUN_TEST(test_metrics_match_pinned_baseline);
     RUN_TEST(test_margin_override_content_centered);
     return UNITY_END();

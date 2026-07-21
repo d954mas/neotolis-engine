@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "proof_format": "portable-v1",
+  "measurement_source_commit": "2e375a83d535dcc012a4e61085066439f3992c29",
+  "tool_version": "2.0.0",
+  "builder_threads": 1,
+  "builder_binary_sha256": "09ce82ced22afce673e168b6bf5a9797bedca8872abc1869b07c5678f7bec6c6",
+  "geometry_source_sha256": "72325b998042e85850d37ae91d3fcc23d99b699b93a98984026c68478c75f456",
+  "corpus_sha256": "9d561a62c87396a31d74806f9ad170fed09f298ffd9ce6d292d35d336974733c",
+  "settings_sha256": "6896129518e7cb46affd30ae65546fd665e32f8d42b40a0d5fca367cddaac2f5",
+  "selection_rationale": "On the deterministic 128-sprite mixed-AA corpus, total hull vertices are 896/752/716/666/642/598 at 0/2/5/10/15/25%; 10% is the production default, while larger allowances remain available for corpora that continue trading area for fewer vertices.",
+  "default_max_added_area_percent": 10,
+  "sweep_values": [0, 2, 5, 10, 15, 25],
+  "sweep": [
+    {"max_added_area_percent": 0, "hull_vertices_total": 896, "hull_vertices_mean": 7.0000, "density_fill_frontier": 0.5465, "representative_total_overdraw_percent": 0.15990160, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/00-percent-0.json", "sweep_sha256": "cdcc56c66377ed8428ad9b743e9a204344bc98f0ee4ccc6718dbc9716b27967f", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5"}
+    ,{"max_added_area_percent": 2, "hull_vertices_total": 752, "hull_vertices_mean": 5.8750, "density_fill_frontier": 0.5857, "representative_total_overdraw_percent": 0.76260763, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/01-percent-2.json", "sweep_sha256": "39339f1b0dccb65d2c7ca9a4c43f017464e3bf2b9a79837770799791a1e4e471", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "027da473b66d442ee9796c5b59a1ff51dad07a2d255534ce97531317c1191e36"}
+    ,{"max_added_area_percent": 5, "hull_vertices_total": 716, "hull_vertices_mean": 5.5938, "density_fill_frontier": 0.5766, "representative_total_overdraw_percent": 0.76260763, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/02-percent-5.json", "sweep_sha256": "8e27e8bf34027deed6587898121a83b6ac9f84ef8b9dd77a1abf6b3dd1537165", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "75afcbccd7e737b2f76e546f278b29fc0efafae9aa7ebb0444108a8d0dd88ee2"}
+    ,{"max_added_area_percent": 10, "hull_vertices_total": 666, "hull_vertices_mean": 5.2031, "density_fill_frontier": 0.5547, "representative_total_overdraw_percent": 0.76260763, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/03-percent-10.json", "sweep_sha256": "ae40d10f58d65ddcd4448d7e14e69cc506307689e3746525d22990715c8dce0c", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "7b6d316afd4fc75c6c16a86fe7dbab8516a28f2ead13bc798c59b1185d230061"}
+    ,{"max_added_area_percent": 15, "hull_vertices_total": 642, "hull_vertices_mean": 5.0156, "density_fill_frontier": 0.5814, "representative_total_overdraw_percent": 0.76260763, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/04-percent-15.json", "sweep_sha256": "84e4ef521f145c7c44216be2687c2f2b9124f78aff19df6a304949e810aa0ff1", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "7e08350bb16b9b720e8ece72030b314603056f99c45ca56bd691e62907359ef7"}
+    ,{"max_added_area_percent": 25, "hull_vertices_total": 598, "hull_vertices_mean": 4.6719, "density_fill_frontier": 0.5565, "representative_total_overdraw_percent": 0.76260763, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/05-percent-25.json", "sweep_sha256": "d93d867da5b8d40344e2cd75172b12f6d90fd7738cdcb922f644f99e51000d77", "baseline_pack_sha256": "9451d07df30321a1600f6a104183dfbbd2535d4a22b8dfbd43fddf509465cfe5", "selected_pack_sha256": "c221f1fa57a5d57ba2f646090470b20fb53a504507b7e8feb6963f83987aa028"}
+  ],
+  "columns": [
+    {"column_id": "baseline", "max_added_area_percent": 0, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/00-percent-0.json", "sweep_sha256": "cdcc56c66377ed8428ad9b743e9a204344bc98f0ee4ccc6718dbc9716b27967f"}
+    ,{"column_id": "candidate", "max_added_area_percent": 5, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/02-percent-5.json", "sweep_sha256": "8e27e8bf34027deed6587898121a83b6ac9f84ef8b9dd77a1abf6b3dd1537165"}
+    ,{"column_id": "recommended", "max_added_area_percent": 10, "sweep_source": "tests/fixtures/hull_visual_acceptance/proof/03-percent-10.json", "sweep_sha256": "ae40d10f58d65ddcd4448d7e14e69cc506307689e3746525d22990715c8dce0c"}
+  ]
+}

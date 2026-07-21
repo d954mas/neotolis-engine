@@ -1,6 +1,7 @@
 #ifndef NT_BENCH_JSON_H
 #define NT_BENCH_JSON_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Timings are machine-bound; density, page, and vertex metrics are portable. */
@@ -24,6 +25,29 @@ typedef struct {
 } nt_bench_atlas_result_t;
 
 typedef struct {
+    char source[NT_BENCH_STR_MAX];
+    char baseline_pack_sha256[65];
+    char selected_pack_sha256[65];
+    bool valid;
+    bool full_cell_coverage;
+    bool topology_valid;
+    bool triangulation_valid;
+    bool allowance_valid;
+    bool ceiling_valid;
+    uint32_t retained_cell_count;
+    uint32_t base_vertex_count;
+    uint32_t selected_vertex_count;
+    uint64_t opaque_area2;
+    uint64_t base_area2;
+    uint64_t selected_area2;
+    uint64_t added_area2;
+    uint64_t lost_area2;
+    double base_overdraw_percent;
+    double added_area_percent;
+    double total_overdraw_percent;
+} nt_bench_geometry_proof_t;
+
+typedef struct {
     /* meta */
     char tool_version[NT_BENCH_STR_MAX];
     int builder_version; /* NT_BUILDER_VERSION */
@@ -37,12 +61,14 @@ typedef struct {
     uint32_t opts_max_vertices;
     int opts_allow_transform; /* bool */
     uint32_t opts_alpha_threshold;
+    float opts_max_added_area_percent;
     int opts_power_of_two; /* bool */
     uint64_t cache_hits;
     uint64_t cache_misses;
     /* atlases */
     nt_bench_atlas_result_t atlases[NT_BENCH_MAX_ATLASES];
     uint32_t atlas_count;
+    nt_bench_geometry_proof_t proof;
 } nt_bench_run_t;
 
 /* Write run as a single JSON object to out_path. Returns 0 on success,

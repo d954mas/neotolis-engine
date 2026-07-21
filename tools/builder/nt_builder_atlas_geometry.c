@@ -73,7 +73,485 @@ bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t threshold,
 
 /* --- 2D cross product for hull orientation --- */
 
-static int64_t cross2d(Point2D o, Point2D a, Point2D b) { return ((int64_t)(a.x - o.x) * (int64_t)(b.y - o.y)) - ((int64_t)(a.y - o.y) * (int64_t)(b.x - o.x)); }
+static int64_t cross2d(Point2D o, Point2D a, Point2D b) {
+    int64_t ax = (int64_t)a.x - (int64_t)o.x;
+    int64_t ay = (int64_t)a.y - (int64_t)o.y;
+    int64_t bx = (int64_t)b.x - (int64_t)o.x;
+    int64_t by = (int64_t)b.y - (int64_t)o.y;
+    return (ax * by) - (ay * bx);
+}
+
+static bool point2d_equal(Point2D a, Point2D b) { return a.x == b.x && a.y == b.y; }
+
+static bool point_on_segment(Point2D a, Point2D b, Point2D p) {
+    if (cross2d(a, b, p) != 0) {
+        return false;
+    }
+    int32_t min_x = a.x < b.x ? a.x : b.x;
+    int32_t max_x = a.x > b.x ? a.x : b.x;
+    int32_t min_y = a.y < b.y ? a.y : b.y;
+    int32_t max_y = a.y > b.y ? a.y : b.y;
+    return p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
+}
+
+static int cross_sign(int64_t value) { return (value > 0) - (value < 0); }
+
+static bool segments_intersect_or_touch(Point2D a, Point2D b, Point2D c, Point2D d) {
+    int64_t ab_c = cross2d(a, b, c);
+    int64_t ab_d = cross2d(a, b, d);
+    int64_t cd_a = cross2d(c, d, a);
+    int64_t cd_b = cross2d(c, d, b);
+    if (cross_sign(ab_c) != cross_sign(ab_d) && cross_sign(cd_a) != cross_sign(cd_b)) {
+        return true;
+    }
+    return (ab_c == 0 && point_on_segment(a, b, c)) || (ab_d == 0 && point_on_segment(a, b, d)) || (cd_a == 0 && point_on_segment(c, d, a)) || (cd_b == 0 && point_on_segment(c, d, b));
+}
+
+static int64_t polygon_signed_twice_area(const Point2D *poly, uint32_t count) {
+    int64_t twice_area = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t j = (i + 1U) % count;
+        twice_area += ((int64_t)poly[i].x * (int64_t)poly[j].y) - ((int64_t)poly[j].x * (int64_t)poly[i].y);
+    }
+    return twice_area;
+}
+
+static bool polygon_coordinates_widening_safe(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < INT16_MIN || poly[i].x > INT16_MAX || poly[i].y < INT16_MIN || poly[i].y > INT16_MAX) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* |coord| <= 2^30 keeps every cross2d product within int64; wider than the
+ * int16 serialization domain because covering generators legally overshoot trim. */
+static bool polygon_coordinates_cross_safe(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < -(1 << 30) || poly[i].x > (1 << 30) || poly[i].y < -(1 << 30) || poly[i].y > (1 << 30)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+nt_polygon_validity_t polygon_validate(const Point2D *poly, uint32_t count) {
+    if (!poly || count < 3) {
+        return NT_POLYGON_INVALID_TOO_FEW_VERTICES;
+    }
+    if (!polygon_coordinates_cross_safe(poly, count)) {
+        return NT_POLYGON_INVALID_COORD_RANGE;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        for (uint32_t j = i + 1U; j < count; j++) {
+            if (point2d_equal(poly[i], poly[j])) {
+                return NT_POLYGON_INVALID_REPEATED_VERTEX;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1U) % count];
+        for (uint32_t j = i + 1U; j < count; j++) {
+            Point2D c = poly[j];
+            Point2D d = poly[(j + 1U) % count];
+            bool adjacent = ((i + 1U) % count == j) || ((j + 1U) % count == i);
+            if (!adjacent && segments_intersect_or_touch(a, b, c, d)) {
+                return NT_POLYGON_INVALID_SELF_INTERSECTION;
+            }
+        }
+    }
+    int64_t twice_area = polygon_signed_twice_area(poly, count);
+    if (twice_area == 0) {
+        return NT_POLYGON_INVALID_ZERO_AREA;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D common = poly[(i + 1U) % count];
+        Point2D d = poly[(i + 2U) % count];
+        if (point_on_segment(a, common, d) || point_on_segment(common, d, a)) {
+            return NT_POLYGON_INVALID_SELF_INTERSECTION;
+        }
+    }
+    return twice_area > 0 ? NT_POLYGON_VALID : NT_POLYGON_INVALID_WINDING;
+}
+
+static bool point_in_or_on_polygon_scaled(const Point2D *poly, uint32_t count, int64_t px, int64_t py, int64_t scale) {
+    int winding = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1U) % count];
+        int64_t ax = (int64_t)a.x * scale;
+        int64_t ay = (int64_t)a.y * scale;
+        int64_t bx = (int64_t)b.x * scale;
+        int64_t by = (int64_t)b.y * scale;
+        int64_t cross = ((bx - ax) * (py - ay)) - ((by - ay) * (px - ax));
+        if (cross == 0 && px >= (ax < bx ? ax : bx) && px <= (ax > bx ? ax : bx) && py >= (ay < by ? ay : by) && py <= (ay > by ? ay : by)) {
+            return true;
+        }
+        if (ay <= py) {
+            if (by > py && cross > 0) {
+                winding++;
+            }
+        } else if (by <= py && cross < 0) {
+            winding--;
+        }
+    }
+    return winding != 0;
+}
+
+static bool segment_crosses_open_cell(Point2D a, Point2D b, uint32_t x, uint32_t y) {
+    int64_t ax = (int64_t)a.x * 2;
+    int64_t ay = (int64_t)a.y * 2;
+    int64_t bx = (int64_t)b.x * 2;
+    int64_t by = (int64_t)b.y * 2;
+    int64_t left = (int64_t)x * 2;
+    int64_t top = (int64_t)y * 2;
+    int64_t right = left + 2;
+    int64_t bottom = top + 2;
+    int64_t min_x = ax < bx ? ax : bx;
+    int64_t max_x = ax > bx ? ax : bx;
+    int64_t min_y = ay < by ? ay : by;
+    int64_t max_y = ay > by ? ay : by;
+    if (max_x <= left || min_x >= right || max_y <= top || min_y >= bottom) {
+        return false;
+    }
+
+    typedef struct {
+        int64_t numerator;
+        int64_t denominator;
+    } SegmentFraction;
+    SegmentFraction lower = {0, 1};
+    SegmentFraction upper = {1, 1};
+    const int64_t starts[2] = {ax, ay};
+    const int64_t deltas[2] = {bx - ax, by - ay};
+    const int64_t lows[2] = {left, top};
+    const int64_t highs[2] = {right, bottom};
+    for (uint32_t axis = 0; axis < 2; axis++) {
+        if (deltas[axis] == 0) {
+            if (starts[axis] <= lows[axis] || starts[axis] >= highs[axis]) {
+                return false;
+            }
+            continue;
+        }
+        SegmentFraction axis_lower = {0};
+        SegmentFraction axis_upper = {0};
+        if (deltas[axis] > 0) {
+            axis_lower = (SegmentFraction){lows[axis] - starts[axis], deltas[axis]};
+            axis_upper = (SegmentFraction){highs[axis] - starts[axis], deltas[axis]};
+        } else {
+            axis_lower = (SegmentFraction){starts[axis] - highs[axis], -deltas[axis]};
+            axis_upper = (SegmentFraction){starts[axis] - lows[axis], -deltas[axis]};
+        }
+        if ((lower.numerator * axis_lower.denominator) < (axis_lower.numerator * lower.denominator)) {
+            lower = axis_lower;
+        }
+        if ((axis_upper.numerator * upper.denominator) < (upper.numerator * axis_upper.denominator)) {
+            upper = axis_upper;
+        }
+    }
+    return (lower.numerator * upper.denominator) < (upper.numerator * lower.denominator);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact coverage stays single-pass.
+bool nt_polygon_covers_retained_cells(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t *out_retained_cells, uint32_t *out_lost_cells) {
+    uint32_t retained_cells = 0;
+    uint32_t lost_cells = 0;
+    if (!poly || poly_count < 3 || !binary || tw > INT16_MAX || th > INT16_MAX || !polygon_coordinates_widening_safe(poly, poly_count)) {
+        if (out_retained_cells) {
+            *out_retained_cells = 0;
+        }
+        if (out_lost_cells) {
+            *out_lost_cells = 0;
+        }
+        return false;
+    }
+
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (binary[((size_t)y * tw) + x] == 0) {
+                continue;
+            }
+            retained_cells++;
+            bool covered = point_in_or_on_polygon_scaled(poly, poly_count, x, y, 1) && point_in_or_on_polygon_scaled(poly, poly_count, (int64_t)x + 1, y, 1) &&
+                           point_in_or_on_polygon_scaled(poly, poly_count, (int64_t)x + 1, (int64_t)y + 1, 1) && point_in_or_on_polygon_scaled(poly, poly_count, x, (int64_t)y + 1, 1);
+            for (uint32_t edge = 0; covered && edge < poly_count; edge++) {
+                covered = !segment_crosses_open_cell(poly[edge], poly[(edge + 1U) % poly_count], x, y);
+            }
+            if (!covered) {
+                lost_cells++;
+                if (!out_retained_cells && !out_lost_cells) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (out_retained_cells) {
+        *out_retained_cells = retained_cells;
+    }
+    if (out_lost_cells) {
+        *out_lost_cells = lost_cells;
+    }
+    return retained_cells > 0 && lost_cells == 0;
+}
+
+typedef struct {
+    uint16_t from;
+    uint16_t to;
+} TriangleEdge;
+
+static bool polygon_vertices_adjacent(uint16_t a, uint16_t b, uint32_t count) { return ((uint32_t)a + 1U) % count == b || ((uint32_t)b + 1U) % count == a; }
+
+static bool triangle_diagonal_inside(const Point2D *poly, uint32_t count, uint16_t from, uint16_t to) {
+    if (polygon_vertices_adjacent(from, to, count)) {
+        return true;
+    }
+    Point2D a = poly[from];
+    Point2D b = poly[to];
+    if (!point_in_or_on_polygon_scaled(poly, count, (int64_t)a.x + b.x, (int64_t)a.y + b.y, 2)) {
+        return false;
+    }
+    for (uint32_t edge = 0; edge < count; edge++) {
+        uint32_t next = (edge + 1U) % count;
+        if (edge == from || edge == to || next == from || next == to) {
+            continue;
+        }
+        if (segments_intersect_or_touch(a, b, poly[edge], poly[next])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+bool nt_polygon_triangles_validate(const Point2D *poly, uint32_t poly_count, const uint16_t *indices, uint32_t index_count, uint64_t *out_area2) {
+    if (!poly || !indices || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || !polygon_coordinates_widening_safe(poly, poly_count) || polygon_validate(poly, poly_count) != NT_POLYGON_VALID ||
+        index_count != (poly_count - 2U) * 3U) {
+        return false;
+    }
+
+    TriangleEdge edges[NT_POLYGON_MAX_TRIANGLE_INDICES];
+    uint64_t triangle_area2 = 0;
+    for (uint32_t triangle = 0; triangle < index_count / 3U; triangle++) {
+        uint16_t a = indices[(triangle * 3U) + 0U];
+        uint16_t b = indices[(triangle * 3U) + 1U];
+        uint16_t c = indices[(triangle * 3U) + 2U];
+        if (a >= poly_count || b >= poly_count || c >= poly_count || a == b || b == c || c == a) {
+            return false;
+        }
+        int64_t area2 = cross2d(poly[a], poly[b], poly[c]);
+        if (area2 <= 0 || UINT64_MAX - triangle_area2 < (uint64_t)area2) {
+            return false;
+        }
+        triangle_area2 += (uint64_t)area2;
+        TriangleEdge tri_edges[3] = {{a, b}, {b, c}, {c, a}};
+        for (uint32_t edge = 0; edge < 3; edge++) {
+            edges[(triangle * 3U) + edge] = tri_edges[edge];
+            if (!triangle_diagonal_inside(poly, poly_count, tri_edges[edge].from, tri_edges[edge].to)) {
+                return false;
+            }
+        }
+    }
+    if (triangle_area2 != polygon_abs_twice_area(poly, poly_count)) {
+        return false;
+    }
+
+    bool consumed[NT_POLYGON_MAX_TRIANGLE_INDICES] = {0};
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (consumed[i]) {
+            continue;
+        }
+        uint32_t same = 0;
+        uint32_t reverse = 0;
+        for (uint32_t j = i; j < index_count; j++) {
+            if ((edges[j].from == edges[i].from && edges[j].to == edges[i].to) || (edges[j].from == edges[i].to && edges[j].to == edges[i].from)) {
+                consumed[j] = true;
+                same += edges[j].from == edges[i].from && edges[j].to == edges[i].to ? 1U : 0U;
+                reverse += edges[j].from == edges[i].to && edges[j].to == edges[i].from ? 1U : 0U;
+            }
+        }
+        bool boundary = ((uint32_t)edges[i].from + 1U) % poly_count == edges[i].to;
+        if ((boundary && (same != 1U || reverse != 0U)) || (!boundary && (same != 1U || reverse != 1U))) {
+            return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (polygon_vertices_adjacent(edges[i].from, edges[i].to, poly_count)) {
+            continue;
+        }
+        for (uint32_t j = i + 1U; j < index_count; j++) {
+            if (polygon_vertices_adjacent(edges[j].from, edges[j].to, poly_count) || edges[i].from == edges[j].from || edges[i].from == edges[j].to || edges[i].to == edges[j].from ||
+                edges[i].to == edges[j].to) {
+                continue;
+            }
+            if (segments_intersect_or_touch(poly[edges[i].from], poly[edges[i].to], poly[edges[j].from], poly[edges[j].to])) {
+                return false;
+            }
+        }
+    }
+
+    if (out_area2) {
+        *out_area2 = triangle_area2;
+    }
+    return true;
+}
+
+bool nt_polygon_triangulate_validated(const Point2D *poly, uint32_t poly_count, uint16_t *out_indices, uint32_t *out_index_count, uint64_t *out_area2) {
+    if (!poly || !out_indices || !out_index_count || poly_count < 3 || poly_count > NT_POLYGON_MAX_VERTICES || !polygon_coordinates_widening_safe(poly, poly_count) ||
+        polygon_validate(poly, poly_count) != NT_POLYGON_VALID) {
+        return false;
+    }
+    uint32_t index_count = (poly_count - 2U) * 3U;
+    if (poly_count == 3) {
+        out_indices[0] = 0;
+        out_indices[1] = 1;
+        out_indices[2] = 2;
+    } else {
+        int32_t xy[NT_POLYGON_MAX_VERTICES * 2];
+        for (uint32_t i = 0; i < poly_count; i++) {
+            xy[(size_t)i * 2U] = poly[i].x;
+            xy[((size_t)i * 2U) + 1U] = poly[i].y;
+        }
+        uint16_t *generated = NULL;
+        uint32_t triangle_count = nt_clipper2_triangulate(xy, poly_count, &generated);
+        if (!generated || triangle_count != poly_count - 2U) {
+            free(generated);
+            return false;
+        }
+        memcpy(out_indices, generated, (size_t)index_count * sizeof(uint16_t));
+        free(generated);
+        for (uint32_t triangle = 0; triangle < triangle_count; triangle++) {
+            uint16_t *a = &out_indices[(triangle * 3U) + 0U];
+            uint16_t *b = &out_indices[(triangle * 3U) + 1U];
+            uint16_t *c = &out_indices[(triangle * 3U) + 2U];
+            if (*a >= poly_count || *b >= poly_count || *c >= poly_count) {
+                return false;
+            }
+            if (cross2d(poly[*a], poly[*b], poly[*c]) < 0) {
+                uint16_t swap = *b;
+                *b = *c;
+                *c = swap;
+            }
+        }
+    }
+    if (!nt_polygon_triangles_validate(poly, poly_count, out_indices, index_count, out_area2)) {
+        return false;
+    }
+    *out_index_count = index_count;
+    return true;
+}
+
+nt_polygon_feasibility_t nt_polygon_feasibility(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices) {
+    nt_polygon_feasibility_t result = {0};
+    if (!poly || !binary || poly_count < 3 || poly_count > max_vertices || poly_count > NT_POLYGON_MAX_VERTICES || tw == 0 || th == 0 || tw > INT16_MAX || th > INT16_MAX) {
+        return result;
+    }
+    result.bounds_valid = true;
+    for (uint32_t i = 0; i < poly_count; i++) {
+        if (poly[i].x < 0 || poly[i].y < 0 || (uint32_t)poly[i].x > tw || (uint32_t)poly[i].y > th) {
+            result.bounds_valid = false;
+            return result;
+        }
+    }
+    result.topology_valid = polygon_validate(poly, poly_count) == NT_POLYGON_VALID;
+    if (!result.topology_valid) {
+        return result;
+    }
+    result.coverage_valid = nt_polygon_covers_retained_cells(poly, poly_count, binary, tw, th, &result.retained_cell_count, &result.lost_retained_cell_count);
+    result.retained_area2 = (uint64_t)result.retained_cell_count * 2U;
+    result.lost_area2 = (uint64_t)result.lost_retained_cell_count * 2U;
+    result.polygon_area2 = polygon_abs_twice_area(poly, poly_count);
+    if (!result.coverage_valid) {
+        return result;
+    }
+    result.triangulation_valid = nt_polygon_triangulate_validated(poly, poly_count, result.triangle_indices, &result.triangle_index_count, NULL);
+    result.valid = result.bounds_valid && result.topology_valid && result.coverage_valid && result.triangulation_valid;
+    return result;
+}
+
+static bool selected_geometry_bounds_valid(const Point2D *poly, uint32_t count, uint32_t width, uint32_t height) {
+    if (!poly || count < 3 || count > NT_POLYGON_MAX_VERTICES || width == 0 || height == 0 || width > INT16_MAX || height > INT16_MAX) {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if (poly[i].x < 0 || poly[i].y < 0 || (uint32_t)poly[i].x > width || (uint32_t)poly[i].y > height) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_selected_geometry_proof_t nt_selected_geometry_validate(const uint8_t *binary, uint32_t width, uint32_t height, uint64_t claimed_opaque_area2, const Point2D *base_poly, uint32_t base_count,
+                                                           uint64_t claimed_base_area2, const uint16_t *base_indices, uint32_t base_index_count, const Point2D *selected_poly, uint32_t selected_count,
+                                                           uint64_t claimed_selected_area2, const uint16_t *selected_indices, uint32_t selected_index_count, float max_added_area_percent,
+                                                           uint32_t max_vertices) {
+    nt_selected_geometry_proof_t proof = {0};
+    proof.base_vertex_count = base_count;
+    proof.selected_vertex_count = selected_count;
+    proof.base_triangle_index_count = base_index_count;
+    proof.selected_triangle_index_count = selected_index_count;
+    proof.max_vertices = max_vertices;
+    /* -0.0F -> +0.0F so proof equality can memcmp-compare the stored percent. */
+    proof.max_added_area_percent = max_added_area_percent == 0.0F ? 0.0F : max_added_area_percent;
+    proof.opaque_area2 = claimed_opaque_area2;
+    proof.base_area2 = claimed_base_area2;
+    proof.selected_area2 = claimed_selected_area2;
+    proof.inputs_valid = binary && base_poly && base_indices && selected_poly && selected_indices && width > 0 && height > 0 && width <= INT16_MAX && height <= INT16_MAX && max_vertices >= 3 &&
+                         max_vertices <= NT_POLYGON_MAX_VERTICES && isfinite(max_added_area_percent) && max_added_area_percent >= 0.0F;
+    if (!proof.inputs_valid) {
+        return proof;
+    }
+
+    uint32_t retained = 0;
+    size_t cell_count = (size_t)width * height;
+    for (size_t i = 0; i < cell_count; i++) {
+        retained += binary[i] != 0 ? 1U : 0U;
+    }
+    proof.retained_cell_count = retained;
+    uint64_t recomputed_opaque_area2 = (uint64_t)retained * 2U;
+    proof.opaque_area_valid = retained > 0 && claimed_opaque_area2 == recomputed_opaque_area2;
+
+    proof.base_bounds_valid = selected_geometry_bounds_valid(base_poly, base_count, width, height);
+    proof.base_topology_valid = proof.base_bounds_valid && polygon_validate(base_poly, base_count) == NT_POLYGON_VALID;
+    proof.base_coverage_valid = proof.base_topology_valid && nt_polygon_covers_retained_cells(base_poly, base_count, binary, width, height, NULL, NULL);
+    uint64_t recomputed_base_area2 = 0;
+    proof.base_triangulation_valid = proof.base_coverage_valid && nt_polygon_triangles_validate(base_poly, base_count, base_indices, base_index_count, &recomputed_base_area2);
+    proof.base_area_valid = proof.base_triangulation_valid && recomputed_base_area2 == claimed_base_area2;
+
+    proof.selected_bounds_valid = selected_geometry_bounds_valid(selected_poly, selected_count, width, height);
+    proof.selected_topology_valid = proof.selected_bounds_valid && polygon_validate(selected_poly, selected_count) == NT_POLYGON_VALID;
+    proof.selected_coverage_valid = proof.selected_topology_valid && nt_polygon_covers_retained_cells(selected_poly, selected_count, binary, width, height, NULL, NULL);
+    uint64_t recomputed_selected_area2 = 0;
+    proof.selected_triangulation_valid =
+        proof.selected_coverage_valid && nt_polygon_triangles_validate(selected_poly, selected_count, selected_indices, selected_index_count, &recomputed_selected_area2);
+    proof.selected_area_valid = proof.selected_triangulation_valid && recomputed_selected_area2 == claimed_selected_area2;
+
+    proof.metric_order_valid =
+        proof.opaque_area_valid && proof.base_area_valid && proof.selected_area_valid && claimed_base_area2 >= claimed_opaque_area2 && claimed_selected_area2 >= claimed_base_area2;
+    proof.added_area2 = proof.metric_order_valid ? claimed_selected_area2 - claimed_base_area2 : 0;
+    proof.allowance_valid = proof.metric_order_valid && ((double)proof.added_area2 * 100.0) <= ((double)claimed_opaque_area2 * (double)max_added_area_percent);
+    proof.ceiling_valid = base_count <= max_vertices && selected_count <= max_vertices;
+    proof.valid = proof.inputs_valid && proof.opaque_area_valid && proof.base_bounds_valid && proof.base_topology_valid && proof.base_coverage_valid && proof.base_triangulation_valid &&
+                  proof.base_area_valid && proof.selected_bounds_valid && proof.selected_topology_valid && proof.selected_coverage_valid && proof.selected_triangulation_valid &&
+                  proof.selected_area_valid && proof.metric_order_valid && proof.allowance_valid && proof.ceiling_valid;
+    return proof;
+}
+
+bool nt_selected_geometry_proof_equal(const nt_selected_geometry_proof_t *left, const nt_selected_geometry_proof_t *right) {
+    return left && right && left->inputs_valid == right->inputs_valid && left->opaque_area_valid == right->opaque_area_valid && left->base_bounds_valid == right->base_bounds_valid &&
+           left->base_topology_valid == right->base_topology_valid && left->base_coverage_valid == right->base_coverage_valid && left->base_triangulation_valid == right->base_triangulation_valid &&
+           left->base_area_valid == right->base_area_valid && left->selected_bounds_valid == right->selected_bounds_valid && left->selected_topology_valid == right->selected_topology_valid &&
+           left->selected_coverage_valid == right->selected_coverage_valid && left->selected_triangulation_valid == right->selected_triangulation_valid &&
+           left->selected_area_valid == right->selected_area_valid && left->metric_order_valid == right->metric_order_valid && left->allowance_valid == right->allowance_valid &&
+           left->ceiling_valid == right->ceiling_valid && left->valid == right->valid && left->retained_cell_count == right->retained_cell_count &&
+           left->base_vertex_count == right->base_vertex_count && left->selected_vertex_count == right->selected_vertex_count && left->base_triangle_index_count == right->base_triangle_index_count &&
+           left->selected_triangle_index_count == right->selected_triangle_index_count && left->max_vertices == right->max_vertices && left->max_added_area_percent == right->max_added_area_percent &&
+           left->opaque_area2 == right->opaque_area2 && left->base_area2 == right->base_area2 && left->selected_area2 == right->selected_area2 && left->added_area2 == right->added_area2;
+}
 
 /* --- qsort comparator: sort by x, then by y --- */
 
@@ -142,10 +620,7 @@ uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out) {
     return k;
 }
 /* --- Convex hull simplification: min-area vertex removal --- */
-/* Iteratively remove the vertex whose removal adds the smallest triangle area.
- * For convex polygons, removing a vertex always makes the polygon LARGER —
- * the edge between neighbors passes OUTSIDE the removed vertex.
- * Result is guaranteed to fully contain the original hull. */
+/* Strict comparison preserves the earliest vertex on equal-area ties. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
@@ -210,6 +685,181 @@ uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, P
     }
 
     free(keep);
+    return count;
+}
+
+static bool covering_line_intersection(Point2D a, Point2D b, Point2D c, Point2D d, double *out_x, double *out_y) {
+    double ab_x = (double)a.x - (double)b.x;
+    double ab_y = (double)a.y - (double)b.y;
+    double cd_x = (double)c.x - (double)d.x;
+    double cd_y = (double)c.y - (double)d.y;
+    double det = (ab_x * cd_y) - (ab_y * cd_x);
+    if (!isfinite(det) || fabs(det) <= 1e-12) {
+        return false;
+    }
+    double ab_cross = ((double)a.x * (double)b.y) - ((double)a.y * (double)b.x);
+    double cd_cross = ((double)c.x * (double)d.y) - ((double)c.y * (double)d.x);
+    double x = ((ab_cross * cd_x) - (ab_x * cd_cross)) / det;
+    double y = ((ab_cross * cd_y) - (ab_y * cd_cross)) / det;
+    if (!isfinite(x) || !isfinite(y) || x < (double)INT32_MIN || x > (double)INT32_MAX || y < (double)INT32_MIN || y > (double)INT32_MAX) {
+        return false;
+    }
+    *out_x = x;
+    *out_y = y;
+    return true;
+}
+
+static void covering_replace_edge(const Point2D *poly, const uint32_t *source_indices, uint32_t count, uint32_t edge, Point2D replacement, Point2D *out, uint32_t *out_source_indices) {
+    uint32_t next = (edge + 1) % count;
+    uint32_t after = (next + 1) % count;
+    out[0] = replacement;
+    out_source_indices[0] = source_indices[edge] < source_indices[next] ? source_indices[edge] : source_indices[next];
+    for (uint32_t dst = 1, src = after; dst < count - 1; dst++, src = (src + 1) % count) {
+        out[dst] = poly[src];
+        out_source_indices[dst] = source_indices[src];
+    }
+}
+
+static bool covering_is_strict_convex(const Point2D *poly, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        Point2D a = poly[i];
+        Point2D b = poly[(i + 1) % count];
+        Point2D c = poly[(i + 2) % count];
+        double cross = (((double)b.x - (double)a.x) * ((double)c.y - (double)b.y)) - (((double)b.y - (double)a.y) * ((double)c.x - (double)b.x));
+        if (!(cross > 0.0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool covering_encloses(const Point2D *poly, uint32_t poly_count, const Point2D *points, uint32_t point_count) {
+    for (uint32_t edge = 0; edge < poly_count; edge++) {
+        Point2D a = poly[edge];
+        Point2D b = poly[(edge + 1) % poly_count];
+        double dx = (double)b.x - (double)a.x;
+        double dy = (double)b.y - (double)a.y;
+        for (uint32_t i = 0; i < point_count; i++) {
+            double px = (double)points[i].x - (double)a.x;
+            double py = (double)points[i].y - (double)a.y;
+            if ((dx * py) - (dy * px) < -1e-9) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+uint32_t hull_simplify_covering(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
+    if (!hull || !out || n < 3 || max_vertices < 3) {
+        return 0;
+    }
+    if (polygon_validate(hull, n) != NT_POLYGON_VALID) {
+        return 0;
+    }
+    if (n <= max_vertices) {
+        memcpy(out, hull, (size_t)n * sizeof(Point2D));
+        return n;
+    }
+
+    Point2D *current = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    Point2D *scratch = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    uint32_t *current_sources = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+    uint32_t *scratch_sources = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+    NT_BUILD_ASSERT(current && scratch && current_sources && scratch_sources && "hull_simplify_covering: alloc failed");
+    memcpy(current, hull, (size_t)n * sizeof(Point2D));
+    for (uint32_t i = 0; i < n; i++) {
+        current_sources[i] = i;
+    }
+
+    uint32_t count = n;
+    while (count > max_vertices) {
+        bool found = false;
+        double best_error = HUGE_VAL;
+        uint32_t best_source = UINT32_MAX;
+        uint32_t best_edge = 0;
+        Point2D best_point = {0};
+
+        for (uint32_t edge = 0; edge < count; edge++) {
+            uint32_t prev = (edge + count - 1) % count;
+            uint32_t next = (edge + 1) % count;
+            uint32_t after = (next + 1) % count;
+            double ix = 0.0;
+            double iy = 0.0;
+            if (!covering_line_intersection(current[prev], current[edge], current[next], current[after], &ix, &iy)) {
+                continue;
+            }
+
+            double edge_dx = (double)current[next].x - (double)current[edge].x;
+            double edge_dy = (double)current[next].y - (double)current[edge].y;
+            double edge_len = sqrt((edge_dx * edge_dx) + (edge_dy * edge_dy));
+            if (!(edge_len > 0.0)) {
+                continue;
+            }
+            double error = fabs((((ix - (double)current[edge].x) * edge_dy) - ((iy - (double)current[edge].y) * edge_dx)) / edge_len);
+
+            double rounded_x[2] = {floor(ix), ceil(ix)};
+            double rounded_y[2] = {floor(iy), ceil(iy)};
+            bool rounded_found = false;
+            double rounded_error = HUGE_VAL;
+            Point2D rounded_point = {0};
+            for (uint32_t yi = 0; yi < 2; yi++) {
+                for (uint32_t xi = 0; xi < 2; xi++) {
+                    Point2D candidate = {(int32_t)rounded_x[xi], (int32_t)rounded_y[yi]};
+                    covering_replace_edge(current, current_sources, count, edge, candidate, scratch, scratch_sources);
+                    if (!covering_is_strict_convex(scratch, count - 1) || !covering_encloses(scratch, count - 1, current, count)) {
+                        continue;
+                    }
+                    double rx = (double)candidate.x - ix;
+                    double ry = (double)candidate.y - iy;
+                    double rounding = (rx * rx) + (ry * ry);
+                    if (!rounded_found || rounding < rounded_error) {
+                        rounded_found = true;
+                        rounded_error = rounding;
+                        rounded_point = candidate;
+                    }
+                }
+            }
+            if (!rounded_found) {
+                continue;
+            }
+
+            uint32_t source = current_sources[edge] < current_sources[next] ? current_sources[edge] : current_sources[next];
+            if (!found || error < best_error || (error == best_error && source < best_source)) {
+                found = true;
+                best_error = error;
+                best_source = source;
+                best_edge = edge;
+                best_point = rounded_point;
+            }
+        }
+
+        if (!found) {
+            /* Parallel opposite edges admit no finite enclosing reduction; the
+             * frontier's rect candidate covers this case instead. */
+            free(scratch_sources);
+            free(current_sources);
+            free(scratch);
+            free(current);
+            return 0;
+        }
+
+        covering_replace_edge(current, current_sources, count, best_edge, best_point, scratch, scratch_sources);
+        Point2D *point_swap = current;
+        current = scratch;
+        scratch = point_swap;
+        uint32_t *source_swap = current_sources;
+        current_sources = scratch_sources;
+        scratch_sources = source_swap;
+        count--;
+    }
+
+    memcpy(out, current, (size_t)count * sizeof(Point2D));
+    free(scratch_sources);
+    free(current_sources);
+    free(scratch);
+    free(current);
     return count;
 }
 
@@ -278,61 +928,6 @@ uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertic
     return count;
 }
 
-/* --- Fan triangulation from vertex 0 --- */
-
-uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
-    if (vertex_count < 3) {
-        return 0;
-    }
-    uint32_t tri_count = vertex_count - 2;
-    for (uint32_t i = 0; i < tri_count; i++) {
-        indices[(i * 3) + 0] = 0;
-        indices[(i * 3) + 1] = (uint16_t)(i + 1);
-        indices[(i * 3) + 2] = (uint16_t)(i + 2);
-    }
-    return tri_count;
-}
-/* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
-
-/* Triangulates a simple polygon (convex or concave). Uses Clipper2 CDT
- * for better triangle quality than ear-clipping. Falls back to fan_triangulate
- * on failure (e.g., self-intersecting input).
- * Input:  polygon vertices (CCW winding), vertex count n.
- * Output: triangle indices (local 0..n-1) written to 'indices'.
- * Returns number of triangles. */
-uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices) {
-    if (n < 3) {
-        return 0;
-    }
-    if (n == 3) {
-        indices[0] = 0;
-        indices[1] = 1;
-        indices[2] = 2;
-        return 1;
-    }
-    /* Convert to flat xy and call Clipper2 CDT via bridge */
-    int32_t stack_xy[64];
-    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc((size_t)n * 2 * sizeof(int32_t));
-    NT_BUILD_ASSERT(xy && "triangulate: alloc failed");
-    for (size_t i = 0; i < n; i++) {
-        xy[i * 2] = poly[i].x;
-        xy[(i * 2) + 1] = poly[i].y;
-    }
-    uint16_t *cdt_indices = NULL;
-    uint32_t tri_count = nt_clipper2_triangulate(xy, n, &cdt_indices);
-    if (xy != stack_xy) {
-        free(xy);
-    }
-    if (tri_count == 0 || !cdt_indices) {
-        /* Clipper2 CDT failed (degenerate/self-intersecting) — fallback to fan */
-        free(cdt_indices);
-        return fan_triangulate(n, indices);
-    }
-    memcpy(indices, cdt_indices, (size_t)tri_count * 3 * sizeof(uint16_t));
-    free(cdt_indices);
-    return tri_count;
-}
-
 /* --- Point-in-polygon test (ray casting, even-odd rule) --- */
 
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
@@ -368,8 +963,7 @@ bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
  * Used to determine the minimum Clipper2 inflate amount needed so the inflated
  * polygon fully encloses every opaque pixel center (stricter than the clean
  * contour vertices, which sit at integer pixel corners and miss +0.5 offsets). */
-/* Distance from point (cx,cy) to the nearest polygon edge. */
-static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) {
+static double polygon_point_edge_distance_sq(const Point2D *poly, uint32_t poly_count, double cx, double cy) {
     double min_d_sq = 1e30;
     for (uint32_t i = 0; i < poly_count; i++) {
         uint32_t j = (i + 1) % poly_count;
@@ -395,8 +989,192 @@ static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_cou
             min_d_sq = d_sq;
         }
     }
-    return sqrt(min_d_sq);
+    return min_d_sq;
 }
+
+static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) { return sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy)); }
+
+nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
+    nt_polygon_coverage_metrics_t metrics = {0};
+    if (!poly || poly_count < 3 || !binary) {
+        return metrics;
+    }
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            double cx = (double)x + 0.5;
+            double cy = (double)y + 0.5;
+            bool covered = point_in_polygon_f(poly, poly_count, cx, cy) || polygon_point_edge_distance_sq(poly, poly_count, cx, cy) <= 1e-18;
+            bool retained = binary[((size_t)y * tw) + x] != 0;
+            metrics.lost_retained_pixels += retained && !covered ? 1U : 0U;
+            metrics.extra_covered_pixels += !retained && covered ? 1U : 0U;
+        }
+    }
+    return metrics;
+}
+
+// #region test_access
+#ifdef NT_TEST_ACCESS
+typedef struct {
+    double a;
+    double b;
+    double c;
+    double begin;
+    double end;
+} BoundaryDistancePiece;
+
+static void boundary_piece_set_endpoint(BoundaryDistancePiece *piece, Point2D reference_start, Point2D reference_end, Point2D endpoint) {
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ox = (double)reference_start.x - (double)endpoint.x;
+    double oy = (double)reference_start.y - (double)endpoint.y;
+    piece->a = (vx * vx) + (vy * vy);
+    piece->b = 2.0 * ((ox * vx) + (oy * vy));
+    piece->c = (ox * ox) + (oy * oy);
+}
+
+static void boundary_piece_set_line(BoundaryDistancePiece *piece, Point2D reference_start, Point2D reference_end, Point2D edge_start, Point2D edge_end) {
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ex = (double)edge_end.x - (double)edge_start.x;
+    double ey = (double)edge_end.y - (double)edge_start.y;
+    double ox = (double)reference_start.x - (double)edge_start.x;
+    double oy = (double)reference_start.y - (double)edge_start.y;
+    double edge_len_sq = (ex * ex) + (ey * ey);
+    double cross_start = (ox * ey) - (oy * ex);
+    double cross_step = (vx * ey) - (vy * ex);
+    piece->a = (cross_step * cross_step) / edge_len_sq;
+    piece->b = (2.0 * cross_start * cross_step) / edge_len_sq;
+    piece->c = (cross_start * cross_start) / edge_len_sq;
+}
+
+static uint32_t boundary_edge_pieces(Point2D reference_start, Point2D reference_end, Point2D edge_start, Point2D edge_end, BoundaryDistancePiece *pieces) {
+    double ex = (double)edge_end.x - (double)edge_start.x;
+    double ey = (double)edge_end.y - (double)edge_start.y;
+    double edge_len_sq = (ex * ex) + (ey * ey);
+    if (edge_len_sq == 0.0) {
+        pieces[0].begin = 0.0;
+        pieces[0].end = 1.0;
+        boundary_piece_set_endpoint(&pieces[0], reference_start, reference_end, edge_start);
+        return 1;
+    }
+
+    double vx = (double)reference_end.x - (double)reference_start.x;
+    double vy = (double)reference_end.y - (double)reference_start.y;
+    double ox = (double)reference_start.x - (double)edge_start.x;
+    double oy = (double)reference_start.y - (double)edge_start.y;
+    double projection_start = ((ox * ex) + (oy * ey)) / edge_len_sq;
+    double projection_step = ((vx * ex) + (vy * ey)) / edge_len_sq;
+    double cuts[4] = {0.0, 1.0, 0.0, 0.0};
+    uint32_t cut_count = 2;
+    if (projection_step != 0.0) {
+        double zero_crossing = -projection_start / projection_step;
+        double one_crossing = (1.0 - projection_start) / projection_step;
+        if (zero_crossing > 0.0 && zero_crossing < 1.0) {
+            cuts[cut_count++] = zero_crossing;
+        }
+        if (one_crossing > 0.0 && one_crossing < 1.0) {
+            cuts[cut_count++] = one_crossing;
+        }
+    }
+    for (uint32_t i = 1; i < cut_count; i++) {
+        double key = cuts[i];
+        uint32_t j = i;
+        while (j > 0 && cuts[j - 1] > key) {
+            cuts[j] = cuts[j - 1];
+            j--;
+        }
+        cuts[j] = key;
+    }
+
+    uint32_t piece_count = 0;
+    for (uint32_t i = 0; i + 1 < cut_count; i++) {
+        if (cuts[i + 1] <= cuts[i]) {
+            continue;
+        }
+        BoundaryDistancePiece *piece = &pieces[piece_count++];
+        piece->begin = cuts[i];
+        piece->end = cuts[i + 1];
+        double midpoint = (piece->begin + piece->end) * 0.5;
+        double projection = projection_start + (projection_step * midpoint);
+        if (projection <= 0.0) {
+            boundary_piece_set_endpoint(piece, reference_start, reference_end, edge_start);
+        } else if (projection >= 1.0) {
+            boundary_piece_set_endpoint(piece, reference_start, reference_end, edge_end);
+        } else {
+            boundary_piece_set_line(piece, reference_start, reference_end, edge_start, edge_end);
+        }
+    }
+    return piece_count;
+}
+
+static void boundary_consider_t(const Point2D *candidate, uint32_t candidate_count, Point2D start, Point2D end, double t, double *max_distance_sq) {
+    double x = (double)start.x + (t * ((double)end.x - (double)start.x));
+    double y = (double)start.y + (t * ((double)end.y - (double)start.y));
+    double distance_sq = polygon_point_edge_distance_sq(candidate, candidate_count, x, y);
+    if (distance_sq > *max_distance_sq) {
+        *max_distance_sq = distance_sq;
+    }
+}
+
+static void boundary_consider_piece_intersections(const BoundaryDistancePiece *lhs, const BoundaryDistancePiece *rhs, const Point2D *candidate, uint32_t candidate_count, Point2D start, Point2D end,
+                                                  double *max_distance_sq) {
+    double begin = lhs->begin > rhs->begin ? lhs->begin : rhs->begin;
+    double finish = lhs->end < rhs->end ? lhs->end : rhs->end;
+    if (finish < begin) {
+        return;
+    }
+    double a = lhs->a - rhs->a;
+    double b = lhs->b - rhs->b;
+    double c = lhs->c - rhs->c;
+    if (fabs(a) < 1e-12) {
+        if (fabs(b) < 1e-12) {
+            return;
+        }
+        double root = -c / b;
+        if (root >= begin && root <= finish) {
+            boundary_consider_t(candidate, candidate_count, start, end, root, max_distance_sq);
+        }
+        return;
+    }
+    double discriminant = (b * b) - (4.0 * a * c);
+    if (discriminant < 0.0) {
+        return;
+    }
+    double root_span = sqrt(discriminant);
+    double roots[2] = {(-b - root_span) / (2.0 * a), (-b + root_span) / (2.0 * a)};
+    for (uint32_t i = 0; i < 2; i++) {
+        if (roots[i] >= begin && roots[i] <= finish) {
+            boundary_consider_t(candidate, candidate_count, start, end, roots[i], max_distance_sq);
+        }
+    }
+}
+
+double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count) {
+    enum { MAX_CANDIDATE_VERTICES = 16, MAX_DISTANCE_PIECES = MAX_CANDIDATE_VERTICES * 3 };
+    NT_BUILD_ASSERT(reference && candidate && reference_count >= 3 && candidate_count >= 3 && candidate_count <= MAX_CANDIDATE_VERTICES);
+    double max_distance_sq = 0.0;
+    for (uint32_t reference_index = 0; reference_index < reference_count; reference_index++) {
+        Point2D start = reference[reference_index];
+        Point2D end = reference[(reference_index + 1) % reference_count];
+        BoundaryDistancePiece pieces[MAX_DISTANCE_PIECES];
+        uint32_t piece_count = 0;
+        for (uint32_t candidate_index = 0; candidate_index < candidate_count; candidate_index++) {
+            Point2D edge_start = candidate[candidate_index];
+            Point2D edge_end = candidate[(candidate_index + 1) % candidate_count];
+            piece_count += boundary_edge_pieces(start, end, edge_start, edge_end, &pieces[piece_count]);
+        }
+        for (uint32_t i = 0; i < piece_count; i++) {
+            boundary_consider_t(candidate, candidate_count, start, end, pieces[i].begin, &max_distance_sq);
+            boundary_consider_t(candidate, candidate_count, start, end, pieces[i].end, &max_distance_sq);
+            for (uint32_t j = i + 1; j < piece_count; j++) {
+                boundary_consider_piece_intersections(&pieces[i], &pieces[j], candidate, candidate_count, start, end, &max_distance_sq);
+            }
+        }
+    }
+    return sqrt(max_distance_sq);
+}
+#endif
+// #endregion
 
 /* Scanline inside/outside classification — computes per-row x-intersections
  * using EXACTLY the same edge-crossing formula as point_in_polygon_f, then
@@ -484,6 +1262,19 @@ void binary_dilate_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t 
             uint8_t up = (y > 0) ? in[i - tw] : 0;
             uint8_t down = (y + 1 < th) ? in[i + tw] : 0;
             out[i] = (v | left | right | up | down) ? (uint8_t)1 : (uint8_t)0;
+        }
+    }
+}
+
+void binary_erode_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t th) {
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            size_t i = ((size_t)y * tw) + x;
+            uint8_t left = (x > 0) ? in[i - 1] : 0;
+            uint8_t right = (x + 1 < tw) ? in[i + 1] : 0;
+            uint8_t up = (y > 0) ? in[i - tw] : 0;
+            uint8_t down = (y + 1 < th) ? in[i + tw] : 0;
+            out[i] = (in[i] && left && right && up && down) ? (uint8_t)1 : (uint8_t)0;
         }
     }
 }
@@ -758,7 +1549,11 @@ uint32_t remove_collinear(const Point2D *in, uint32_t n, Point2D *out) {
             out[count++] = in[i];
         }
     }
-    return (count >= 3) ? count : n; /* keep all if degenerate */
+    if (count >= 3) {
+        return count;
+    }
+    memcpy(out, in, (size_t)n * sizeof(Point2D));
+    return n;
 }
 
 /* --- Ramer-Douglas-Peucker simplification for closed polygons --- */
@@ -898,7 +1693,11 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
     free(a_map);
     free(chain);
 
-    return (count >= 3) ? count : n;
+    if (count < 3) {
+        memcpy(out, poly, (size_t)n * sizeof(Point2D));
+        return n;
+    }
+    return count;
 }
 
 /* --- Polygon inflation via Clipper2 (handles concave corners correctly) --- */
@@ -1060,18 +1859,25 @@ void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw
 }
 
 uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count) {
+    uint64_t twice_area = polygon_abs_twice_area(poly, count);
+    return (twice_area >> 1U) + (twice_area & 1U);
+}
+
+uint64_t polygon_abs_twice_area(const Point2D *poly, uint32_t count) {
     if (count < 3) {
         return 0;
     }
 
-    int64_t twice_area = 0;
+    uint64_t positive = 0;
+    uint64_t negative = 0;
     for (uint32_t i = 0; i < count; i++) {
-        uint32_t j = (i + 1 == count) ? 0 : i + 1;
-        twice_area += ((int64_t)poly[i].x * (int64_t)poly[j].y) - ((int64_t)poly[j].x * (int64_t)poly[i].y);
-    }
-    if (twice_area < 0) {
-        twice_area = -twice_area;
+        uint32_t next = (i + 1U) % count;
+        int64_t cross = ((int64_t)poly[i].x * poly[next].y) - ((int64_t)poly[next].x * poly[i].y);
+        uint64_t magnitude = cross < 0 ? (uint64_t)(-(cross + 1)) + 1U : (uint64_t)cross;
+        uint64_t *sum = cross < 0 ? &negative : &positive;
+        NT_BUILD_ASSERT(UINT64_MAX - *sum >= magnitude && "polygon area overflow");
+        *sum += magnitude;
     }
 
-    return ((uint64_t)twice_area + 1ULL) >> 1U;
+    return positive >= negative ? positive - negative : negative - positive;
 }
