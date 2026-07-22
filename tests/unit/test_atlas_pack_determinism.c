@@ -599,46 +599,8 @@ static uint32_t count_atlas_cache_files(const char *dir) {
     return count;
 }
 
-/* Pack the mini-corpus to `path` through the on-disk cache `cache` at atlas mask. */
-static bool pack_corpus_masked(const char *path, const char *cache, uint8_t mask) {
-    (void)MKDIR("build");
-    (void)MKDIR("build/tests");
-    (void)MKDIR(TMP_DIR);
-    NtBuilderContext *ctx = nt_builder_start_pack(path);
-    if (!ctx) {
-        return false;
-    }
-    nt_builder_set_threads(ctx, 1);
-    nt_builder_set_cache_dir(ctx, cache);
-    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.allowed_transforms = mask;
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_mask", &opts);
-    uint8_t *bufs[CORPUS_COUNT] = {0};
-    for (int i = 0; i < CORPUS_COUNT; ++i) {
-        const spr_spec_t *s = &k_corpus[i];
-        bufs[i] = (uint8_t *)malloc((size_t)s->w * s->h * 4);
-        TEST_ASSERT_NOT_NULL(bufs[i]);
-        gen_sprite(bufs[i], s);
-        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
-        sprite_opts.name = s->name;
-        nt_atlas_add_raw(atlas, bufs[i], s->w, s->h, &sprite_opts);
-    }
-    (void)nt_atlas_commit(atlas);
-    nt_build_result_t result = nt_builder_finish_pack(ctx);
-    nt_builder_free_pack(ctx);
-    for (int i = 0; i < CORPUS_COUNT; ++i) {
-        free(bufs[i]);
-    }
-    return result == NT_BUILD_OK;
-}
-
-/* allowed_transforms participates in the atlas cache key: the same corpus at
- * two masks writes two distinct cache entries. */
-void test_allowed_transforms_changes_cache_key(void) {
-    const char *cache = TMP_DIR "/atlas_cache_mask_dir";
-    (void)MKDIR(TMP_DIR);
-    (void)MKDIR(cache);
-    /* Start clean: remove any prior atlas_*.bin so the count reflects this run. */
+/* Remove prior atlas cache .bin files so counts reflect the current test run. */
+static void clear_atlas_cache_files(const char *cache) {
 #ifdef _WIN32
     char pattern[512];
     (void)snprintf(pattern, sizeof(pattern), "%s\\atlas_*.bin", cache);
@@ -667,13 +629,76 @@ void test_allowed_transforms_changes_cache_key(void) {
         (void)closedir(d);
     }
 #endif
+}
+
+/* Pack the mini-corpus to `path` through the on-disk cache `cache` at atlas mask.
+ * sprite0_mask: per-sprite allowed_transforms for sprite 0 (0 = inherit atlas mask). */
+static bool pack_corpus_masked(const char *path, const char *cache, uint8_t mask, uint8_t sprite0_mask) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_builder_set_cache_dir(ctx, cache);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = mask;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_mask", &opts);
+    uint8_t *bufs[CORPUS_COUNT] = {0};
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        const spr_spec_t *s = &k_corpus[i];
+        bufs[i] = (uint8_t *)malloc((size_t)s->w * s->h * 4);
+        TEST_ASSERT_NOT_NULL(bufs[i]);
+        gen_sprite(bufs[i], s);
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        if (i == 0) {
+            sprite_opts.allowed_transforms = sprite0_mask;
+        }
+        nt_atlas_add_raw(atlas, bufs[i], s->w, s->h, &sprite_opts);
+    }
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    for (int i = 0; i < CORPUS_COUNT; ++i) {
+        free(bufs[i]);
+    }
+    return result == NT_BUILD_OK;
+}
+
+/* allowed_transforms participates in the atlas cache key: the same corpus at
+ * two masks writes two distinct cache entries. */
+void test_allowed_transforms_changes_cache_key(void) {
+    const char *cache = TMP_DIR "/atlas_cache_mask_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clear_atlas_cache_files(cache);
     TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
 
-    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_mask_all.ntpack", cache, NT_ATLAS_TRANSFORMS_ALL), "ALL-mask pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_mask_all.ntpack", cache, NT_ATLAS_TRANSFORMS_ALL, 0), "ALL-mask pack failed");
     TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
-    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_mask_identity.ntpack", cache, NT_ATLAS_TRANSFORMS_IDENTITY), "IDENTITY-mask pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_mask_identity.ntpack", cache, NT_ATLAS_TRANSFORMS_IDENTITY, 0), "IDENTITY-mask pack failed");
     /* Two entries ⇒ the mask changed the cache key. */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "allowed_transforms must change the atlas cache key");
+}
+
+/* Per-sprite transforms_override participates in the cache key on its own: the
+ * atlas mask stays fixed, only sprite 0's override changes ⇒ a second cache
+ * entry. Guards against a key serialization that drops the per-sprite mask and
+ * reuses a stale placement. */
+void test_sprite_transforms_override_changes_cache_key(void) {
+    const char *cache = TMP_DIR "/atlas_cache_sprite_mask_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clear_atlas_cache_files(cache);
+    TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
+
+    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_smask_inherit.ntpack", cache, NT_ATLAS_TRANSFORMS_ALL, 0), "inherit-override pack failed");
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+    TEST_ASSERT_TRUE_MESSAGE(pack_corpus_masked(TMP_DIR "/det_smask_identity.ntpack", cache, NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_IDENTITY), "sprite-override pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "per-sprite transforms override must change the atlas cache key");
 }
 
 int main(void) {
@@ -685,5 +710,6 @@ int main(void) {
     RUN_TEST(test_metrics_match_pinned_baseline);
     RUN_TEST(test_margin_override_content_centered);
     RUN_TEST(test_allowed_transforms_changes_cache_key);
+    RUN_TEST(test_sprite_transforms_override_changes_cache_key);
     return UNITY_END();
 }

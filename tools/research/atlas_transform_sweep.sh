@@ -105,6 +105,7 @@ run_bench() {
 declare -A TEX     # "corpus|mask" -> fill_texture
 declare -A ALLSHA1 # corpus -> ALL-mask selected pack sha (run 1)
 declare -A ALLSHA2 # corpus -> ALL-mask selected pack sha (run 2)
+run_fail=0         # any bench failure (after retry) makes the sweep evidence partial
 
 for spec in "${CORPORA[@]}"; do
     IFS='|' read -r name glob shape max_size <<< "$spec"
@@ -112,6 +113,7 @@ for spec in "${CORPORA[@]}"; do
         out_json="${OUT_DIR}/sweep_${name}_${mask}.json"
         if ! run_bench "$out_json" "$name" "$glob" "$name" "$shape" "$max_size" "$mask"; then
             echo "| ${name} | ${mask} | FAIL | - | - | - |" | tee -a "$RESULTS"
+            run_fail=1
             continue
         fi
         pages="$(json_num "$out_json" pages)"
@@ -125,6 +127,8 @@ for spec in "${CORPORA[@]}"; do
             # Second ALL run for the byte-identity (determinism) check.
             if run_bench "${OUT_DIR}/sweep_${name}_all2.json" "$name" "$glob" "$name" "$shape" "$max_size" all; then
                 ALLSHA2["$name"]="$(json_hex "${OUT_DIR}/sweep_${name}_all2.json" selected_pack_sha256)"
+            else
+                run_fail=1
             fi
         fi
     done
@@ -190,4 +194,9 @@ echo "Results written to ${RESULTS}"
 if [[ "$xform_fail" -ne 0 ]]; then
     # Advisory, not a gate: greedy packing has no superset-monotonicity guarantee.
     echo "WARNING: corpus-scale monotonicity violated — inspect before blaming mask gating." >&2
+fi
+if [[ "$run_fail" -ne 0 ]]; then
+    # Gate: a caller must not mistake a partial sweep (FAIL/n/a rows) for full evidence.
+    echo "ERROR: sweep incomplete — at least one bench run failed after retry." >&2
+    exit 1
 fi
