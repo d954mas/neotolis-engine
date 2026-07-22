@@ -72,5 +72,18 @@ int main(void) {
     if (defaults.allowed_transforms != NT_ATLAS_TRANSFORMS_ALL) {
         return 3;
     }
+
+    /* Positional tripwire: sprite opts promise positional source compatibility,
+     * so the FULL field list is initialized positionally — reordering any field
+     * lands a value in the wrong slot and fails the checks below. */
+    const nt_atlas_sprite_opts_t sprite_positional = {
+        "legacy", 0.25F, 0.75F, 11, 12, 13, 14, NT_ATLAS_SPRITE_SHAPE_CONVEX, NT_ATLAS_TRANSFORMS_IDENTITY, 9, 15, 16, 2.5F, 7, true, true,
+    };
+    if (sprite_positional.name[0] != 'l' || sprite_positional.origin_x != 0.25F || sprite_positional.origin_y != 0.75F || sprite_positional.slice9_left != 11 || sprite_positional.slice9_right != 12 ||
+        sprite_positional.slice9_top != 13 || sprite_positional.slice9_bottom != 14 || sprite_positional.shape != NT_ATLAS_SPRITE_SHAPE_CONVEX ||
+        sprite_positional.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY || sprite_positional.max_vertices != 9 || sprite_positional.margin != 15 || sprite_positional.extrude != 16 ||
+        sprite_positional.max_added_area_percent != 2.5F || sprite_positional.alpha_threshold != 7 || !sprite_positional.has_max_added_area_percent || !sprite_positional.has_alpha_threshold) {
+        return 4;
+    }
     return 0;
 }

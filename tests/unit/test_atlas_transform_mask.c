@@ -262,7 +262,9 @@ static void assert_all_in_mask(const char *pack_path, uint8_t mask, const char *
     TEST_ASSERT_TRUE_MESSAGE(collect_transforms(pack_path, t, 64, &n), "collect transforms failed");
     TEST_ASSERT_GREATER_THAN_INT_MESSAGE(0, n, "no regions unpacked");
     for (int i = 0; i < n; ++i) {
-        TEST_ASSERT_TRUE_MESSAGE((mask >> t[i]) & 1U, what);
+        /* Range first: a corrupt transform >= 32 would make the shift UB. */
+        TEST_ASSERT_TRUE_MESSAGE(t[i] < 8U, "transform value out of D4 range");
+        TEST_ASSERT_TRUE_MESSAGE((mask & (1U << t[i])) != 0U, what);
     }
 }
 
