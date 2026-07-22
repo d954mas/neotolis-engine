@@ -2630,8 +2630,9 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         uint8_t sm = p->sprites[oi].transforms_override;
-        if (sm && (sm & p->opts->allowed_transforms) == 0) {
-            /* Likely a typo'd mask — the explicit request degrades to identity-only. */
+        if (sm && (sm & (uint8_t)(p->opts->allowed_transforms | NT_ATLAS_TRANSFORMS_IDENTITY)) == 0) {
+            /* None of the requested bits survive the floored intersection — not even
+             * identity was asked for. Likely a typo'd mask; degrades to identity-only. */
             NT_LOG_WARN("  sprite '%s': transform mask 0x%02X disjoint from atlas mask 0x%02X -> identity only", p->sprites[oi].name, sm, p->opts->allowed_transforms);
         }
         uint8_t eff = (uint8_t)(p->opts->allowed_transforms & (sm ? sm : p->opts->allowed_transforms));

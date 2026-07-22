@@ -346,6 +346,8 @@ transform-mask change reordered its fields) — use designated initializers or
 helper: a zero-initialized atlas options struct means
 `max_added_area_percent = 0%`, not the public 10% default it returns.
 
+**Slice9 transform semantics:** non-zero slice9 borders auto-force `shape = RECT` and an identity-only effective transform mask. `allowed_transforms` of `0` (inherit) or `IDENTITY` are accepted and coerced; explicitly requesting any non-identity mask bit on a slice9 sprite is a caller bug and asserts.
+
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
 - `extrude`: `0` **inherits** the atlas default. A non-zero override sets **this sprite's edge bleed** (RECT only) and may be smaller OR larger than the atlas extrude — but a *zero* bleed cannot be expressed per-sprite (0 means inherit). Effective extrude, whether inherited or overridden, requires the effective sprite shape to be RECT. Compose/serialize apply the raw override. The packing footprint, however, reserves room for `max(this sprite's extrude, atlas extrude)`, so an `UNFITTABLE` record reports that effective (max) extrude — the space that actually caused the fit failure, distinct from the per-sprite bleed written into the page.

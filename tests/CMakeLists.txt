@@ -775,7 +775,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Transform-mask OUTPUT contract: byte-identity to the 81-01 master etalons,
+    # Transform-mask OUTPUT contract: byte-identity to the master-captured etalons,
     # forbidden-orientation + intersection + slice9 read back from the unpacked
     # atlas, and the partial-mask density inequality. Links ntpack_parse.c for the
     # SHA + region probe; the fixture (test_helpers) is header-only.
@@ -794,7 +794,7 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_atlas_transform_mask WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
-    # (positional contract kept), atlas opts pin the post-Phase-81 field order.
+    # (positional contract kept), atlas opts pin the current field order.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
     target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
     nt_setup_test_target(test_atlas_options_compat)

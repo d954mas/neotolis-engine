@@ -1,8 +1,8 @@
 #ifndef NT_TEST_ATLAS_TRANSFORM_FIXTURE_H
 #define NT_TEST_ATLAS_TRANSFORM_FIXTURE_H
 
-/* Header-only (static inline) so it can exist before its consumer test target:
- * a standalone .c would be an orphan in the compile DB until Wave 3.
+/* Header-only (static inline): the fixture needs no TU of its own, so it can
+ * never become an orphan in the compile DB.
  *
  * The caller owns nt_atlas_opts_t and sets the transform control — this fixture
  * only builds sprites and dumps regions, so the SAME fixture is packed by the

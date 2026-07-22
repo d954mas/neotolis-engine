@@ -1,7 +1,8 @@
-/* Transform-mask OUTPUT contract (XFORM-01/02/03/04). Every correctness check is
- * on the UNPACKED produced atlas — region.transform read back from the pack, or a
- * SHA-256 over the serialized pack — never the packer's internal orientation
- * filter (D-11). Byte-identity is proven against the Plan 81-01 master etalons. */
+/* Transform-mask OUTPUT contract. Every correctness check is on the UNPACKED
+ * produced atlas — region.transform read back from the pack, or a SHA-256 over
+ * the serialized pack — never the packer's internal orientation filter.
+ * Byte-identity is proven against master-captured etalons; see
+ * tests/fixtures/transform_mask_golden/PROVENANCE.txt for their capture recipe. */
 
 #include <errno.h>
 #include <math.h>
@@ -33,7 +34,7 @@
 #define TMP_DIR "build/tests/tmp"
 #define GOLDEN_DIR "tests/fixtures/transform_mask_golden"
 
-/* Atlas name used by the Plan 81-01 capture harness. The name seeds the texture
+/* Atlas name the etalons were captured with. The name seeds the texture
  * page resource ids, so byte-identity to the etalons requires the same name. */
 #define GOLDEN_ATLAS_NAME "transform_golden"
 
@@ -98,7 +99,7 @@ static void read_sha_file(const char *path, char out[65]) {
 
 /* --- Pack builders --- */
 
-/* Build the shared 81-01 fixture to `path` at the given atlas mask, thread=1. */
+/* Build the shared etalon fixture to `path` at the given atlas mask, thread=1. */
 static bool build_fixture_pack(uint8_t atlas_mask, const char *atlas_name, const char *path) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
@@ -189,10 +190,10 @@ static bool build_slice9_pack(const char *path) {
     return r == NT_BUILD_OK;
 }
 
-/* --- Region dump / transform extraction (unpacked output, D-11) --- */
+/* --- Region dump / transform extraction (unpacked output) --- */
 
-/* Reuse the 81-01 fixture dump utility: write the structural region dump for a
- * produced pack into a malloc'd, NUL-terminated string (LF line endings). */
+/* Write the structural region dump for a produced pack into a malloc'd,
+ * NUL-terminated string (LF line endings). */
 static char *dump_regions_text(const char *pack_path) {
     size_t len = 0;
     uint8_t *bytes = read_bin_file(pack_path, &len);
@@ -278,7 +279,7 @@ static void collect_expect_n(const char *pack_path, int expected, uint8_t t[64])
     TEST_ASSERT_EQUAL_INT_MESSAGE(expected, n, "unexpected region count");
 }
 
-/* --- XFORM-01: defaults --- */
+/* --- Defaults --- */
 
 void test_defaults_allowed_transforms(void) {
     nt_atlas_opts_t o = nt_atlas_opts_defaults();
@@ -288,7 +289,7 @@ void test_defaults_allowed_transforms(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, s.allowed_transforms, "sprite default mask must be 0 (inherit)");
 }
 
-/* --- XFORM-04: forbidden-orientation (unpacked output check, D-11) --- */
+/* --- Forbidden orientations never reach the unpacked output --- */
 
 void test_export_mask_emits_only_identity_and_rot90(void) {
     const char *path = TMP_DIR "/xform_export.ntpack";
@@ -307,7 +308,7 @@ void test_export_mask_emits_only_identity_and_rot90(void) {
     TEST_ASSERT_TRUE_MESSAGE(saw_rot90, "EXPORT mask must actually emit rot90 on this fixture");
 }
 
-/* --- XFORM-04: a partial rotation mask never packs worse than identity-only --- */
+/* --- A partial rotation mask never packs worse than identity-only --- */
 
 void test_export_density_at_least_identity(void) {
     const char *export_path = TMP_DIR "/xform_export_density.ntpack";
@@ -329,7 +330,7 @@ void test_export_density_at_least_identity(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(me.density_fill_texture), "EXPORT texture density must be >= IDENTITY texture density");
 }
 
-/* --- XFORM-03: per-sprite mask intersects the atlas mask --- */
+/* --- Per-sprite mask intersects the atlas mask --- */
 
 void test_per_sprite_mask_intersection(void) {
     const char *control_path = TMP_DIR "/xform_intersect_control.ntpack";
@@ -349,7 +350,7 @@ void test_per_sprite_mask_intersection(void) {
     }
 }
 
-/* --- XFORM-01: a zero atlas mask (zero-init struct) behaves as identity-only --- */
+/* --- A zero atlas mask (zero-init struct) behaves as identity-only --- */
 
 void test_zero_mask_behaves_as_identity(void) {
     const char *path = TMP_DIR "/xform_zeromask.ntpack";
@@ -386,7 +387,7 @@ static bool build_masked_strips_pack(const char *path, const char *name, uint8_t
     return r == NT_BUILD_OK;
 }
 
-/* --- XFORM-03: disjoint atlas∩sprite floors to identity (the floor is load-bearing:
+/* --- Disjoint atlas∩sprite floors to identity (the floor is load-bearing:
  * without it orient_count would be 0 and the packer would assert-crash) --- */
 
 void test_disjoint_sprite_mask_floors_to_identity(void) {
@@ -398,7 +399,7 @@ void test_disjoint_sprite_mask_floors_to_identity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "disjoint sprite mask must floor to identity");
 }
 
-/* --- XFORM-03: a sprite mask can only restrict — it cannot widen the atlas mask --- */
+/* --- A sprite mask can only restrict — it cannot widen the atlas mask --- */
 
 void test_sprite_mask_cannot_widen_atlas_mask(void) {
     const char *path = TMP_DIR "/xform_widen.ntpack";
@@ -407,7 +408,7 @@ void test_sprite_mask_cannot_widen_atlas_mask(void) {
     assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY, "sprite mask must not widen the atlas mask");
 }
 
-/* --- XFORM-03: slice9 emits only identity regardless of the atlas mask --- */
+/* --- Slice9 emits only identity regardless of the atlas mask --- */
 
 void test_slice9_emits_identity(void) {
     const char *path = TMP_DIR "/xform_slice9.ntpack";
@@ -419,7 +420,7 @@ void test_slice9_emits_identity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "slice9 sprite must emit identity");
 }
 
-/* --- XFORM-02: byte-identity to the Plan 81-01 master etalons --- */
+/* --- Byte-identity to the master-captured etalons --- */
 
 static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_path, const char *pack_path) {
     TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(mask, GOLDEN_ATLAS_NAME, pack_path), "golden pack build failed");
@@ -435,7 +436,7 @@ static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_p
     TEST_ASSERT_NOT_NULL_MESSAGE(etalon_dump, "read etalon dump");
 
     /* On any divergence, emit the current dump so the diff vs the committed
-     * etalon shows WHAT moved (D-14). */
+     * etalon shows WHAT moved. */
     if (strcmp(etalon_dump, dump) != 0 || strcmp(expected_sha, actual_sha) != 0) {
         TEST_MESSAGE("current structural region dump (compare against the committed etalon dump):");
         TEST_MESSAGE(dump);

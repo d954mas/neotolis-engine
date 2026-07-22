@@ -288,7 +288,7 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    /* Self-check: every emitted region transform must lie inside the requested mask (D-11/D-13). */
+    /* Self-check: every emitted region transform must lie inside the requested mask. */
     uint32_t bad_region = 0U;
     uint8_t bad_transform = 0U;
     const int vrc = nt_bench_verify_region_transforms(pack_path, allowed_transforms, &bad_region, &bad_transform);

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# atlas_transform_sweep.sh — NON-CI transform-mask density evidence (Phase 81, D-13/D-15).
+# atlas_transform_sweep.sh — NON-CI transform-mask density evidence.
 #
 # Runs atlas_bench across 3 masks (identity, export, all) x 3 corpora
 # (anim_heavy, mixed_aa, rect_only) = 9 packs and emits a markdown density table.
 # The nine-patch corpus is excluded (its forced-identity sprites make masks moot);
-# the ROTATIONS/FLIPS presets are informative-only and out of scope (D-13).
+# the ROTATIONS/FLIPS presets are informative-only and not swept.
 #
 # Not wired into check.sh. Requirements:
 #   - git lfs pull   (mixed_aa reuses the 4.8k-file bigatlas LFS fixture)
 #   - a built native atlas_bench (see scripts/bench_atlas.sh, or pass --no-build path)
 #
 # Every pack runs single-threaded (NT_BUILDER_THREADS=1) with a per-run timeout and
-# one retry. The known cold-mixed_aa vpack multithread hang is a PRE-EXISTING Phase-83
-# flake — a timeout here is NOT a transform-mask regression. Phase 83 owns the fix.
+# one retry. The known cold-run mixed_aa vpack multithread hang is a PRE-EXISTING
+# packer flake owned by the packer-rewrite work — a timeout here is NOT a
+# transform-mask regression.
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -83,7 +84,7 @@ run_bench() {
             return 0
         fi
         if [[ "$rc" -eq 124 ]]; then
-            echo "  WARNING: ${name}/${mask} timed out after ${RUN_TIMEOUT}s (attempt ${attempt}) — known Phase-83 cold-mixed_aa vpack flake, NOT a mask regression." >&2
+            echo "  WARNING: ${name}/${mask} timed out after ${RUN_TIMEOUT}s (attempt ${attempt}) — known pre-existing cold-run vpack flake, NOT a mask regression." >&2
         else
             echo "  WARNING: ${name}/${mask} exited ${rc} (attempt ${attempt})." >&2
         fi
@@ -122,7 +123,7 @@ for spec in "${CORPORA[@]}"; do
         echo "| ${name} | ${mask} | ${pages} | ${frontier} | ${texture} | ${pack_ms} |" | tee -a "$RESULTS"
         if [[ "$mask" == "all" ]]; then
             ALLSHA1["$name"]="$(json_hex "$out_json" selected_pack_sha256)"
-            # Second ALL run for the D-15 byte-identity (determinism) check.
+            # Second ALL run for the byte-identity (determinism) check.
             if run_bench "${OUT_DIR}/sweep_${name}_all2.json" "$name" "$glob" "$name" "$shape" "$max_size" all; then
                 ALLSHA2["$name"]="$(json_hex "${OUT_DIR}/sweep_${name}_all2.json" selected_pack_sha256)"
             fi
@@ -130,11 +131,11 @@ for spec in "${CORPORA[@]}"; do
     done
 done
 
-# XFORM-04 at corpus scale: empirical expectation, NOT a packer theorem — greedy
+# Corpus-scale monotonicity: empirical expectation, NOT a packer theorem — greedy
 # placement with more orientations can in principle pack worse. A FAIL row after
 # an intentional packer change means re-baseline, not necessarily a mask bug.
 echo "" | tee -a "$RESULTS"
-echo "## XFORM-04 corpus-scale monotonicity (fill_texture)" | tee -a "$RESULTS"
+echo "## Corpus-scale monotonicity (fill_texture)" | tee -a "$RESULTS"
 xform_fail=0
 for spec in "${CORPORA[@]}"; do
     IFS='|' read -r name _ _ _ <<< "$spec"
@@ -152,12 +153,12 @@ for spec in "${CORPORA[@]}"; do
     fi
 done
 
-# D-15 full-corpus evidence. The committed baselines predate Phase 78-80 and carry
-# no pack SHA, so a same-builder byte-hash vs master is unavailable (documented
-# fallback). Concrete byte-identity here = ALL-mask determinism (two runs identical),
-# plus a structural-equality check against the regenerated committed baseline JSON.
+# Full-corpus evidence. The committed baselines carry no pack SHA (older tool
+# version), so a same-builder byte-hash vs master is unavailable. Concrete
+# byte-identity here = ALL-mask determinism (two runs identical), plus a
+# structural-equality check against the regenerated committed baseline JSON.
 echo "" | tee -a "$RESULTS"
-echo "## D-15 ALL-mask evidence" | tee -a "$RESULTS"
+echo "## ALL-mask evidence" | tee -a "$RESULTS"
 for spec in "${CORPORA[@]}"; do
     IFS='|' read -r name _ _ _ <<< "$spec"
     s1="${ALLSHA1["$name"]:-}"
@@ -167,12 +168,15 @@ for spec in "${CORPORA[@]}"; do
         [[ "$s1" == "$s2" ]] && det="MATCH" || det="DIFFER"
     fi
     base_json="tools/research/atlas_bench/baseline/${name}.json"
+    run_json="${OUT_DIR}/sweep_${name}_all.json"
     struct="n/a"
-    if [[ -f "$base_json" ]]; then
+    # Gate on a successful CURRENT run (s1 set) — a stale run_json from an earlier
+    # sweep would otherwise produce a false MATCH (or abort under set -e if absent).
+    if [[ -n "$s1" && -f "$base_json" && -f "$run_json" ]]; then
         b_pages="$(json_num "$base_json" pages)"
         b_tex="$(json_num "$base_json" density_fill_texture)"
-        r_pages="$(json_num "${OUT_DIR}/sweep_${name}_all.json" pages)"
-        r_tex="$(json_num "${OUT_DIR}/sweep_${name}_all.json" density_fill_texture)"
+        r_pages="$(json_num "$run_json" pages)"
+        r_tex="$(json_num "$run_json" density_fill_texture)"
         if [[ "$b_pages" == "$r_pages" ]] && awk -v a="$b_tex" -v b="$r_tex" 'BEGIN{exit !((a-b<0?b-a:a-b) < 1e-4)}'; then
             struct="MATCH"
         else
@@ -186,5 +190,5 @@ echo "" | tee -a "$RESULTS"
 echo "Results written to ${RESULTS}"
 if [[ "$xform_fail" -ne 0 ]]; then
     # Advisory, not a gate: greedy packing has no superset-monotonicity guarantee.
-    echo "WARNING: XFORM-04 corpus-scale monotonicity violated — inspect before blaming mask gating." >&2
+    echo "WARNING: corpus-scale monotonicity violated — inspect before blaming mask gating." >&2
 fi

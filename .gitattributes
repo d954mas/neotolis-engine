@@ -9,7 +9,7 @@
 *.js text eol=lf
 
 # Transform-mask golden etalons must stay byte-stable across platforms so a
-# fresh dump matches by exact text-equality (Plan 81-03) — pin LF, never CRLF.
+# fresh dump matches by exact text-equality — pin LF, never CRLF.
 tests/fixtures/transform_mask_golden/** text eol=lf
 
 # Git LFS tracked assets

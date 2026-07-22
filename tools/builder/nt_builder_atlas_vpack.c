@@ -1528,6 +1528,33 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
  * Returns true if the sprite was placed. Returns false when a fresh page
  * is needed but ATLAS_MAX_PAGES is already reached; vector_pack propagates
  * page exhaustion to its caller. */
+
+/* Ring equality up to cyclic shift and winding reversal, after AABB-min
+ * normalization. D4 flips reverse winding and rotations shift the start
+ * vertex, so an index-aligned compare misses geometrically identical rings. */
+static bool vpack_rings_equivalent(const Point2D *a, const Point2D *b, uint32_t count, int32_t a_min_x, int32_t a_min_y, int32_t b_min_x, int32_t b_min_y) {
+    for (uint32_t shift = 0; shift < count; shift++) {
+        bool fwd = true;
+        bool rev = true;
+        for (uint32_t v = 0; v < count && (fwd || rev); v++) {
+            int32_t ax = a[v].x - a_min_x;
+            int32_t ay = a[v].y - a_min_y;
+            const Point2D *bf = &b[(v + shift) % count];
+            const Point2D *br = &b[(shift + count - v) % count];
+            if (fwd && (ax != bf->x - b_min_x || ay != bf->y - b_min_y)) {
+                fwd = false;
+            }
+            if (rev && (ax != br->x - b_min_x || ay != br->y - b_min_y)) {
+                rev = false;
+            }
+        }
+        if (fwd || rev) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
@@ -1573,13 +1600,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
                 }
                 int32_t p_aabb[4];
                 vpack_calc_aabb(od.polys[p], od.counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
-                bool same = true;
-                for (uint32_t v = 0; v < od.counts[r] && same; v++) {
-                    if ((od.polys[r][v].x - r_aabb[0]) != (od.polys[p][v].x - p_aabb[0]) || (od.polys[r][v].y - r_aabb[1]) != (od.polys[p][v].y - p_aabb[1])) {
-                        same = false;
-                    }
-                }
-                if (same) {
+                if (vpack_rings_equivalent(od.polys[r], od.polys[p], od.counts[r], r_aabb[0], r_aabb[1], p_aabb[0], p_aabb[1])) {
                     dup = true;
                 }
             }
