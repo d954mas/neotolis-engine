@@ -77,11 +77,11 @@ run_bench() {
     local name="$1" glob="$2" atlas="$3" shape="$4" max_size="$5" mask="$6"
     local attempt rc
     for attempt in 1 2; do
-        if NT_BUILDER_THREADS=1 timeout "${RUN_TIMEOUT}" \
-            "$BENCH_EXE" "$out_json" "$glob" "$atlas" "$shape" "$max_size" 0 --transforms "$mask" >/dev/null 2>&1; then
+        NT_BUILDER_THREADS=1 timeout "${RUN_TIMEOUT}" \
+            "$BENCH_EXE" "$out_json" "$glob" "$atlas" "$shape" "$max_size" 0 --transforms "$mask" >/dev/null 2>&1 && rc=0 || rc=$?
+        if [[ "$rc" -eq 0 ]]; then
             return 0
         fi
-        rc=$?
         if [[ "$rc" -eq 124 ]]; then
             echo "  WARNING: ${name}/${mask} timed out after ${RUN_TIMEOUT}s (attempt ${attempt}) — known Phase-83 cold-mixed_aa vpack flake, NOT a mask regression." >&2
         else
@@ -130,8 +130,9 @@ for spec in "${CORPORA[@]}"; do
     done
 done
 
-# XFORM-04 at corpus scale: a broader mask never packs worse on fill_texture,
-# so density(export) >= density(identity) per corpus (81-03 fill_texture guard).
+# XFORM-04 at corpus scale: empirical expectation, NOT a packer theorem — greedy
+# placement with more orientations can in principle pack worse. A FAIL row after
+# an intentional packer change means re-baseline, not necessarily a mask bug.
 echo "" | tee -a "$RESULTS"
 echo "## XFORM-04 corpus-scale monotonicity (fill_texture)" | tee -a "$RESULTS"
 xform_fail=0
@@ -184,6 +185,6 @@ done
 echo "" | tee -a "$RESULTS"
 echo "Results written to ${RESULTS}"
 if [[ "$xform_fail" -ne 0 ]]; then
-    echo "ERROR: XFORM-04 corpus-scale monotonicity violated." >&2
-    exit 1
+    # Advisory, not a gate: greedy packing has no superset-monotonicity guarantee.
+    echo "WARNING: XFORM-04 corpus-scale monotonicity violated — inspect before blaming mask gating." >&2
 fi

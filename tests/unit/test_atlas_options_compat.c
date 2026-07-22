@@ -8,6 +8,17 @@
  * This validates the current layout via designated initializers instead: every
  * field — including the allowed_transforms mask — round-trips, and the defaults
  * helper reports the all-transforms mask. */
+
+/* Sprite opts keep the append-only positional contract (layout unchanged in Phase 81). */
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, extrude), "sprite controls must be append-only");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "appended controls must stay after the legacy positional fields");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "appended controls must stay after the legacy positional fields");
+
+/* Anchor the post-Phase-81 atlas layout so the next reorder is loud, not silent. */
+_Static_assert(offsetof(nt_atlas_opts_t, max_added_area_percent) > offsetof(nt_atlas_opts_t, max_vertices), "atlas v2 layout: area budget sits after max_vertices");
+_Static_assert(offsetof(nt_atlas_opts_t, allowed_transforms) > offsetof(nt_atlas_opts_t, shape), "atlas v2 layout: transform mask sits after shape");
+_Static_assert(offsetof(nt_atlas_opts_t, gen_mipmaps) > offsetof(nt_atlas_opts_t, wrap_v), "atlas v2 layout: controls append-only from this baseline");
+
 int main(void) {
     const nt_tex_compress_opts_t compress = {.mode = NT_TEX_COMPRESS_ETC1S};
 

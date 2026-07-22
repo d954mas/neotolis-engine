@@ -110,18 +110,22 @@ static bool build_fixture_pack(uint8_t atlas_mask, const char *atlas_name, const
     return r == NT_BUILD_OK;
 }
 
-/* Fill an opaque RGBA strip (asymmetric strips rotate under an unrestricted mask). */
-static void fill_solid(uint8_t *px, uint16_t w, uint16_t h) {
+/* Fill an opaque RGBA strip (asymmetric strips rotate under an unrestricted mask).
+ * Distinct colors per sprite keep pixel hashes distinct — no dedup interference. */
+static void fill_solid(uint8_t *px, uint16_t w, uint16_t h, uint8_t r, uint8_t g, uint8_t b) {
     for (size_t i = 0; i < (size_t)w * h; ++i) {
-        px[(i * 4) + 0] = 180;
-        px[(i * 4) + 1] = 90;
-        px[(i * 4) + 2] = 60;
+        px[(i * 4) + 0] = r;
+        px[(i * 4) + 1] = g;
+        px[(i * 4) + 2] = b;
         px[(i * 4) + 3] = 255;
     }
 }
 
-/* Atlas mask ALL, but sprite index 1 masked to IDENTITY|FLIP_H, sprite 3 inherits. */
-static bool build_intersection_pack(const char *path) {
+/* Fixture: three tall strips + ONE wide 44x8 strip the ALL packer transposes.
+ * mask_wide=true restricts the wide strip to IDENTITY|FLIP_H; the unmasked build
+ * is the A/B control proving the packer WOULD transpose it — without the control
+ * the masked assert would be vacuous (identity could win anyway). */
+static bool build_intersection_pack(const char *path, bool mask_wide) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     if (!ctx) {
@@ -130,16 +134,16 @@ static bool build_intersection_pack(const char *path) {
     nt_builder_set_threads(ctx, 1);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "intersect", &opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, mask_wide ? "intersect_masked" : "intersect_control", &opts);
 
     uint8_t px[48 * 48 * 4];
     const uint16_t dims[4][2] = {{8, 44}, {8, 44}, {44, 8}, {8, 40}};
-    const char *names[4] = {"s0", "s1_target", "s2", "s3_inherit"};
+    const char *names[4] = {"s0", "s1", "s2_wide", "s3"};
     for (int i = 0; i < 4; ++i) {
-        fill_solid(px, dims[i][0], dims[i][1]);
+        fill_solid(px, dims[i][0], dims[i][1], (uint8_t)(180 + (i * 10)), 90, 60);
         nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
         so.name = names[i];
-        if (i == 1) {
+        if (mask_wide && i == 2) {
             so.allowed_transforms = (uint8_t)(NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H);
         }
         nt_atlas_add_raw(atlas, px, dims[i][0], dims[i][1], &so);
@@ -163,7 +167,7 @@ static bool build_slice9_pack(const char *path) {
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "slice9", &opts);
 
     uint8_t px[48 * 48 * 4];
-    fill_solid(px, 24, 40);
+    fill_solid(px, 24, 40, 180, 90, 60);
     nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
     so.name = "panel";
     so.slice9_left = 4;
@@ -263,6 +267,16 @@ void test_export_mask_emits_only_identity_and_rot90(void) {
     TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_EXPORT, "export", path), "EXPORT pack failed");
     /* EXPORT = IDENTITY|ROT90 → the only bits set are values 0 and 5. */
     assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_EXPORT, "region transform outside {identity, rot90}");
+    /* Positive pin: the fixture's dimension-swapping strips make rot90 a win, so a
+     * regression that collapses partial masks to identity-only must fail here. */
+    uint8_t t[64];
+    int n = 0;
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(path, t, 64, &n), "collect transforms failed");
+    bool saw_rot90 = false;
+    for (int i = 0; i < n; ++i) {
+        saw_rot90 = saw_rot90 || (t[i] == NT_ATLAS_XFORM_ROT90);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw_rot90, "EXPORT mask must actually emit rot90 on this fixture");
 }
 
 /* --- XFORM-04: a partial rotation mask never packs worse than identity-only --- */
@@ -279,29 +293,95 @@ void test_export_density_at_least_identity(void) {
     memset(&mi, 0, sizeof(mi));
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(export_path, &me), "parse EXPORT pack");
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(identity_path, &mi), "parse IDENTITY pack");
-    /* Page-area efficiency (Σ poly_px / Σ page_px) is the packer's objective, so
-     * EXPORT (⊇ IDENTITY choices) can never do worse. Frontier density measures
-     * used-bbox tightness (arrangement-dependent), not packing quality — on this
-     * fixture EXPORT transposes the whole page (128x64 vs 64x128) at equal texture
-     * density, which lowers frontier while leaving fill_texture unchanged. */
+    /* Empirical pin of this fixture's deterministic outcome — NOT a packer theorem:
+     * greedy placement with a wider orientation set can in principle pack worse. A
+     * failure here after an intentional packer change means re-baseline, not a mask
+     * bug. Frontier density is arrangement-dependent (EXPORT transposes the page
+     * 128x64 vs 64x128), so the pin uses fill_texture. */
     TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(me.density_fill_texture), "EXPORT texture density must be >= IDENTITY texture density");
 }
 
 /* --- XFORM-03: per-sprite mask intersects the atlas mask --- */
 
 void test_per_sprite_mask_intersection(void) {
-    const char *path = TMP_DIR "/xform_intersect.ntpack";
-    TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(path), "intersection pack failed");
+    const char *control_path = TMP_DIR "/xform_intersect_control.ntpack";
+    const char *masked_path = TMP_DIR "/xform_intersect_masked.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(control_path, false), "control pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(masked_path, true), "masked pack failed");
     uint8_t t[64];
     int n = 0;
-    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(path, t, 64, &n), "collect transforms failed");
+    /* A/B control: unrestricted, the packer transposes the wide strip. */
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(control_path, t, 64, &n), "collect control transforms failed");
     TEST_ASSERT_EQUAL_INT_MESSAGE(4, n, "expected 4 regions in add order");
-    /* Sprite 1 masked to IDENTITY|FLIP_H → its region transform is 0 or 1. */
-    TEST_ASSERT_TRUE_MESSAGE(t[1] == NT_ATLAS_XFORM_IDENTITY || t[1] == NT_ATLAS_XFORM_FLIP_H, "masked sprite emitted a forbidden transform");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, t[2], "control: packer must transpose the wide strip — masked assert would be vacuous");
+    /* Same fixture, wide strip masked to IDENTITY|FLIP_H → transform is 0 or 1. */
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(masked_path, t, 64, &n), "collect masked transforms failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(4, n, "expected 4 regions in add order");
+    TEST_ASSERT_TRUE_MESSAGE(t[2] == NT_ATLAS_XFORM_IDENTITY || t[2] == NT_ATLAS_XFORM_FLIP_H, "masked sprite emitted a forbidden transform");
     /* Inheriting sprites still resolve to a valid D4 value (identity always representable). */
     for (int i = 0; i < n; ++i) {
         TEST_ASSERT_TRUE_MESSAGE(t[i] <= NT_ATLAS_XFORM_ANTITRANSPOSE, "transform value out of D4 range");
     }
+}
+
+/* --- XFORM-01: a zero atlas mask (zero-init struct) behaves as identity-only --- */
+
+void test_zero_mask_behaves_as_identity(void) {
+    const char *path = TMP_DIR "/xform_zeromask.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(0x00U, "zeromask", path), "zero-mask pack failed");
+    assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY, "zero mask must emit identity only");
+}
+
+/* Two 44x8 strips the ALL packer transposes + one 8x40 tall strip, with per-sprite
+ * masks (0 = inherit) — probes the identity-floor and no-widening corners. */
+static bool build_masked_strips_pack(const char *path, const char *name, uint8_t atlas_mask, const uint8_t sprite_masks[3]) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = atlas_mask;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, name, &opts);
+
+    uint8_t px[48 * 48 * 4];
+    const uint16_t dims[3][2] = {{44, 8}, {44, 8}, {8, 40}};
+    const char *names[3] = {"m0", "m1", "m2"};
+    for (int i = 0; i < 3; ++i) {
+        fill_solid(px, dims[i][0], dims[i][1], (uint8_t)(60 + (i * 20)), 140, 200);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = names[i];
+        so.allowed_transforms = sprite_masks[i];
+        nt_atlas_add_raw(atlas, px, dims[i][0], dims[i][1], &so);
+    }
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return r == NT_BUILD_OK;
+}
+
+/* --- XFORM-03: disjoint atlas∩sprite floors to identity (the floor is load-bearing:
+ * without it orient_count would be 0 and the packer would assert-crash) --- */
+
+void test_disjoint_sprite_mask_floors_to_identity(void) {
+    const char *path = TMP_DIR "/xform_disjoint.ntpack";
+    const uint8_t masks[3] = {NT_ATLAS_TRANSFORM_TRANSPOSE, 0U, 0U}; /* 0x21 & 0x10 == 0 */
+    TEST_ASSERT_TRUE_MESSAGE(build_masked_strips_pack(path, "disjoint", NT_ATLAS_TRANSFORMS_EXPORT, masks), "disjoint pack failed");
+    uint8_t t[64];
+    int n = 0;
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(path, t, 64, &n), "collect transforms failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(3, n, "expected 3 regions in add order");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "disjoint sprite mask must floor to identity");
+}
+
+/* --- XFORM-03: a sprite mask can only restrict — it cannot widen the atlas mask --- */
+
+void test_sprite_mask_cannot_widen_atlas_mask(void) {
+    const char *path = TMP_DIR "/xform_widen.ntpack";
+    const uint8_t masks[3] = {NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_ALL};
+    TEST_ASSERT_TRUE_MESSAGE(build_masked_strips_pack(path, "widen", NT_ATLAS_TRANSFORMS_IDENTITY, masks), "widen pack failed");
+    assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY, "sprite mask must not widen the atlas mask");
 }
 
 /* --- XFORM-03: slice9 emits only identity regardless of the atlas mask --- */
@@ -355,6 +435,9 @@ int main(void) {
     RUN_TEST(test_export_mask_emits_only_identity_and_rot90);
     RUN_TEST(test_export_density_at_least_identity);
     RUN_TEST(test_per_sprite_mask_intersection);
+    RUN_TEST(test_zero_mask_behaves_as_identity);
+    RUN_TEST(test_disjoint_sprite_mask_floors_to_identity);
+    RUN_TEST(test_sprite_mask_cannot_widen_atlas_mask);
     RUN_TEST(test_slice9_emits_identity);
     RUN_TEST(test_golden_byte_identity_all);
     RUN_TEST(test_golden_byte_identity_identity);

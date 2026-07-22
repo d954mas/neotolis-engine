@@ -1532,8 +1532,8 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
     VPackOrientData od;
-    /* Effective D4 mask gates which transform VALUES are generated. NULL = ALL. */
-    uint8_t eff = ctx->eff_transforms ? ctx->eff_transforms[idx] : NT_ATLAS_TRANSFORMS_ALL;
+    /* Effective D4 mask gates which transform VALUES are generated. NULL = opts mask. */
+    uint8_t eff = ctx->eff_transforms ? ctx->eff_transforms[idx] : ctx->opts->allowed_transforms;
     eff |= NT_ATLAS_TRANSFORMS_IDENTITY; /* identity floor — always generated */
 
     // #region Orient generate — transform inflated polygon for the masked D4 values

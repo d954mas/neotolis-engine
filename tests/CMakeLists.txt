@@ -793,15 +793,10 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_transform_mask PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_transform_mask WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Compiles the complete pre-tolerance positional option lists as an external consumer would.
+    # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
+    # (positional contract kept), atlas opts pin the post-Phase-81 field order.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
     target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
-    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(test_atlas_options_compat PRIVATE
-            -Wno-missing-field-initializers
-            -Wno-error=missing-field-initializers
-        )
-    endif()
     nt_setup_test_target(test_atlas_options_compat)
 
     if(WIN32)
