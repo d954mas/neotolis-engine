@@ -1519,16 +1519,6 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
     return found_on_page;
 }
 
-/* Place a single sprite. Called once per sorted sprite from vector_pack.
- * Transforms the sprite's inflated polygon into up to 8 D4 orientations,
- * deduplicates them, pre-computes bounds, scans every existing page for
- * the best candidate position (falling back to a new page if nothing
- * fits), records the winning placement, and updates stats.
- *
- * Returns true if the sprite was placed. Returns false when a fresh page
- * is needed but ATLAS_MAX_PAGES is already reached; vector_pack propagates
- * page exhaustion to its caller. */
-
 /* Ring equality up to cyclic shift and winding reversal, after AABB-min
  * normalization. D4 flips reverse winding and rotations shift the start
  * vertex, so an index-aligned compare misses geometrically identical rings. */
@@ -1555,6 +1545,15 @@ static bool vpack_rings_equivalent(const Point2D *a, const Point2D *b, uint32_t 
     return false;
 }
 
+/* Place a single sprite. Called once per sorted sprite from vector_pack.
+ * Transforms the sprite's inflated polygon into up to 8 D4 orientations,
+ * deduplicates them, pre-computes bounds, scans every existing page for
+ * the best candidate position (falling back to a new page if nothing
+ * fits), records the winning placement, and updates stats.
+ *
+ * Returns true if the sprite was placed. Returns false when a fresh page
+ * is needed but ATLAS_MAX_PAGES is already reached; vector_pack propagates
+ * page exhaustion to its caller. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
@@ -1564,11 +1563,8 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     eff |= NT_ATLAS_TRANSFORMS_IDENTITY; /* identity floor — always generated */
 
     // #region Orient generate — transform inflated polygon for the masked D4 values
-    /* Transform exact pack polygon for each permitted orientation VALUE.
-     * Orthogonal D4 transforms preserve the exact offset shape, so we can
-     * reuse the once-built inflated polygon instead of inflating per
-     * orientation. od.orig[k] records the stored transform VALUE, not the
-     * generation index — the two diverge once the mask gates generation. */
+    /* Orthogonal D4 transforms preserve the exact offset shape — reuse the
+     * once-built inflated polygon instead of inflating per orientation. */
     uint32_t orient_count = 0;
     for (uint32_t v = 0; v < 8; v++) {
         if (!(eff & (1U << v))) {
@@ -1581,7 +1577,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
             polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], (uint8_t)v, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[orient_count]);
             od.counts[orient_count] = ctx->inf_counts[idx];
         }
-        od.orig[orient_count] = (uint8_t)v;
+        od.orig[orient_count] = (uint8_t)v; /* stored transform VALUE, not generation index */
         orient_count++;
     }
     // #endregion
@@ -1816,6 +1812,8 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
  *                          (already inflated to enclose all opaque pixels).
  *   hull_counts[i]       — vertex count for hull i.
  *   sprite_count         — total sprites to pack.
+ *   eff_transforms[i]    — per-sprite effective D4 mask (NULL = all use
+ *                          opts->allowed_transforms); identity bit set upstream.
  *   opts                 — extrude, padding, margin, max_size, power_of_two,
  *                          allowed_transforms. The packer inflates hulls further by
  *                          (extrude + padding/2) so NFP non-overlap guarantees

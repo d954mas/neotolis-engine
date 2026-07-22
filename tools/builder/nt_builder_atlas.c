@@ -546,7 +546,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * a full re-pack when only re-encode is needed. */
     uint8_t flags = (uint8_t)(opts->power_of_two ? 2 : 0);
     opts_buf[pos++] = flags;
-    opts_buf[pos++] = opts->allowed_transforms; /* dedicated atlas transform-mask byte */
+    opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
 
@@ -852,7 +852,6 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
 static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     /* allowed_transforms: any uint8 mask is legal (identity floor applied downstream). */
-    /* 0 = atlas default; otherwise 3..16. */
     NT_BUILD_ASSERT((sopts->max_vertices == 0 || (sopts->max_vertices >= 4 && sopts->max_vertices <= 16)) && "max_vertices override must be 0 (atlas default) or 4..16");
 }
 
@@ -877,8 +876,8 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
 }
 
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
- * Slice9 borders auto-force RECT shape + no rotation. The cross-field contract
- * is asserted earlier on the add path (before content checks), not here. */
+ * Slice9 borders auto-force RECT shape + identity-only transform mask. The cross-field
+ * contract is asserted earlier on the add path (before content checks), not here. */
 static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;

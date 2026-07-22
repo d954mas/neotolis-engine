@@ -4,9 +4,9 @@
 /* Header-only (static inline): the fixture needs no TU of its own, so it can
  * never become an orphan in the compile DB.
  *
- * The caller owns nt_atlas_opts_t and sets the transform control — this fixture
- * only builds sprites and dumps regions, so the SAME fixture is packed by the
- * legacy bool here and by the new mask in the later assertion, bit-for-bit. */
+ * The caller owns nt_atlas_opts_t and the transform control — the fixture only
+ * builds sprites and dumps regions, so every mask setting packs identical
+ * sprite bytes. */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -16,7 +16,6 @@
 #include "nt_builder.h"      /* NtAtlasBuild, nt_atlas_add_raw, sprite opts */
 #include "nt_pack_format.h"  /* NtPackHeader, NtAssetEntry, NT_ASSET_ATLAS */
 #include "nt_atlas_format.h" /* NtAtlasHeader, NtAtlasRegion, NtAtlasVertex */
-#include "ntpack_parse.h"    /* documented dump dependency (shared pack parsing) */
 /* clang-format on */
 
 typedef enum {
@@ -36,10 +35,9 @@ typedef struct {
     uint8_t b;
 } nt_atlas_fixture_spec_t;
 
-/* 10 order-stable sprites. Four strongly asymmetric, dimension-swapping strips
- * (6x40/40x6, 8x44/44x8) give the packer a rotation win so the transform path
- * actually fires; the rest add hull variety. Every sprite keeps opaque content
- * after trim (no empty-mask abort). */
+/* 10 order-stable sprites; four dimension-swapping strips (6x40/40x6, 8x44/44x8)
+ * make rotation a packing win so the transform path fires; the rest add hull
+ * variety. Every sprite stays opaque after trim (no empty-mask abort). */
 /* clang-format off */
 static const nt_atlas_fixture_spec_t k_atlas_fixture_sprites[] = {
     {"strip_tall_a",  6, 40, NT_ATLAS_FIX_STRIP,  210,  50,  50},
@@ -99,10 +97,9 @@ static inline void atlas_transform_fixture_add(NtAtlasBuild *atlas) {
     }
 }
 
-/* Write one `index transform x y w h` line per region, sorted by region index.
- * x/y/w/h are the region's atlas-UV bbox (0-65535) — a placement fingerprint
- * that flips value under rotation. Self-contained pack walk (bench metrics do
- * not expose per-region transform); every offset is guarded against pack_len. */
+/* One `index transform x y w h` line per region; x/y/w/h = atlas-UV bbox, a
+ * placement fingerprint that changes under rotation. Self-contained walk (bench
+ * metrics lack per-region transform); every offset is guarded against pack_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard-per-read pack walk; splitting detaches guards from reads
 static inline bool atlas_transform_fixture_dump_regions(const void *pack_bytes, size_t pack_len, FILE *out) {
     if (pack_bytes == NULL || out == NULL || pack_len < sizeof(NtPackHeader)) {

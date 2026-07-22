@@ -8,11 +8,10 @@
 #
 # Not wired into check.sh. Requirements:
 #   - git lfs pull   (mixed_aa reuses the 4.8k-file bigatlas LFS fixture)
-#   - a built native atlas_bench (see scripts/bench_atlas.sh, or pass --no-build path)
+#   - a built native atlas_bench (see scripts/bench_atlas.sh, or pass --no-build with the exe already built)
 #
 # Every pack runs single-threaded (NT_BUILDER_THREADS=1) with a per-run timeout and
-# one retry. The known cold-run mixed_aa vpack multithread hang is a PRE-EXISTING
-# packer flake owned by the packer-rewrite work — a timeout here is NOT a
+# one retry. A mixed_aa timeout is a known cold-run vpack flake, not a
 # transform-mask regression.
 
 set -euo pipefail
@@ -153,10 +152,10 @@ for spec in "${CORPORA[@]}"; do
     fi
 done
 
-# Full-corpus evidence. The committed baselines carry no pack SHA (older tool
-# version), so a same-builder byte-hash vs master is unavailable. Concrete
-# byte-identity here = ALL-mask determinism (two runs identical), plus a
-# structural-equality check against the regenerated committed baseline JSON.
+# Full-corpus evidence: ALL-mask determinism (two runs byte-identical) plus a
+# structural check (pages + fill_texture) against the committed baseline JSON.
+# Baseline pack SHAs are machine-captured, so a byte-compare against them is
+# deliberately not required.
 echo "" | tee -a "$RESULTS"
 echo "## ALL-mask evidence" | tee -a "$RESULTS"
 for spec in "${CORPORA[@]}"; do

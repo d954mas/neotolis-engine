@@ -319,8 +319,7 @@ typedef enum {
 #define NT_ATLAS_TRANSFORM_ROT270 (1U << NT_ATLAS_XFORM_ROT270)
 #define NT_ATLAS_TRANSFORM_ANTITRANSPOSE (1U << NT_ATLAS_XFORM_ANTITRANSPOSE)
 
-/* Mask presets. ALL = every D4 orientation; IDENTITY = identity only.
- * EXPORT = one quarter-turn, the single-rotated-flag export target (e.g. Defold). */
+/* Mask presets. EXPORT = one quarter-turn — the single-rotated-flag export target (e.g. Defold). */
 #define NT_ATLAS_TRANSFORMS_ALL 0xFFU
 #define NT_ATLAS_TRANSFORMS_IDENTITY NT_ATLAS_TRANSFORM_IDENTITY
 #define NT_ATLAS_TRANSFORMS_EXPORT (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_ROT90)
@@ -395,7 +394,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 
 /* --- Atlas sprite options (per-sprite, passed to nt_atlas_add*) --- */
 
-/* Per-sprite shape/rotation overrides (0 = use atlas default). */
+/* Per-sprite shape overrides (0 = use atlas default). */
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
@@ -408,11 +407,9 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
  * the default 0.5. Always start from the defaults function for partial
  * overrides, or set every field explicitly in the literal.
  *
- * Slice9: when any slice9 border is non-zero, the pipeline auto-forces
- * shape=RECT and the transform mask to identity-only at geometry/pack time —
- * but only from the inheritable spellings (allowed_transforms 0 or IDENTITY);
- * explicitly requesting a non-identity mask on a slice9 sprite is a caller
- * bug and asserts. */
+ * Slice9: non-zero borders auto-force shape=RECT and an identity-only transform
+ * mask at geometry/pack time. allowed_transforms must be 0 or IDENTITY on a
+ * slice9 sprite — any other mask asserts (caller bug). */
 typedef struct {
     /* Optional region name.
      *   nt_atlas_add:      NULL = derive from file path (basename with extension)

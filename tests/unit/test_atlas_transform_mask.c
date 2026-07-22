@@ -1,8 +1,6 @@
-/* Transform-mask OUTPUT contract. Every correctness check is on the UNPACKED
- * produced atlas — region.transform read back from the pack, or a SHA-256 over
- * the serialized pack — never the packer's internal orientation filter.
- * Byte-identity is proven against master-captured etalons; see
- * tests/fixtures/transform_mask_golden/PROVENANCE.txt for their capture recipe. */
+/* Transform-mask OUTPUT contract: every check reads the UNPACKED atlas —
+ * region.transform or a pack SHA-256 — never the packer's internal filter.
+ * Etalon capture recipe: tests/fixtures/transform_mask_golden/PROVENANCE.txt. */
 
 #include <errno.h>
 #include <math.h>
@@ -130,10 +128,9 @@ static void fill_solid(uint8_t *px, uint16_t w, uint16_t h, uint8_t r, uint8_t g
     }
 }
 
-/* Fixture: three tall strips + ONE wide 44x8 strip the ALL packer transposes.
- * mask_wide=true restricts the wide strip to IDENTITY|FLIP_H; the unmasked build
- * is the A/B control proving the packer WOULD transpose it — without the control
- * the masked assert would be vacuous (identity could win anyway). */
+/* Three tall strips + ONE wide 44x8 strip the ALL packer transposes. mask_wide
+ * restricts the wide strip to IDENTITY|FLIP_H; the unmasked A/B control proves
+ * the packer WOULD transpose it — otherwise the masked assert is vacuous. */
 static bool build_intersection_pack(const char *path, bool mask_wide) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
@@ -322,11 +319,9 @@ void test_export_density_at_least_identity(void) {
     memset(&mi, 0, sizeof(mi));
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(export_path, &me), "parse EXPORT pack");
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(identity_path, &mi), "parse IDENTITY pack");
-    /* Empirical pin of this fixture's deterministic outcome — NOT a packer theorem:
-     * greedy placement with a wider orientation set can in principle pack worse. A
-     * failure here after an intentional packer change means re-baseline, not a mask
-     * bug. Frontier density is arrangement-dependent (EXPORT transposes the page
-     * 128x64 vs 64x128), so the pin uses fill_texture. */
+    /* Empirical pin, NOT a packer theorem — greedy packing with more orientations
+     * can pack worse; after an intentional packer change, re-baseline. Pins
+     * fill_texture: frontier density flips with page arrangement (128x64 vs 64x128). */
     TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(me.density_fill_texture), "EXPORT texture density must be >= IDENTITY texture density");
 }
 

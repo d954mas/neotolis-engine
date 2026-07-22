@@ -775,10 +775,9 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Transform-mask OUTPUT contract: byte-identity to the master-captured etalons,
-    # forbidden-orientation + intersection + slice9 read back from the unpacked
-    # atlas, and the partial-mask density inequality. Links ntpack_parse.c for the
-    # SHA + region probe; the fixture (test_helpers) is header-only.
+    # Transform-mask OUTPUT contract: golden byte-identity + mask/intersection/slice9
+    # read-back from the unpacked atlas. Links ntpack_parse.c (SHA + region probe);
+    # the test_helpers fixture is header-only.
     add_executable(test_atlas_transform_mask
         unit/test_atlas_transform_mask.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c

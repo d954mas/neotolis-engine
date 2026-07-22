@@ -632,9 +632,8 @@ static bool pack_corpus_masked(const char *path, const char *cache, uint8_t mask
     return result == NT_BUILD_OK;
 }
 
-/* allowed_transforms participates in the atlas cache key (v19): the same corpus
- * at two masks writes two distinct cache entries. (Key version 19 itself is
- * pinned by the byte-identity golden in test_atlas_transform_mask.) */
+/* allowed_transforms participates in the atlas cache key: the same corpus at
+ * two masks writes two distinct cache entries. */
 void test_allowed_transforms_changes_cache_key(void) {
     const char *cache = TMP_DIR "/atlas_cache_mask_dir";
     (void)MKDIR(TMP_DIR);

@@ -3,13 +3,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Positional-initializer compatibility for atlas opts is intentionally abandoned
- * (transform control moved to a mask, so old positional literals no longer map).
- * This validates the current layout via designated initializers instead: every
- * field — including the allowed_transforms mask — round-trips, and the defaults
- * helper reports the all-transforms mask. */
+/* Atlas opts carry NO positional-initializer contract — designated initializers
+ * only. Round-trips every field (incl. allowed_transforms) and pins the
+ * defaults mask to ALL. */
 
-/* Sprite opts keep the append-only positional contract (untouched by the mask change). */
+/* Sprite opts keep the append-only positional contract. */
 _Static_assert(offsetof(nt_atlas_sprite_opts_t, max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, extrude), "sprite controls must be append-only");
 _Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "appended controls must stay after the legacy positional fields");
 _Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "appended controls must stay after the legacy positional fields");
