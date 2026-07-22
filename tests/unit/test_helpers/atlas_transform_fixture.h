@@ -103,6 +103,7 @@ static inline void atlas_transform_fixture_add(NtAtlasBuild *atlas) {
  * x/y/w/h are the region's atlas-UV bbox (0-65535) — a placement fingerprint
  * that flips value under rotation. Self-contained pack walk (bench metrics do
  * not expose per-region transform); every offset is guarded against pack_len. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard-per-read pack walk; splitting detaches guards from reads
 static inline bool atlas_transform_fixture_dump_regions(const void *pack_bytes, size_t pack_len, FILE *out) {
     if (pack_bytes == NULL || out == NULL || pack_len < sizeof(NtPackHeader)) {
         return false;

@@ -3,6 +3,7 @@
  * SHA-256 over the serialized pack — never the packer's internal orientation
  * filter (D-11). Byte-identity is proven against the Plan 81-01 master etalons. */
 
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -70,12 +71,19 @@ static char *read_text_file(const char *path) {
     if (!bytes) {
         return NULL;
     }
-    char *txt = (char *)realloc(bytes, len + 1);
+    /* Dumps/etalons are tiny; the cap bounds the file-tainted alloc size. */
+    if (len > (1U << 20)) {
+        free(bytes);
+        return NULL;
+    }
+    char *txt = (char *)malloc(len + 1);
     if (!txt) {
         free(bytes);
         return NULL;
     }
+    memcpy(txt, bytes, len);
     txt[len] = '\0';
+    free(bytes);
     return txt;
 }
 
@@ -207,6 +215,23 @@ static char *dump_regions_text(const char *pack_path) {
     return read_text_file(tmp);
 }
 
+/* Parse the 6 space-separated unsigned fields of one dump line ("idx tr x y w h").
+ * strtoul-based (cert-err34-c); parsing never crosses line_end. */
+static bool parse_dump_line_u6(const char *line, const char *line_end, unsigned out[6]) {
+    const char *cur = line;
+    for (int k = 0; k < 6; ++k) {
+        char *end = NULL;
+        errno = 0;
+        unsigned long v = strtoul(cur, &end, 10);
+        if (end == cur || end > line_end || errno == ERANGE || v > 0xFFFFFFFFUL) {
+            return false;
+        }
+        out[k] = (unsigned)v;
+        cur = end;
+    }
+    return true;
+}
+
 /* Extract region.transform values (in region-index order) from a produced pack. */
 static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int *count) {
     char *txt = dump_regions_text(pack_path);
@@ -216,16 +241,12 @@ static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int
     int n = 0;
     const char *p = txt;
     while (*p) {
-        unsigned idx = 0;
-        unsigned tr = 0;
-        unsigned x = 0;
-        unsigned y = 0;
-        unsigned w = 0;
-        unsigned h = 0;
-        if (sscanf(p, "%u %u %u %u %u %u", &idx, &tr, &x, &y, &w, &h) == 6 && n < cap) {
-            out[n++] = (uint8_t)tr;
-        }
         const char *nl = strchr(p, '\n');
+        const char *line_end = nl ? nl : p + strlen(p);
+        unsigned fields[6];
+        if (n < cap && parse_dump_line_u6(p, line_end, fields)) {
+            out[n++] = (uint8_t)fields[1];
+        }
         if (!nl) {
             break;
         }
@@ -249,6 +270,13 @@ static void assert_all_in_mask(const char *pack_path, uint8_t mask, const char *
 
 /* Round density to 1e-6 fixed point for exact-integer comparison (no ULP noise). */
 static int64_t density_fixed(double d) { return llround(d * 1000000.0); }
+
+/* Collect transforms and require the exact region count. */
+static void collect_expect_n(const char *pack_path, int expected, uint8_t t[64]) {
+    int n = 0;
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(pack_path, t, 64, &n), "collect transforms failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(expected, n, "unexpected region count");
+}
 
 /* --- XFORM-01: defaults --- */
 
@@ -309,17 +337,14 @@ void test_per_sprite_mask_intersection(void) {
     TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(control_path, false), "control pack failed");
     TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(masked_path, true), "masked pack failed");
     uint8_t t[64];
-    int n = 0;
     /* A/B control: unrestricted, the packer transposes the wide strip. */
-    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(control_path, t, 64, &n), "collect control transforms failed");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(4, n, "expected 4 regions in add order");
+    collect_expect_n(control_path, 4, t);
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, t[2], "control: packer must transpose the wide strip — masked assert would be vacuous");
     /* Same fixture, wide strip masked to IDENTITY|FLIP_H → transform is 0 or 1. */
-    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(masked_path, t, 64, &n), "collect masked transforms failed");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(4, n, "expected 4 regions in add order");
+    collect_expect_n(masked_path, 4, t);
     TEST_ASSERT_TRUE_MESSAGE(t[2] == NT_ATLAS_XFORM_IDENTITY || t[2] == NT_ATLAS_XFORM_FLIP_H, "masked sprite emitted a forbidden transform");
     /* Inheriting sprites still resolve to a valid D4 value (identity always representable). */
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < 4; ++i) {
         TEST_ASSERT_TRUE_MESSAGE(t[i] <= NT_ATLAS_XFORM_ANTITRANSPOSE, "transform value out of D4 range");
     }
 }
@@ -369,9 +394,7 @@ void test_disjoint_sprite_mask_floors_to_identity(void) {
     const uint8_t masks[3] = {NT_ATLAS_TRANSFORM_TRANSPOSE, 0U, 0U}; /* 0x21 & 0x10 == 0 */
     TEST_ASSERT_TRUE_MESSAGE(build_masked_strips_pack(path, "disjoint", NT_ATLAS_TRANSFORMS_EXPORT, masks), "disjoint pack failed");
     uint8_t t[64];
-    int n = 0;
-    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(path, t, 64, &n), "collect transforms failed");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(3, n, "expected 3 regions in add order");
+    collect_expect_n(path, 3, t);
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "disjoint sprite mask must floor to identity");
 }
 
