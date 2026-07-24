@@ -162,13 +162,19 @@ done
 # deliberately not required.
 echo "" | tee -a "$RESULTS"
 echo "## ALL-mask evidence" | tee -a "$RESULTS"
+evidence_fail=0
 for spec in "${CORPORA[@]}"; do
     IFS='|' read -r name _ _ _ <<< "$spec"
     s1="${ALLSHA1["$name"]:-}"
     s2="${ALLSHA2["$name"]:-}"
     det="n/a"
     if [[ -n "$s1" && -n "$s2" ]]; then
-        [[ "$s1" == "$s2" ]] && det="MATCH" || det="DIFFER"
+        if [[ "$s1" == "$s2" ]]; then
+            det="MATCH"
+        else
+            det="DIFFER"
+            evidence_fail=1
+        fi
     fi
     base_json="tools/research/atlas_bench/baseline/${name}.json"
     run_json="${OUT_DIR}/sweep_${name}_all.json"
@@ -184,6 +190,7 @@ for spec in "${CORPORA[@]}"; do
             struct="MATCH"
         else
             struct="DIFFER (baseline pages=${b_pages} tex=${b_tex} vs run pages=${r_pages} tex=${r_tex})"
+            evidence_fail=1
         fi
     fi
     echo "- ${name}: ALL-mask determinism ${det} (sha ${s1:0:12}); vs committed baseline ${struct}" | tee -a "$RESULTS"
@@ -198,5 +205,9 @@ fi
 if [[ "$run_fail" -ne 0 ]]; then
     # Gate: a caller must not mistake a partial sweep (FAIL/n/a rows) for full evidence.
     echo "ERROR: sweep incomplete — at least one bench run failed after retry." >&2
+    exit 1
+fi
+if [[ "$evidence_fail" -ne 0 ]]; then
+    echo "ERROR: ALL-mask determinism or baseline evidence differs." >&2
     exit 1
 fi

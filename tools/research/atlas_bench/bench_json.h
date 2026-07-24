@@ -8,6 +8,7 @@
 
 #define NT_BENCH_MAX_ATLASES 16
 #define NT_BENCH_STR_MAX 256
+#define NT_BENCH_JSON_SCHEMA_VERSION 2
 
 typedef struct {
     char name[NT_BENCH_STR_MAX];

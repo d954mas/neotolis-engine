@@ -487,6 +487,17 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_bench_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_cli WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    add_executable(test_atlas_bench_json
+        unit/test_atlas_bench_json.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/bench_json.c
+    )
+    target_link_libraries(test_atlas_bench_json PRIVATE unity)
+    target_include_directories(test_atlas_bench_json PRIVATE
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_bench_json PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_bench_json WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
@@ -817,6 +828,11 @@ if(NOT EMSCRIPTEN)
         add_test(
             NAME test_bench_hull_tolerance_guard
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
+        add_test(
+            NAME test_atlas_transform_sweep_guard
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_transform_sweep_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
         set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES

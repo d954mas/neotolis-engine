@@ -43,6 +43,7 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
     }
 
     (void)fputs("{\n", f);
+    (void)fprintf(f, "  \"schema_version\": %d,\n", NT_BENCH_JSON_SCHEMA_VERSION);
 
     /* meta block */
     (void)fputs("  \"meta\": {\n", f);
