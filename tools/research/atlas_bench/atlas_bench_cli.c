@@ -69,8 +69,8 @@ bool atlas_bench_parse_transforms(const char *text, uint8_t *out_mask) {
         *out_mask = ATLAS_BENCH_TRANSFORMS_ALL;
     } else if (ci_equal(text, "identity")) {
         *out_mask = ATLAS_BENCH_TRANSFORMS_IDENTITY;
-    } else if (ci_equal(text, "export")) {
-        *out_mask = ATLAS_BENCH_TRANSFORMS_EXPORT;
+    } else if (ci_equal(text, "identity-rot90")) {
+        *out_mask = ATLAS_BENCH_TRANSFORMS_IDENTITY_ROT90;
     } else if (ci_equal(text, "rotations")) {
         *out_mask = ATLAS_BENCH_TRANSFORMS_ROTATIONS;
     } else if (ci_equal(text, "flips")) {

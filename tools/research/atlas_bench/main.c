@@ -25,7 +25,7 @@
  * has no builder dependency); pin them to the single source so they cannot drift. */
 _Static_assert(ATLAS_BENCH_TRANSFORMS_ALL == NT_ATLAS_TRANSFORMS_ALL, "CLI ALL preset drifted");
 _Static_assert(ATLAS_BENCH_TRANSFORMS_IDENTITY == NT_ATLAS_TRANSFORMS_IDENTITY, "CLI IDENTITY preset drifted");
-_Static_assert(ATLAS_BENCH_TRANSFORMS_EXPORT == NT_ATLAS_TRANSFORMS_EXPORT, "CLI EXPORT preset drifted");
+_Static_assert(ATLAS_BENCH_TRANSFORMS_IDENTITY_ROT90 == NT_ATLAS_TRANSFORMS_IDENTITY_ROT90, "CLI IDENTITY_ROT90 preset drifted");
 _Static_assert(ATLAS_BENCH_TRANSFORMS_ROTATIONS == NT_ATLAS_TRANSFORMS_ROTATIONS, "CLI ROTATIONS preset drifted");
 _Static_assert(ATLAS_BENCH_TRANSFORMS_FLIPS == NT_ATLAS_TRANSFORMS_FLIPS, "CLI FLIPS preset drifted");
 
@@ -201,7 +201,7 @@ static uint8_t *build_retained_mask(const char *path, uint8_t threshold, uint32_
 int main(int argc, char *argv[]) {
     if (argc < 6) {
         (void)fprintf(stderr, "Usage: atlas_bench <out_json> <corpus_glob> <atlas_name> <shape rect|convex|concave> <max_size> [max_sprites] [--max-added-area-percent <percent>] [--transforms "
-                              "<hex|all|identity|export|rotations|flips>]\n");
+                              "<hex|all|identity|identity-rot90|rotations|flips>]\n");
         return 1;
     }
     const char *out_json = argv[1];

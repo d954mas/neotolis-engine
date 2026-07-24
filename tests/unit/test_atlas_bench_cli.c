@@ -82,15 +82,15 @@ void test_parse_transforms_accepts_hex_and_presets(void) {
     TEST_ASSERT_EQUAL_UINT8(0x01U, mask);
     TEST_ASSERT_TRUE(atlas_bench_parse_transforms("IDENTITY", &mask));
     TEST_ASSERT_EQUAL_UINT8(0x01U, mask);
-    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("export", &mask));
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)(ATLAS_BENCH_TRANSFORMS_IDENTITY | (1U << NT_ATLAS_XFORM_ROT90)), mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("identity-rot90", &mask));
+    TEST_ASSERT_EQUAL_UINT8(ATLAS_BENCH_TRANSFORMS_IDENTITY_ROT90, mask);
     TEST_ASSERT_TRUE(atlas_bench_parse_transforms("all", &mask));
     TEST_ASSERT_EQUAL_UINT8(255U, mask);
 }
 
 void test_parse_transforms_rejects_bad_arg(void) {
     uint8_t mask = 7U;
-    const char *invalid[] = {NULL, "", "0x100", "0xG1", "rotate", "0x", "255", "1"};
+    const char *invalid[] = {NULL, "", "0x100", "0xG1", "rotate", "export", "0x", "255", "1"};
     for (uint32_t i = 0U; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
         TEST_ASSERT_FALSE(atlas_bench_parse_transforms(invalid[i], &mask));
     }

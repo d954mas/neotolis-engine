@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Non-CI evidence for identity/export/all across non-slice9 corpora.
+# Non-CI evidence for identity/identity-rot90/all across non-slice9 corpora.
 # Runs are single-threaded with one timeout retry and require LFS fixtures.
 
 set -euo pipefail
@@ -26,7 +26,7 @@ CORPORA=(
     "mixed_aa|assets/sprites/bigatlas/*.png|concave|4096"
     "rect_only|assets/bench/rect_only/*.png|rect|2048"
 )
-MASKS=(identity export all)
+MASKS=(identity identity-rot90 all)
 
 BENCH_BASE="build/tools/research/${PRESET}/atlas_bench"
 resolve_exe() {
@@ -132,15 +132,15 @@ xform_fail=0
 for spec in "${CORPORA[@]}"; do
     IFS='|' read -r name _ _ _ <<< "$spec"
     id_tex="${TEX["${name}|identity"]:-}"
-    ex_tex="${TEX["${name}|export"]:-}"
-    if [[ -z "$id_tex" || -z "$ex_tex" ]]; then
+    rot90_tex="${TEX["${name}|identity-rot90"]:-}"
+    if [[ -z "$id_tex" || -z "$rot90_tex" ]]; then
         echo "- ${name}: SKIP (a run failed)" | tee -a "$RESULTS"
         continue
     fi
-    if awk -v a="$ex_tex" -v b="$id_tex" 'BEGIN{exit !(a+1e-9 >= b)}'; then
-        echo "- ${name}: OK  export ${ex_tex} >= identity ${id_tex}" | tee -a "$RESULTS"
+    if awk -v a="$rot90_tex" -v b="$id_tex" 'BEGIN{exit !(a+1e-9 >= b)}'; then
+        echo "- ${name}: OK  identity-rot90 ${rot90_tex} >= identity ${id_tex}" | tee -a "$RESULTS"
     else
-        echo "- ${name}: FAIL export ${ex_tex} < identity ${id_tex}" | tee -a "$RESULTS"
+        echo "- ${name}: FAIL identity-rot90 ${rot90_tex} < identity ${id_tex}" | tee -a "$RESULTS"
         xform_fail=1
     fi
 done

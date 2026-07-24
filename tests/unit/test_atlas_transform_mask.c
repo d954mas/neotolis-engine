@@ -304,11 +304,10 @@ void test_each_d4_mask_bit_selects_its_transform_value(void) {
 
 /* --- Forbidden orientations never reach the unpacked output --- */
 
-void test_export_mask_emits_only_identity_and_rot90(void) {
-    const char *path = TMP_DIR "/xform_export.ntpack";
-    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_EXPORT, "export", path), "EXPORT pack failed");
-    /* EXPORT = IDENTITY|ROT90 → the only bits set are values 0 and 5. */
-    assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_EXPORT, "region transform outside {identity, rot90}");
+void test_identity_rot90_mask_emits_only_identity_and_rot90(void) {
+    const char *path = TMP_DIR "/xform_identity_rot90.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_IDENTITY_ROT90, "identity_rot90", path), "IDENTITY_ROT90 pack failed");
+    assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY_ROT90, "region transform outside {identity, rot90}");
     /* Positive pin: the fixture's dimension-swapping strips make rot90 a win, so a
      * regression that collapses partial masks to identity-only must fail here. */
     uint8_t t[64];
@@ -318,27 +317,27 @@ void test_export_mask_emits_only_identity_and_rot90(void) {
     for (int i = 0; i < n; ++i) {
         saw_rot90 = saw_rot90 || (t[i] == NT_ATLAS_XFORM_ROT90);
     }
-    TEST_ASSERT_TRUE_MESSAGE(saw_rot90, "EXPORT mask must actually emit rot90 on this fixture");
+    TEST_ASSERT_TRUE_MESSAGE(saw_rot90, "IDENTITY_ROT90 mask must actually emit rot90 on this fixture");
 }
 
 /* --- A partial rotation mask never packs worse than identity-only --- */
 
-void test_export_density_at_least_identity(void) {
-    const char *export_path = TMP_DIR "/xform_export_density.ntpack";
+void test_identity_rot90_density_at_least_identity(void) {
+    const char *identity_rot90_path = TMP_DIR "/xform_identity_rot90_density.ntpack";
     const char *identity_path = TMP_DIR "/xform_identity_density.ntpack";
-    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_EXPORT, "density", export_path), "EXPORT density pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_IDENTITY_ROT90, "density", identity_rot90_path), "IDENTITY_ROT90 density pack failed");
     TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(NT_ATLAS_TRANSFORMS_IDENTITY, "density", identity_path), "IDENTITY density pack failed");
 
-    nt_bench_atlas_metrics_t me;
+    nt_bench_atlas_metrics_t mr;
     nt_bench_atlas_metrics_t mi;
-    memset(&me, 0, sizeof(me));
+    memset(&mr, 0, sizeof(mr));
     memset(&mi, 0, sizeof(mi));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(export_path, &me), "parse EXPORT pack");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(identity_rot90_path, &mr), "parse IDENTITY_ROT90 pack");
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_parse_ntpack(identity_path, &mi), "parse IDENTITY pack");
     /* Empirical pin, NOT a packer theorem — greedy packing with more orientations
      * can pack worse; after an intentional packer change, re-baseline. Pins
      * fill_texture: frontier density flips with page arrangement (128x64 vs 64x128). */
-    TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(me.density_fill_texture), "EXPORT texture density must be >= IDENTITY texture density");
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(mr.density_fill_texture), "IDENTITY_ROT90 texture density must be >= IDENTITY texture density");
 }
 
 /* --- A non-zero sprite mask may narrow the atlas default --- */
@@ -461,8 +460,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_allowed_transforms);
     RUN_TEST(test_each_d4_mask_bit_selects_its_transform_value);
-    RUN_TEST(test_export_mask_emits_only_identity_and_rot90);
-    RUN_TEST(test_export_density_at_least_identity);
+    RUN_TEST(test_identity_rot90_mask_emits_only_identity_and_rot90);
+    RUN_TEST(test_identity_rot90_density_at_least_identity);
     RUN_TEST(test_sprite_mask_can_narrow_atlas_mask);
     RUN_TEST(test_zero_mask_behaves_as_identity);
     RUN_TEST(test_sprite_mask_can_widen_atlas_mask);

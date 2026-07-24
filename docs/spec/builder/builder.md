@@ -280,6 +280,10 @@ typedef struct {
 } nt_atlas_opts_t;
 ```
 
+Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
+`NT_ATLAS_TRANSFORMS_IDENTITY_ROT90`, `NT_ATLAS_TRANSFORMS_ROTATIONS`,
+`NT_ATLAS_TRANSFORMS_FLIPS`, and `NT_ATLAS_TRANSFORMS_ALL`.
+
 **Silhouette modes (`nt_atlas_shape_t`):**
 
 - `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
