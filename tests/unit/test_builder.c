@@ -5250,6 +5250,20 @@ void test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack(void) {
     free(s);
 }
 
+void test_atlas_add_raw_slice9_nonidentity_transform_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_transform_assert.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "slice9_transform", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "panel.png";
+    opts.slice9_left = 4;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORM_ROT90;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &opts), "slice9 sprite must not allow non-identity transforms");
+    free(s);
+}
+
 /* Per-sprite extrude still observes the later transaction's real shape. */
 void test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -8279,6 +8293,7 @@ int main(void) {
     RUN_TEST(test_atlas_begin_bad_ppu_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_nan_ppu_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_slice9_nonidentity_transform_asserts);
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_valid_opts_commits_after_failed_pack);
     RUN_TEST(test_atlas_file_and_glob_commit_after_failed_pack);

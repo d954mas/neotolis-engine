@@ -835,11 +835,19 @@ if(NOT EMSCRIPTEN)
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_transform_sweep_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
+        add_test(
+            NAME test_atlas_bench_transforms_e2e
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_bench_transforms_e2e.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
         set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
+        set_tests_properties(test_atlas_bench_transforms_e2e PROPERTIES
+            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
+        )
     else()
-        message(WARNING "Git Bash not found; test_bench_hull_tolerance_guard is NOT registered — the hull evidence shell pins will not run")
+        message(WARNING "Git Bash not found; native shell guards are NOT registered")
     endif()
 
     # --- Basis encode + runtime transcode in one exe ---

@@ -684,10 +684,8 @@ void test_allowed_transforms_changes_cache_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "allowed_transforms must change the atlas cache key");
 }
 
-/* Per-sprite transforms_override participates in the cache key on its own: the
- * atlas mask stays fixed, only sprite 0's override changes ⇒ a second cache
- * entry. Guards against a key serialization that drops the per-sprite mask and
- * reuses a stale placement. */
+/* A fixed atlas mask makes the second cache entry prove that the raw
+ * per-sprite transform override participates in the key. */
 void test_sprite_transforms_override_changes_cache_key(void) {
     const char *cache = TMP_DIR "/atlas_cache_sprite_mask_dir";
     (void)MKDIR(TMP_DIR);

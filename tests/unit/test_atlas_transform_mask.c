@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Windows SDK before C17 stdnoreturn.h (matches test_atlas_pack_determinism). */
+/* Include the Windows SDK before headers that may define C17 noreturn. */
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <direct.h>
@@ -23,6 +23,7 @@
 /* clang-format off */
 #include "nt_atlas_format.h"
 #include "nt_builder.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
 #include "test_helpers/atlas_transform_fixture.h"
@@ -288,6 +289,19 @@ void test_defaults_allowed_transforms(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, s.allowed_transforms, "sprite default mask must be 0 (inherit)");
 }
 
+void test_each_d4_mask_bit_selects_its_transform_value(void) {
+    uint8_t values[8];
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_collect_transform_values(0, values));
+    TEST_ASSERT_EQUAL_UINT8(NT_ATLAS_XFORM_IDENTITY, values[0]);
+
+    for (uint8_t transform = 1; transform < 8; ++transform) {
+        uint8_t mask = (uint8_t)(1U << transform);
+        TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_collect_transform_values(mask, values));
+        TEST_ASSERT_EQUAL_UINT8(NT_ATLAS_XFORM_IDENTITY, values[0]);
+        TEST_ASSERT_EQUAL_UINT8(transform, values[1]);
+    }
+}
+
 /* --- Forbidden orientations never reach the unpacked output --- */
 
 void test_export_mask_emits_only_identity_and_rot90(void) {
@@ -446,6 +460,7 @@ void test_golden_byte_identity_identity(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_allowed_transforms);
+    RUN_TEST(test_each_d4_mask_bit_selects_its_transform_value);
     RUN_TEST(test_export_mask_emits_only_identity_and_rot90);
     RUN_TEST(test_export_density_at_least_identity);
     RUN_TEST(test_sprite_mask_can_narrow_atlas_mask);

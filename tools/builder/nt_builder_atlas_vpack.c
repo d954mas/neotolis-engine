@@ -108,6 +108,7 @@
 /* clang-format off */
 #include "nt_builder_atlas_vpack.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_builder.h"             /* NT_BUILD_ASSERT */
 #include "nt_clipper2_bridge.h"     /* nt_clipper2_minkowski_nfp */
 #include "log/nt_log.h"             /* NT_LOG_INFO, NT_LOG_ERROR */
@@ -1545,6 +1546,21 @@ static bool vpack_rings_equivalent(const Point2D *a, const Point2D *b, uint32_t 
     return false;
 }
 
+static uint32_t vpack_collect_transform_values(uint8_t mask, uint8_t out_values[8]) {
+    uint32_t count = 0;
+    mask |= NT_ATLAS_TRANSFORMS_IDENTITY;
+    for (uint8_t transform = 0; transform < 8; ++transform) {
+        if (mask & (uint8_t)(1U << transform)) {
+            out_values[count++] = transform;
+        }
+    }
+    return count;
+}
+
+#ifdef NT_TEST_ACCESS
+uint32_t nt_atlas_test_collect_transform_values(uint8_t mask, uint8_t out_values[8]) { return vpack_collect_transform_values(mask, out_values); }
+#endif
+
 /* Place a single sprite. Called once per sorted sprite from vector_pack.
  * Transforms the sprite's inflated polygon into up to 8 D4 orientations,
  * deduplicates them, pre-computes bounds, scans every existing page for
@@ -1558,27 +1574,23 @@ static bool vpack_rings_equivalent(const Point2D *a, const Point2D *b, uint32_t 
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
     VPackOrientData od;
-    /* Effective D4 mask gates which transform VALUES are generated. NULL = opts mask. */
     uint8_t eff = ctx->eff_transforms ? ctx->eff_transforms[idx] : ctx->opts->allowed_transforms;
-    eff |= NT_ATLAS_TRANSFORMS_IDENTITY; /* identity floor — always generated */
+    uint8_t transform_values[8];
+    uint32_t orient_count = vpack_collect_transform_values(eff, transform_values);
 
     // #region Orient generate — transform inflated polygon for the masked D4 values
     /* Orthogonal D4 transforms preserve the exact offset shape — reuse the
      * once-built inflated polygon instead of inflating per orientation. */
-    uint32_t orient_count = 0;
-    for (uint32_t v = 0; v < 8; v++) {
-        if (!(eff & (1U << v))) {
-            continue;
-        }
+    for (uint32_t orient = 0; orient < orient_count; ++orient) {
+        uint8_t v = transform_values[orient];
         if (v == 0) {
-            od.counts[orient_count] = ctx->inf_counts[idx];
-            memcpy(od.polys[orient_count], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
+            od.counts[orient] = ctx->inf_counts[idx];
+            memcpy(od.polys[orient], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
         } else {
-            polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], (uint8_t)v, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[orient_count]);
-            od.counts[orient_count] = ctx->inf_counts[idx];
+            polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], v, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[orient]);
+            od.counts[orient] = ctx->inf_counts[idx];
         }
-        od.orig[orient_count] = (uint8_t)v; /* stored transform VALUE, not generation index */
-        orient_count++;
+        od.orig[orient] = v;
     }
     // #endregion
 

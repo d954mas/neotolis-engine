@@ -1,12 +1,8 @@
 #ifndef NT_TEST_ATLAS_TRANSFORM_FIXTURE_H
 #define NT_TEST_ATLAS_TRANSFORM_FIXTURE_H
 
-/* Header-only (static inline): the fixture needs no TU of its own, so it can
- * never become an orphan in the compile DB.
- *
- * The caller owns nt_atlas_opts_t and the transform control — the fixture only
- * builds sprites and dumps regions, so every mask setting packs identical
- * sprite bytes. */
+/* Header-only keeps the fixture in each caller's compile DB. Callers own the
+ * transform selection, so every mask run packs identical sprite bytes. */
 
 #include <stdint.h>
 #include <stdio.h>

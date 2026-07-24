@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# atlas_transform_sweep.sh — NON-CI transform-mask density evidence.
-#
-# Runs atlas_bench across 3 masks (identity, export, all) x 3 corpora
-# (anim_heavy, mixed_aa, rect_only) = 9 packs and emits a markdown density table.
-# The nine-patch corpus is excluded (its forced-identity sprites make masks moot);
-# the ROTATIONS/FLIPS presets are informative-only and not swept.
-#
-# Not wired into check.sh. Requirements:
-#   - git lfs pull   (mixed_aa reuses the 4.8k-file bigatlas LFS fixture)
-#   - a built native atlas_bench (see scripts/bench_atlas.sh, or pass --no-build with the exe already built)
-#
-# Every pack runs single-threaded (NT_BUILDER_THREADS=1) with a per-run timeout and
-# one retry. A mixed_aa timeout is a known cold-run vpack flake, not a
-# transform-mask regression.
+# Non-CI evidence for identity/export/all across non-slice9 corpora.
+# Runs are single-threaded with one timeout retry and require LFS fixtures.
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -20,6 +8,7 @@ cd "$(git rev-parse --show-toplevel)"
 PRESET="native-release"
 OUT_DIR="build/bench"
 RUN_TIMEOUT="900"
+BASELINE_DIR="${NT_ATLAS_TRANSFORM_BASELINE_DIR:-tools/research/atlas_bench/baseline}"
 NO_BUILD=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -156,10 +145,8 @@ for spec in "${CORPORA[@]}"; do
     fi
 done
 
-# Full-corpus evidence: ALL-mask determinism (two runs byte-identical) plus a
-# structural check (pages + fill_texture) against the committed baseline JSON.
-# Baseline pack SHAs are machine-captured, so a byte-compare against them is
-# deliberately not required.
+# Gate ALL-mask determinism and structure against the committed baseline.
+# Machine-captured baseline pack SHAs are intentionally not portable gates.
 echo "" | tee -a "$RESULTS"
 echo "## ALL-mask evidence" | tee -a "$RESULTS"
 evidence_fail=0
@@ -176,12 +163,20 @@ for spec in "${CORPORA[@]}"; do
             evidence_fail=1
         fi
     fi
-    base_json="tools/research/atlas_bench/baseline/${name}.json"
+    base_json="${BASELINE_DIR}/${name}.json"
     run_json="${OUT_DIR}/sweep_${name}_all.json"
     struct="n/a"
     # Gate on a successful CURRENT run (s1 set) — a stale run_json from an earlier
     # sweep would otherwise produce a false MATCH (or abort under set -e if absent).
-    if [[ -n "$s1" && -f "$base_json" && -f "$run_json" ]]; then
+    if [[ ! -f "$base_json" ]]; then
+        echo "ERROR: missing baseline evidence: ${base_json}" >&2
+        struct="MISSING"
+        evidence_fail=1
+    elif [[ -n "$s1" && ! -f "$run_json" ]]; then
+        echo "ERROR: missing current sweep evidence: ${run_json}" >&2
+        struct="MISSING"
+        evidence_fail=1
+    elif [[ -n "$s1" ]]; then
         b_pages="$(json_num "$base_json" pages)"
         b_tex="$(json_num "$base_json" density_fill_texture)"
         r_pages="$(json_num "$run_json" pages)"
