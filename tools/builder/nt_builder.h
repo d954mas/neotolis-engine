@@ -437,7 +437,7 @@ typedef struct {
 
     /* Per-sprite overrides (0 = use atlas default). */
     uint8_t shape;              /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
-    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero intersects with it (identity floor still applies) */
+    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero replaces it (identity floor still applies) */
     uint8_t max_vertices;       /* 0 = atlas default, else 4..16 */
     uint8_t margin;             /* 0 = atlas default; raise-only — a value below the atlas margin is clamped up */
     /* 0 = inherit atlas default. A non-zero value sets THIS sprite's edge bleed

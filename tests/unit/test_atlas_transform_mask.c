@@ -128,10 +128,10 @@ static void fill_solid(uint8_t *px, uint16_t w, uint16_t h, uint8_t r, uint8_t g
     }
 }
 
-/* Three tall strips + ONE wide 44x8 strip the ALL packer transposes. mask_wide
+/* Three tall strips + ONE wide 44x8 strip the ALL packer transposes. override_wide
  * restricts the wide strip to IDENTITY|FLIP_H; the unmasked A/B control proves
  * the packer WOULD transpose it — otherwise the masked assert is vacuous. */
-static bool build_intersection_pack(const char *path, bool mask_wide) {
+static bool build_override_pack(const char *path, bool override_wide) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     if (!ctx) {
@@ -140,7 +140,7 @@ static bool build_intersection_pack(const char *path, bool mask_wide) {
     nt_builder_set_threads(ctx, 1);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
-    NtAtlasBuild *atlas = nt_atlas_begin(ctx, mask_wide ? "intersect_masked" : "intersect_control", &opts);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, override_wide ? "override_masked" : "override_control", &opts);
 
     uint8_t px[48 * 48 * 4];
     const uint16_t dims[4][2] = {{8, 44}, {8, 44}, {44, 8}, {8, 40}};
@@ -149,7 +149,7 @@ static bool build_intersection_pack(const char *path, bool mask_wide) {
         fill_solid(px, dims[i][0], dims[i][1], (uint8_t)(180 + (i * 10)), 90, 60);
         nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
         so.name = names[i];
-        if (mask_wide && i == 2) {
+        if (override_wide && i == 2) {
             so.allowed_transforms = (uint8_t)(NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H);
         }
         nt_atlas_add_raw(atlas, px, dims[i][0], dims[i][1], &so);
@@ -327,13 +327,13 @@ void test_export_density_at_least_identity(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT64_MESSAGE(density_fixed(mi.density_fill_texture), density_fixed(me.density_fill_texture), "EXPORT texture density must be >= IDENTITY texture density");
 }
 
-/* --- Per-sprite mask intersects the atlas mask --- */
+/* --- A non-zero sprite mask may narrow the atlas default --- */
 
-void test_per_sprite_mask_intersection(void) {
-    const char *control_path = TMP_DIR "/xform_intersect_control.ntpack";
-    const char *masked_path = TMP_DIR "/xform_intersect_masked.ntpack";
-    TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(control_path, false), "control pack failed");
-    TEST_ASSERT_TRUE_MESSAGE(build_intersection_pack(masked_path, true), "masked pack failed");
+void test_sprite_mask_can_narrow_atlas_mask(void) {
+    const char *control_path = TMP_DIR "/xform_override_control.ntpack";
+    const char *masked_path = TMP_DIR "/xform_override_masked.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_override_pack(control_path, false), "control pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_override_pack(masked_path, true), "masked pack failed");
     uint8_t t[64];
     /* A/B control: unrestricted, the packer transposes the wide strip. */
     collect_expect_n(control_path, 4, t);
@@ -355,8 +355,7 @@ void test_zero_mask_behaves_as_identity(void) {
     assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY, "zero mask must emit identity only");
 }
 
-/* Two 44x8 strips the ALL packer transposes + one 8x40 tall strip, with per-sprite
- * masks (0 = inherit) — probes the identity-floor and no-widening corners. */
+/* Two 44x8 strips the ALL packer transposes + one 8x40 tall strip. */
 static bool build_masked_strips_pack(const char *path, const char *name, uint8_t atlas_mask, const uint8_t sprite_masks[3]) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(path);
@@ -384,25 +383,19 @@ static bool build_masked_strips_pack(const char *path, const char *name, uint8_t
     return r == NT_BUILD_OK;
 }
 
-/* --- Disjoint atlas∩sprite floors to identity (the floor is load-bearing:
- * without it orient_count would be 0 and the packer would assert-crash) --- */
+/* --- A non-zero sprite mask replaces and may widen the atlas mask --- */
 
-void test_disjoint_sprite_mask_floors_to_identity(void) {
-    const char *path = TMP_DIR "/xform_disjoint.ntpack";
-    const uint8_t masks[3] = {NT_ATLAS_TRANSFORM_TRANSPOSE, 0U, 0U}; /* 0x21 & 0x10 == 0 */
-    TEST_ASSERT_TRUE_MESSAGE(build_masked_strips_pack(path, "disjoint", NT_ATLAS_TRANSFORMS_EXPORT, masks), "disjoint pack failed");
-    uint8_t t[64];
-    collect_expect_n(path, 3, t);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, t[0], "disjoint sprite mask must floor to identity");
-}
-
-/* --- A sprite mask can only restrict — it cannot widen the atlas mask --- */
-
-void test_sprite_mask_cannot_widen_atlas_mask(void) {
+void test_sprite_mask_can_widen_atlas_mask(void) {
     const char *path = TMP_DIR "/xform_widen.ntpack";
     const uint8_t masks[3] = {NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_ALL};
     TEST_ASSERT_TRUE_MESSAGE(build_masked_strips_pack(path, "widen", NT_ATLAS_TRANSFORMS_IDENTITY, masks), "widen pack failed");
-    assert_all_in_mask(path, NT_ATLAS_TRANSFORMS_IDENTITY, "sprite mask must not widen the atlas mask");
+    uint8_t t[64];
+    collect_expect_n(path, 3, t);
+    bool saw_non_identity = false;
+    for (int i = 0; i < 3; ++i) {
+        saw_non_identity = saw_non_identity || (t[i] != NT_ATLAS_XFORM_IDENTITY);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw_non_identity, "sprite override must widen an identity-only atlas on this fixture");
 }
 
 /* --- Slice9 emits only identity regardless of the atlas mask --- */
@@ -455,10 +448,9 @@ int main(void) {
     RUN_TEST(test_defaults_allowed_transforms);
     RUN_TEST(test_export_mask_emits_only_identity_and_rot90);
     RUN_TEST(test_export_density_at_least_identity);
-    RUN_TEST(test_per_sprite_mask_intersection);
+    RUN_TEST(test_sprite_mask_can_narrow_atlas_mask);
     RUN_TEST(test_zero_mask_behaves_as_identity);
-    RUN_TEST(test_disjoint_sprite_mask_floors_to_identity);
-    RUN_TEST(test_sprite_mask_cannot_widen_atlas_mask);
+    RUN_TEST(test_sprite_mask_can_widen_atlas_mask);
     RUN_TEST(test_slice9_emits_identity);
     RUN_TEST(test_golden_byte_identity_all);
     RUN_TEST(test_golden_byte_identity_identity);

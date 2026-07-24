@@ -473,7 +473,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 19 };
+enum { ATLAS_CACHE_KEY_VERSION = 20 };
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Atlas cache stores raw page pixels + placements; post-pack texture
@@ -2622,19 +2622,13 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
-    /* Per-sprite effective D4 transform mask for vector_pack: atlas ∩ sprite,
-     * with the identity bit floored on (slice9 already forced sprite → identity). */
+    /* A non-zero sprite mask replaces the atlas default; identity remains mandatory. */
     uint8_t *u_eff_transforms = (uint8_t *)calloc(p->unique_count, sizeof(uint8_t));
     NT_BUILD_ASSERT(u_eff_transforms && "pipeline_tile_pack: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         uint8_t sm = p->sprites[oi].transforms_override;
-        if (sm && (sm & (uint8_t)(p->opts->allowed_transforms | NT_ATLAS_TRANSFORMS_IDENTITY)) == 0) {
-            /* None of the requested bits survive the floored intersection — not even
-             * identity was asked for. Likely a typo'd mask; degrades to identity-only. */
-            NT_LOG_WARN("  sprite '%s': transform mask 0x%02X disjoint from atlas mask 0x%02X -> identity only", p->sprites[oi].name, sm, p->opts->allowed_transforms);
-        }
-        uint8_t eff = (uint8_t)(p->opts->allowed_transforms & (sm ? sm : p->opts->allowed_transforms));
+        uint8_t eff = sm ? sm : p->opts->allowed_transforms;
         eff |= NT_ATLAS_TRANSFORMS_IDENTITY;
         u_eff_transforms[i] = eff;
     }

@@ -241,7 +241,7 @@ The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each can
 
 - **Sub-pixel exact** — no quantization to a tile grid.
 - **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
-- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the per-sprite effective `allowed_transforms` mask (atlas ∩ sprite, identity always permitted). Identity-equivalent orientations are deduplicated. (Full packer spec rewrite tracked in Phase 83.)
+- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the effective `allowed_transforms` mask. A zero per-sprite mask inherits the atlas mask; a non-zero mask replaces it, so a sprite may narrow or widen the atlas default. Identity is always permitted. Identity-equivalent orientations are deduplicated. (Full packer spec rewrite tracked in Phase 83.)
 - **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
 - **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
 - **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
@@ -324,7 +324,7 @@ typedef struct {
     uint16_t slice9_top;
     uint16_t slice9_bottom;
     uint8_t shape;              /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
-    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero intersects with it (identity floor applies) */
+    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero replaces it (identity floor applies) */
     uint8_t max_vertices;       /* 0 = atlas default, else 4..16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
     uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
@@ -382,7 +382,7 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 19. Pack options include atlas `alpha_threshold`, `max_vertices`, `max_added_area_percent`, and the `allowed_transforms` mask; raw per-sprite identity includes threshold, max-vertices, the transform-mask override, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 20. Pack options include atlas `alpha_threshold`, `max_vertices`, `max_added_area_percent`, and the `allowed_transforms` mask; raw per-sprite identity includes threshold, max-vertices, the transform-mask override, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 
