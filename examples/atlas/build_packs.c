@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
     opts.max_size = (argc >= 3) ? (uint32_t)strtoul(argv[2], NULL, 10) : 2048U;
     opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     opts.max_vertices = 8;
-    opts.allow_transform = true;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
     opts.debug_png = true;
     const char *glob_pattern = (argc >= 4) ? argv[3] : "assets/sprites/spineboy/*.png";
     const char *atlas_name = (argc >= 5) ? argv[4] : "spineboy";

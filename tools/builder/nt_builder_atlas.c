@@ -473,7 +473,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 18 };
+enum { ATLAS_CACHE_KEY_VERSION = 20 };
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Atlas cache stores raw page pixels + placements; post-pack texture
@@ -504,7 +504,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
         memcpy(sprite_buf + ov_off + 4, &sprites[i].slice9_top, sizeof(uint16_t));
         memcpy(sprite_buf + ov_off + 6, &sprites[i].slice9_bottom, sizeof(uint16_t));
         sprite_buf[ov_off + 8] = sprites[i].shape_override;
-        sprite_buf[ov_off + 9] = sprites[i].rotate_override;
+        sprite_buf[ov_off + 9] = sprites[i].transforms_override;
         sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
         sprite_buf[ov_off + 11] = sprites[i].margin_override;
         sprite_buf[ov_off + 12] = sprites[i].extrude_override;
@@ -544,8 +544,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * premultiplied, debug_png, compress) are handled by the texture cache
      * and must NOT appear — otherwise changing e.g. premultiplied triggers
      * a full re-pack when only re-encode is needed. */
-    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0));
+    uint8_t flags = (uint8_t)(opts->power_of_two ? 2 : 0);
     opts_buf[pos++] = flags;
+    opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
 
@@ -850,8 +851,7 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
 /* Pure sprite-opts asserts independent of content validation. */
 static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
-    NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
-    /* 0 = atlas default; otherwise 3..16. */
+    /* allowed_transforms: any uint8 mask is legal (identity floor applied downstream). */
     NT_BUILD_ASSERT((sopts->max_vertices == 0 || (sopts->max_vertices >= 4 && sopts->max_vertices <= 16)) && "max_vertices override must be 0 (atlas default) or 4..16");
 }
 
@@ -864,7 +864,7 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
     uint8_t effective_override = sopts->shape;
     if (has_slice9) {
         NT_BUILD_ASSERT((sopts->shape == 0 || sopts->shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "slice9 sprite must use RECT shape");
-        NT_BUILD_ASSERT((sopts->allow_rotate == 0 || sopts->allow_rotate == NT_ATLAS_SPRITE_ROTATE_NO) && "slice9 sprite must not allow rotation");
+        NT_BUILD_ASSERT((sopts->allowed_transforms == 0 || sopts->allowed_transforms == NT_ATLAS_TRANSFORMS_IDENTITY) && "slice9 sprite must not allow non-identity transforms");
         effective_override = NT_ATLAS_SPRITE_SHAPE_RECT;
     }
     uint32_t effective_extrude = sopts->extrude ? sopts->extrude : atlas_opts->extrude;
@@ -876,8 +876,8 @@ static void atlas_assert_sprite_cross_field(const nt_atlas_sprite_opts_t *sopts,
 }
 
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
- * Slice9 borders auto-force RECT shape + no rotation. The cross-field contract
- * is asserted earlier on the add path (before content checks), not here. */
+ * Slice9 borders auto-force RECT shape + identity-only transform mask. The cross-field
+ * contract is asserted earlier on the add path (before content checks), not here. */
 static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
@@ -889,15 +889,15 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->alpha_threshold_override = sopts->alpha_threshold;
     sprite->has_alpha_threshold_override = sopts->has_alpha_threshold;
     sprite->shape_override = sopts->shape;
-    sprite->rotate_override = sopts->allow_rotate;
+    sprite->transforms_override = sopts->allowed_transforms;
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
-    /* Slice9 auto-force: RECT shape + no rotation. */
+    /* Slice9 auto-force: RECT shape + identity-only transform mask. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
         sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
-        sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
+        sprite->transforms_override = NT_ATLAS_TRANSFORMS_IDENTITY;
     }
 }
 
@@ -1245,7 +1245,8 @@ static bool pipeline_dedup_meta_match(const AtlasPipeline *p, uint32_t curr_idx,
            sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
            (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
            p->geometry_opts[curr_idx].effective_alpha_threshold == p->geometry_opts[orig_idx].effective_alpha_threshold && sc->shape_override == so->shape_override &&
-           sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override && sc->extrude_override == so->extrude_override;
+           sc->transforms_override == so->transforms_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override &&
+           sc->extrude_override == so->extrude_override;
 }
 
 static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
@@ -2557,7 +2558,7 @@ static void pipeline_validate(AtlasPipeline *p) {
 /* Free the per-unique scratch pipeline_tile_pack allocates (incl. the override
  * scratch hulls). Shared by the normal tail and the pages-exhausted early-out
  * so every exit frees the same set. */
-static void tile_pack_free_scratch(AtlasPipeline *p, uint32_t *u_trim_w, uint32_t *u_trim_h, Point2D **u_hulls, uint32_t *u_hull_counts, bool *u_no_rotate) {
+static void tile_pack_free_scratch(AtlasPipeline *p, uint32_t *u_trim_w, uint32_t *u_trim_h, Point2D **u_hulls, uint32_t *u_hull_counts, uint8_t *u_eff_transforms) {
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         if (u_hulls[i] != p->hull_vertices[oi]) {
@@ -2568,7 +2569,7 @@ static void tile_pack_free_scratch(AtlasPipeline *p, uint32_t *u_trim_w, uint32_
     free(u_trim_h);
     free((void *)u_hulls);
     free(u_hull_counts);
-    free(u_no_rotate);
+    free(u_eff_transforms);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2621,14 +2622,15 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
-    /* Per-sprite rotation override for vector_pack. */
-    bool *u_no_rotate = (bool *)calloc(p->unique_count, sizeof(bool));
-    NT_BUILD_ASSERT(u_no_rotate && "pipeline_tile_pack: alloc failed");
+    /* A non-zero sprite mask replaces the atlas default; identity remains mandatory. */
+    uint8_t *u_eff_transforms = (uint8_t *)calloc(p->unique_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(u_eff_transforms && "pipeline_tile_pack: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
-        if (p->sprites[oi].rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) {
-            u_no_rotate[i] = true;
-        }
+        uint8_t sm = p->sprites[oi].transforms_override;
+        uint8_t eff = sm ? sm : p->opts->allowed_transforms;
+        eff |= NT_ATLAS_TRANSFORMS_IDENTITY;
+        u_eff_transforms[i] = eff;
     }
 
     /* Empty-page fit is validated up front in pipeline_validate (every sprite +
@@ -2636,8 +2638,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
      * page should accept placement" invariant cannot trip. */
     NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
     bool pages_exhausted = false;
-    p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count,
-                                     &pages_exhausted);
+    p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_eff_transforms, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats,
+                                     p->thread_count, &pages_exhausted);
     if (pages_exhausted) {
         /* ATLAS_MAX_PAGES exhausted — vector_pack already joined its worker pool
          * and freed its buffers; report gracefully and bail. */
@@ -2647,7 +2649,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placement_count = 0;
         /* vector_pack freed its pages; compose is skipped so page_pixels stays NULL
          * and pipeline_cleanup's guard handles the (nonzero) page_count safely. */
-        tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_no_rotate);
+        tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_eff_transforms);
         return;
     }
     pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
@@ -2663,7 +2665,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placements[i].trimmed_h = p->trim_h[orig_idx];
     }
 
-    tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_no_rotate);
+    tile_pack_free_scratch(p, u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_eff_transforms);
 }
 
 /* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */

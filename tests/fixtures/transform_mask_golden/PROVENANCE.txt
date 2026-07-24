@@ -1,0 +1,12 @@
+Transform-mask golden etalons.
+Captured from master BEFORE the Phase-81 allow_transform deletion.
+Single-threaded (NT_BUILDER_THREADS=1), nt_atlas_opts_defaults().
+Atlas name "transform_golden" — the name seeds the texture page resource ids,
+so the SHA depends on it; re-capture with any other name will not match.
+etalon_all      = allow_transform=true  sha256 5245e519994baa937cb1696c22c078e2dc32690af966d7c736cdcf7e68116d88
+etalon_identity = allow_transform=false sha256 a1a1e638d743a1d237c78d7c4fa17f3a92247d76f8d1203f2c44b404ab2ff329
+test_atlas_transform_mask re-packs the same fixture with allowed_transforms=0xFF/0x01
+and asserts byte-identity against these dump + sha256 files.
+To regenerate after an INTENTIONAL packer change: run test_atlas_transform_mask,
+then take the SHA-256 and region dump of build/tests/tmp/xform_golden_all.ntpack
+and xform_golden_identity.ntpack (the test prints the current dump on divergence).

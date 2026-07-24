@@ -1,6 +1,7 @@
 {
+  "schema_version": 2,
   "meta": {
-    "tool_version": "1.0.0",
+    "tool_version": "2.0.0",
     "builder_version": 1,
     "corpus": "assets/sprites/bigatlas/*.png",
     "os": "windows",
@@ -10,8 +11,9 @@
       "max_size": 4096,
       "padding": 2,
       "max_vertices": 8,
-      "allow_transform": true,
+      "allowed_transforms": 255,
       "alpha_threshold": 1,
+      "max_added_area_percent": 10,
       "power_of_two": true
     },
     "cache_hits": 0,
@@ -24,15 +26,33 @@
       "unique": 0,
       "pages": 1,
       "region_count": 4812,
-      "pack_ms": 91220.9188,
-      "density_fill_frontier": 0.6313,
-      "density_fill_texture": 0.6304,
+      "pack_ms": 824633.5407,
+      "density_fill_frontier": 0.6343,
+      "density_fill_texture": 0.6332,
       "hull_verts": {
-        "total": 37514,
+        "total": 24626,
         "min": 4,
         "max": 8,
-        "mean": 7.7959
+        "mean": 5.1176
       }
     }
-  ]
+  ],
+  "selected_geometry_proof": {
+    "source": "assets/sprites/bigatlas/ages_ copy.png",
+    "baseline_pack_sha256": "c41bfd5d9988ac384a5b4573125119dded852445d5d78e81f1aeff7f07aac518",
+    "selected_pack_sha256": "922edd60658f5f3dfd5bffa9dfff4f2d60b400f1ae659ca1916ca03d3010d8e1",
+    "valid": true,
+    "retained_cell_count": 16260,
+    "base_vertex_count": 8,
+    "selected_vertex_count": 4,
+    "opaque_area2": 32520,
+    "base_area2": 32572,
+    "selected_area2": 32768,
+    "added_area2": 196,
+    "lost_area2": 0,
+    "base_overdraw_percent": 0.15990160,
+    "added_area_percent": 0.60270603,
+    "total_overdraw_percent": 0.76260763,
+    "gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}
+  }
 }

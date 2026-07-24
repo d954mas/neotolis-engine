@@ -5250,6 +5250,20 @@ void test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack(void) {
     free(s);
 }
 
+void test_atlas_add_raw_slice9_nonidentity_transform_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_transform_assert.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "slice9_transform", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "panel.png";
+    opts.slice9_left = 4;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORM_ROT90;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &opts), "slice9 sprite must not allow non-identity transforms");
+    free(s);
+}
+
 /* Per-sprite extrude still observes the later transaction's real shape. */
 void test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -5996,7 +6010,7 @@ void test_atlas_codegen(void) {
 void test_atlas_codegen_large(void) {
     /* 500 regions is enough to exercise "many regions + codegen name mangling
      * for high indices" — the SPR0499 name check below is the real invariant.
-     * allow_transform=false: every sprite is identical, so 8 D4 orientations
+     * identity-only mask: every sprite is identical, so 8 D4 orientations
      * would just multiply packer work by 8 for zero benefit. Together these
      * keep the test under a few seconds in debug+ASAN instead of ~10 minutes. */
     enum { LARGE_ATLAS_REGION_COUNT = 500 };
@@ -6007,7 +6021,7 @@ void test_atlas_codegen_large(void) {
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_RECT;
-    opts.allow_transform = false;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     NtAtlasBuild *atlas_build_5440 = nt_atlas_begin(ctx, "sprites", &opts);
 
     for (uint32_t i = 0; i < LARGE_ATLAS_REGION_COUNT; i++) {
@@ -6067,7 +6081,7 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
     TEST_ASSERT_TRUE(opts.max_added_area_percent == 10.0F);
     TEST_ASSERT_EQUAL(8, opts.max_vertices);
-    TEST_ASSERT_TRUE(opts.allow_transform);
+    TEST_ASSERT_EQUAL_UINT8(NT_ATLAS_TRANSFORMS_ALL, opts.allowed_transforms);
     TEST_ASSERT_TRUE(opts.power_of_two);
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
@@ -8279,6 +8293,7 @@ int main(void) {
     RUN_TEST(test_atlas_begin_bad_ppu_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_nan_ppu_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_add_raw_slice9_nonidentity_transform_asserts);
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_valid_opts_commits_after_failed_pack);
     RUN_TEST(test_atlas_file_and_glob_commit_after_failed_pack);

@@ -482,9 +482,21 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_atlas_bench_cli PRIVATE unity)
     target_include_directories(test_atlas_bench_cli PRIVATE
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_SOURCE_DIR}/shared/include   # nt_atlas_format.h (transform value indices)
     )
     target_compile_definitions(test_atlas_bench_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_bench_cli WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    add_executable(test_atlas_bench_json
+        unit/test_atlas_bench_json.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/bench_json.c
+    )
+    target_link_libraries(test_atlas_bench_json PRIVATE unity)
+    target_include_directories(test_atlas_bench_json PRIVATE
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+    )
+    target_compile_definitions(test_atlas_bench_json PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_bench_json WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
@@ -774,15 +786,27 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Compiles the complete pre-tolerance positional option lists as an external consumer would.
+    # Transform-mask OUTPUT contract: golden byte-identity + mask/intersection/slice9
+    # read-back from the unpacked atlas. Links ntpack_parse.c (SHA + region probe);
+    # the test_helpers fixture is header-only.
+    add_executable(test_atlas_transform_mask
+        unit/test_atlas_transform_mask.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_transform_mask PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_transform_mask PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_transform_mask PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_transform_mask WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
+    # (positional contract kept), atlas opts pin the current field order.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
     target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
-    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(test_atlas_options_compat PRIVATE
-            -Wno-missing-field-initializers
-            -Wno-error=missing-field-initializers
-        )
-    endif()
     nt_setup_test_target(test_atlas_options_compat)
 
     if(WIN32)
@@ -806,11 +830,24 @@ if(NOT EMSCRIPTEN)
             COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_bench_hull_tolerance_guard.sh"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
+        add_test(
+            NAME test_atlas_transform_sweep_guard
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_transform_sweep_guard.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
+        add_test(
+            NAME test_atlas_bench_transforms_e2e
+            COMMAND "${NT_GIT_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_atlas_bench_transforms_e2e.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
         set_tests_properties(test_bench_hull_tolerance_guard PROPERTIES
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
+        set_tests_properties(test_atlas_bench_transforms_e2e PROPERTIES
+            ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
+        )
     else()
-        message(WARNING "Git Bash not found; test_bench_hull_tolerance_guard is NOT registered — the hull evidence shell pins will not run")
+        message(WARNING "Git Bash not found; native shell guards are NOT registered")
     endif()
 
     # --- Basis encode + runtime transcode in one exe ---

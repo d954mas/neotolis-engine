@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
 
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
-    atlas_opts.allow_transform = false;
+    atlas_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     atlas_opts.pixels_per_unit = 1.0F;
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;

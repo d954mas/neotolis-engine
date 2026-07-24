@@ -29,6 +29,7 @@ uint32_t nt_atlas_test_frontier_select_areas(const uint64_t *slot_area2, uint32_
 void nt_atlas_test_frontier_selection_proof_mismatch(void);
 uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_t width, uint32_t height, uint32_t max_vertices);
 bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count);
+uint32_t nt_atlas_test_collect_transform_values(uint8_t mask, uint8_t out_values[8]);
 
 /* Directed Hausdorff distance from the full reference boundary to the
  * candidate boundary. Both polygons are closed implicitly. */

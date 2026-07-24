@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     // #region atlas: widget art + slice9 panels + white pixel
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
-    atlas_opts.allow_transform = false;
+    atlas_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     atlas_opts.pixels_per_unit = 1.0F;
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;
@@ -296,7 +296,7 @@ int main(int argc, char *argv[]) {
      * fully-OPAQUE so the trimmer strips nothing) is kept for the A/B [0,1]-UV reference cell. */
     nt_atlas_opts_t radial_opts = nt_atlas_opts_defaults();
     radial_opts.shape = NT_ATLAS_SHAPE_RECT;
-    radial_opts.allow_transform = false;
+    radial_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     radial_opts.padding = 0;
     radial_opts.margin = 0;
     radial_opts.extrude = 0;
@@ -332,7 +332,7 @@ int main(int argc, char *argv[]) {
     nt_atlas_sprite_opts_t radial_sprite = nt_atlas_sprite_opts_defaults();
     radial_sprite.name = "radial_art";
     radial_sprite.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
-    radial_sprite.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
+    radial_sprite.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     nt_atlas_add_raw(radial_atlas, radial_art, RADIAL_ART_DIM, RADIAL_ART_DIM, &radial_sprite);
     (void)printf("  Atlas 'ui_showcase_radial_art': radial_art %dx%d (full-bleed, UV [0,1])\n", RADIAL_ART_DIM, RADIAL_ART_DIM);
 

@@ -241,7 +241,7 @@ The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each can
 
 - **Sub-pixel exact** — no quantization to a tile grid.
 - **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
-- **8 D4 orientations** — flipH, flipV, diagonal flip and combinations. Identity-equivalent orientations are deduplicated.
+- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the effective `allowed_transforms` mask. A zero per-sprite mask inherits the atlas mask; a non-zero mask replaces it, so a sprite may narrow or widen the atlas default. Identity is always permitted. Identity-equivalent orientations are deduplicated. (Full packer spec rewrite tracked in Phase 83.)
 - **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
 - **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
 - **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
@@ -265,8 +265,9 @@ typedef struct {
     uint32_t extrude;                       /* AABB edge duplication (default 0; <= max_size; RECT only when non-zero) */
     uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
+    float max_added_area_percent;           /* simplification-added area budget (default 10%) */
     nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    bool allow_transform;                   /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
+    uint8_t allowed_transforms;             /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); 0xFF = all (default), 0x01 = identity only. Identity is the implicit floor. */
     bool power_of_two;                      /* round atlas dims to POT (default true) */
     bool debug_png;                         /* write debug atlas page PNGs (default false) */
     bool premultiplied;                     /* premultiply RGB by alpha during texture encode (default true) */
@@ -276,9 +277,12 @@ typedef struct {
     nt_texture_default_wrap_t wrap_u;       /* default REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default REPEAT */
     bool gen_mipmaps;                       /* RAW only; default true */
-    float max_added_area_percent;           /* simplification-added area budget (default 10%) */
 } nt_atlas_opts_t;
 ```
+
+Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
+`NT_ATLAS_TRANSFORMS_IDENTITY_ROT90`, `NT_ATLAS_TRANSFORMS_ROTATIONS`,
+`NT_ATLAS_TRANSFORMS_FLIPS`, and `NT_ATLAS_TRANSFORMS_ALL`.
 
 **Silhouette modes (`nt_atlas_shape_t`):**
 
@@ -323,9 +327,9 @@ typedef struct {
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
-    uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
-    uint8_t max_vertices; /* 0 = atlas default, else 4..16 */
+    uint8_t shape;              /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
+    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero replaces it (identity floor applies) */
+    uint8_t max_vertices;       /* 0 = atlas default, else 4..16 */
     uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
     uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
@@ -335,14 +339,18 @@ typedef struct {
 } nt_atlas_sprite_opts_t;
 ```
 
-The area-budget and per-sprite threshold controls are appended after each
-complete legacy field list. Legal positional initializers therefore
-retain every existing field mapping when recompiled; this is source-recompile
-compatibility, not a binary-ABI promise for stale object files. For per-sprite
-options, zero-initialized appended controls preserve inherit semantics. For
-atlas-level `nt_atlas_opts_t`, use `nt_atlas_opts_defaults()` when defaults matter:
-a zero-initialized atlas options struct means `max_added_area_percent = 0%`, not
-the public 10% default returned by the defaults helper.
+For per-sprite options the area-budget and threshold controls are appended after
+the complete legacy field list, so legal positional initializers of
+`nt_atlas_sprite_opts_t` retain their field mapping when recompiled
+(source-recompile compatibility, not a binary-ABI promise for stale object
+files), and zero-initialized appended controls preserve inherit semantics.
+Atlas-level `nt_atlas_opts_t` dropped positional compatibility in Phase 81 (the
+transform-mask change reordered its fields) — use designated initializers or
+`nt_atlas_opts_defaults()`. When defaults matter, start from the defaults
+helper: a zero-initialized atlas options struct means
+`max_added_area_percent = 0%`, not the public 10% default it returns.
+
+**Slice9 transform semantics:** non-zero slice9 borders auto-force `shape = RECT` and an identity-only effective transform mask. `allowed_transforms` of `0` (inherit) or `IDENTITY` are accepted and canonicalized to the stored `IDENTITY` override before dedup and cache-key generation; explicitly requesting any non-identity mask bit on a slice9 sprite is a caller bug and asserts.
 
 **Margin vs. extrude override semantics:**
 - `margin` is **raise-only**: it only feeds the packing footprint, so a per-sprite value below the atlas margin is clamped up to the atlas value. An `UNFITTABLE` record reports the *effective* (clamped-up) margin the packer actually used, not a below-atlas request.
@@ -370,7 +378,7 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 **Glob rule:** `nt_atlas_add_glob` asserts `opts->name == NULL` — a single name cannot apply to N matched files without hash collisions. Each matched file derives its own name from its path, and the `origin_x/y` fields propagate to all of them. For per-file name overrides within a glob, call `nt_builder_glob_iterate` with a custom callback that calls `nt_atlas_add` per match.
 
-**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on decoded pixel hash, trim-local byte compare, and geometry-affecting controls: slice9, effective alpha threshold, shape/rotation/max-vertices/margin/extrude overrides, and the max-added-area override value plus presence bit. Origin is not considered, so each logical region stores its own pivot while sharing geometry/pixels. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
+**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on decoded pixel hash, trim-local byte compare, and geometry-affecting controls: slice9, effective alpha threshold, shape/transform-mask/max-vertices/margin/extrude overrides, and the max-added-area override value plus presence bit. Origin is not considered, so each logical region stores its own pivot while sharing geometry/pixels. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
 
 **Zero-init footgun:** C99 designated-initialiser compound literals (`&(nt_atlas_sprite_opts_t){.origin_y = 1.0F}`) zero-init unset fields — so `origin_x` becomes `0.0`, not the default `0.5`. Always start from `nt_atlas_sprite_opts_defaults()` for partial overrides, or set every field explicitly in the literal.
 
@@ -378,7 +386,7 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 Separate from the per-asset [builder cache](#builder-cache) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 18. Pack options include atlas `alpha_threshold`, `max_vertices`, and `max_added_area_percent`; raw per-sprite identity includes threshold, max-vertices, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + source_width + source_height + origin_x + origin_y + raw_overrides) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. `ATLAS_CACHE_KEY_VERSION` is currently 20. Pack options include atlas `alpha_threshold`, `max_vertices`, `max_added_area_percent`, and the `allowed_transforms` mask; per-sprite identity includes threshold, max-vertices, the transform-mask override, and the explicit max-added-area and alpha-threshold presence bits even when they currently resolve to inherited values. Slice9 is the transform-mask exception: its accepted `0` and `IDENTITY` inputs are canonicalized to the same stored `IDENTITY` override because they have identical forced behavior. Each overridable payload participates only when its presence bit is true; otherwise the unused value is canonicalized to zero. This keeps cache and dedup behavior safe if atlas defaults or resolution rules change. Signed zero is canonicalized before storage and hashing. Per-sprite data is hashed in add order because cached placements reference sprites by index. Source dimensions are part of identity because the same flat RGBA bytes can describe different image shapes. Only pack/compose-affecting options are included; post-pack fields are handled by the texture encode cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache entry, containing the placement table and composed page pixels. On hit, the pipeline skips pack, compose, and cache write; debug output, serialization, and publish still run.
 

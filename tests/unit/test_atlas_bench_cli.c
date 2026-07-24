@@ -72,6 +72,31 @@ void test_parse_max_size_enforces_builder_range(void) {
     TEST_ASSERT_FALSE(atlas_bench_parse_max_size("16384px", &value));
 }
 
+void test_parse_transforms_accepts_hex_and_presets(void) {
+    uint8_t mask = 0U;
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("0xFF", &mask));
+    TEST_ASSERT_EQUAL_UINT8(255U, mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("0x21", &mask));
+    TEST_ASSERT_EQUAL_UINT8(0x21U, mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("identity", &mask));
+    TEST_ASSERT_EQUAL_UINT8(0x01U, mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("IDENTITY", &mask));
+    TEST_ASSERT_EQUAL_UINT8(0x01U, mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("identity-rot90", &mask));
+    TEST_ASSERT_EQUAL_UINT8(ATLAS_BENCH_TRANSFORMS_IDENTITY_ROT90, mask);
+    TEST_ASSERT_TRUE(atlas_bench_parse_transforms("all", &mask));
+    TEST_ASSERT_EQUAL_UINT8(255U, mask);
+}
+
+void test_parse_transforms_rejects_bad_arg(void) {
+    uint8_t mask = 7U;
+    const char *invalid[] = {NULL, "", "0x100", "0xG1", "rotate", "export", "0x", "255", "1"};
+    for (uint32_t i = 0U; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        TEST_ASSERT_FALSE(atlas_bench_parse_transforms(invalid[i], &mask));
+    }
+    TEST_ASSERT_FALSE(atlas_bench_parse_transforms("0xFF", NULL));
+}
+
 void test_derive_pack_paths_rejects_truncation(void) {
     char selected[64];
     char baseline[64];
@@ -160,6 +185,8 @@ int main(void) {
     RUN_TEST(test_parse_u32_strict_accepts_decimal_range);
     RUN_TEST(test_parse_u32_strict_rejects_partial_signed_and_overflow);
     RUN_TEST(test_parse_max_size_enforces_builder_range);
+    RUN_TEST(test_parse_transforms_accepts_hex_and_presets);
+    RUN_TEST(test_parse_transforms_rejects_bad_arg);
     RUN_TEST(test_derive_pack_paths_rejects_truncation);
     RUN_TEST(test_pre_write_failure_preserves_existing_json_and_removes_both_pack_pairs);
     RUN_TEST(test_failed_json_write_cleanup_removes_partial_json_and_both_pack_pairs);

@@ -15,9 +15,9 @@
  *    better packing density (classic bin-packing heuristic).
  *
  * 3. For each sprite (in sorted order):
- *    a. If opts.allow_transform, generate up to 8 D4 orientations of the
- *       inflated polygon (identity + flipH/V + diagonal + 90°/180°/270°).
- *       If opts.allow_transform is false, only identity is tried.
+ *    a. Generate the D4 orientations whose bit is set in the sprite's effective
+ *       transform mask (identity + flipH/V + diagonal + 90°/180°/270°). Identity
+ *       is always included; a mask of just the identity bit tries identity only.
  *    b. Deduplicate orientations that produce identical shapes.
  *    c. For each orientation, compute AABB and candidate-position bounds.
  *    d. Try every existing page (plus a fresh page as fallback), for each
@@ -108,6 +108,7 @@
 /* clang-format off */
 #include "nt_builder_atlas_vpack.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_builder.h"             /* NT_BUILD_ASSERT */
 #include "nt_clipper2_bridge.h"     /* nt_clipper2_minkowski_nfp */
 #include "log/nt_log.h"             /* NT_LOG_INFO, NT_LOG_ERROR */
@@ -1134,7 +1135,7 @@ typedef struct {
     Point2D *const *inf_polys;
     const uint32_t *inf_counts;
     const nt_atlas_opts_t *opts;
-    const bool *no_rotate; /* per-sprite no-rotation flag (NULL = all obey opts) */
+    const uint8_t *eff_transforms; /* per-sprite effective D4 mask (NULL = all use opts->allowed_transforms) */
     uint32_t extrude;
     uint32_t margin;
     uint32_t max_size;
@@ -1519,6 +1520,47 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
     return found_on_page;
 }
 
+/* Ring equality up to cyclic shift and winding reversal, after AABB-min
+ * normalization. D4 flips reverse winding and rotations shift the start
+ * vertex, so an index-aligned compare misses geometrically identical rings. */
+static bool vpack_rings_equivalent(const Point2D *a, const Point2D *b, uint32_t count, int32_t a_min_x, int32_t a_min_y, int32_t b_min_x, int32_t b_min_y) {
+    for (uint32_t shift = 0; shift < count; shift++) {
+        bool fwd = true;
+        bool rev = true;
+        for (uint32_t v = 0; v < count && (fwd || rev); v++) {
+            int32_t ax = a[v].x - a_min_x;
+            int32_t ay = a[v].y - a_min_y;
+            const Point2D *bf = &b[(v + shift) % count];
+            const Point2D *br = &b[(shift + count - v) % count];
+            if (fwd && (ax != bf->x - b_min_x || ay != bf->y - b_min_y)) {
+                fwd = false;
+            }
+            if (rev && (ax != br->x - b_min_x || ay != br->y - b_min_y)) {
+                rev = false;
+            }
+        }
+        if (fwd || rev) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t vpack_collect_transform_values(uint8_t mask, uint8_t out_values[8]) {
+    uint32_t count = 0;
+    mask |= NT_ATLAS_TRANSFORMS_IDENTITY;
+    for (uint8_t transform = 0; transform < 8; ++transform) {
+        if (mask & (uint8_t)(1U << transform)) {
+            out_values[count++] = transform;
+        }
+    }
+    return count;
+}
+
+#ifdef NT_TEST_ACCESS
+uint32_t nt_atlas_test_collect_transform_values(uint8_t mask, uint8_t out_values[8]) { return vpack_collect_transform_values(mask, out_values); }
+#endif
+
 /* Place a single sprite. Called once per sorted sprite from vector_pack.
  * Transforms the sprite's inflated polygon into up to 8 D4 orientations,
  * deduplicates them, pre-computes bounds, scans every existing page for
@@ -1532,27 +1574,27 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
     VPackOrientData od;
-    /* Per-sprite no_rotate overrides atlas-level allow_transform */
-    bool sprite_no_rotate = ctx->no_rotate && ctx->no_rotate[idx];
-    uint32_t orient_count = (ctx->opts->allow_transform && !sprite_no_rotate) ? 8 : 1;
+    uint8_t eff = ctx->eff_transforms ? ctx->eff_transforms[idx] : ctx->opts->allowed_transforms;
+    uint8_t transform_values[8];
+    uint32_t orient_count = vpack_collect_transform_values(eff, transform_values);
 
-    // #region Orient generate — transform inflated polygon for all D4 orientations
-    /* Transform exact pack polygon for all orientations.
-     * Orthogonal D4 transforms preserve the exact offset shape, so we can
-     * reuse the once-built inflated polygon instead of inflating per
-     * orientation. */
-    od.counts[0] = ctx->inf_counts[idx];
-    memcpy(od.polys[0], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
-    for (uint32_t r = 1; r < orient_count; r++) {
-        polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], (uint8_t)r, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[r]);
-        od.counts[r] = ctx->inf_counts[idx];
+    // #region Orient generate — transform inflated polygon for the masked D4 values
+    /* Orthogonal D4 transforms preserve the exact offset shape — reuse the
+     * once-built inflated polygon instead of inflating per orientation. */
+    for (uint32_t orient = 0; orient < orient_count; ++orient) {
+        uint8_t v = transform_values[orient];
+        if (v == 0) {
+            od.counts[orient] = ctx->inf_counts[idx];
+            memcpy(od.polys[orient], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
+        } else {
+            polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], v, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[orient]);
+            od.counts[orient] = ctx->inf_counts[idx];
+        }
+        od.orig[orient] = v;
     }
     // #endregion
 
     // #region Deduplicate orientations (skip transforms that produce identical polygons)
-    for (uint32_t r = 0; r < orient_count; r++) {
-        od.orig[r] = (uint8_t)r;
-    }
     {
         uint32_t source_orient_count = orient_count;
         uint32_t dedup_count = 0;
@@ -1566,22 +1608,17 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
                 }
                 int32_t p_aabb[4];
                 vpack_calc_aabb(od.polys[p], od.counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
-                bool same = true;
-                for (uint32_t v = 0; v < od.counts[r] && same; v++) {
-                    if ((od.polys[r][v].x - r_aabb[0]) != (od.polys[p][v].x - p_aabb[0]) || (od.polys[r][v].y - r_aabb[1]) != (od.polys[p][v].y - p_aabb[1])) {
-                        same = false;
-                    }
-                }
-                if (same) {
+                if (vpack_rings_equivalent(od.polys[r], od.polys[p], od.counts[r], r_aabb[0], r_aabb[1], p_aabb[0], p_aabb[1])) {
                     dup = true;
                 }
             }
             if (!dup) {
+                uint8_t kept_value = od.orig[r]; /* carry the generated VALUE, not the index */
                 if (dedup_count != r) {
                     memcpy(od.polys[dedup_count], od.polys[r], od.counts[r] * sizeof(Point2D));
                     od.counts[dedup_count] = od.counts[r];
                 }
-                od.orig[dedup_count] = (uint8_t)r;
+                od.orig[dedup_count] = kept_value;
                 dedup_count++;
             }
         }
@@ -1787,8 +1824,10 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
  *                          (already inflated to enclose all opaque pixels).
  *   hull_counts[i]       — vertex count for hull i.
  *   sprite_count         — total sprites to pack.
+ *   eff_transforms[i]    — per-sprite effective D4 mask (NULL = all use
+ *                          opts->allowed_transforms); identity bit set upstream.
  *   opts                 — extrude, padding, margin, max_size, power_of_two,
- *                          allow_transform. The packer inflates hulls further by
+ *                          allowed_transforms. The packer inflates hulls further by
  *                          (extrude + padding/2) so NFP non-overlap guarantees
  *                          the desired clearance between sprites.
  *   thread_count         — 1 = single-threaded; > 1 starts a thread pool for
@@ -1821,8 +1860,9 @@ bool vpack_sprite_fits_empty_page(const Point2D *hull, uint32_t hull_count, cons
  * parallel mode due to cache write races; see the file header for details.
  */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
-                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count, bool *out_pages_exhausted) {
+uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+                     const uint8_t *eff_transforms, AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count,
+                     bool *out_pages_exhausted) {
     *out_pages_exhausted = false;
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
@@ -1962,7 +2002,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         .inf_polys = inf_polys,
         .inf_counts = inf_counts,
         .opts = opts,
-        .no_rotate = no_rotate,
+        .eff_transforms = eff_transforms,
         .extrude = extrude,
         .margin = margin,
         .max_size = max_size,

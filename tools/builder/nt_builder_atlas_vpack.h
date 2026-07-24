@@ -66,10 +66,12 @@ typedef struct {
 void pack_stats_reset(PackStats *stats);
 
 /* Pack sprites via NFP/Minkowski vector packing.
- * no_rotate: per-sprite flag array (may be NULL = all sprites use opts->allow_transform).
- *            no_rotate[i] == true: force identity transform for sprite i. */
-uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
-                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count, bool *out_pages_exhausted);
+ * eff_transforms: per-sprite effective D4 transform mask (may be NULL = all sprites
+ *                 use opts->allowed_transforms). Bit i permits stored transform value i;
+ *                 the identity bit is always set upstream. */
+uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+                     const uint8_t *eff_transforms, AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count,
+                     bool *out_pages_exhausted);
 
 /* Empty-page fit test for one sprite. Returns false when the sprite's inflated
  * hull cannot fit an empty max_size page — pipeline_tile_pack uses this for the

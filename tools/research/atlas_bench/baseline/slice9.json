@@ -1,6 +1,7 @@
 {
+  "schema_version": 2,
   "meta": {
-    "tool_version": "1.0.0",
+    "tool_version": "2.0.0",
     "builder_version": 1,
     "corpus": "assets/bench/slice9/*.png",
     "os": "windows",
@@ -10,8 +11,9 @@
       "max_size": 2048,
       "padding": 2,
       "max_vertices": 8,
-      "allow_transform": true,
+      "allowed_transforms": 255,
       "alpha_threshold": 1,
+      "max_added_area_percent": 10,
       "power_of_two": true
     },
     "cache_hits": 0,
@@ -24,15 +26,33 @@
       "unique": 0,
       "pages": 1,
       "region_count": 12,
-      "pack_ms": 20.0917,
-      "density_fill_frontier": 0.6202,
-      "density_fill_texture": 0.3912,
+      "pack_ms": 3248.2437,
+      "density_fill_frontier": 0.8248,
+      "density_fill_texture": 0.7564,
       "hull_verts": {
-        "total": 72,
+        "total": 48,
         "min": 4,
-        "max": 8,
-        "mean": 6.0000
+        "max": 4,
+        "mean": 4.0000
       }
     }
-  ]
+  ],
+  "selected_geometry_proof": {
+    "source": "assets/bench/slice9/panel_00.png",
+    "baseline_pack_sha256": "738db900b0d290802887399c3e0af8c38348132a1cafabb4fe8a70d139442f40",
+    "selected_pack_sha256": "0736245114e54785e2a8e40b53ec9bb8c2ab0b8d54070d9457b20d6e87825ab8",
+    "valid": true,
+    "retained_cell_count": 2248,
+    "base_vertex_count": 8,
+    "selected_vertex_count": 4,
+    "opaque_area2": 4496,
+    "base_area2": 4544,
+    "selected_area2": 4608,
+    "added_area2": 64,
+    "lost_area2": 0,
+    "base_overdraw_percent": 1.06761566,
+    "added_area_percent": 1.42348754,
+    "total_overdraw_percent": 2.49110320,
+    "gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}
+  }
 }

@@ -673,7 +673,7 @@ static PanelPackResult panel_write_pack(const VisualRow *row, const VisualFixtur
     opts.alpha_threshold = strcmp(row->sample_id, "pixel-art-threshold-control") == 0 ? 1U : row->threshold;
     opts.max_vertices = max_vertices;
     opts.max_added_area_percent = percent;
-    opts.allow_transform = false;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
     opts.power_of_two = false;
     opts.gen_mipmaps = false;
     opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_NEAREST;

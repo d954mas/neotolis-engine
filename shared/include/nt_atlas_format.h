@@ -101,4 +101,16 @@ typedef struct {
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasVertex) == 8, "NtAtlasVertex must be 8 bytes");
 
+/* Stored values for NtAtlasRegion.transform (bit encoding + apply order on the field).
+ * Values double as transform-mask bit indices — bit i permits stored value i.
+ * Direction-neutral names: rot90/rot270 label quarter-turns, not a CW/CCW sense. */
+#define NT_ATLAS_XFORM_IDENTITY 0U      /* no change */
+#define NT_ATLAS_XFORM_FLIP_H 1U        /* flipH */
+#define NT_ATLAS_XFORM_FLIP_V 2U        /* flipV */
+#define NT_ATLAS_XFORM_ROT180 3U        /* flipH|flipV */
+#define NT_ATLAS_XFORM_TRANSPOSE 4U     /* diagonal */
+#define NT_ATLAS_XFORM_ROT90 5U         /* diagonal|flipH */
+#define NT_ATLAS_XFORM_ROT270 6U        /* diagonal|flipV */
+#define NT_ATLAS_XFORM_ANTITRANSPOSE 7U /* diagonal|flipH|flipV */
+
 #endif /* NT_ATLAS_FORMAT_H */
