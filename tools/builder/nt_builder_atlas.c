@@ -1193,6 +1193,16 @@ static uint8_t atlas_sprite_effective_mask(const AtlasPipeline *p, uint32_t i) {
     return (uint8_t)((sm ? sm : p->opts->allowed_transforms) | NT_ATLAS_TRANSFORMS_IDENTITY);
 }
 
+/* Raise-only: a per-sprite margin below the atlas margin is clamped up. */
+static uint32_t atlas_sprite_resolved_margin(const AtlasPipeline *p, uint32_t i) {
+    const uint32_t sm = p->sprites[i].margin_override;
+    return sm > p->opts->margin ? sm : p->opts->margin;
+}
+
+/* A per-sprite extrude replaces the atlas value in either direction; 0 inherits,
+ * so a zero bleed cannot be expressed per sprite. */
+static uint32_t atlas_sprite_resolved_extrude(const AtlasPipeline *p, uint32_t i) { return p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude; }
+
 static void pipeline_resolve_geometry_opts(AtlasPipeline *p) {
     p->geometry_opts = (AtlasGeometryOpts *)malloc((size_t)p->sprite_count * sizeof(AtlasGeometryOpts));
     NT_BUILD_ASSERT(p->geometry_opts && "pipeline_resolve_geometry_opts: alloc failed");
@@ -1268,15 +1278,16 @@ static void pipeline_cache_check(AtlasPipeline *p) {
 
 /* --- pipeline_dedup: detect duplicate sprites by hash + pixel comparison --- */
 
+/* Resolved effective values only: two spellings of the same packing decision are the
+ * same content. The slice9 borders are per-region metadata that never reaches the
+ * packed pixels, and the transform mask is admission policy — comparing it would
+ * make every group mask-uniform and the group intersection dead code. */
 static bool pipeline_dedup_meta_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
-    const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
-    const NtAtlasSpriteInput *so = &p->sprites[orig_idx];
-    return sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
-           sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
-           (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
-           p->geometry_opts[curr_idx].effective_alpha_threshold == p->geometry_opts[orig_idx].effective_alpha_threshold && sc->shape_override == so->shape_override &&
-           sc->transforms_override == so->transforms_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override &&
-           sc->extrude_override == so->extrude_override;
+    const AtlasGeometryOpts *gc = &p->geometry_opts[curr_idx];
+    const AtlasGeometryOpts *go = &p->geometry_opts[orig_idx];
+    return gc->shape == go->shape && gc->max_vertices == go->max_vertices && gc->effective_alpha_threshold == go->effective_alpha_threshold &&
+           gc->max_added_area_percent == go->max_added_area_percent && atlas_sprite_resolved_margin(p, curr_idx) == atlas_sprite_resolved_margin(p, orig_idx) &&
+           atlas_sprite_resolved_extrude(p, curr_idx) == atlas_sprite_resolved_extrude(p, orig_idx);
 }
 
 static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
@@ -2525,9 +2536,8 @@ static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t i
 
 /* Match the packing footprint, including larger per-sprite overrides. */
 static void atlas_fit_hull(const AtlasPipeline *p, uint32_t oi, Point2D quad[4], const Point2D **out_hull, uint32_t *out_count) {
-    uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-    uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
-    uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
+    uint32_t extra_margin = atlas_sprite_resolved_margin(p, oi) - p->opts->margin;
+    uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, oi);
     uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
     if (extra_margin > 0 || extra_extrude > 0 || p->hull_vertices[oi] == NULL) {
         uint32_t tw = p->trim_w[oi] + ((extra_margin + extra_extrude) * 2);
@@ -2597,9 +2607,8 @@ static void pipeline_validate(AtlasPipeline *p) {
             continue;
         }
         /* Report the spacing actually reserved by the packer. */
-        uint32_t sprite_margin = p->sprites[c].margin_override ? p->sprites[c].margin_override : p->opts->margin;
-        uint32_t sprite_extrude = p->sprites[c].extrude_override ? p->sprites[c].extrude_override : p->opts->extrude;
-        uint32_t effective_margin = sprite_margin > p->opts->margin ? sprite_margin : p->opts->margin;
+        uint32_t effective_margin = atlas_sprite_resolved_margin(p, c);
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, c);
         uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
         nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE,
                               .w = p->trim_w[c],
@@ -2715,9 +2724,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
      * serialization. */
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
-        uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-        uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
-        uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
+        uint32_t extra_margin = atlas_sprite_resolved_margin(p, oi) - p->opts->margin;
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, oi);
         uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
         if (extra_margin > 0 || extra_extrude > 0) {
             u_trim_w[i] += (extra_margin + extra_extrude) * 2;
@@ -2819,10 +2827,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
 /* Per-sprite margin above the atlas baseline. tile_pack grows the footprint by
  * 2*extra on each axis; compose/serialize must shift content by `extra` so the
  * surplus splits evenly left/top + right/bottom instead of piling on one edge. */
-static uint32_t sprite_extra_margin(const AtlasPipeline *p, uint32_t si) {
-    uint32_t sprite_margin = p->sprites[si].margin_override ? p->sprites[si].margin_override : p->opts->margin;
-    return sprite_margin > p->opts->margin ? sprite_margin - p->opts->margin : 0;
-}
+static uint32_t sprite_extra_margin(const AtlasPipeline *p, uint32_t si) { return atlas_sprite_resolved_margin(p, si) - p->opts->margin; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_compose(AtlasPipeline *p) {
@@ -2838,7 +2843,7 @@ static void pipeline_compose(AtlasPipeline *p) {
     for (uint32_t pi = 0; pi < p->placement_count; pi++) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
-        uint32_t sprite_extrude = p->sprites[idx].extrude_override ? p->sprites[idx].extrude_override : p->opts->extrude;
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, idx);
         uint32_t extra_margin = sprite_extra_margin(p, idx);
         uint32_t inner_x = pl->x + sprite_extrude + extra_margin;
         uint32_t inner_y = pl->y + sprite_extrude + extra_margin;
@@ -2871,7 +2876,7 @@ static void pipeline_debug_png(AtlasPipeline *p) {
                 continue;
             }
             uint32_t si = p->placements[pi].sprite_index;
-            uint32_t sprite_extrude = p->sprites[si].extrude_override ? p->sprites[si].extrude_override : p->opts->extrude;
+            uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, si);
             uint32_t extra_margin = sprite_extra_margin(p, si);
             uint32_t ix = p->placements[pi].x + sprite_extrude + extra_margin;
             uint32_t iy = p->placements[pi].y + sprite_extrude + extra_margin;
@@ -3040,7 +3045,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         /* Blob indices are local (0..vertex_count-1) and world-CCW after Y-flip. */
         memcpy(blocks[i].indices, local_indices, (size_t)idx_count * sizeof(uint16_t));
 
-        uint32_t s_extrude = p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude;
+        uint32_t s_extrude = atlas_sprite_resolved_extrude(p, i);
         uint32_t extra_margin = sprite_extra_margin(p, i);
         uint32_t inner_x = pl->x + s_extrude + extra_margin;
         uint32_t inner_y = pl->y + s_extrude + extra_margin;
