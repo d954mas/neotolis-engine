@@ -86,6 +86,10 @@ int nt_bench_write_json(const char *out_path, const nt_bench_run_t *run) {
         (void)fputs(",\n", f);
         (void)fprintf(f, "      \"sprites\": %u,\n", a->sprites);
         (void)fprintf(f, "      \"unique\": %u,\n", a->unique);
+        (void)fprintf(f, "      \"folds_exact\": %u,\n", a->folds_exact);
+        (void)fprintf(f, "      \"folds_d4\": %u,\n", a->folds_d4);
+        (void)fprintf(f, "      \"area_saved_px\": %llu,\n", (unsigned long long)a->area_saved_px);
+        (void)fprintf(f, "      \"vertex_blocks_shared\": %u,\n", a->vertex_blocks_shared);
         (void)fprintf(f, "      \"pages\": %u,\n", a->pages);
         (void)fprintf(f, "      \"region_count\": %u,\n", a->region_count);
         (void)fprintf(f, "      \"pack_ms\": %.4f,\n", a->pack_ms);
