@@ -1185,6 +1185,14 @@ typedef struct {
     bool cache_hit;
 } AtlasPipeline;
 
+/* Single expression for the effective D4 mask, shared by the packer, the group
+ * narrowing and the output check. A non-zero sprite mask replaces the atlas
+ * default; identity stays mandatory. */
+static uint8_t atlas_sprite_effective_mask(const AtlasPipeline *p, uint32_t i) {
+    const uint8_t sm = p->sprites[i].transforms_override;
+    return (uint8_t)((sm ? sm : p->opts->allowed_transforms) | NT_ATLAS_TRANSFORMS_IDENTITY);
+}
+
 static void pipeline_resolve_geometry_opts(AtlasPipeline *p) {
     p->geometry_opts = (AtlasGeometryOpts *)malloc((size_t)p->sprite_count * sizeof(AtlasGeometryOpts));
     NT_BUILD_ASSERT(p->geometry_opts && "pipeline_resolve_geometry_opts: alloc failed");
@@ -2726,16 +2734,50 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
-    /* A non-zero sprite mask replaces the atlas default; identity remains mandatory. */
     uint8_t *u_eff_transforms = (uint8_t *)calloc(p->unique_count, sizeof(uint8_t));
     NT_BUILD_ASSERT(u_eff_transforms && "pipeline_tile_pack: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
-        uint32_t oi = p->unique_indices[i];
-        uint8_t sm = p->sprites[oi].transforms_override;
-        uint8_t eff = sm ? sm : p->opts->allowed_transforms;
-        eff |= NT_ATLAS_TRANSFORMS_IDENTITY;
-        u_eff_transforms[i] = eff;
+        u_eff_transforms[i] = atlas_sprite_effective_mask(p, p->unique_indices[i]);
     }
+
+    // #region group placement mask
+    /* The packer orients a whole alias group at once, so the placement must be legal
+     * for every member — one rule that covers mixed masks and slice9 with no special
+     * case, since a nine-patch resolves to identity-only. */
+    uint32_t *unique_slot = (uint32_t *)malloc((size_t)p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(unique_slot && "pipeline_tile_pack: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        unique_slot[i] = UINT32_MAX;
+    }
+    for (uint32_t u = 0; u < p->unique_count; u++) {
+        unique_slot[p->unique_indices[u]] = u;
+    }
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0) {
+            continue;
+        }
+        const uint32_t root = (uint32_t)p->dedup_map[i];
+        NT_BUILD_ASSERT(root < p->sprite_count && "pipeline_tile_pack: alias root out of range");
+        /* A consumer may define NT_BUILD_ASSERT away, so bound the read itself. */
+        if (root >= p->sprite_count) {
+            continue;
+        }
+        const uint32_t u = unique_slot[root];
+        NT_BUILD_ASSERT(u < p->unique_count && "pipeline_tile_pack: alias root is not a unique sprite");
+        if (u >= p->unique_count) {
+            continue;
+        }
+        u_eff_transforms[u] &= atlas_sprite_effective_mask(p, i);
+        /* A mask is generally not closed under composition, so a group carrying a
+         * non-identity relative is placed at identity and each alias region's
+         * transform is literally its relative. */
+        if (p->alias_rel[i] != 0) {
+            u_eff_transforms[u] = NT_ATLAS_TRANSFORMS_IDENTITY;
+        }
+        u_eff_transforms[u] |= NT_ATLAS_TRANSFORMS_IDENTITY;
+    }
+    free(unique_slot);
+    // #endregion
 
     /* Empty-page fit is validated up front in pipeline_validate (every sprite +
      * dedup alias), so by here every sprite provably fits — vector_pack's "empty
