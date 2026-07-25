@@ -18,6 +18,7 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
+#include "test_helpers/atlas_dedup_fixture.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -699,6 +700,145 @@ void test_sprite_transforms_override_changes_cache_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "per-sprite transforms override must change the atlas cache key");
 }
 
+/* --- DEDUP-03: repack stability and alias-root stability --- */
+
+/* k_corpus holds no duplicate pair, so it cannot say anything about dedup. This
+ * corpus adds a transposed twin: the root is the member stored at identity, which
+ * makes "which sprite is the root" readable straight from the pack. */
+/* clang-format off */
+static const spr_spec_t k_dup_corpus[] = {
+    {"dup_tall",  16, 24, SPR_SOLID,     120, 180,  60},
+    {"solo_ramp", 28, 20, SPR_TRI_RAMP,   20, 200, 220},
+    {"dup_wide",  24, 16, SPR_SOLID,     120, 180,  60}, /* transpose of dup_tall */
+    {"solo_tri",  32, 32, SPR_TRI_LOWER, 240, 180,  20},
+    {"solo_box",  18, 18, SPR_BORDERED,  180,  20, 180},
+};
+/* clang-format on */
+#define DUP_CORPUS_COUNT ((int)(sizeof(k_dup_corpus) / sizeof(k_dup_corpus[0])))
+#define DUP_ROOT 0
+#define DUP_ALIAS 2
+
+/* clang-format off */
+static const int k_dup_order_declared[] = {0, 1, 2, 3, 4};
+/* Unrelated sprites permuted; the duplicate pair keeps its relative add order. */
+static const int k_dup_order_shuffled[] = {4, 0, 3, 2, 1};
+/* The group's OWN add order swapped — the control for the root assertion. */
+static const int k_dup_order_swapped[]  = {2, 1, 0, 3, 4};
+/* clang-format on */
+
+static bool pack_dup_corpus(const char *path, const int *order) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_dup", &opts);
+    for (int i = 0; i < DUP_CORPUS_COUNT; ++i) {
+        const spr_spec_t *s = &k_dup_corpus[order[i]];
+        uint8_t *px = (uint8_t *)malloc((size_t)s->w * s->h * 4);
+        TEST_ASSERT_NOT_NULL(px);
+        gen_sprite(px, s);
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        nt_atlas_add_raw(atlas, px, (uint16_t)s->w, (uint16_t)s->h, &sprite_opts);
+        free(px);
+    }
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return result == NT_BUILD_OK;
+}
+
+static uint8_t *read_pack_bytes(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < 0) {
+        (void)fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return NULL;
+    }
+    *out_len = fread(buf, 1, (size_t)sz, f);
+    (void)fclose(f);
+    return buf;
+}
+
+static void collect_dup_regions(const char *path, nt_atlas_dedup_region_t *out) {
+    size_t len = 0;
+    uint8_t *bytes = read_pack_bytes(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(bytes, len, out, (uint32_t)DUP_CORPUS_COUNT, &got);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)DUP_CORPUS_COUNT, got, "one region per sprite");
+}
+
+/* Region order is add order, so a corpus entry's region index is its position. */
+static int region_of(const int *order, int corpus_index) {
+    for (int i = 0; i < DUP_CORPUS_COUNT; ++i) {
+        if (order[i] == corpus_index) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* The pair shares one placement and `root_entry` is the member stored at identity. */
+static void assert_dup_root_is(const char *path, const int *order, int root_entry, int alias_entry, const char *what) {
+    nt_atlas_dedup_region_t regions[8] = {0};
+    collect_dup_regions(path, regions);
+    const int ri = region_of(order, root_entry);
+    const int ai = region_of(order, alias_entry);
+    TEST_ASSERT_TRUE_MESSAGE(ri >= 0 && ai >= 0, "corpus entry missing from the add order");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[ri].page_index, regions[ai].page_index, "the transposed twin must share the root's page");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[ri].u_min, regions[ai].u_min, "the transposed twin must share the root's placement U");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[ri].v_min, regions[ai].v_min, "the transposed twin must share the root's placement V");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[ri].transform, what);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, regions[ai].transform, what);
+}
+
+void test_repeat_build_is_byte_identical_with_dedup(void) {
+    const char *a_path = TMP_DIR "/det_dup_a.ntpack";
+    const char *b_path = TMP_DIR "/det_dup_b.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(a_path, k_dup_order_declared), "dedup corpus pack A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(b_path, k_dup_order_declared), "dedup corpus pack B failed");
+    /* The corpus must actually fold, or byte-identity says nothing about dedup. */
+    assert_dup_root_is(a_path, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the first-added member of the pair is the root");
+    char sha_a[65];
+    char sha_b[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(a_path, sha_a), "hash dedup pack A");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(b_path, sha_b), "hash dedup pack B");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two dedup builds of one corpus must be byte-identical");
+}
+
+void test_alias_root_survives_unrelated_reordering(void) {
+    const char *declared = TMP_DIR "/det_dup_declared.ntpack";
+    const char *shuffled = TMP_DIR "/det_dup_shuffled.ntpack";
+    const char *swapped = TMP_DIR "/det_dup_swapped.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(declared, k_dup_order_declared), "declared-order pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(shuffled, k_dup_order_shuffled), "shuffled-order pack failed");
+    /* Placement coordinates may legitimately move when the packer sees a different
+     * input order, so the claim is about the root's identity, not the pack bytes. */
+    assert_dup_root_is(declared, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the first-added member of the pair is the root");
+    assert_dup_root_is(shuffled, k_dup_order_shuffled, DUP_ROOT, DUP_ALIAS, "reordering unrelated sprites must not move the alias root");
+    /* Control: swapping the pair's OWN add order does move the root. */
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(swapped, k_dup_order_swapped), "swapped-order pack failed");
+    assert_dup_root_is(swapped, k_dup_order_swapped, DUP_ALIAS, DUP_ROOT, "swapping the pair's own add order must move the root");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_metrics_stable_across_two_packs);
@@ -709,5 +849,7 @@ int main(void) {
     RUN_TEST(test_margin_override_content_centered);
     RUN_TEST(test_allowed_transforms_changes_cache_key);
     RUN_TEST(test_sprite_transforms_override_changes_cache_key);
+    RUN_TEST(test_repeat_build_is_byte_identical_with_dedup);
+    RUN_TEST(test_alias_root_survives_unrelated_reordering);
     return UNITY_END();
 }

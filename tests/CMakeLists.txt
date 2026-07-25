@@ -782,6 +782,7 @@ if(NOT EMSCRIPTEN)
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
     )
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
