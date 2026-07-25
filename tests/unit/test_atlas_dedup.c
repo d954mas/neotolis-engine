@@ -21,6 +21,7 @@
 #include "nt_atlas_format.h"
 #include "nt_builder.h"
 #include "nt_pack_format.h"
+#include "test_helpers/atlas_dedup_f_fixture.h"
 #include "test_helpers/atlas_dedup_fixture.h"
 #include "unity.h"
 /* clang-format on */
@@ -63,9 +64,22 @@ static void assert_float_bits_equal(float expect, float actual, const char *msg)
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(e, a, msg);
 }
 
+/* The statistics view is owned by the ctx and dangles after nt_builder_free_pack,
+ * so every case reads it through this helper while the ctx is still alive. */
+static void read_last_atlas_stats(const NtBuilderContext *ctx, nt_atlas_stats_t *out) {
+    if (out == NULL) {
+        return;
+    }
+    const nt_atlas_stats_t empty = {0};
+    uint32_t n = 0;
+    const nt_atlas_stats_t *stats = nt_builder_get_atlas_stats(ctx, &n);
+    *out = (n > 0) ? stats[n - 1] : empty;
+}
+
 /* Pack the 10-frame fixture single-threaded so the run is byte-deterministic.
- * cache may be NULL; per_frame_dedup may be NULL (every frame inherits). */
-static bool build_dedup_pack_opts(const char *path, const char *atlas_name, const char *cache, bool dedup, const uint8_t *per_frame_dedup) {
+ * cache may be NULL; per_frame_dedup may be NULL (every frame inherits);
+ * out_stats may be NULL. */
+static bool build_dedup_pack_opts(const char *path, const char *atlas_name, const char *cache, bool dedup, const uint8_t *per_frame_dedup, nt_atlas_stats_t *out_stats) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -84,15 +98,16 @@ static bool build_dedup_pack_opts(const char *path, const char *atlas_name, cons
     atlas_dedup_fixture_add_opts(atlas, per_frame_dedup);
     nt_build_result_t commit = nt_atlas_commit(atlas);
     nt_build_result_t finish = nt_builder_finish_pack(ctx);
+    read_last_atlas_stats(ctx, out_stats);
     nt_builder_free_pack(ctx);
     return commit == NT_BUILD_OK && finish == NT_BUILD_OK;
 }
 
-static bool build_dedup_pack(const char *path, const char *atlas_name) { return build_dedup_pack_opts(path, atlas_name, NULL, true, NULL); }
+static bool build_dedup_pack(const char *path, const char *atlas_name) { return build_dedup_pack_opts(path, atlas_name, NULL, true, NULL, NULL); }
 
 /* Collect the fixture's regions from a pack built with the given dedup settings. */
 static void collect_fixture_opts(const char *path, const char *atlas_name, bool dedup, const uint8_t *per_frame_dedup, nt_atlas_dedup_region_t *out, uint32_t *out_count) {
-    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(path, atlas_name, NULL, dedup, per_frame_dedup), "dedup fixture pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(path, atlas_name, NULL, dedup, per_frame_dedup, NULL), "dedup fixture pack failed");
     size_t len = 0;
     uint8_t *bytes = read_bin_file(path, &len);
     TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
@@ -292,9 +307,9 @@ void test_dedup_flags_change_the_atlas_cache_key(void) {
     (void)MKDIR(cache);
     clear_atlas_cache_files(cache);
     TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(on, "dedup_flag", cache, true, NULL));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(off, "dedup_flag", cache, false, NULL));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(sprite_off, "dedup_flag", cache, true, per_frame));
+    TEST_ASSERT_TRUE(build_dedup_pack_opts(on, "dedup_flag", cache, true, NULL, NULL));
+    TEST_ASSERT_TRUE(build_dedup_pack_opts(off, "dedup_flag", cache, false, NULL, NULL));
+    TEST_ASSERT_TRUE(build_dedup_pack_opts(sprite_off, "dedup_flag", cache, true, per_frame, NULL));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, count_atlas_cache_files(cache), "each dedup spelling must occupy its own cache key");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, off), "the atlas dedup flag must change the packed output");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, sprite_off), "a per-sprite dedup override must change the packed output");
@@ -315,7 +330,8 @@ typedef struct {
     uint8_t b;
 } block_sprite_t;
 
-static bool build_block_pack(const char *path, const char *atlas_name, const block_sprite_t *sprites, uint32_t count) {
+/* out_stats may be NULL. */
+static bool build_block_pack(const char *path, const char *atlas_name, const block_sprite_t *sprites, uint32_t count, nt_atlas_stats_t *out_stats) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -342,12 +358,13 @@ static bool build_block_pack(const char *path, const char *atlas_name, const blo
     }
     nt_build_result_t commit = nt_atlas_commit(atlas);
     nt_build_result_t finish = nt_builder_finish_pack(ctx);
+    read_last_atlas_stats(ctx, out_stats);
     nt_builder_free_pack(ctx);
     return commit == NT_BUILD_OK && finish == NT_BUILD_OK;
 }
 
 static void collect_block_pack(const char *path, const char *atlas_name, const block_sprite_t *sprites, uint32_t count, nt_atlas_dedup_region_t *out) {
-    TEST_ASSERT_TRUE_MESSAGE(build_block_pack(path, atlas_name, sprites, count), "block-sharing pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_block_pack(path, atlas_name, sprites, count, NULL), "block-sharing pack failed");
     size_t len = 0;
     uint8_t *bytes = read_bin_file(path, &len);
     TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
@@ -618,6 +635,165 @@ void test_dedup_pack_is_deterministic(void) {
     free(b);
 }
 
+/* --- Dedup statistics ---
+ * The stage split and the saved area exist nowhere but these counters, so each
+ * case pins the published value against an independently known input shape. */
+
+static void assert_fold_identity(const nt_atlas_stats_t *s) {
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s->sprites, s->folds_exact + s->folds_d4 + s->placements, "every sprite must be either a placement or a fold");
+}
+
+void test_stats_fold_identity_holds(void) {
+    nt_atlas_stats_t s = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(TMP_DIR "/dedup_stats.ntpack", "dedup_stats", NULL, true, NULL, &s), "stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT, s.sprites, "the fixture adds ten frames");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, s.placements, "four art states must give four placements");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6, s.folds_exact, "six frames fold at relative transform identity");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s.folds_d4, "no frame needs a D4 transform to fold");
+    /* Every fold saves exactly one art box. */
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE((uint64_t)6U * NT_ATLAS_DEDUP_ART_W * NT_ATLAS_DEDUP_ART_H, s.area_saved_px, "saved area must be six art boxes");
+    assert_fold_identity(&s);
+
+    /* With dedup off the same input must report the degenerate end of the range. */
+    nt_atlas_stats_t off = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(TMP_DIR "/dedup_stats_off.ntpack", "dedup_stats_off", NULL, false, NULL, &off), "dedup-off stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT, off.placements, "dedup off must report one placement per frame");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, off.folds_exact, "dedup off must report no folds");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(0, off.area_saved_px, "dedup off must save no area");
+    assert_fold_identity(&off);
+}
+
+/* out_stats may be NULL. The mask covers both the atlas and every sprite, so a
+ * member's effective mask is exactly the atlas mask. */
+static bool build_f_stats_pack(const char *path, const char *atlas_name, uint8_t mask, const uint8_t *transforms, uint32_t count, nt_atlas_stats_t *out_stats) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = mask;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
+    atlas_dedup_f_fixture_add(atlas, transforms, count, mask, 0U);
+    nt_build_result_t commit = nt_atlas_commit(atlas);
+    nt_build_result_t finish = nt_builder_finish_pack(ctx);
+    read_last_atlas_stats(ctx, out_stats);
+    nt_builder_free_pack(ctx);
+    return commit == NT_BUILD_OK && finish == NT_BUILD_OK;
+}
+
+void test_stats_report_d4_folds(void) {
+    static const uint8_t rotations[4] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90, NT_ATLAS_XFORM_ROT180, NT_ATLAS_XFORM_ROT270};
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_f_images_pairwise_distinct(), "the F probe must stay asymmetric under D4");
+    nt_atlas_stats_t s = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4.ntpack", "dedup_stats_d4", NT_ATLAS_TRANSFORMS_ROTATIONS, rotations, 4, &s), "F rotation stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, s.sprites, "four rotated copies were added");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, s.placements, "four rotated copies must share one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s.folds_exact, "no rotation folds at identity");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, s.folds_d4, "three rotations fold through a D4 transform");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE((uint64_t)3U * NT_ATLAS_F_W * NT_ATLAS_F_H, s.area_saved_px, "saved area must be three F boxes");
+    assert_fold_identity(&s);
+
+    /* Same four images, identity-only mask: the counters must follow the mask. */
+    nt_atlas_stats_t masked = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4_off.ntpack", "dedup_stats_d4_off", NT_ATLAS_TRANSFORMS_IDENTITY, rotations, 4, &masked), "F identity-mask stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, masked.placements, "an identity-only mask must not fold rotations");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, masked.folds_d4, "an identity-only mask must report no D4 folds");
+    assert_fold_identity(&masked);
+}
+
+/* An in-memory mirror of the shipped anim_heavy corpus: three sequences of 10, 8
+ * and 12 frames over 4, 8 and 6 states = 30 frames / 18 states / 12 duplicates,
+ * a ratio known from the corpus generator rather than from the builder. */
+#define ANIM_CANVAS 64
+#define ANIM_FRAME_COUNT 30
+
+/* clang-format off */
+static const uint8_t k_anim_states[ANIM_FRAME_COUNT] = {
+    0,  1,  2,  3,  3,  2,  1,  0,  1,  2,          /* orb:   10 frames, 4 states */
+    10, 11, 12, 13, 14, 15, 16, 17,                 /* spark:  8 frames, 8 states */
+    20, 21, 22, 23, 24, 25, 25, 24, 23, 22, 21, 20, /* ring:  12 frames, 6 states */
+};
+/* clang-format on */
+
+/* A disc whose radius and canvas position vary per state, so a fold has to come
+ * through the post-trim key. The red channel is injective in the state, which is
+ * what keeps two different states from folding into each other. */
+static void fill_anim_frame(uint8_t *px, uint32_t state) {
+    memset(px, 0, (size_t)ANIM_CANVAS * ANIM_CANVAS * 4U);
+    const int32_t radius = (int32_t)(8U + ((state % 5U) * 3U));
+    const int32_t cx = (int32_t)(22U + ((state * 7U) % 20U));
+    const int32_t cy = (int32_t)(22U + ((state * 11U) % 20U));
+    for (int32_t y = 0; y < ANIM_CANVAS; ++y) {
+        for (int32_t x = 0; x < ANIM_CANVAS; ++x) {
+            const int32_t dx = x - cx;
+            const int32_t dy = y - cy;
+            if ((dx * dx) + (dy * dy) > (radius * radius)) {
+                continue;
+            }
+            uint8_t *p = px + ((size_t)((y * ANIM_CANVAS) + x) * 4U);
+            p[0] = (uint8_t)(20U + (state * 8U));
+            p[1] = 90U;
+            p[2] = 140U;
+            p[3] = 255U;
+        }
+    }
+}
+
+void test_stats_match_anim_heavy_shaped_corpus(void) {
+    const char *path = TMP_DIR "/dedup_stats_anim.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_stats_anim", &opts);
+    static uint8_t px[ANIM_CANVAS * ANIM_CANVAS * 4];
+    for (uint32_t i = 0; i < (uint32_t)ANIM_FRAME_COUNT; ++i) {
+        fill_anim_frame(px, k_anim_states[i]);
+        char name[16];
+        (void)snprintf(name, sizeof(name), "anim_%02u", (unsigned)i);
+        nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
+        sopts.name = name;
+        nt_atlas_add_raw(atlas, px, (uint16_t)ANIM_CANVAS, (uint16_t)ANIM_CANVAS, &sopts);
+    }
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, nt_atlas_commit(atlas));
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_atlas_stats_t s = {0};
+    read_last_atlas_stats(ctx, &s);
+    nt_builder_free_pack(ctx);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(30, s.sprites, "the mirror adds thirty frames");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(18, s.placements, "thirty frames over eighteen states must give eighteen placements");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(12, s.folds_exact, "the repeat pattern contributes twelve exact folds");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s.folds_d4, "no state is a D4 image of another");
+    assert_fold_identity(&s);
+}
+
+void test_stats_report_shared_vertex_blocks(void) {
+    nt_atlas_stats_t s = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(TMP_DIR "/dedup_stats_blocks.ntpack", "dedup_stats_blocks", NULL, true, NULL, &s), "block stats pack failed");
+    /* Each identity alias emits bytes equal to its root's, so every fold shares. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s.folds_exact, s.vertex_blocks_shared, "every identity fold must share its root's vertex block");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, s.vertex_blocks_shared, "the fixture must share at least one block");
+
+    static const block_sprite_t distinct[3] = {
+        {"stats_c0", 14, 10, 235, 200, 40},
+        {"stats_c1", 18, 10, 60, 210, 80},
+        {"stats_c2", 14, 16, 70, 90, 230},
+    };
+    nt_atlas_stats_t none = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_block_pack(TMP_DIR "/dedup_stats_no_blocks.ntpack", "dedup_stats_no_blocks", distinct, 3, &none), "distinct-sprite stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, none.placements, "three distinct sprites must not fold");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, none.vertex_blocks_shared, "visually distinct sprites must not share a block");
+    assert_fold_identity(&none);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dedup_fixture_builds);
@@ -634,5 +810,9 @@ int main(void) {
     RUN_TEST(test_slice9_same_art_different_borders_share_placement);
     RUN_TEST(test_slice9_group_with_plain_sprite_stays_identity);
     RUN_TEST(test_dedup_pack_is_deterministic);
+    RUN_TEST(test_stats_fold_identity_holds);
+    RUN_TEST(test_stats_report_d4_folds);
+    RUN_TEST(test_stats_match_anim_heavy_shaped_corpus);
+    RUN_TEST(test_stats_report_shared_vertex_blocks);
     return UNITY_END();
 }
