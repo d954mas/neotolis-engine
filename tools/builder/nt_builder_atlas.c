@@ -1146,6 +1146,10 @@ typedef struct {
     /* Dedup */
     int32_t *dedup_map;
     uint32_t *unique_indices;
+    /* Orientation sprite i's own local space is stored at inside the shared placement
+     * rectangle, i.e. root_bitmap == alias_rel[i](sprite_i_bitmap) — same meaning as
+     * pl->transform. Identity everywhere until the D4 stage populates it. */
+    uint8_t *alias_rel;
 
     /* Geometry */
     uint32_t *vertex_counts;
@@ -1296,7 +1300,8 @@ static void pipeline_dedup(AtlasPipeline *p) {
 
     /* Map duplicate -> original. -1 = unique. */
     p->dedup_map = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
-    NT_BUILD_ASSERT(p->dedup_map && "pipeline_dedup: alloc failed");
+    p->alias_rel = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(p->dedup_map && p->alias_rel && "pipeline_dedup: alloc failed");
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         p->dedup_map[i] = -1;
     }
@@ -2208,6 +2213,79 @@ static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, 
 }
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx);
+static void swap_triangle_winding(uint16_t *indices, uint32_t index_count);
+
+/* Odd popcount of the three flag bits = orientation-reversing transform. */
+static uint32_t d4_parity(uint8_t v) { return (uint32_t)(((v & 1U) + ((v >> 1) & 1U) + ((v >> 2) & 1U)) & 1U); }
+
+/* polygon_transform reverses the ring on odd parity, so every index moves to n-1-idx;
+ * that reversal also flips each triangle, hence the swap back to PNG-CCW. */
+static void alias_remap_reversed_indices(const uint16_t *src, uint32_t index_count, uint32_t n, uint16_t *out) {
+    for (uint32_t k = 0; k < index_count; k++) {
+        uint16_t idx = src[k];
+        NT_BUILD_ASSERT(idx < n && "alias geometry: triangle index outside the vertex ring");
+        if (idx >= n) {
+            idx = 0; /* Hard bound — NT_ASSERT_MODE=OFF compiles the assert away. */
+        }
+        out[k] = (uint16_t)(n - 1U - idx);
+    }
+    swap_triangle_winding(out, index_count);
+}
+
+/* Derive an alias's geometry as the exact integer D4 pre-image of its root's.
+ *
+ * alias_rel maps the alias's local space onto the root's, so the alias's own hull is the
+ * root's pulled back through d4_inverse — with the ROOT's dims, which is the space that
+ * pull-back starts in. Re-tracing instead would let the frontier pick a hull that is not
+ * the exact D4 image of the root's and therefore no longer fits the shared rectangle. */
+static void pipeline_derive_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
+    /* pipeline_dedup chain-follows to a root before comparing, so no composition along a
+     * chain is ever needed. */
+    NT_BUILD_ASSERT(p->dedup_map[orig] < 0 && "alias geometry: dedup_map must point at a root, never at another alias");
+    if (p->hull_vertices[orig] == NULL) {
+        return; /* Root produced no geometry (content error / degenerate trim). */
+    }
+
+    const uint8_t inv = d4_inverse(p->alias_rel[i]);
+    const uint32_t rw = p->trim_w[orig];
+    const uint32_t rh = p->trim_h[orig];
+    uint32_t aw = 0;
+    uint32_t ah = 0;
+    d4_dims_after(inv, rw, rh, &aw, &ah);
+    NT_BUILD_ASSERT(aw == p->trim_w[i] && ah == p->trim_h[i] && "alias geometry: relative transform disagrees with the alias trim dims");
+
+    /* Vertex and index counts are D4-invariant. */
+    const uint32_t n = p->vertex_counts[orig];
+    const uint32_t idx_count = p->triangle_index_counts[orig];
+    const uint32_t bn = p->baseline_vertex_counts[orig];
+    const uint32_t bidx_count = p->baseline_triangle_index_counts[orig];
+    p->vertex_counts[i] = n;
+    p->triangle_index_counts[i] = idx_count;
+    p->baseline_vertex_counts[i] = bn;
+    p->baseline_triangle_index_counts[i] = bidx_count;
+
+    Point2D *hull = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    uint16_t *tris = (uint16_t *)malloc((size_t)idx_count * sizeof(uint16_t));
+    Point2D *base = (Point2D *)malloc((size_t)bn * sizeof(Point2D));
+    uint16_t *base_tris = (uint16_t *)malloc((size_t)bidx_count * sizeof(uint16_t));
+    NT_BUILD_ASSERT(hull && tris && base && base_tris && "pipeline_derive_alias_geometry: alloc failed");
+
+    polygon_transform(p->hull_vertices[orig], n, inv, (int32_t)rw, (int32_t)rh, hull);
+    polygon_transform(p->baseline_vertices[orig], bn, inv, (int32_t)rw, (int32_t)rh, base);
+    if (d4_parity(inv)) {
+        alias_remap_reversed_indices(p->triangle_indices[orig], idx_count, n, tris);
+        alias_remap_reversed_indices(p->baseline_triangle_indices[orig], bidx_count, bn, base_tris);
+    } else {
+        memcpy(tris, p->triangle_indices[orig], (size_t)idx_count * sizeof(uint16_t));
+        memcpy(base_tris, p->baseline_triangle_indices[orig], (size_t)bidx_count * sizeof(uint16_t));
+    }
+
+    p->hull_vertices[i] = hull;
+    p->triangle_indices[i] = tris;
+    p->baseline_vertices[i] = base;
+    p->baseline_triangle_indices[i] = base_tris;
+    p->geometry_proofs[i] = p->geometry_proofs[orig];
+}
 
 static bool geometry_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
     enum { MAX_PASS_COUNT = 8U };
@@ -2392,21 +2470,13 @@ static void pipeline_geometry(AtlasPipeline *p) {
         }
     }
 
-    /* Copy vertex data for duplicates from their originals */
+    // #region alias geometry — every alias owns a derived copy, never a borrowed pointer
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)p->dedup_map[i];
-            p->vertex_counts[i] = p->vertex_counts[orig];
-            p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
-            p->triangle_indices[i] = p->triangle_indices[orig];
-            p->triangle_index_counts[i] = p->triangle_index_counts[orig];
-            p->baseline_vertices[i] = p->baseline_vertices[orig];
-            p->baseline_vertex_counts[i] = p->baseline_vertex_counts[orig];
-            p->baseline_triangle_indices[i] = p->baseline_triangle_indices[orig];
-            p->baseline_triangle_index_counts[i] = p->baseline_triangle_index_counts[orig];
-            p->geometry_proofs[i] = p->geometry_proofs[orig];
+            pipeline_derive_alias_geometry(p, i, (uint32_t)p->dedup_map[i]);
         }
     }
+    // #endregion
 }
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx) {
@@ -3204,15 +3274,13 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         p->sprites[i].name = NULL;
     }
 
-    /* Free hull vertices; duplicates share pointers via dedup_map. */
-    if (p->dedup_map && p->hull_vertices) {
+    /* Every sprite owns its geometry — an alias carries a derived copy, not a borrowed pointer. */
+    if (p->hull_vertices && p->triangle_indices && p->baseline_vertices && p->baseline_triangle_indices) {
         for (uint32_t i = 0; i < p->sprite_count; i++) {
-            if (p->dedup_map[i] < 0) {
-                free(p->hull_vertices[i]);
-                free(p->triangle_indices[i]);
-                free(p->baseline_vertices[i]);
-                free(p->baseline_triangle_indices[i]);
-            }
+            free(p->hull_vertices[i]);
+            free(p->triangle_indices[i]);
+            free(p->baseline_vertices[i]);
+            free(p->baseline_triangle_indices[i]);
             p->hull_vertices[i] = NULL;
             p->triangle_indices[i] = NULL;
             p->baseline_vertices[i] = NULL;
@@ -3235,6 +3303,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->geometry_opts);
     free(p->dedup_map);
     free(p->unique_indices);
+    free(p->alias_rel);
     free(p->vertex_counts);
     free((void *)p->hull_vertices);
     free((void *)p->triangle_indices);
