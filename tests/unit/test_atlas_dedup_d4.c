@@ -2,6 +2,7 @@
  * carry the dimension swap, or every later relative-transform assertion could
  * pass by symmetry instead of by correctness. */
 
+#include <setjmp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@
 #include "nt_atlas_format.h"
 #include "nt_builder.h"
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h"
 #include "nt_pack_format.h"
 #include "test_helpers/atlas_dedup_f_fixture.h"
 #include "test_helpers/atlas_dedup_fixture.h"
@@ -395,6 +397,270 @@ void test_alias_uv_decode_samples_its_own_source_pixel(void) {
     pack_file_free(&pack);
 }
 
+/* --- DEDUP-04: an alias carries the same geometry as a standalone pack --- */
+
+#define FILLER_W 20
+#define FILLER_H 12
+
+/* An unrelated sprite so a standalone pack is a real multi-sprite pack. Its
+ * colour is outside the F's encoded range, so it can never join the group. */
+static void add_filler(NtAtlasBuild *atlas) {
+    uint8_t px[FILLER_W * FILLER_H * 4];
+    for (size_t i = 0; i < (size_t)FILLER_W * FILLER_H; ++i) {
+        px[(i * 4U) + 0U] = 10;
+        px[(i * 4U) + 1U] = 240;
+        px[(i * 4U) + 2U] = 90;
+        px[(i * 4U) + 3U] = 255;
+    }
+    nt_atlas_sprite_opts_t o = nt_atlas_sprite_opts_defaults();
+    o.name = "filler";
+    nt_atlas_add_raw(atlas, px, (uint16_t)FILLER_W, (uint16_t)FILLER_H, &o);
+}
+
+static bool build_f_standalone_pack(const char *path, const char *name, uint8_t mask, uint8_t transform, bool concave) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (ctx == NULL) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = mask;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, name, &opts);
+    const uint8_t one[1] = {transform};
+    if (concave) {
+        atlas_dedup_f_fixture_add_concave(atlas, one, 1, mask, 0U);
+    } else {
+        atlas_dedup_f_fixture_add(atlas, one, 1, mask, 0U);
+    }
+    add_filler(atlas);
+    const nt_build_result_t commit = nt_atlas_commit(atlas);
+    const nt_build_result_t finish = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return commit == NT_BUILD_OK && finish == NT_BUILD_OK;
+}
+
+/* Twice the signed ring area. local_y is y-up, so a builder PNG-CCW ring reads
+ * CW here — the magnitude is what the triangulation must reproduce. */
+static int64_t ring_area2(const NtAtlasVertex *v, uint32_t n) {
+    int64_t a2 = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+        const NtAtlasVertex *p = &v[i];
+        const NtAtlasVertex *q = &v[(i + 1U) % n];
+        a2 += ((int64_t)p->local_x * q->local_y) - ((int64_t)q->local_x * p->local_y);
+    }
+    return a2 < 0 ? -a2 : a2;
+}
+
+static int64_t tri_area2(const NtAtlasVertex *a, const NtAtlasVertex *b, const NtAtlasVertex *c) {
+    return (((int64_t)b->local_x - a->local_x) * ((int64_t)c->local_y - a->local_y)) - (((int64_t)c->local_x - a->local_x) * ((int64_t)b->local_y - a->local_y));
+}
+
+/* The polygon as a ring, ignoring which vertex the builder happened to start at.
+ * A hull inherited from the root would carry the root's coordinates and match at
+ * no rotation. */
+static bool rings_match_up_to_rotation(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+    for (uint32_t s = 0; s < n; ++s) {
+        bool same = true;
+        for (uint32_t i = 0; i < n && same; ++i) {
+            const NtAtlasVertex *bv = &b[(i + s) % n];
+            same = (a[i].local_x == bv->local_x) && (a[i].local_y == bv->local_y);
+        }
+        if (same) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Blob triangles read world-CCW and must tile this region's own ring exactly —
+ * an index block inherited from a differently-oriented root would not. */
+static void assert_indices_tile_ring(const NtAtlasVertex *v, uint32_t n, const uint16_t *idx, uint32_t idx_count, const char *what) {
+    TEST_ASSERT_TRUE_MESSAGE(idx_count % 3U == 0U, "index_count must be a multiple of 3");
+    int64_t sum = 0;
+    for (uint32_t t = 0; t + 2U < idx_count; t += 3U) {
+        TEST_ASSERT_TRUE_MESSAGE(idx[t] < n && idx[t + 1U] < n && idx[t + 2U] < n, "triangle index outside the vertex ring");
+        const int64_t a2 = tri_area2(&v[idx[t]], &v[idx[t + 1U]], &v[idx[t + 2U]]);
+        TEST_ASSERT_TRUE_MESSAGE(a2 > 0, what);
+        sum += a2;
+    }
+    TEST_ASSERT_EQUAL_INT64_MESSAGE(ring_area2(v, n), sum, "the triangles must tile the region's own polygon exactly");
+}
+
+static void assert_quad_flag_matches_counts(const NtAtlasRegion *reg) {
+    if ((reg->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) == 0U) {
+        return;
+    }
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, reg->vertex_count, "a QUAD_* flag implies vertex_count == 4");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(6, reg->index_count, "a QUAD_* flag implies index_count == 6");
+}
+
+/* An aliased region against the same image packed standalone. vertex_start,
+ * index_start, the UVs and transform may differ; nothing else may. */
+static void assert_region_pair_equivalent(const atlas_view_t *av, uint32_t ar, const atlas_view_t *bv, uint32_t br, const char *what) {
+    const NtAtlasRegion *a = &av->regions[ar];
+    const NtAtlasRegion *b = &bv->regions[br];
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(b->vertex_count, a->vertex_count, what);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(b->index_count, a->index_count, what);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(b->flags, a->flags, what);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(b->source_w, a->source_w, what);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(b->source_h, a->source_h, what);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(b->trim_offset_x, a->trim_offset_x, what);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(b->trim_offset_y, a->trim_offset_y, what);
+    assert_quad_flag_matches_counts(a);
+    assert_quad_flag_matches_counts(b);
+
+    const NtAtlasVertex *avx = NULL;
+    const uint16_t *aidx = NULL;
+    const NtAtlasVertex *bvx = NULL;
+    const uint16_t *bidx = NULL;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(av, ar, &avx, &aidx), "alias region spans outside the blob");
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(bv, br, &bvx, &bidx), "standalone region spans outside the blob");
+    TEST_ASSERT_TRUE_MESSAGE(rings_match_up_to_rotation(avx, bvx, a->vertex_count), what);
+    assert_indices_tile_ring(avx, a->vertex_count, aidx, a->index_count, "alias triangles must be world-CCW");
+    assert_indices_tile_ring(bvx, b->vertex_count, bidx, b->index_count, "standalone triangles must be world-CCW");
+}
+
+static void assert_folded_matches_standalone(bool concave, const char *tag) {
+    char apath[256];
+    (void)snprintf(apath, sizeof(apath), "%s/dedup_f_std_%s.ntpack", TMP_DIR, tag);
+    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(apath, "dedup_f_std", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations, 4, concave), "folded pack build failed");
+    pack_file_t a;
+    pack_file_load(apath, &a);
+    atlas_view_t av;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(a.bytes, a.len, &av), "open the folded atlas blob");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, av.region_count, "one region per rotation image");
+
+    for (uint32_t r = 0; r < 4; ++r) {
+        char bpath[256];
+        (void)snprintf(bpath, sizeof(bpath), "%s/dedup_f_alone_%s_%u.ntpack", TMP_DIR, tag, r);
+        TEST_ASSERT_TRUE_MESSAGE(build_f_standalone_pack(bpath, "dedup_f_alone", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations[r], concave), "standalone pack build failed");
+        pack_file_t b;
+        pack_file_load(bpath, &b);
+        atlas_view_t bv;
+        TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(b.bytes, b.len, &bv), "open the standalone atlas blob");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, bv.region_count, "standalone pack holds the image plus the filler");
+        assert_region_pair_equivalent(&av, r, &bv, 0, "an alias must carry the geometry of the same image packed standalone");
+        pack_file_free(&b);
+    }
+    pack_file_free(&a);
+}
+
+void test_alias_region_matches_standalone_pack(void) { assert_folded_matches_standalone(false, "rect"); }
+
+/* The derived concave hull, not only the RECT quad. */
+void test_concave_alias_hull_matches_standalone(void) { assert_folded_matches_standalone(true, "concave"); }
+
+void test_mirrored_alias_winding_is_world_ccw(void) {
+    const char *path = TMP_DIR "/dedup_f_winding.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(path, "dedup_f_winding", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors, 4, true), "mirror pack build failed");
+    pack_file_t pack;
+    pack_file_load(path, &pack);
+    atlas_view_t view;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(pack.bytes, pack.len, &view), "open the produced atlas blob");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per mirror image");
+    for (uint32_t r = 0; r < 4; ++r) {
+        const NtAtlasVertex *v = NULL;
+        const uint16_t *idx = NULL;
+        TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(&view, r, &v, &idx), "region spans outside the blob");
+        assert_indices_tile_ring(v, view.regions[r].vertex_count, idx, view.regions[r].index_count, "a mirrored alias triangle is not world-CCW");
+        assert_quad_flag_matches_counts(&view.regions[r]);
+    }
+    pack_file_free(&pack);
+}
+
+/* --- A wrong relative transform is rejected, not shipped --- */
+
+static jmp_buf s_build_assert_jmp;
+static const char *s_build_assert_expr;
+
+static void trap_build_assert(const char *expr, const char *file, int line) {
+    s_build_assert_expr = expr;
+    (void)file;
+    (void)line;
+    longjmp(s_build_assert_jmp, 1);
+}
+
+/* Byte-identical twins under distinct names: the group's true relative is
+ * identity, so any forced non-identity relative is provably wrong. Concave shape
+ * keeps the hull orientation-sensitive — the D4 image of a box is a box. */
+static void add_f_twins(NtAtlasBuild *atlas) {
+    uint8_t px[NT_ATLAS_F_MAX_PX];
+    uint16_t w = 0;
+    uint16_t h = 0;
+    atlas_dedup_f_fill(NT_ATLAS_XFORM_IDENTITY, px, &w, &h);
+    static const char *names[2] = {"twin_root", "twin_alias"};
+    for (uint32_t i = 0; i < 2; ++i) {
+        nt_atlas_sprite_opts_t o = nt_atlas_sprite_opts_defaults();
+        o.name = names[i];
+        nt_atlas_add_raw(atlas, px, w, h, &o);
+    }
+}
+
+static NtBuilderContext *begin_twin_pack(const char *path, NtAtlasBuild **out_atlas) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_f_twins", &opts);
+    add_f_twins(atlas);
+    *out_atlas = atlas;
+    return ctx;
+}
+
+/* Build the twin pack and require both regions on one identity placement. */
+static void assert_twins_fold_at_identity(const char *path, const char *what) {
+    NtAtlasBuild *atlas = NULL;
+    NtBuilderContext *ctx = begin_twin_pack(path, &atlas);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), what);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), what);
+    nt_builder_free_pack(ctx);
+    pack_file_t f;
+    pack_file_load(path, &f);
+    nt_atlas_dedup_region_t regions[2] = {0};
+    uint32_t count = 0;
+    const bool ok = atlas_dedup_collect_regions(f.bytes, f.len, regions, 2, &count);
+    pack_file_free(&f);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count, "one region per twin");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "byte-identical twins must share one placement");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[0].transform, what);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[1].transform, what);
+}
+
+void test_wrong_relative_transform_is_rejected(void) {
+    assert_twins_fold_at_identity(TMP_DIR "/dedup_f_twins_ok.ntpack", "the twins must fold at identity before the control is armed");
+
+    /* ROT180 preserves the 9x13 box, so the dims guard passes and the coverage
+     * proof is the gate under test. */
+    nt_atlas_test_force_alias_rel(NT_ATLAS_XFORM_ROT180);
+    NtAtlasBuild *atlas = NULL;
+    NtBuilderContext *ctx = begin_twin_pack(TMP_DIR "/dedup_f_twins_forced.ntpack", &atlas);
+    nt_build_assert_handler = trap_build_assert;
+    s_build_assert_expr = NULL;
+    if (setjmp(s_build_assert_jmp) == 0) {
+        (void)nt_atlas_commit(atlas);
+        nt_build_assert_handler = NULL;
+        nt_atlas_test_force_alias_rel(0xFFU);
+        nt_builder_free_pack(ctx);
+        TEST_FAIL_MESSAGE("a wrong relative transform must abort the build, not produce a pack");
+        return;
+    }
+    nt_build_assert_handler = NULL;
+    nt_atlas_test_force_alias_rel(0xFFU);
+    const bool proof_rejected = s_build_assert_expr != NULL && strstr(s_build_assert_expr, "proof") != NULL;
+    nt_builder_free_pack(ctx);
+    TEST_ASSERT_TRUE_MESSAGE(proof_rejected, "a wrong relative must be rejected by a coverage proof");
+
+    /* And the same build succeeds again — the hook is provably disarmed. */
+    assert_twins_fold_at_identity(TMP_DIR "/dedup_f_twins_disarmed.ntpack", "the forced-relative hook must not leak into a later case");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_f_fixture_images_pairwise_distinct);
@@ -404,5 +670,9 @@ int main(void) {
     RUN_TEST(test_identity_mask_never_folds_rotations);
     RUN_TEST(test_mirrors_fold_under_flips_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
+    RUN_TEST(test_alias_region_matches_standalone_pack);
+    RUN_TEST(test_concave_alias_hull_matches_standalone);
+    RUN_TEST(test_mirrored_alias_winding_is_world_ccw);
+    RUN_TEST(test_wrong_relative_transform_is_rejected);
     return UNITY_END();
 }

@@ -231,8 +231,10 @@ static bool parse_dump_line_u6(const char *line, const char *line_end, unsigned 
     return true;
 }
 
-/* Extract region.transform values (in region-index order) from a produced pack. */
-static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int *count) {
+#define DUMP_ROW_CAP 64
+
+/* Parsed dump rows ("idx transform umin vmin w h") in region-index order. */
+static bool collect_dump_rows(const char *pack_path, unsigned (*out)[6], int cap, int *count) {
     char *txt = dump_regions_text(pack_path);
     if (!txt) {
         return false;
@@ -242,9 +244,8 @@ static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int
     while (*p) {
         const char *nl = strchr(p, '\n');
         const char *line_end = nl ? nl : p + strlen(p);
-        unsigned fields[6];
-        if (n < cap && parse_dump_line_u6(p, line_end, fields)) {
-            out[n++] = (uint8_t)fields[1];
+        if (n < cap && parse_dump_line_u6(p, line_end, out[n])) {
+            ++n;
         }
         if (!nl) {
             break;
@@ -254,6 +255,19 @@ static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int
     free(txt);
     *count = n;
     return n > 0;
+}
+
+/* Extract region.transform values (in region-index order) from a produced pack. */
+static bool collect_transforms(const char *pack_path, uint8_t *out, int cap, int *count) {
+    unsigned rows[DUMP_ROW_CAP][6];
+    const int limit = (cap < DUMP_ROW_CAP) ? cap : DUMP_ROW_CAP;
+    if (!collect_dump_rows(pack_path, rows, limit, count)) {
+        return false;
+    }
+    for (int i = 0; i < *count; ++i) {
+        out[i] = (uint8_t)rows[i][1];
+    }
+    return true;
 }
 
 /* Every emitted region.transform has its bit set in the effective mask. */
@@ -266,6 +280,22 @@ static void assert_all_in_mask(const char *pack_path, uint8_t mask, const char *
         /* Range first: a corrupt transform >= 32 would make the shift UB. */
         TEST_ASSERT_TRUE_MESSAGE(t[i] < 8U, "transform value out of D4 range");
         TEST_ASSERT_TRUE_MESSAGE((mask & (1U << t[i])) != 0U, what);
+    }
+}
+
+/* Per region against that region's OWN effective mask: a non-zero sprite mask
+ * replaces the atlas mask, identity is the floor. An alias region must satisfy
+ * this too — its transform is its own relative, not the root's orientation. */
+static void assert_each_in_own_mask(const char *pack_path, uint8_t atlas_mask, const uint8_t *sprite_masks, int count, const char *what) {
+    uint8_t t[64];
+    int n = 0;
+    TEST_ASSERT_TRUE_MESSAGE(collect_transforms(pack_path, t, 64, &n), "collect transforms failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(count, n, "unexpected region count");
+    for (int i = 0; i < n; ++i) {
+        /* Range first: a corrupt transform >= 32 would make the shift UB. */
+        TEST_ASSERT_TRUE_MESSAGE(t[i] < 8U, "transform value out of D4 range");
+        const uint8_t eff = (uint8_t)((sprite_masks[i] != 0U ? sprite_masks[i] : atlas_mask) | NT_ATLAS_TRANSFORMS_IDENTITY);
+        TEST_ASSERT_TRUE_MESSAGE((eff & (uint8_t)(1U << t[i])) != 0U, what);
     }
 }
 
@@ -355,9 +385,8 @@ void test_sprite_mask_can_narrow_atlas_mask(void) {
     collect_expect_n(masked_path, 4, t);
     TEST_ASSERT_TRUE_MESSAGE(t[2] == NT_ATLAS_XFORM_IDENTITY || t[2] == NT_ATLAS_XFORM_FLIP_H, "masked sprite emitted a forbidden transform");
     /* Inheriting sprites still resolve to a valid D4 value (identity always representable). */
-    for (int i = 0; i < 4; ++i) {
-        TEST_ASSERT_TRUE_MESSAGE(t[i] <= NT_ATLAS_XFORM_ANTITRANSPOSE, "transform value out of D4 range");
-    }
+    const uint8_t sprite_masks[4] = {0, 0, (uint8_t)(NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H), 0};
+    assert_each_in_own_mask(masked_path, NT_ATLAS_TRANSFORMS_ALL, sprite_masks, 4, "region transform outside its own effective mask");
 }
 
 /* --- A zero atlas mask (zero-init struct) behaves as identity-only --- */
@@ -456,6 +485,79 @@ void test_golden_byte_identity_identity(void) {
     assert_golden(NT_ATLAS_TRANSFORMS_IDENTITY, GOLDEN_DIR "/etalon_identity.sha256", GOLDEN_DIR "/etalon_identity.dump.txt", TMP_DIR "/xform_golden_identity.ntpack");
 }
 
+/* --- An alias region's transform lies in its OWN effective mask --- */
+
+/* build_override_pack's layout with the wide strip doubled into a byte-identical
+ * pair: the twins fold onto one placement the ALL packer transposes to align with
+ * the tall column. Each twin carries its own mask, so the group intersection is
+ * readable per region from the unpacked output. */
+#define TWIN_SPRITE_COUNT 5
+#define TWIN_A 2
+#define TWIN_B 3
+
+static bool build_twin_mask_pack(const char *path, const char *name, const uint8_t *masks) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, name, &opts);
+
+    uint8_t px[48 * 48 * 4];
+    const uint16_t dims[TWIN_SPRITE_COUNT][2] = {{8, 44}, {8, 44}, {44, 8}, {44, 8}, {8, 40}};
+    const char *names[TWIN_SPRITE_COUNT] = {"w0", "w1", "twin_a", "twin_b", "w3"};
+    for (int i = 0; i < TWIN_SPRITE_COUNT; ++i) {
+        /* The twins share one colour, so their content is byte-identical. */
+        const uint8_t r = (i == TWIN_B) ? (uint8_t)(180 + (TWIN_A * 10)) : (uint8_t)(180 + (i * 10));
+        fill_solid(px, dims[i][0], dims[i][1], r, 90, 60);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = names[i];
+        so.allowed_transforms = masks[i];
+        nt_atlas_add_raw(atlas, px, dims[i][0], dims[i][1], &so);
+    }
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return r == NT_BUILD_OK;
+}
+
+/* Collect the rows and require the twins to actually share one placement —
+ * without the fold this case would say nothing about an alias region. */
+static void collect_twin_rows(const char *pack_path, unsigned (*rows)[6]) {
+    int n = 0;
+    TEST_ASSERT_TRUE_MESSAGE(collect_dump_rows(pack_path, rows, DUMP_ROW_CAP, &n), "collect dump rows failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(TWIN_SPRITE_COUNT, n, "unexpected region count");
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(rows[TWIN_A][2], rows[TWIN_B][2], "the byte-identical twins must share one placement U");
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(rows[TWIN_A][3], rows[TWIN_B][3], "the byte-identical twins must share one placement V");
+}
+
+void test_alias_region_transform_is_in_its_own_mask(void) {
+    const char *control_path = TMP_DIR "/xform_twin_control.ntpack";
+    const char *masked_path = TMP_DIR "/xform_twin_masked.ntpack";
+    const uint8_t both_all[TWIN_SPRITE_COUNT] = {0, 0, NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_ALL, 0};
+    const uint8_t mixed[TWIN_SPRITE_COUNT] = {0, 0, NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_IDENTITY, 0};
+    unsigned rows[DUMP_ROW_CAP][6];
+
+    /* A/B control: unrestricted, the packer orients the folded pair non-identity —
+     * otherwise the masked assert below would be vacuous. */
+    TEST_ASSERT_TRUE_MESSAGE(build_twin_mask_pack(control_path, "twin_control", both_all), "control twin pack failed");
+    collect_twin_rows(control_path, rows);
+    TEST_ASSERT_TRUE_MESSAGE(rows[TWIN_A][1] != NT_ATLAS_XFORM_IDENTITY, "control: the packer must orient the folded twins non-identity");
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(rows[TWIN_A][1], rows[TWIN_B][1], "an identity-relative alias shares its root's orientation");
+    assert_each_in_own_mask(control_path, NT_ATLAS_TRANSFORMS_ALL, both_all, TWIN_SPRITE_COUNT, "region transform outside its own effective mask");
+
+    /* Same art, one twin restricted to identity: the group intersection collapses
+     * the shared placement to identity for BOTH members. */
+    TEST_ASSERT_TRUE_MESSAGE(build_twin_mask_pack(masked_path, "twin_masked", mixed), "masked twin pack failed");
+    collect_twin_rows(masked_path, rows);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(NT_ATLAS_XFORM_IDENTITY, rows[TWIN_A][1], "a group with an identity-only member must pack at identity");
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(NT_ATLAS_XFORM_IDENTITY, rows[TWIN_B][1], "a group with an identity-only member must pack at identity");
+    assert_each_in_own_mask(masked_path, NT_ATLAS_TRANSFORMS_ALL, mixed, TWIN_SPRITE_COUNT, "region transform outside its own effective mask");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_allowed_transforms);
@@ -466,6 +568,7 @@ int main(void) {
     RUN_TEST(test_zero_mask_behaves_as_identity);
     RUN_TEST(test_sprite_mask_can_widen_atlas_mask);
     RUN_TEST(test_slice9_emits_identity);
+    RUN_TEST(test_alias_region_transform_is_in_its_own_mask);
     RUN_TEST(test_golden_byte_identity_all);
     RUN_TEST(test_golden_byte_identity_identity);
     return UNITY_END();
