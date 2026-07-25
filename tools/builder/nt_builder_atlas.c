@@ -1178,6 +1178,11 @@ typedef struct {
     /* Blocks folded by byte equality in pipeline_serialize — the only observable
      * proving that sharing actually happens. */
     uint32_t vertex_blocks_shared;
+    /* Aliases split by relative transform, plus the post-trim area their shared
+     * placements save. */
+    uint32_t folds_exact;
+    uint32_t folds_d4;
+    uint64_t area_saved_px;
     uint32_t placement_count;
     uint32_t page_count;
     uint32_t thread_count;
@@ -1311,6 +1316,48 @@ static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_id
     return true;
 }
 
+/* rel is the orientation the alias's own local space is stored at inside the shared
+ * rectangle: root_bitmap == rel(a_bitmap), the same meaning pl->transform carries. The
+ * opposite direction would force d4_inverse(rel) into reg->transform, which is not
+ * generally a member of the alias's own mask. */
+static bool pipeline_dedup_pixels_match_rel(const AtlasPipeline *p, uint32_t a_idx, uint32_t root_idx, uint8_t rel) {
+    const uint32_t aw = p->trim_w[a_idx];
+    const uint32_t ah = p->trim_h[a_idx];
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    d4_dims_after(rel, aw, ah, &ow, &oh);
+    if (ow != p->trim_w[root_idx] || oh != p->trim_h[root_idx]) {
+        return false; /* Reject before any read: the two buffers have different shapes. */
+    }
+    if (rel == 0) {
+        return pipeline_dedup_pixels_match(p, a_idx, root_idx);
+    }
+    const NtAtlasSpriteInput *sa = &p->sprites[a_idx];
+    const NtAtlasSpriteInput *sr = &p->sprites[root_idx];
+    const size_t a_stride = (size_t)sa->width * 4U;
+    const size_t r_stride = (size_t)sr->width * 4U;
+    const uint8_t *a_org = sa->rgba + ((size_t)p->trim_y[a_idx] * a_stride) + ((size_t)p->trim_x[a_idx] * 4U);
+    const uint8_t *r_org = sr->rgba + ((size_t)p->trim_y[root_idx] * r_stride) + ((size_t)p->trim_x[root_idx] * 4U);
+    for (uint32_t y = 0; y < ah; y++) {
+        for (uint32_t x = 0; x < aw; x++) {
+            int32_t tx = 0;
+            int32_t ty = 0;
+            /* Texel variant: the corner variant maps 0..w and is off by one on every mirror. */
+            transform_point_texel((int32_t)x, (int32_t)y, rel, (int32_t)aw, (int32_t)ah, &tx, &ty);
+            /* Hard bound — the read crosses into another sprite's buffer. */
+            if (tx < 0 || ty < 0 || (uint32_t)tx >= ow || (uint32_t)ty >= oh) {
+                return false;
+            }
+            const uint8_t *px_a = a_org + ((size_t)y * a_stride) + ((size_t)x * 4U);
+            const uint8_t *px_r = r_org + ((size_t)(uint32_t)ty * r_stride) + ((size_t)(uint32_t)tx * 4U);
+            if (memcmp(px_a, px_r, 4U) != 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /* Unordered post-trim dimension pair: D4-invariant, so any two sprites related by a
  * transform share it, and it costs no raster pass. */
 static uint64_t atlas_sprite_dim_key(const AtlasPipeline *p, uint32_t i) {
@@ -1418,6 +1465,47 @@ static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *
     free(scratch);
 }
 
+#ifdef NT_TEST_ACCESS
+/* 0xFF disables. Corrupts the first alias of a build so a test can prove the coverage
+ * proof rejects a wrong relative transform. */
+static uint8_t g_force_alias_rel = 0xFFU;
+void nt_atlas_test_force_alias_rel(uint8_t rel) { g_force_alias_rel = rel; }
+#endif
+
+static void pipeline_dedup_record_alias(AtlasPipeline *p, uint32_t a, uint32_t root, uint8_t rel) {
+    p->dedup_map[a] = (int32_t)root;
+    p->alias_rel[a] = rel;
+#ifdef NT_TEST_ACCESS
+    if (g_force_alias_rel != 0xFFU && p->folds_exact + p->folds_d4 == 0) {
+        p->alias_rel[a] = g_force_alias_rel;
+    }
+#endif
+    if (p->alias_rel[a] == 0) {
+        p->folds_exact++;
+    } else {
+        p->folds_d4++;
+    }
+    p->area_saved_px += (uint64_t)p->trim_w[a] * p->trim_h[a];
+}
+
+/* Lowest relative transform the alias's own mask permits and its pixels confirm. Ascending
+ * order is what makes the choice deterministic when symmetric art matches under several
+ * relatives; rel == 0 IS the exact stage, so there is no separate exact pass. */
+static bool pipeline_dedup_find_rel(const AtlasPipeline *p, uint32_t a, uint32_t root, uint8_t *out_rel) {
+    const uint8_t mask = atlas_sprite_effective_mask(p, a);
+    for (uint8_t rel = 0; rel < 8U; rel++) {
+        if (!(mask & (uint8_t)(1U << rel))) {
+            continue; /* A sprite may only join with a relative its own mask permits. */
+        }
+        if (!pipeline_dedup_pixels_match_rel(p, a, root, rel)) {
+            continue;
+        }
+        *out_rel = rel;
+        return true;
+    }
+    return false;
+}
+
 /* One search over an equal-content run, walked in add order. The run's first eligible
  * member is the root, so the root is the lowest add index — after the D4 stage the root
  * decides every alias's relative transform and emitted block, so this is a correctness
@@ -1425,15 +1513,22 @@ static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *
 static void pipeline_dedup_fold_run(AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
     for (uint32_t m = lo + 1; m < hi; m++) {
         const uint32_t a = e[m].index;
+        /* dedup = off is bidirectional: excluded here as a member and below as a target.
+         * Because this one search subsumes the exact stage, that also covers the
+         * source-identical case — no second guard exists or is needed. */
+        if (!atlas_sprite_dedup_enabled(&p->sprites[a], p->opts)) {
+            continue;
+        }
         for (uint32_t r = lo; r < m; r++) {
             const uint32_t root = e[r].index;
             /* Only roots are targets; a non-root's own root sits earlier in the run and was
              * already tried, so no chain-follow is needed. */
-            if (p->dedup_map[root] >= 0) {
+            if (p->dedup_map[root] >= 0 || !atlas_sprite_dedup_enabled(&p->sprites[root], p->opts)) {
                 continue;
             }
-            if (pipeline_dedup_meta_match(p, a, root) && pipeline_dedup_pixels_match(p, a, root)) {
-                p->dedup_map[a] = (int32_t)root;
+            uint8_t rel = 0;
+            if (pipeline_dedup_meta_match(p, a, root) && pipeline_dedup_find_rel(p, a, root, &rel)) {
+                pipeline_dedup_record_alias(p, a, root, rel);
                 break;
             }
         }
