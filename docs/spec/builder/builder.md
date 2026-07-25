@@ -235,6 +235,10 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 
 Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish the same output. Before a polygon candidate is accepted, its triangle union must continuously cover the full unit-square area of every retained pixel cell; centre-only coverage is not sufficient.
 
+### Dedup statistics
+
+`const nt_atlas_stats_t *nt_builder_get_atlas_stats(ctx, &count)` returns one record per successfully committed atlas, in commit order: `sprites`, `placements`, `folds_exact`, `folds_d4`, `area_saved_px`, `vertex_blocks_shared`. `folds_exact + folds_d4 + placements == sprites` holds for every record. Like the content-error channel this is a borrowed, read-only view owned by the context and valid only until `nt_builder_free_pack`; it is deliberately **not** reachable through the `NtAtlasBuild` handle, which commit frees. Only `placements` is recoverable from the packed atlas (by counting distinct per-page UV origins) — the exact/D4 stage split, the saved area and the shared-block count exist nowhere else. The same numbers are appended to the `BENCH` log line as `folds_exact`, `folds_d4`, `area_saved` and `blocks_shared`.
+
 ### Vector packer
 
 The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each candidate position the incoming polygon is tested against the union of No-Fit Polygons of all already-placed sprites. Properties:

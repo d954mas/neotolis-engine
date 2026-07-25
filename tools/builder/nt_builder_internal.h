@@ -198,6 +198,12 @@ struct NtBuilderContext {
     uint32_t font_count;
     uint32_t atlas_count;
 
+    /* Per-atlas dedup statistics, appended by each successful atlas commit. The
+     * count precedes its array so the 8-aligned array absorbs the pad this run of
+     * uint32 counters would otherwise leave. */
+    uint32_t atlas_stats_count;
+    nt_atlas_stats_t atlas_stats[NT_BUILD_MAX_ASSETS];
+
     /* Atlas transaction currently collecting inputs. */
     NtAtlasBuild *active_atlas;
 

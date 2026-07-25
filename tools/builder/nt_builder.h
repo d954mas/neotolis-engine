@@ -202,6 +202,26 @@ bool nt_builder_errors_truncated(const NtBuilderContext *ctx);
 /* err and buf must be non-NULL; len == 0 writes nothing. */
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len);
 
+/* --- Per-atlas dedup statistics ---
+ * A counter exists because the exact/D4 stage split and the saved area cannot be
+ * recovered from the packed atlas; only the placement count can. */
+typedef struct {
+    uint32_t sprites;              /* sprites in the transaction */
+    uint32_t placements;           /* distinct packed rectangles */
+    uint32_t folds_exact;          /* aliases folded at relative transform identity */
+    uint32_t folds_d4;             /* aliases folded through a non-identity D4 transform */
+    uint64_t area_saved_px;        /* summed post-trim area of every alias */
+    uint32_t vertex_blocks_shared; /* vertex+index blocks folded by byte equality */
+} nt_atlas_stats_t;
+
+/* One entry per successfully committed atlas, in commit order (a failed commit
+ * publishes none). The returned pointer is a BORROWED, READ-ONLY view into the
+ * context — the caller must NOT free it, and it is valid only until
+ * nt_builder_free_pack() (dangles afterward); never read it off the NtAtlasBuild
+ * handle, which commit frees. ctx must be non-NULL; the returned data is valid
+ * when *out_count > 0; out_count may be NULL. */
+const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, uint32_t *out_count);
+
 /* --- Texture options (game controls format and resize per-texture) --- */
 
 typedef struct nt_tex_compress_opts_t nt_tex_compress_opts_t;

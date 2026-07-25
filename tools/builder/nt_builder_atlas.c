@@ -3793,6 +3793,19 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     bench_debug_png = nt_time_now() - t0;
     pipeline_publish_outputs(&p);
 
+    /* Published, so the numbers describe a real atlas. Every sprite is either its
+     * own placement or an alias of one — a miscounted fold shows up here. */
+    NT_BUILD_ASSERT(p.folds_exact + p.folds_d4 + p.placement_count == p.sprite_count && "atlas_commit: folds and placements do not account for every sprite");
+    NT_BUILD_ASSERT(ctx->atlas_stats_count < NT_BUILD_MAX_ASSETS && "atlas_commit: more committed atlases than NT_BUILD_MAX_ASSETS");
+    if (ctx->atlas_stats_count < NT_BUILD_MAX_ASSETS) {
+        ctx->atlas_stats[ctx->atlas_stats_count++] = (nt_atlas_stats_t){.sprites = p.sprite_count,
+                                                                        .placements = p.placement_count,
+                                                                        .folds_exact = p.folds_exact,
+                                                                        .folds_d4 = p.folds_d4,
+                                                                        .area_saved_px = p.area_saved_px,
+                                                                        .vertex_blocks_shared = p.vertex_blocks_shared};
+    }
+
     double bench_total = nt_time_now() - t_total;
     p.stats.used_area = 0;
     for (uint32_t i = 0; i < p.page_count; i++) {
@@ -3804,12 +3817,14 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
     NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u "
                 "used_area=%llu frontier_area=%llu trim_area=%llu poly_area=%llu pot_waste=%llu fill_frontier=%.4f fill_texture=%.4f "
-                "or_ops=%llu test_ops=%llu page_scans=%llu page_existing=%llu page_new=%llu cache_hits=%llu cache_misses=%llu",
+                "or_ops=%llu test_ops=%llu page_scans=%llu page_existing=%llu page_new=%llu cache_hits=%llu cache_misses=%llu "
+                "folds_exact=%u folds_d4=%u area_saved=%llu blocks_shared=%u",
                 bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
                 bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.frontier_area, (unsigned long long)p.stats.trim_area,
                 (unsigned long long)p.stats.poly_area, (unsigned long long)pot_waste_area, poly_frontier_fill, poly_texture_fill, (unsigned long long)p.stats.or_count,
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
-                (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count);
+                (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count, p.folds_exact, p.folds_d4, (unsigned long long)p.area_saved_px,
+                p.vertex_blocks_shared);
 
 cleanup:;
     nt_build_result_t result = state->failed ? atlas_merge_errors(state) : NT_BUILD_OK;

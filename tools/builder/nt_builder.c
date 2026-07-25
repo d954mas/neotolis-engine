@@ -540,6 +540,14 @@ const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint3
     return ctx->errors;
 }
 
+const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, uint32_t *out_count) {
+    NT_BUILD_ASSERT(ctx && "get_atlas_stats: ctx is NULL");
+    if (out_count) {
+        *out_count = ctx->atlas_stats_count;
+    }
+    return ctx->atlas_stats;
+}
+
 bool nt_builder_errors_truncated(const NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "errors_truncated: ctx is NULL");
     return ctx->errors_truncated;
