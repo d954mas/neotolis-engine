@@ -209,28 +209,29 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  *  New pages only when max_size exhausted (ATLAS-18).
  * =================================================================== */
 
-// #region Duplicate detection — identify identical sprites by hash
+// #region Duplicate detection — identify identical sprites by content
 /* --- Duplicate detection sort comparator --- */
 
 typedef struct {
     uint32_t index;
-    uint64_t hash;
+    uint64_t dim_key; /* D4-invariant post-trim dimension pair */
+    uint64_t hash;    /* canonical post-trim content hash */
 } DedupSortEntry;
 
+/* Sorting by dim_key first keeps the orientation hashes confined to buckets that can
+ * actually fold; the index tie-break is what makes the first entry of a run its
+ * lowest-add-index member, which is the group root. */
 static int dedup_sort_cmp(const void *a, const void *b) {
     const DedupSortEntry *ea = (const DedupSortEntry *)a;
     const DedupSortEntry *eb = (const DedupSortEntry *)b;
-    if (ea->hash < eb->hash) {
-        return -1;
+    if (ea->dim_key != eb->dim_key) {
+        return ea->dim_key < eb->dim_key ? -1 : 1;
     }
-    if (ea->hash > eb->hash) {
-        return 1;
+    if (ea->hash != eb->hash) {
+        return ea->hash < eb->hash ? -1 : 1;
     }
-    if (ea->index < eb->index) {
-        return -1;
-    }
-    if (ea->index > eb->index) {
-        return 1;
+    if (ea->index != eb->index) {
+        return ea->index < eb->index ? -1 : 1;
     }
     return 0;
 }
@@ -473,7 +474,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 21 };
+enum { ATLAS_CACHE_KEY_VERSION = 22 };
 
 /* Per-sprite key record: hash + source dims + origin, then the raw override block. */
 enum { KEY_OV_OFF = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) };
@@ -1310,15 +1311,166 @@ static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_id
     return true;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void pipeline_dedup(AtlasPipeline *p) {
-    DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(p->sprite_count * sizeof(DedupSortEntry));
-    NT_BUILD_ASSERT(dedup_entries && "pipeline_dedup: alloc failed");
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        dedup_entries[i].index = i;
-        dedup_entries[i].hash = p->sprites[i].decoded_hash;
+/* Unordered post-trim dimension pair: D4-invariant, so any two sprites related by a
+ * transform share it, and it costs no raster pass. */
+static uint64_t atlas_sprite_dim_key(const AtlasPipeline *p, uint32_t i) {
+    const uint32_t w = p->trim_w[i];
+    const uint32_t h = p->trim_h[i];
+    return ((uint64_t)(w < h ? w : h) << 32U) | (w < h ? h : w);
+}
+
+/* Minimum of the eight orientation hashes of the post-trim RGBA. Mask-independent by
+ * construction: a mask is admission policy, so keying on it would give two sprites with
+ * identical content different buckets. Strictly supersedes decoded_hash as the grouping key,
+ * which keeps its global-asset-cache and atlas-cache-key roles. */
+static uint64_t atlas_sprite_canonical_hash(const AtlasPipeline *p, uint32_t i, uint8_t *scratch) {
+    const uint32_t tw = p->trim_w[i];
+    const uint32_t th = p->trim_h[i];
+    if (tw == 0 || th == 0) {
+        return 0; /* Transparent after trim — already a content error. */
     }
-    qsort(dedup_entries, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    const NtAtlasSpriteInput *s = &p->sprites[i];
+    const size_t src_stride = (size_t)s->width * 4U;
+    const uint8_t *src = s->rgba + ((size_t)p->trim_y[i] * src_stride) + ((size_t)p->trim_x[i] * 4U);
+    uint64_t best = UINT64_MAX;
+    for (uint8_t t = 0; t < 8U; t++) {
+        uint32_t ow = 0;
+        uint32_t oh = 0;
+        d4_dims_after(t, tw, th, &ow, &oh);
+        for (uint32_t y = 0; y < th; y++) {
+            const uint8_t *row = src + ((size_t)y * src_stride);
+            if (t == 0) {
+                memcpy(scratch + ((size_t)y * tw * 4U), row, (size_t)tw * 4U);
+                continue;
+            }
+            for (uint32_t x = 0; x < tw; x++) {
+                int32_t tx = 0;
+                int32_t ty = 0;
+                /* Texel variant: the corner variant maps 0..w and is off by one on every mirror. */
+                transform_point_texel((int32_t)x, (int32_t)y, t, (int32_t)tw, (int32_t)th, &tx, &ty);
+                memcpy(scratch + ((((size_t)(uint32_t)ty * ow) + (uint32_t)tx) * 4U), row + ((size_t)x * 4U), 4U);
+            }
+        }
+        const uint64_t h = nt_hash64(scratch, tw * th * 4U).value;
+        best = h < best ? h : best;
+    }
+    return best;
+}
+
+/* End of the dim_key bucket starting at lo. */
+static uint32_t dedup_bucket_end(const DedupSortEntry *e, uint32_t count, uint32_t lo) {
+    uint32_t hi = lo + 1;
+    while (hi < count && e[hi].dim_key == e[lo].dim_key) {
+        hi++;
+    }
+    return hi;
+}
+
+/* End of the equal-content run starting at lo. */
+static uint32_t dedup_group_end(const DedupSortEntry *e, uint32_t count, uint32_t lo) {
+    uint32_t hi = lo + 1;
+    while (hi < count && e[hi].dim_key == e[lo].dim_key && e[hi].hash == e[lo].hash) {
+        hi++;
+    }
+    return hi;
+}
+
+/* Largest post-trim area among buckets that can actually fold — every member of a bucket
+ * shares its dimension pair, so one entry sizes the whole bucket. */
+static size_t dedup_scratch_bytes(const AtlasPipeline *p, const DedupSortEntry *e) {
+    size_t bytes = 0;
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
+        if (hi - lo >= 2) {
+            const uint32_t idx = e[lo].index;
+            const size_t need = (size_t)p->trim_w[idx] * p->trim_h[idx] * 4U;
+            bytes = need > bytes ? need : bytes;
+        }
+        lo = hi;
+    }
+    return bytes;
+}
+
+static void dedup_hash_bucket(const AtlasPipeline *p, DedupSortEntry *e, uint32_t lo, uint32_t hi, uint8_t *scratch) {
+    for (uint32_t k = lo; k < hi; k++) {
+        e[k].hash = atlas_sprite_canonical_hash(p, e[k].index, scratch);
+    }
+}
+
+/* Entries must already be dim_key-sorted. Only buckets that can fold pay the eight
+ * orientation hashes; a singleton keeps hash 0 and cannot meet anything. */
+static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *e) {
+    const size_t scratch_bytes = dedup_scratch_bytes(p, e);
+    if (scratch_bytes == 0) {
+        return;
+    }
+    /* One buffer for the whole pass — a per-sprite allocation in an O(8N) loop is wrong
+     * even in an offline tool. */
+    uint8_t *scratch = (uint8_t *)malloc(scratch_bytes);
+    NT_BUILD_ASSERT(scratch && "pipeline_dedup: orientation scratch alloc failed");
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
+        if (hi - lo >= 2) {
+            dedup_hash_bucket(p, e, lo, hi, scratch);
+        }
+        lo = hi;
+    }
+    free(scratch);
+}
+
+/* One search over an equal-content run, walked in add order. The run's first eligible
+ * member is the root, so the root is the lowest add index — after the D4 stage the root
+ * decides every alias's relative transform and emitted block, so this is a correctness
+ * requirement, not a nicety. */
+static void pipeline_dedup_fold_run(AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
+    for (uint32_t m = lo + 1; m < hi; m++) {
+        const uint32_t a = e[m].index;
+        for (uint32_t r = lo; r < m; r++) {
+            const uint32_t root = e[r].index;
+            /* Only roots are targets; a non-root's own root sits earlier in the run and was
+             * already tried, so no chain-follow is needed. */
+            if (p->dedup_map[root] >= 0) {
+                continue;
+            }
+            if (pipeline_dedup_meta_match(p, a, root) && pipeline_dedup_pixels_match(p, a, root)) {
+                p->dedup_map[a] = (int32_t)root;
+                break;
+            }
+        }
+    }
+}
+
+static DedupSortEntry *pipeline_dedup_sorted_entries(const AtlasPipeline *p) {
+    DedupSortEntry *e = (DedupSortEntry *)calloc(p->sprite_count, sizeof(DedupSortEntry));
+    NT_BUILD_ASSERT(e && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        /* The add-order root rule rests on the sprite array being in add order. A rejected
+         * add consumes an add_seq without appending, so the two only rise together. */
+        NT_BUILD_ASSERT((i == 0 || p->sprites[i].add_seq > p->sprites[i - 1].add_seq) && "pipeline_dedup: sprite array is not in add order");
+        e[i].index = i;
+        e[i].dim_key = atlas_sprite_dim_key(p, i);
+    }
+    qsort(e, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    pipeline_dedup_hash_buckets(p, e);
+    qsort(e, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    return e;
+}
+
+static void pipeline_dedup_collect_unique(AtlasPipeline *p) {
+    p->unique_count = 0;
+    p->unique_indices = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(p->unique_indices && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0) {
+            p->unique_indices[p->unique_count++] = i;
+            continue;
+        }
+        NT_BUILD_ASSERT(p->dedup_map[(uint32_t)p->dedup_map[i]] < 0 && "pipeline_dedup: every alias must point at a root");
+    }
+}
+
+static void pipeline_dedup(AtlasPipeline *p) {
+    DedupSortEntry *dedup_entries = pipeline_dedup_sorted_entries(p);
 
     /* Map duplicate -> original. -1 = unique. */
     p->dedup_map = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
@@ -1328,32 +1480,14 @@ static void pipeline_dedup(AtlasPipeline *p) {
         p->dedup_map[i] = -1;
     }
 
-    for (uint32_t i = 1; i < p->sprite_count; i++) {
-        const uint32_t curr_idx = dedup_entries[i].index;
-        uint32_t j = i;
-        while (j > 0 && dedup_entries[j - 1].hash == dedup_entries[i].hash) {
-            j--;
-            uint32_t orig = dedup_entries[j].index;
-            while (p->dedup_map[orig] >= 0) {
-                orig = (uint32_t)p->dedup_map[orig];
-            }
-            if (pipeline_dedup_meta_match(p, curr_idx, orig) && pipeline_dedup_pixels_match(p, curr_idx, orig)) {
-                p->dedup_map[curr_idx] = (int32_t)orig;
-                break;
-            }
-        }
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_group_end(dedup_entries, p->sprite_count, lo);
+        pipeline_dedup_fold_run(p, dedup_entries, lo, hi);
+        lo = hi;
     }
     free(dedup_entries);
 
-    /* Count unique sprites */
-    p->unique_count = 0;
-    p->unique_indices = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(p->unique_indices && "pipeline_dedup: alloc failed");
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] < 0) {
-            p->unique_indices[p->unique_count++] = i;
-        }
-    }
+    pipeline_dedup_collect_unique(p);
 }
 
 /* Candidate ownership transfers only through the frontier. */
