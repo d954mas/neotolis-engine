@@ -1,5 +1,5 @@
-/* Baseline dedup probe: every assertion here holds both before and after the
- * post-trim/D4 dedup change. Requirement-level folds land with the behaviour. */
+/* Pack-level dedup assertions: everything is read back from the produced pack,
+ * never from builder internals. */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -218,6 +218,133 @@ void test_distinct_sprites_do_not_share_blocks(void) {
     TEST_ASSERT_NOT_EQUAL_MESSAGE(regions[1].vertex_start, regions[2].vertex_start, "distinct sprites must not share a block");
 }
 
+/* Resolved-value grouping and slice9 safety are decided by the atlas options and
+ * the per-sprite overrides, so these cases drive one solid rect per sprite and
+ * vary only the spelling under test. */
+#define RESOLVED_SPRITE_MAX_DIM 48
+#define RESOLVED_SPRITE_MAX_PX (RESOLVED_SPRITE_MAX_DIM * RESOLVED_SPRITE_MAX_DIM * 4)
+#define RESOLVED_SPRITE_MAX_COUNT 6
+
+typedef struct {
+    const char *name;
+    uint16_t w;
+    uint16_t h;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t margin;          /* per-sprite margin override (0 = inherit) */
+    uint16_t slice9_lrtb[4]; /* all zero = no slice9 */
+} resolved_sprite_t;
+
+static bool build_resolved_pack(const char *path, const char *atlas_name, const nt_atlas_opts_t *opts, const resolved_sprite_t *sprites, uint32_t count) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, opts);
+    uint8_t px[RESOLVED_SPRITE_MAX_PX];
+    for (uint32_t i = 0; i < count; ++i) {
+        const resolved_sprite_t *s = &sprites[i];
+        const uint32_t texels = (uint32_t)s->w * (uint32_t)s->h;
+        for (uint32_t t = 0; t < texels; ++t) {
+            px[(t * 4U) + 0U] = s->r;
+            px[(t * 4U) + 1U] = s->g;
+            px[(t * 4U) + 2U] = s->b;
+            px[(t * 4U) + 3U] = 255U;
+        }
+        nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
+        sopts.name = s->name;
+        sopts.margin = s->margin;
+        sopts.slice9_left = s->slice9_lrtb[0];
+        sopts.slice9_right = s->slice9_lrtb[1];
+        sopts.slice9_top = s->slice9_lrtb[2];
+        sopts.slice9_bottom = s->slice9_lrtb[3];
+        nt_atlas_add_raw(atlas, px, s->w, s->h, &sopts);
+    }
+    nt_build_result_t commit = nt_atlas_commit(atlas);
+    nt_build_result_t finish = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return commit == NT_BUILD_OK && finish == NT_BUILD_OK;
+}
+
+static void collect_resolved_pack(const char *path, const char *atlas_name, const nt_atlas_opts_t *opts, const resolved_sprite_t *sprites, uint32_t count, nt_atlas_dedup_region_t *out) {
+    TEST_ASSERT_TRUE_MESSAGE(build_resolved_pack(path, atlas_name, opts, sprites, count), "resolved-value pack failed");
+    size_t len = 0;
+    uint8_t *bytes = read_bin_file(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(bytes, len, out, count, &got);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(count, got, "one region per sprite");
+}
+
+/* margin 0 (inherit) and margin 4 (explicit) resolve to the same footprint, so
+ * they group; margin 9 resolves higher and must keep its own placement. */
+void test_resolved_margin_groups_equivalent_spellings(void) {
+    static const resolved_sprite_t sprites[3] = {
+        {"margin_inherit", 20, 14, 210, 120, 40, 0, {0, 0, 0, 0}},
+        {"margin_explicit", 20, 14, 210, 120, 40, 4, {0, 0, 0, 0}},
+        {"margin_raised", 20, 14, 210, 120, 40, 9, {0, 0, 0, 0}},
+    };
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.margin = 4;
+    nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_margin.ntpack", "dedup_resolved_margin", &opts, sprites, 3, regions);
+
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].page_index, regions[1].page_index, "equivalent margin spellings must share a page");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].u_min, regions[1].u_min, "equivalent margin spellings must share a placement U");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].v_min, regions[1].v_min, "equivalent margin spellings must share a placement V");
+    /* A higher resolved margin is a different packing footprint, not a spelling. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 3), "a raised margin must keep its own placement");
+}
+
+/* Borders are per-region metadata written from each sprite's own data, so the
+ * same art with different borders is one placement and two border sets. */
+void test_slice9_same_art_different_borders_share_placement(void) {
+    static const resolved_sprite_t sprites[2] = {
+        {"panel_even", 24, 40, 180, 90, 60, 0, {4, 4, 4, 4}},
+        {"panel_odd", 24, 40, 180, 90, 60, 0, {6, 2, 8, 3}},
+    };
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_slice9_borders.ntpack", "dedup_slice9_borders", &opts, sprites, 2, regions);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "same art must share one placement");
+    for (uint32_t i = 0; i < 2; ++i) {
+        for (uint32_t k = 0; k < 4; ++k) {
+            TEST_ASSERT_EQUAL_UINT16_MESSAGE(sprites[i].slice9_lrtb[k], regions[i].slice9_lrtb[k], "each region must keep its own borders");
+        }
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[i].transform, "slice9 regions must be stored at identity");
+    }
+}
+
+/* The case the group intersection exists for: a nine-patch resolves to
+ * identity-only, so a plain twin under an unrestricted atlas mask cannot drag
+ * the shared placement into a rotation the runtime would reject. */
+void test_slice9_group_with_plain_sprite_stays_identity(void) {
+    static const resolved_sprite_t sprites[5] = {
+        {"tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}},     {"tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}}, {"wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}},
+        {"wide_panel", 44, 8, 200, 90, 60, 0, {4, 4, 2, 2}}, {"tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}},
+    };
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    /* RECT so the nine-patch and its plain twin resolve to the same shape. */
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
+    nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_slice9_group.ntpack", "dedup_slice9_group", &opts, sprites, 5, regions);
+
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].u_min, regions[3].u_min, "the nine-patch must alias onto its plain twin");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].v_min, regions[3].v_min, "the nine-patch must alias onto its plain twin");
+    for (uint32_t i = 0; i < 5; ++i) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[i].transform, "a group containing a nine-patch must pack at identity");
+    }
+}
+
 void test_dedup_pack_is_deterministic(void) {
     const char *path_a = TMP_DIR "/dedup_determinism_a.ntpack";
     const char *path_b = TMP_DIR "/dedup_determinism_b.ntpack";
@@ -241,6 +368,9 @@ int main(void) {
     RUN_TEST(test_dedup_region_metadata_is_per_sprite);
     RUN_TEST(test_identity_aliases_share_one_vertex_block);
     RUN_TEST(test_distinct_sprites_do_not_share_blocks);
+    RUN_TEST(test_resolved_margin_groups_equivalent_spellings);
+    RUN_TEST(test_slice9_same_art_different_borders_share_placement);
+    RUN_TEST(test_slice9_group_with_plain_sprite_stays_identity);
     RUN_TEST(test_dedup_pack_is_deterministic);
     return UNITY_END();
 }
