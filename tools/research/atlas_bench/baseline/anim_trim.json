@@ -1,0 +1,62 @@
+{
+  "schema_version": 3,
+  "meta": {
+    "tool_version": "2.0.0",
+    "builder_version": 1,
+    "corpus": "assets/bench/anim_trim/*.png",
+    "os": "windows",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "atlas_opts": {
+      "shape": "concave",
+      "max_size": 2048,
+      "padding": 2,
+      "max_vertices": 8,
+      "allowed_transforms": 255,
+      "alpha_threshold": 1,
+      "max_added_area_percent": 10,
+      "power_of_two": true
+    },
+    "cache_hits": 0,
+    "cache_misses": 0
+  },
+  "atlases": [
+    {
+      "name": "anim_trim",
+      "sprites": 28,
+      "unique": 7,
+      "folds_exact": 12,
+      "folds_d4": 9,
+      "area_saved_px": 3876,
+      "vertex_blocks_shared": 12,
+      "pages": 1,
+      "region_count": 28,
+      "pack_ms": 10.5419,
+      "density_fill_frontier": 1.4163,
+      "density_fill_texture": 1.1148,
+      "hull_verts": {
+        "total": 168,
+        "min": 6,
+        "max": 6,
+        "mean": 6.0000
+      }
+    }
+  ],
+  "selected_geometry_proof": {
+    "source": "assets/bench/anim_trim/d4_s4_id.png",
+    "baseline_pack_sha256": "b6b120d271ead712eff2734887f83858d7821c5d962ca16a0067536541730185",
+    "selected_pack_sha256": "b6b120d271ead712eff2734887f83858d7821c5d962ca16a0067536541730185",
+    "valid": true,
+    "retained_cell_count": 87,
+    "base_vertex_count": 6,
+    "selected_vertex_count": 6,
+    "opaque_area2": 174,
+    "base_area2": 253,
+    "selected_area2": 253,
+    "added_area2": 0,
+    "lost_area2": 0,
+    "base_overdraw_percent": 45.40229885,
+    "added_area_percent": 0.00000000,
+    "total_overdraw_percent": 45.40229885,
+    "gates": {"full_cell_coverage":true,"topology":true,"triangulation":true,"allowance":true,"ceiling":true}
+  }
+}

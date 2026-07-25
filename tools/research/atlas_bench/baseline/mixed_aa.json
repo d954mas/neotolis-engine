@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "meta": {
     "tool_version": "2.0.0",
     "builder_version": 1,
@@ -23,11 +23,15 @@
     {
       "name": "mixed_aa",
       "sprites": 4812,
-      "unique": 0,
+      "unique": 1960,
+      "folds_exact": 2232,
+      "folds_d4": 620,
+      "area_saved_px": 12679354,
+      "vertex_blocks_shared": 2576,
       "pages": 1,
       "region_count": 4812,
-      "pack_ms": 824633.5407,
-      "density_fill_frontier": 0.6343,
+      "pack_ms": 298871.0098,
+      "density_fill_frontier": 0.6341,
       "density_fill_texture": 0.6332,
       "hull_verts": {
         "total": 24626,
@@ -39,8 +43,8 @@
   ],
   "selected_geometry_proof": {
     "source": "assets/sprites/bigatlas/ages_ copy.png",
-    "baseline_pack_sha256": "c41bfd5d9988ac384a5b4573125119dded852445d5d78e81f1aeff7f07aac518",
-    "selected_pack_sha256": "922edd60658f5f3dfd5bffa9dfff4f2d60b400f1ae659ca1916ca03d3010d8e1",
+    "baseline_pack_sha256": "29b214a52e9222b461ea235d636797ac041ed18186da5db11eefc09d0e943017",
+    "selected_pack_sha256": "18ad76c96501c22a5440ab00809c8d4007c588e22e0bd8f0537cb7ea4a576a07",
     "valid": true,
     "retained_cell_count": 16260,
     "base_vertex_count": 8,
