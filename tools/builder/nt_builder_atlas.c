@@ -2232,6 +2232,22 @@ static void alias_remap_reversed_indices(const uint16_t *src, uint32_t index_cou
     swap_triangle_winding(out, index_count);
 }
 
+/* Re-prove an alias's already-derived geometry against the alias's OWN mask. This pass is
+ * what catches a wrong relative transform or a wrong derivation, so it must never be
+ * short-circuited by the area-preservation argument that makes the root's scalars valid
+ * claims here. */
+static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
+    const nt_selected_geometry_proof_t *root_proof = &p->geometry_proofs[orig];
+    uint8_t *binary = pipeline_geometry_binary_mask(p, i);
+    nt_selected_geometry_proof_t proof =
+        nt_selected_geometry_validate(binary, p->trim_w[i], p->trim_h[i], root_proof->opaque_area2, p->baseline_vertices[i], p->baseline_vertex_counts[i], root_proof->base_area2,
+                                      p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], p->hull_vertices[i], p->vertex_counts[i], root_proof->selected_area2,
+                                      p->triangle_indices[i], p->triangle_index_counts[i], p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
+    free(binary);
+    p->geometry_proofs[i] = proof;
+    NT_BUILD_ASSERT(proof.valid && nt_selected_geometry_proof_equal(&proof, root_proof) && "alias geometry proof mismatch");
+}
+
 /* Derive an alias's geometry as the exact integer D4 pre-image of its root's.
  *
  * alias_rel maps the alias's local space onto the root's, so the alias's own hull is the
@@ -2284,7 +2300,7 @@ static void pipeline_derive_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_
     p->triangle_indices[i] = tris;
     p->baseline_vertices[i] = base;
     p->baseline_triangle_indices[i] = base_tris;
-    p->geometry_proofs[i] = p->geometry_proofs[orig];
+    pipeline_reprove_alias_geometry(p, i, orig);
 }
 
 static bool geometry_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
@@ -2995,9 +3011,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
-        /* Pass 1 only runs on originals, and originals have pl->sprite_index == i
-         * (the packer remaps back before returning). Use i directly — cheaper and
-         * doesn't rely on the invariant holding through future refactors. */
+        /* Originals have pl->sprite_index == i (the packer remaps back before
+         * returning), so i is used directly below. Holds only while the duplicate
+         * skip above keeps pass 1 originals-only. */
         NT_BUILD_ASSERT(pl->sprite_index == i && "pipeline_serialize: Pass 1 invariant broken (non-original placement)");
 
         uint16_t local_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
