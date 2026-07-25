@@ -853,6 +853,7 @@ static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     /* allowed_transforms: any uint8 mask is legal (identity floor applied downstream). */
     NT_BUILD_ASSERT((sopts->max_vertices == 0 || (sopts->max_vertices >= 4 && sopts->max_vertices <= 16)) && "max_vertices override must be 0 (atlas default) or 4..16");
+    NT_BUILD_ASSERT(sopts->dedup <= NT_ATLAS_SPRITE_DEDUP_OFF && "dedup override must be 0 (atlas default), NT_ATLAS_SPRITE_DEDUP_ON or _OFF");
 }
 
 /* Atlas-shape-dependent sprite cross-field asserts (slice9→RECT, extrude>0→RECT
@@ -893,6 +894,7 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
+    sprite->dedup_override = sopts->dedup;
     /* Slice9 auto-force: RECT shape + identity-only transform mask. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {

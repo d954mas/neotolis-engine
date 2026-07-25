@@ -364,6 +364,8 @@ typedef struct {
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
     bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
+    bool dedup;                             /* fold sprites with identical content onto one placement (default: true).
+                                             * A 0x00 zero-init therefore means dedup OFF — same trade-off as allowed_transforms. */
 } nt_atlas_opts_t;
 
 /* Default atlas options */
@@ -389,6 +391,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .gen_mipmaps = true,
+        .dedup = true,
     };
 }
 
@@ -398,6 +401,10 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
+
+/* Per-sprite dedup override (0 = use atlas dedup). */
+#define NT_ATLAS_SPRITE_DEDUP_ON 1
+#define NT_ATLAS_SPRITE_DEDUP_OFF 2
 
 /* Per-sprite opts struct for nt_atlas_add / nt_atlas_add_raw / nt_atlas_add_glob.
  *
@@ -409,7 +416,10 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
  *
  * Slice9: non-zero borders auto-force shape=RECT and an identity-only transform
  * mask at geometry/pack time. allowed_transforms must be 0 or IDENTITY on a
- * slice9 sprite — any other mask asserts (caller bug). */
+ * slice9 sprite — any other mask asserts (caller bug).
+ *
+ * Dedup: the tri-state dedup override decides this sprite's placement sharing
+ * on its own; OFF guarantees a private placement even when the atlas dedups. */
 typedef struct {
     /* Optional region name.
      *   nt_atlas_add:      NULL = derive from file path (basename with extension)
@@ -446,6 +456,10 @@ typedef struct {
      * whether inherited or overridden, requires the effective shape to be RECT.
      * The packing footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
+    /* 0 = inherit atlas dedup, NT_ATLAS_SPRITE_DEDUP_ON = share a placement with
+     * matching content, NT_ATLAS_SPRITE_DEDUP_OFF = guaranteed private placement
+     * (never aliases onto another sprite and never becomes an alias target). */
+    uint8_t dedup;
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
     uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */

@@ -71,8 +71,15 @@ typedef struct {
     uint8_t max_verts_override;       /* 0 = atlas default */
     uint8_t margin_override;          /* 0 = atlas default */
     uint8_t extrude_override;         /* 0 = atlas default */
+    uint8_t dedup_override;           /* 0 = inherit atlas dedup; else NT_ATLAS_SPRITE_DEDUP_ON/OFF */
     uint32_t add_seq;                 /* per-add sequence for stable add-order error reporting */
 } NtAtlasSpriteInput;
+
+/* Single resolution point for the dedup decision: anything other than an explicit
+ * ON/OFF override inherits the atlas flag. */
+static inline bool atlas_sprite_dedup_enabled(const NtAtlasSpriteInput *sprite, const nt_atlas_opts_t *atlas) {
+    return sprite->dedup_override ? (sprite->dedup_override == NT_ATLAS_SPRITE_DEDUP_ON) : atlas->dedup;
+}
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */
 typedef struct {
