@@ -30,9 +30,9 @@
       "vertex_blocks_shared": 12,
       "pages": 1,
       "region_count": 28,
-      "pack_ms": 10.5419,
-      "density_fill_frontier": 1.4163,
-      "density_fill_texture": 1.1148,
+      "pack_ms": 14.7641,
+      "density_fill_frontier": 0.6188,
+      "density_fill_texture": 0.4871,
       "hull_verts": {
         "total": 168,
         "min": 6,
