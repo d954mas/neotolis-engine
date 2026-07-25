@@ -26,6 +26,7 @@ done
 # mixed_aa reuses bigatlas; the other corpora are dedicated LFS fixtures.
 CORPORA=(
     "anim_heavy|assets/bench/anim_heavy/*.png|concave|2048|0"
+    "anim_trim|assets/bench/anim_trim/*.png|concave|2048|0"
     "mixed_aa|assets/sprites/bigatlas/*.png|concave|4096|0"
     "rect_only|assets/bench/rect_only/*.png|rect|2048|0"
     "slice9|assets/bench/slice9/*.png|concave|2048|0"
