@@ -2905,6 +2905,14 @@ static char *atlas_page_normalized_path(const char *atlas_name, uint32_t page);
 
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
 
+/* One sprite's serialized geometry, emitted before the blob is sized. Hashed and
+ * compared as raw bytes, so padding would make block identity non-deterministic. */
+typedef struct {
+    NtAtlasVertex vertices[NT_POLYGON_MAX_VERTICES];
+    uint16_t indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+} SerializeBlock;
+_Static_assert(sizeof(SerializeBlock) == (NT_POLYGON_MAX_VERTICES * sizeof(NtAtlasVertex)) + (NT_POLYGON_MAX_TRIANGLE_INDICES * sizeof(uint16_t)), "SerializeBlock must have no padding");
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_serialize(AtlasPipeline *p) {
     const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
@@ -2912,25 +2920,26 @@ static void pipeline_serialize(AtlasPipeline *p) {
      * validated pre-pack in pipeline_validate, so serialize is only ever reached
      * with every sprite within uint16 bounds. */
 
-    /* Count total vertices and indices for UNIQUE sprites only.
-     * Duplicates are sprites with identical pixel data — they share placement with
-     * their original (occupying the same atlas position), so they share vertex_start
-     * and index_start in the blob. This saves space for very large atlases.
-     * Pre-triangulated sprites have an explicit triangle count;
-     * single-component polygons use (n - 2) triangles.
+    /* Bound every sprite's block, alias included — each one owns its geometry and
+     * is emitted from it. The blob totals still cover unique sprites only: a
+     * duplicate shares its original's byte range.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
     uint32_t total_vertex_count = 0;
     uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
-        if (p->dedup_map[i] >= 0) {
-            continue; /* Duplicate — its vertex/index storage is shared with the original */
-        }
         NT_BUILD_ASSERT(p->geometry_proofs[i].valid && "pipeline_serialize: selected geometry proof missing");
-        total_vertex_count += p->vertex_counts[i];
         uint32_t tri = p->triangle_index_counts[i] / 3U;
         NT_BUILD_ASSERT(p->triangle_index_counts[i] == (p->vertex_counts[i] - 2U) * 3U && "pipeline_serialize: selected triangle span mismatch");
         NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
+        /* The emit stage writes into fixed-size per-sprite storage; geometry
+         * selection bounds both counts, so this can only fire on a builder bug. */
+        NT_BUILD_ASSERT(p->vertex_counts[i] <= NT_POLYGON_MAX_VERTICES && p->triangle_index_counts[i] <= NT_POLYGON_MAX_TRIANGLE_INDICES &&
+                        "pipeline_serialize: block exceeds per-sprite scratch bound");
+        if (p->dedup_map[i] >= 0) {
+            continue; /* shares its original's byte range in the blob */
+        }
+        total_vertex_count += p->vertex_counts[i];
         total_index_count += tri * 3;
     }
 
@@ -2982,57 +2991,49 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
 
     /* Regions + vertices + indices.
-     * Two-pass: pass 1 writes vertex/index data only for unique sprites and records
-     * their start offsets. Pass 2 fills NtAtlasRegion structures, with duplicates
-     * sharing vertex_start/index_start with their original.
      *
-     * Sharing is correct because duplicates have identical pixel data and are placed
-     * at the SAME atlas position (placement_lookup propagates orig's placement to
-     * duplicates), so they have the same atlas_u/v and same local geometry. */
+     * Every sprite's block — alias included — is emitted from its own geometry, its
+     * own relative transform and its own index array. Byte-identical blocks then
+     * share one byte range in the blob; pass 2 fills one NtAtlasRegion per sprite
+     * from the assigned offsets. */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
-    uint32_t vertex_cursor = 0;
-    uint32_t index_cursor = 0;
 
-    /* Per-sprite recorded start offsets — populated for originals in pass 1, then
-     * propagated from original to duplicates before pass 2. */
+    SerializeBlock *blocks = (SerializeBlock *)calloc(p->sprite_count, sizeof(SerializeBlock));
     uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint8_t *sprite_flags = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
-    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && "pipeline_serialize: alloc failed");
+    uint8_t *region_transform = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(blocks && sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && region_transform && "pipeline_serialize: alloc failed");
 
-    /* Pass 1: write vertex/index data only for unique sprites */
+    // #region serialize emit
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
-            continue; /* duplicate — handled in propagation step */
-        }
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
-        /* Originals have pl->sprite_index == i (the packer remaps back before
-         * returning), so i is used directly below. Holds only while the duplicate
-         * skip above keeps pass 1 originals-only. */
-        NT_BUILD_ASSERT(pl->sprite_index == i && "pipeline_serialize: Pass 1 invariant broken (non-original placement)");
+        /* An alias borrows its root's placement, so only an original's placement
+         * points back at itself. */
+        NT_BUILD_ASSERT((pl->sprite_index == i || p->dedup_map[i] >= 0) && "pipeline_serialize: placement belongs to another sprite");
+        /* The anchor rule forces a group to identity placement as soon as any
+         * member's relative is non-identity, so this is never a D4 composition. */
+        NT_BUILD_ASSERT((p->alias_rel[i] == 0 || pl->transform == 0) && "pipeline_serialize: non-identity alias_rel requires identity placement");
+        uint8_t rt = p->alias_rel[i] ? p->alias_rel[i] : pl->transform;
+        region_transform[i] = rt;
+
+        uint32_t vertex_count = p->vertex_counts[i];
+        uint32_t idx_count = p->triangle_index_counts[i];
+        sprite_idx_count[i] = idx_count;
 
         uint16_t local_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-        uint32_t idx_count = p->triangle_index_counts[i];
         memcpy(local_indices, p->triangle_indices[i], (size_t)idx_count * sizeof(uint16_t));
-        NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
-        /* vertex_start/index_start are uint32_t in v3 — no practical bound until 4G entries. */
-
-        sprite_vertex_start[i] = vertex_cursor;
-        sprite_index_start[i] = index_cursor;
-        sprite_idx_count[i] = idx_count;
-        /* Flag detection runs on PNG-CCW pattern — must precede the winding
-         * swap below or every QUAD_* match would miss. */
-        sprite_flags[i] = atlas_region_flags_from_indices(p->vertex_counts[i], idx_count, local_indices);
+        /* Flag detection runs on this sprite's own PNG-CCW pattern — must precede
+         * the winding swap below or every QUAD_* match would miss. */
+        sprite_flags[i] = atlas_region_flags_from_indices(vertex_count, idx_count, local_indices);
         swap_triangle_winding(local_indices, idx_count);
-
-        /* Write triangle indices (local: 0..vertex_count-1, world-CCW after Y-flip) */
-        memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
-        index_cursor += idx_count;
+        /* Blob indices are local (0..vertex_count-1) and world-CCW after Y-flip. */
+        memcpy(blocks[i].indices, local_indices, (size_t)idx_count * sizeof(uint16_t));
 
         uint32_t s_extrude = p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude;
         uint32_t extra_margin = sprite_extra_margin(p, i);
@@ -3041,8 +3042,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t atlas_w = p->page_w[pl->page];
         uint32_t atlas_h = p->page_h[pl->page];
 
-        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
-            NtAtlasVertex *vtx = &vertices[vertex_cursor++];
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            NtAtlasVertex *vtx = &blocks[i].vertices[v];
             int32_t lx = p->hull_vertices[i][v].x;
             int32_t ly = p->hull_vertices[i][v].y;
             /* Y-flip vertex into y-up local space at the blob boundary (v5).
@@ -3060,7 +3061,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
             int32_t tx;
             int32_t ty;
-            transform_point(lx, ly, pl->transform, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
+            /* The UV is baked through this sprite's own orientation inside the
+             * shared rectangle, against its own trim dims. */
+            transform_point(lx, ly, rt, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
             float atlas_px = (float)inner_x + (float)tx;
             float atlas_py = (float)inner_y + (float)ty;
 
@@ -3082,37 +3085,64 @@ static void pipeline_serialize(AtlasPipeline *p) {
             vtx->atlas_v = (uint16_t)tmp_v;
         }
 
+        /* Re-prove the emitted bytes against this sprite's own mask: the check that
+         * catches a wrong relative transform before it can ship. */
         Point2D reconstructed[NT_POLYGON_MAX_VERTICES];
         uint16_t reconstructed_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
-            const NtAtlasVertex *serialized = &vertices[sprite_vertex_start[i] + v];
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            const NtAtlasVertex *serialized = &blocks[i].vertices[v];
             reconstructed[v].x = serialized->local_x;
             reconstructed[v].y = (int32_t)p->trim_h[i] - serialized->local_y;
         }
-        memcpy(reconstructed_indices, &indices[sprite_index_start[i]], (size_t)idx_count * sizeof(uint16_t));
+        memcpy(reconstructed_indices, blocks[i].indices, (size_t)idx_count * sizeof(uint16_t));
         swap_triangle_winding(reconstructed_indices, idx_count);
         uint8_t *binary = pipeline_geometry_binary_mask(p, i);
         nt_selected_geometry_proof_t serialized_proof =
             nt_selected_geometry_validate(binary, p->trim_w[i], p->trim_h[i], p->geometry_proofs[i].opaque_area2, p->baseline_vertices[i], p->baseline_vertex_counts[i],
-                                          p->geometry_proofs[i].base_area2, p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], reconstructed, p->vertex_counts[i],
+                                          p->geometry_proofs[i].base_area2, p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], reconstructed, vertex_count,
                                           p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
         free(binary);
         NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
     }
+    // #endregion
 
-    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
-    NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
+    /* Sharing the original's byte range below is only correct while a duplicate
+     * emits the same bytes, which an identity relative transform guarantees. */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            uint32_t orig = (uint32_t)p->dedup_map[i];
+            NT_BUILD_ASSERT(p->vertex_counts[i] == p->vertex_counts[orig] && sprite_idx_count[i] == sprite_idx_count[orig] && memcmp(&blocks[i], &blocks[orig], sizeof(SerializeBlock)) == 0 &&
+                            "pipeline_serialize: duplicate emitted a different block than its original");
+        }
+    }
 
-    /* Propagate offsets from originals to duplicates */
+    /* Assign block offsets in add order and copy the winning blocks in.
+     * vertex_start/index_start are uint32_t in v3 — no practical bound until 4G
+     * entries. */
+    uint32_t vertex_cursor = 0;
+    uint32_t index_cursor = 0;
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            continue;
+        }
+        NT_BUILD_ASSERT(vertex_cursor + p->vertex_counts[i] <= total_vertex_count && index_cursor + sprite_idx_count[i] <= total_index_count && "pipeline_serialize: block overruns the sized blob");
+        sprite_vertex_start[i] = vertex_cursor;
+        sprite_index_start[i] = index_cursor;
+        memcpy(&vertices[vertex_cursor], blocks[i].vertices, (size_t)p->vertex_counts[i] * sizeof(NtAtlasVertex));
+        memcpy(&indices[index_cursor], blocks[i].indices, (size_t)sprite_idx_count[i] * sizeof(uint16_t));
+        vertex_cursor += p->vertex_counts[i];
+        index_cursor += sprite_idx_count[i];
+    }
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] >= 0) {
             uint32_t orig = (uint32_t)p->dedup_map[i];
             sprite_vertex_start[i] = sprite_vertex_start[orig];
             sprite_index_start[i] = sprite_index_start[orig];
-            sprite_idx_count[i] = sprite_idx_count[orig];
-            sprite_flags[i] = sprite_flags[orig];
         }
     }
+
+    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
+    NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
 
     /* Pass 2: fill region structures (one per sprite, including duplicates) */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
@@ -3144,7 +3174,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->index_start = sprite_index_start[i];
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
-        reg->transform = pl->transform;
+        reg->transform = region_transform[i];
         reg->index_count = (uint8_t)sprite_idx_count[i];
         reg->flags = sprite_flags[i];
         /* Builder-side invariant: any QUAD_* flag implies vertex_count==4 +
@@ -3166,10 +3196,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memset(reg->_reserved2, 0, sizeof(reg->_reserved2));
     }
 
+    free(blocks);
     free(sprite_vertex_start);
     free(sprite_index_start);
     free(sprite_idx_count);
     free(sprite_flags);
+    free(region_transform);
 
     p->atlas_blob = blob;
     p->atlas_blob_size = blob_size;
