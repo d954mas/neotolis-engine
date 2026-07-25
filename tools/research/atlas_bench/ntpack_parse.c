@@ -21,6 +21,29 @@
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 
+/* Caller must have validated the region's vertex window against total_vertex_count. */
+static void region_uv_bbox(const NtAtlasVertex *verts, const NtAtlasRegion *r, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
+    *umin = UINT16_MAX;
+    *umax = 0;
+    *vmin = UINT16_MAX;
+    *vmax = 0;
+    for (uint32_t j = 0; j < r->vertex_count; j++) {
+        const NtAtlasVertex *p = &verts[r->vertex_start + j];
+        if (p->atlas_u < *umin) {
+            *umin = p->atlas_u;
+        }
+        if (p->atlas_u > *umax) {
+            *umax = p->atlas_u;
+        }
+        if (p->atlas_v < *vmin) {
+            *vmin = p->atlas_v;
+        }
+        if (p->atlas_v > *vmax) {
+            *vmax = p->atlas_v;
+        }
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard chain; splitting would separate bounds checks from the reads they protect
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out) {
     if (blob == NULL || out == NULL) {
@@ -90,19 +113,6 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
             hull_max = nv;
         }
 
-        /* Dedup: identical sprites alias the same deduplicated vertex span, so
-         * they occupy the SAME atlas pixels. Count each unique span's polygon
-         * area ONCE — matching the packer's poly_area (unique-set fill). Hull
-         * counts above stay per-region (region_count == input-sprite count).
-         * O(n^2) scan keeps the blob parser allocation-free. */
-        bool is_unique_span = true;
-        for (uint16_t j = 0; j < i; j++) {
-            if (regions[j].vertex_start == vstart) {
-                is_unique_span = false;
-                break;
-            }
-        }
-
         if (nv >= 3) {
             double shoelace = 0.0;
             uint16_t umin = UINT16_MAX;
@@ -126,15 +136,39 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                     vmax = p->atlas_v;
                 }
             }
+            const uint8_t page = regions[i].page_index;
+
+            /* Dedup: regions sharing a placement rectangle occupy the SAME atlas
+             * pixels, so their polygon area counts ONCE — matching the packer's
+             * poly_area (unique-set fill). The key is the UV footprint, not the
+             * vertex span: a D4 alias owns its own vertex block but shares the
+             * rectangle, and a shared span always implies an equal footprint.
+             * Hull counts above stay per-region (region_count == sprite count).
+             * O(n^2) scan keeps the blob parser allocation-free. */
+            bool is_unique_placement = true;
+            for (uint16_t j = 0; j < i; j++) {
+                if (regions[j].vertex_count < 3 || regions[j].page_index != page) {
+                    continue;
+                }
+                uint16_t jumin = 0;
+                uint16_t jumax = 0;
+                uint16_t jvmin = 0;
+                uint16_t jvmax = 0;
+                region_uv_bbox(verts, &regions[j], &jumin, &jumax, &jvmin, &jvmax);
+                if (jumin == umin && jumax == umax && jvmin == vmin && jvmax == vmax) {
+                    is_unique_placement = false;
+                    break;
+                }
+            }
+
             const double region_area = fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
             bbox_area += (double)(umax - umin) * (double)(vmax - vmin) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
-            if (is_unique_span) {
+            if (is_unique_placement) {
                 poly_area += region_area;
             }
 
-            const uint8_t page = regions[i].page_index;
             if (page < h->page_count && page < NT_BENCH_MAX_PAGES) {
-                if (is_unique_span) {
+                if (is_unique_placement) {
                     out->page_poly_area_uv[page] += region_area;
                 }
                 if (umin < pumin[page]) {

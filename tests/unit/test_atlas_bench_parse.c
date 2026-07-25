@@ -136,6 +136,70 @@ static uint32_t build_quad_blob(uint8_t *buf, uint32_t cap) {
     return build_mock_atlas_blob(buf, cap, &spec);
 }
 
+/* Three quads on one page. `middle` selects what region 1 is:
+ *   ALIAS     — region 0's UV footprint in its OWN vertex block (a D4 alias)
+ *   DISTINCT  — the same quad shifted, so its footprint differs
+ *   ABSENT    — omitted entirely
+ * Region 1's corner order is rotated in the ALIAS case so the vertex bytes
+ * differ from region 0 while the footprint stays equal. */
+typedef enum { MIDDLE_ALIAS, MIDDLE_DISTINCT, MIDDLE_ABSENT } middle_kind_t;
+
+static void write_quad(NtAtlasVertex *dst, uint16_t u0, uint16_t u1, uint16_t v0, uint16_t v1, uint16_t rotate) {
+    const uint16_t us[4] = {u0, u1, u1, u0};
+    const uint16_t vs[4] = {v0, v0, v1, v1};
+    for (uint16_t i = 0; i < 4; i++) {
+        const uint16_t src = (uint16_t)((i + rotate) % 4);
+        dst[i].local_x = (int16_t)(i * 3);
+        dst[i].local_y = (int16_t)(i * 3);
+        dst[i].atlas_u = us[src];
+        dst[i].atlas_v = vs[src];
+    }
+}
+
+static uint32_t build_placement_blob(uint8_t *buf, uint32_t cap, middle_kind_t middle) {
+    NtAtlasVertex verts[12];
+    NtAtlasRegion regions[3];
+    memset(regions, 0, sizeof(regions));
+
+    write_quad(&verts[0], 1000, 5000, 2000, 6000, 0);
+    if (middle == MIDDLE_ALIAS) {
+        write_quad(&verts[4], 1000, 5000, 2000, 6000, 2);
+    } else {
+        write_quad(&verts[4], 9000, 13000, 2000, 6000, 0);
+    }
+    write_quad(&verts[8], 20000, 24000, 20000, 25000, 0);
+
+    const uint16_t region_count = (middle == MIDDLE_ABSENT) ? 2 : 3;
+    const uint32_t starts[3] = {0, 4, 8};
+    for (uint16_t r = 0; r < region_count; r++) {
+        /* ABSENT keeps region 0 and the third quad, skipping the middle block. */
+        const uint16_t src = (middle == MIDDLE_ABSENT && r == 1) ? 2 : r;
+        regions[r].vertex_start = starts[src];
+        regions[r].vertex_count = 4;
+        regions[r].page_index = 0;
+    }
+
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = region_count,
+        .vertices = verts,
+        .total_vertex_count = 12,
+        .indices = NULL,
+        .total_index_count = 0,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+    return build_mock_atlas_blob(buf, cap, &spec);
+}
+
+static double parse_poly_area(middle_kind_t middle) {
+    uint8_t buf[1024];
+    uint32_t size = build_placement_blob(buf, sizeof(buf), middle);
+    nt_bench_atlas_metrics_t m;
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_atlas_blob(buf, size, &m));
+    return m.poly_area_uv;
+}
+
 /* ---- Tests ---- */
 
 static void region_and_vertex_counts(void) {
@@ -161,6 +225,23 @@ static void polygon_area_positive(void) {
     TEST_ASSERT_EQUAL_INT(0, rc);
     TEST_ASSERT_TRUE(m.poly_area_uv > 0.0);
 }
+
+/* A footprint-sharing alias must not add area, even though it owns its own
+ * vertex block — the pre-dedup span key counted it and pushed anim_trim's
+ * reported fill above 1.0. Doubles compared bit-exactly: the parser and the
+ * ABSENT case accumulate the same two areas in the same order, and Unity is
+ * built with UNITY_EXCLUDE_FLOAT. */
+static void alias_sharing_a_placement_counts_once(void) {
+    const double aliased = parse_poly_area(MIDDLE_ALIAS);
+    const double without = parse_poly_area(MIDDLE_ABSENT);
+    uint64_t a_bits = 0;
+    uint64_t w_bits = 0;
+    memcpy(&a_bits, &aliased, sizeof(a_bits));
+    memcpy(&w_bits, &without, sizeof(w_bits));
+    TEST_ASSERT_EQUAL_HEX64(w_bits, a_bits);
+}
+
+static void distinct_placement_adds_area(void) { TEST_ASSERT_TRUE(parse_poly_area(MIDDLE_DISTINCT) > parse_poly_area(MIDDLE_ALIAS)); }
 
 static void reject_bad_magic(void) {
     uint8_t buf[512];
@@ -348,6 +429,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(region_and_vertex_counts);
     RUN_TEST(polygon_area_positive);
+    RUN_TEST(alias_sharing_a_placement_counts_once);
+    RUN_TEST(distinct_placement_adds_area);
     RUN_TEST(reject_bad_magic);
     RUN_TEST(reject_bad_version);
     RUN_TEST(reject_oob_vertex_offset);
