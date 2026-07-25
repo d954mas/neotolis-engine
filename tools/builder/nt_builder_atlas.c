@@ -473,46 +473,57 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 20 };
+enum { ATLAS_CACHE_KEY_VERSION = 21 };
+
+/* Per-sprite key record: hash + source dims + origin, then the raw override block. */
+enum { KEY_OV_OFF = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) };
+enum { PER_SPRITE_SIZE = KEY_OV_OFF + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (4 * sizeof(uint8_t)) };
+/* Nothing else ties the hand-summed size to the hand-computed write offsets;
+ * a mismatch truncates or over-reads the key input silently. */
+_Static_assert(PER_SPRITE_SIZE == KEY_OV_OFF + 17 + sizeof(float), "PER_SPRITE_SIZE must equal the last per-sprite write offset + 1");
+
+static void atlas_key_write_sprite(uint8_t *out, const NtAtlasSpriteInput *s) {
+    size_t off = 0;
+    memcpy(out + off, &s->decoded_hash, sizeof(uint64_t));
+    off += sizeof(uint64_t);
+    memcpy(out + off, &s->width, sizeof(uint32_t));
+    off += sizeof(uint32_t);
+    memcpy(out + off, &s->height, sizeof(uint32_t));
+    off += sizeof(uint32_t);
+    memcpy(out + off, &s->origin_x, sizeof(float));
+    off += sizeof(float);
+    memcpy(out + off, &s->origin_y, sizeof(float));
+    const size_t ov_off = KEY_OV_OFF;
+    memcpy(out + ov_off, &s->slice9_left, sizeof(uint16_t));
+    memcpy(out + ov_off + 2, &s->slice9_right, sizeof(uint16_t));
+    memcpy(out + ov_off + 4, &s->slice9_top, sizeof(uint16_t));
+    memcpy(out + ov_off + 6, &s->slice9_bottom, sizeof(uint16_t));
+    out[ov_off + 8] = s->shape_override;
+    out[ov_off + 9] = s->transforms_override;
+    out[ov_off + 10] = s->max_verts_override;
+    out[ov_off + 11] = s->margin_override;
+    out[ov_off + 12] = s->extrude_override;
+    float area_percent = s->has_max_added_area_percent_override ? s->max_added_area_percent_override : 0.0F;
+    memcpy(out + ov_off + 13, &area_percent, sizeof(float));
+    out[ov_off + 13 + sizeof(float)] = s->alpha_threshold_override;
+    out[ov_off + 14 + sizeof(float)] = s->has_alpha_threshold_override ? 1 : 0;
+    out[ov_off + 15 + sizeof(float)] = s->has_max_added_area_percent_override ? 1 : 0;
+    /* Tri-state, so the value already carries its own presence. */
+    out[ov_off + 16 + sizeof(float)] = s->dedup_override;
+}
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Atlas cache stores raw page pixels + placements; post-pack texture
      * encoding knobs belong to the texture cache. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
-     * cached placements store sprite_index in add-order, so the key must be
-     * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (3 * sizeof(uint8_t)) };
+    /* Per-sprite records stay in add-order, NOT sorted — cached placements store
+     * sprite_index in add-order, so the key must be order-sensitive to avoid
+     * mismatching placements after reordering. */
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        size_t off = (size_t)i * PER_SPRITE_SIZE;
-        memcpy(sprite_buf + off, &sprites[i].decoded_hash, sizeof(uint64_t));
-        off += sizeof(uint64_t);
-        memcpy(sprite_buf + off, &sprites[i].width, sizeof(uint32_t));
-        off += sizeof(uint32_t);
-        memcpy(sprite_buf + off, &sprites[i].height, sizeof(uint32_t));
-        off += sizeof(uint32_t);
-        memcpy(sprite_buf + off, &sprites[i].origin_x, sizeof(float));
-        off += sizeof(float);
-        memcpy(sprite_buf + off, &sprites[i].origin_y, sizeof(float));
-        off += sizeof(float);
-        size_t ov_off = off;
-        memcpy(sprite_buf + ov_off, &sprites[i].slice9_left, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 2, &sprites[i].slice9_right, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 4, &sprites[i].slice9_top, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 6, &sprites[i].slice9_bottom, sizeof(uint16_t));
-        sprite_buf[ov_off + 8] = sprites[i].shape_override;
-        sprite_buf[ov_off + 9] = sprites[i].transforms_override;
-        sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
-        sprite_buf[ov_off + 11] = sprites[i].margin_override;
-        sprite_buf[ov_off + 12] = sprites[i].extrude_override;
-        float area_percent = sprites[i].has_max_added_area_percent_override ? sprites[i].max_added_area_percent_override : 0.0F;
-        memcpy(sprite_buf + ov_off + 13, &area_percent, sizeof(float));
-        sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override;
-        sprite_buf[ov_off + 14 + sizeof(float)] = sprites[i].has_alpha_threshold_override ? 1 : 0;
-        sprite_buf[ov_off + 15 + sizeof(float)] = sprites[i].has_max_added_area_percent_override ? 1 : 0;
+        atlas_key_write_sprite(sprite_buf + ((size_t)i * PER_SPRITE_SIZE), &sprites[i]);
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -548,7 +559,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     opts_buf[pos++] = flags;
     opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
+    opts_buf[pos++] = opts->dedup ? 1 : 0;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
+    NT_BUILD_ASSERT(pos <= sizeof(opts_buf) && "compute_atlas_cache_key: opts_buf too small");
 
     /* Combine into single buffer and hash */
     size_t total = per_sprite_bytes + pos;
