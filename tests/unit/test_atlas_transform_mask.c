@@ -26,16 +26,19 @@
 #include "nt_builder_atlas_test.h"
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
+#include "test_helpers/atlas_dedup_fixture.h"
 #include "test_helpers/atlas_transform_fixture.h"
 #include "unity.h"
 /* clang-format on */
 
 #define TMP_DIR "build/tests/tmp"
 #define GOLDEN_DIR "tests/fixtures/transform_mask_golden"
+#define DEDUP_GOLDEN_DIR "tests/fixtures/dedup_golden"
 
 /* Atlas name the etalons were captured with. The name seeds the texture
  * page resource ids, so byte-identity to the etalons requires the same name. */
 #define GOLDEN_ATLAS_NAME "transform_golden"
+#define DEDUP_GOLDEN_ATLAS_NAME "dedup_golden"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -98,7 +101,9 @@ static void read_sha_file(const char *path, char out[65]) {
 
 /* --- Pack builders --- */
 
-/* Build the shared etalon fixture to `path` at the given atlas mask, thread=1. */
+/* Build the shared etalon fixture to `path` at the given atlas mask, thread=1.
+ * Dedup is off so these etalons stay a pure transform-mask contract — dedup
+ * behaviour is pinned separately by the dedup_golden etalon. */
 static bool build_fixture_pack(uint8_t atlas_mask, const char *atlas_name, const char *path) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
@@ -110,6 +115,7 @@ static bool build_fixture_pack(uint8_t atlas_mask, const char *atlas_name, const
     nt_builder_set_threads(ctx, 1);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.allowed_transforms = atlas_mask;
+    opts.dedup = false;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
     atlas_transform_fixture_add(atlas);
     (void)nt_atlas_commit(atlas);
@@ -188,19 +194,40 @@ static bool build_slice9_pack(const char *path) {
     return r == NT_BUILD_OK;
 }
 
+/* Atlas-level dedup ON over the 10-frame post-trim fixture — the etalon that
+ * pins the folding behaviour the transform goldens deliberately exclude. */
+static bool build_dedup_golden_pack(const char *path) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, DEDUP_GOLDEN_ATLAS_NAME, &opts);
+    atlas_dedup_fixture_add(atlas);
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return r == NT_BUILD_OK;
+}
+
 /* --- Region dump / transform extraction (unpacked output) --- */
 
+#define REGIONS_DUMP_TMP TMP_DIR "/xform_regions_dump.txt"
+
 /* Write the structural region dump for a produced pack into a malloc'd,
- * NUL-terminated string (LF line endings). */
-static char *dump_regions_text(const char *pack_path) {
+ * NUL-terminated string (LF line endings). `tmp_path` keeps the on-disk copy a
+ * capture run can move straight into a fixture. */
+static char *dump_regions_text(const char *pack_path, const char *tmp_path) {
     size_t len = 0;
     uint8_t *bytes = read_bin_file(pack_path, &len);
     if (!bytes) {
         return NULL;
     }
-    char tmp[512];
-    (void)snprintf(tmp, sizeof(tmp), "%s/xform_regions_dump.txt", TMP_DIR);
-    FILE *f = fopen(tmp, "wb"); /* wb → LF, matches the LF-pinned etalon dumps */
+    FILE *f = fopen(tmp_path, "wb"); /* wb → LF, matches the LF-pinned etalon dumps */
     if (!f) {
         free(bytes);
         return NULL;
@@ -211,7 +238,7 @@ static char *dump_regions_text(const char *pack_path) {
     if (!ok) {
         return NULL;
     }
-    return read_text_file(tmp);
+    return read_text_file(tmp_path);
 }
 
 /* Parse the 6 space-separated unsigned fields of one dump line ("idx tr x y w h").
@@ -235,7 +262,7 @@ static bool parse_dump_line_u6(const char *line, const char *line_end, unsigned 
 
 /* Parsed dump rows ("idx transform umin vmin w h") in region-index order. */
 static bool collect_dump_rows(const char *pack_path, unsigned (*out)[6], int cap, int *count) {
-    char *txt = dump_regions_text(pack_path);
+    char *txt = dump_regions_text(pack_path, REGIONS_DUMP_TMP);
     if (!txt) {
         return false;
     }
@@ -454,15 +481,15 @@ void test_slice9_emits_identity(void) {
 
 /* --- Byte-identity to the master-captured etalons --- */
 
-static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_path, const char *pack_path) {
-    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(mask, GOLDEN_ATLAS_NAME, pack_path), "golden pack build failed");
-
+/* Compare an already-produced pack against its committed etalon pair. The dump
+ * lands in `dump_tmp` so a capture run can copy it into the fixture verbatim. */
+static void assert_matches_etalon(const char *pack_path, const char *sha_path, const char *dump_path, const char *dump_tmp) {
     char actual_sha[65];
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(pack_path, actual_sha), "hash produced pack");
     char expected_sha[65];
     read_sha_file(sha_path, expected_sha);
 
-    char *dump = dump_regions_text(pack_path);
+    char *dump = dump_regions_text(pack_path, dump_tmp);
     TEST_ASSERT_NOT_NULL_MESSAGE(dump, "produced pack dump");
     char *etalon_dump = read_text_file(dump_path);
     TEST_ASSERT_NOT_NULL_MESSAGE(etalon_dump, "read etalon dump");
@@ -479,10 +506,35 @@ static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_p
     free(etalon_dump);
 }
 
+static void assert_golden(uint8_t mask, const char *sha_path, const char *dump_path, const char *pack_path) {
+    TEST_ASSERT_TRUE_MESSAGE(build_fixture_pack(mask, GOLDEN_ATLAS_NAME, pack_path), "golden pack build failed");
+    assert_matches_etalon(pack_path, sha_path, dump_path, TMP_DIR "/xform_golden_dump.txt");
+}
+
 void test_golden_byte_identity_all(void) { assert_golden(NT_ATLAS_TRANSFORMS_ALL, GOLDEN_DIR "/etalon_all.sha256", GOLDEN_DIR "/etalon_all.dump.txt", TMP_DIR "/xform_golden_all.ntpack"); }
 
 void test_golden_byte_identity_identity(void) {
     assert_golden(NT_ATLAS_TRANSFORMS_IDENTITY, GOLDEN_DIR "/etalon_identity.sha256", GOLDEN_DIR "/etalon_identity.dump.txt", TMP_DIR "/xform_golden_identity.ntpack");
+}
+
+/* --- Byte-identity of a dedup-ON pack (the folding contract) --- */
+
+void test_golden_byte_identity_dedup_on(void) {
+    const char *path = TMP_DIR "/dedup_golden.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_golden_pack(path), "dedup golden pack build failed");
+    /* Non-vacuity: without the fold the 10 frames would not share 4 placements. */
+    nt_atlas_dedup_region_t regions[NT_ATLAS_DEDUP_FRAME_COUNT];
+    uint32_t count = 0;
+    size_t len = 0;
+    uint8_t *bytes = read_bin_file(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read dedup golden pack");
+    const bool ok = atlas_dedup_collect_regions(bytes, len, regions, NT_ATLAS_DEDUP_FRAME_COUNT, &count);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect dedup golden regions");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT, count, "unexpected region count");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, atlas_dedup_distinct_placements(regions, count), "the etalon must be captured on a folded pack");
+
+    assert_matches_etalon(path, DEDUP_GOLDEN_DIR "/etalon_dedup_on.sha256", DEDUP_GOLDEN_DIR "/etalon_dedup_on.dump.txt", TMP_DIR "/dedup_golden_dump.txt");
 }
 
 /* --- An alias region's transform lies in its OWN effective mask --- */
@@ -571,5 +623,6 @@ int main(void) {
     RUN_TEST(test_alias_region_transform_is_in_its_own_mask);
     RUN_TEST(test_golden_byte_identity_all);
     RUN_TEST(test_golden_byte_identity_identity);
+    RUN_TEST(test_golden_byte_identity_dedup_on);
     return UNITY_END();
 }

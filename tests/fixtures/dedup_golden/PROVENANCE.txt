@@ -1,0 +1,20 @@
+Dedup-ON golden etalon.
+Captured on the tree that shipped post-trim + D4-canonical dedup, AFTER
+byte-equal vertex-block sharing landed (blocks fold across pages, so an etalon
+captured before it would not match).
+Single-threaded (nt_builder_set_threads(ctx, 1), NT_BUILDER_THREADS=1),
+nt_atlas_opts_defaults() unmodified — dedup ON, allowed_transforms = ALL.
+Fixture: tests/unit/test_helpers/atlas_dedup_fixture.h, all 10 frames via
+atlas_dedup_fixture_add (4 art states on 10 distinct canvas sizes/offsets, so
+folding is reachable only after the alpha trim). 10 frames -> 4 placements.
+Atlas name "dedup_golden" — the name seeds the texture page resource ids, so
+the SHA depends on it; re-capture with any other name will not match.
+etalon_dedup_on sha256 6c3a155588a7db1eefe6d40c3f7c3c5ede4a45360d3adee393a2c0e5a08683a4
+test_atlas_transform_mask::test_golden_byte_identity_dedup_on re-packs the same
+fixture, asserts the pack still folds to 4 distinct placements, then asserts
+byte-identity against this dump + sha256 pair.
+To regenerate after an INTENTIONAL dedup or packer change: run
+test_atlas_transform_mask, then take the SHA-256 of
+build/tests/tmp/dedup_golden.ntpack and copy
+build/tests/tmp/dedup_golden_dump.txt over the dump file (the test also prints
+the current dump on divergence). Keep both files LF — pinned in .gitattributes.
