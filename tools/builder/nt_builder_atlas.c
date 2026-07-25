@@ -1174,6 +1174,9 @@ typedef struct {
     PackStats stats;
     uint32_t sprite_count;
     uint32_t unique_count;
+    /* Blocks folded by byte equality in pipeline_serialize — the only observable
+     * proving that sharing actually happens. */
+    uint32_t vertex_blocks_shared;
     uint32_t placement_count;
     uint32_t page_count;
     uint32_t thread_count;
@@ -2921,11 +2924,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
      * with every sprite within uint16 bounds. */
 
     /* Bound every sprite's block, alias included — each one owns its geometry and
-     * is emitted from it. The blob totals still cover unique sprites only: a
-     * duplicate shares its original's byte range.
+     * is emitted from it. The blob is sized afterwards, from the byte-deduplicated
+     * block totals.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
-    uint32_t total_vertex_count = 0;
-    uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
         NT_BUILD_ASSERT(p->geometry_proofs[i].valid && "pipeline_serialize: selected geometry proof missing");
@@ -2936,11 +2937,6 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * selection bounds both counts, so this can only fire on a builder bug. */
         NT_BUILD_ASSERT(p->vertex_counts[i] <= NT_POLYGON_MAX_VERTICES && p->triangle_index_counts[i] <= NT_POLYGON_MAX_TRIANGLE_INDICES &&
                         "pipeline_serialize: block exceeds per-sprite scratch bound");
-        if (p->dedup_map[i] >= 0) {
-            continue; /* shares its original's byte range in the blob */
-        }
-        total_vertex_count += p->vertex_counts[i];
-        total_index_count += tri * 3;
     }
 
     /* Build placement lookup: original_sprite_index -> placement index.
@@ -2961,45 +2957,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         }
     }
 
-    /* Serialize blob: header + texture_resource_ids + regions + vertices + indices */
-    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
-    uint32_t vertex_offset = regions_offset + (p->sprite_count * (uint32_t)sizeof(NtAtlasRegion));
-    uint32_t index_offset = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
-    uint32_t blob_size = index_offset + (total_index_count * (uint32_t)sizeof(uint16_t));
-    uint8_t *blob = (uint8_t *)calloc(1, blob_size);
-    NT_BUILD_ASSERT(blob && "pipeline_serialize: blob alloc failed");
-
-    /* Header */
-    NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
-    hdr->magic = NT_ATLAS_MAGIC;
-    hdr->version = NT_ATLAS_VERSION;
-    hdr->region_count = (uint16_t)p->sprite_count;
-    hdr->page_count = (uint16_t)p->page_count;
-    hdr->_pad = 0;
-    hdr->vertex_offset = vertex_offset;
-    hdr->total_vertex_count = total_vertex_count;
-    hdr->index_offset = index_offset;
-    hdr->total_index_count = total_index_count;
-
-    /* Texture resource IDs */
-    uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
-    for (uint32_t pg = 0; pg < p->page_count; pg++) {
-        char *tex_path = atlas_page_normalized_path(p->state->name, pg);
-        uint64_t tid = nt_hash64_str(tex_path).value;
-        free(tex_path);
-        memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
-    }
-
-    /* Regions + vertices + indices.
+    /* Vertices + indices + regions.
      *
      * Every sprite's block — alias included — is emitted from its own geometry, its
      * own relative transform and its own index array. Byte-identical blocks then
      * share one byte range in the blob; pass 2 fills one NtAtlasRegion per sprite
      * from the assigned offsets. */
-    NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
-    NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
-    uint16_t *indices = (uint16_t *)(blob + index_offset);
-
     SerializeBlock *blocks = (SerializeBlock *)calloc(p->sprite_count, sizeof(SerializeBlock));
     uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
@@ -3106,43 +3069,117 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
     // #endregion
 
-    /* Sharing the original's byte range below is only correct while a duplicate
-     * emits the same bytes, which an identity relative transform guarantees. */
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)p->dedup_map[i];
-            NT_BUILD_ASSERT(p->vertex_counts[i] == p->vertex_counts[orig] && sprite_idx_count[i] == sprite_idx_count[orig] && memcmp(&blocks[i], &blocks[orig], sizeof(SerializeBlock)) == 0 &&
-                            "pipeline_serialize: duplicate emitted a different block than its original");
-        }
+    // #region serialize block dedup
+    /* Assign each block a byte range, first writer in add order wins — which makes
+     * the assignment deterministic without any tie-break rule. The hash only
+     * narrows the search; identity is decided by memcmp, so a collision can share
+     * nothing.
+     * vertex_start/index_start are uint32_t in v3 — no practical bound until 4G. */
+    uint32_t slot_capacity = 16;
+    while (slot_capacity < p->sprite_count * 2U) {
+        slot_capacity <<= 1U;
     }
+    uint64_t *slot_hash = (uint64_t *)calloc(slot_capacity, sizeof(uint64_t));
+    uint32_t *slot_owner = (uint32_t *)malloc((size_t)slot_capacity * sizeof(uint32_t));
+    int32_t *block_owner = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
+    NT_BUILD_ASSERT(slot_hash && slot_owner && block_owner && "pipeline_serialize: alloc failed");
+    memset(slot_owner, 0xFF, (size_t)slot_capacity * sizeof(uint32_t));
 
-    /* Assign block offsets in add order and copy the winning blocks in.
-     * vertex_start/index_start are uint32_t in v3 — no practical bound until 4G
-     * entries. */
     uint32_t vertex_cursor = 0;
     uint32_t index_cursor = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
+        uint64_t hash = nt_hash64(&blocks[i], (uint32_t)sizeof(SerializeBlock)).value;
+        uint32_t slot = (uint32_t)(hash & (slot_capacity - 1U));
+        block_owner[i] = -1;
+        while (slot_owner[slot] != UINT32_MAX) {
+            uint32_t candidate = slot_owner[slot];
+            if (slot_hash[slot] == hash && p->vertex_counts[candidate] == p->vertex_counts[i] && sprite_idx_count[candidate] == sprite_idx_count[i] &&
+                memcmp(&blocks[candidate], &blocks[i], sizeof(SerializeBlock)) == 0) {
+                block_owner[i] = (int32_t)candidate;
+                break;
+            }
+            slot = (slot + 1U) & (slot_capacity - 1U);
+        }
+        if (block_owner[i] >= 0) {
+            uint32_t owner = (uint32_t)block_owner[i];
+            sprite_vertex_start[i] = sprite_vertex_start[owner];
+            sprite_index_start[i] = sprite_index_start[owner];
+            p->vertex_blocks_shared++;
             continue;
         }
-        NT_BUILD_ASSERT(vertex_cursor + p->vertex_counts[i] <= total_vertex_count && index_cursor + sprite_idx_count[i] <= total_index_count && "pipeline_serialize: block overruns the sized blob");
+        slot_hash[slot] = hash;
+        slot_owner[slot] = i;
         sprite_vertex_start[i] = vertex_cursor;
         sprite_index_start[i] = index_cursor;
-        memcpy(&vertices[vertex_cursor], blocks[i].vertices, (size_t)p->vertex_counts[i] * sizeof(NtAtlasVertex));
-        memcpy(&indices[index_cursor], blocks[i].indices, (size_t)sprite_idx_count[i] * sizeof(uint16_t));
         vertex_cursor += p->vertex_counts[i];
         index_cursor += sprite_idx_count[i];
     }
+    free(slot_hash);
+    free(slot_owner);
+
+    /* An identity relative emits the same bytes as its original, so it must land on
+     * the original's range — this is what keeps packs byte-compatible. */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
+        if (p->dedup_map[i] >= 0 && p->alias_rel[i] == 0) {
             uint32_t orig = (uint32_t)p->dedup_map[i];
-            sprite_vertex_start[i] = sprite_vertex_start[orig];
-            sprite_index_start[i] = sprite_index_start[orig];
+            NT_BUILD_ASSERT(sprite_vertex_start[i] == sprite_vertex_start[orig] && sprite_index_start[i] == sprite_index_start[orig] &&
+                            "pipeline_serialize: identity alias did not share its original's block");
         }
     }
 
-    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
-    NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
+    uint32_t total_vertex_count = vertex_cursor;
+    uint32_t total_index_count = index_cursor;
+    // #endregion
+
+    /* Serialize blob: header + texture_resource_ids + regions + vertices + indices */
+    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
+    uint32_t vertex_offset = regions_offset + (p->sprite_count * (uint32_t)sizeof(NtAtlasRegion));
+    uint32_t index_offset = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
+    uint32_t blob_size = index_offset + (total_index_count * (uint32_t)sizeof(uint16_t));
+    uint8_t *blob = (uint8_t *)calloc(1, blob_size);
+    NT_BUILD_ASSERT(blob && "pipeline_serialize: blob alloc failed");
+
+    /* Header */
+    NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
+    hdr->magic = NT_ATLAS_MAGIC;
+    hdr->version = NT_ATLAS_VERSION;
+    hdr->region_count = (uint16_t)p->sprite_count;
+    hdr->page_count = (uint16_t)p->page_count;
+    hdr->_pad = 0;
+    hdr->vertex_offset = vertex_offset;
+    hdr->total_vertex_count = total_vertex_count;
+    hdr->index_offset = index_offset;
+    hdr->total_index_count = total_index_count;
+
+    /* Texture resource IDs */
+    uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
+        char *tex_path = atlas_page_normalized_path(p->state->name, pg);
+        uint64_t tid = nt_hash64_str(tex_path).value;
+        free(tex_path);
+        memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
+    }
+
+    NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
+    NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
+    uint16_t *indices = (uint16_t *)(blob + index_offset);
+
+    /* Copy the winning blocks into the range they were assigned. */
+    uint32_t copied_vertex_count = 0;
+    uint32_t copied_index_count = 0;
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (block_owner[i] >= 0) {
+            continue; /* shares an earlier sprite's byte-identical block */
+        }
+        NT_BUILD_ASSERT(sprite_vertex_start[i] + p->vertex_counts[i] <= total_vertex_count && sprite_index_start[i] + sprite_idx_count[i] <= total_index_count &&
+                        "pipeline_serialize: block overruns the sized blob");
+        memcpy(&vertices[sprite_vertex_start[i]], blocks[i].vertices, (size_t)p->vertex_counts[i] * sizeof(NtAtlasVertex));
+        memcpy(&indices[sprite_index_start[i]], blocks[i].indices, (size_t)sprite_idx_count[i] * sizeof(uint16_t));
+        copied_vertex_count += p->vertex_counts[i];
+        copied_index_count += sprite_idx_count[i];
+    }
+    NT_BUILD_ASSERT(copied_vertex_count == total_vertex_count && "pipeline_serialize: vertex count mismatch");
+    NT_BUILD_ASSERT(copied_index_count == total_index_count && "pipeline_serialize: index count mismatch");
 
     /* Pass 2: fill region structures (one per sprite, including duplicates) */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
@@ -3197,6 +3234,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
 
     free(blocks);
+    free(block_owner);
     free(sprite_vertex_start);
     free(sprite_index_start);
     free(sprite_idx_count);
