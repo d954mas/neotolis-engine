@@ -814,6 +814,39 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_d4 PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_d4)
 
+    # Post-trim dedup baseline: fixture determinism plus per-alias region metadata
+    # read back from the unpacked atlas. The test_helpers fixture is header-only.
+    add_executable(test_atlas_dedup
+        unit/test_atlas_dedup.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_dedup PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_dedup PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_dedup PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_dedup WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # D4 alias probe contract: the F glyph's 8 orientations must stay pairwise
+    # distinct, so a wrong relative transform cannot pass by symmetry.
+    add_executable(test_atlas_dedup_d4
+        unit/test_atlas_dedup_d4.c
+        unit/test_helpers/nt_assert_trap.c
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
+    )
+    target_link_libraries(test_atlas_dedup_d4 PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_dedup_d4 PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_dedup_d4 PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_dedup_d4 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
     # (positional contract kept), atlas opts pin the current field order.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
