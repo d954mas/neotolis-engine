@@ -620,6 +620,25 @@ void test_mirrored_alias_winding_is_world_ccw(void) {
 
 /* --- A wrong relative transform is rejected, not shipped --- */
 
+/* The forced-relative case longjmps out of the middle of nt_atlas_commit, so the
+ * pipeline's allocations are abandoned on purpose. LSan (CI Debug only) must not
+ * read that as a builder leak. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#include <sanitizer/lsan_interface.h>
+#define NT_TEST_LSAN_DISABLE() __lsan_disable()
+#define NT_TEST_LSAN_ENABLE() __lsan_enable()
+#endif
+#elif defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#define NT_TEST_LSAN_DISABLE() __lsan_disable()
+#define NT_TEST_LSAN_ENABLE() __lsan_enable()
+#endif
+#ifndef NT_TEST_LSAN_DISABLE
+#define NT_TEST_LSAN_DISABLE() ((void)0)
+#define NT_TEST_LSAN_ENABLE() ((void)0)
+#endif
+
 static jmp_buf s_build_assert_jmp;
 static const char *s_build_assert_expr;
 
@@ -690,14 +709,17 @@ void test_wrong_relative_transform_is_rejected(void) {
     NtBuilderContext *ctx = begin_twin_pack(TMP_DIR "/dedup_f_twins_forced.ntpack", &atlas);
     nt_build_assert_handler = trap_build_assert;
     s_build_assert_expr = NULL;
+    NT_TEST_LSAN_DISABLE();
     if (setjmp(s_build_assert_jmp) == 0) {
         (void)nt_atlas_commit(atlas);
+        NT_TEST_LSAN_ENABLE();
         nt_build_assert_handler = NULL;
         nt_atlas_test_force_alias_rel(0xFFU);
         nt_builder_free_pack(ctx);
         TEST_FAIL_MESSAGE("a wrong relative transform must abort the build, not produce a pack");
         return;
     }
+    NT_TEST_LSAN_ENABLE();
     nt_build_assert_handler = NULL;
     nt_atlas_test_force_alias_rel(0xFFU);
     const bool proof_rejected = s_build_assert_expr != NULL && strstr(s_build_assert_expr, "proof") != NULL;

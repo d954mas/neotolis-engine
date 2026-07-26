@@ -139,7 +139,7 @@ static uint32_t count_atlas_cache_files(const char *dir) {
         return 0;
     }
     const struct dirent *ent = NULL;
-    while ((ent = readdir(d)) != NULL) {
+    while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
         if (strncmp(ent->d_name, "atlas_", 6) == 0) {
             ++n;
         }
@@ -171,7 +171,7 @@ static void clear_atlas_cache_files(const char *dir) {
         return;
     }
     const struct dirent *ent = NULL;
-    while ((ent = readdir(d)) != NULL) {
+    while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
         if (strncmp(ent->d_name, "atlas_", 6) == 0) {
             char p[512];
             (void)snprintf(p, sizeof(p), "%s/%s", dir, ent->d_name);
