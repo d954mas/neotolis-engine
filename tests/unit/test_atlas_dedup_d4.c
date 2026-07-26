@@ -271,6 +271,53 @@ void test_mirrors_fold_under_flips_mask(void) {
     assert_transforms_in_mask(regions, 4, NT_ATLAS_TRANSFORMS_FLIPS);
 }
 
+/* Admission is directional: the fold is gated by the mask of the sprite that
+ * joins, never by the root's. Both members carry an explicit mask, so the atlas
+ * mask below cannot stand in for either. */
+static void collect_masked_pair(const char *path, const char *name, uint8_t root_mask, uint8_t alias_mask, nt_atlas_dedup_region_t *out) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, name, &opts);
+    const uint8_t transforms[2] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90};
+    const uint8_t masks[2] = {root_mask, alias_mask};
+    atlas_dedup_f_fixture_add_masked(atlas, transforms, masks, 2);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "masked-pair commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "masked-pair finish_pack failed");
+    nt_builder_free_pack(ctx);
+    pack_file_t f;
+    pack_file_load(path, &f);
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(f.bytes, f.len, out, 2, &got);
+    pack_file_free(&f);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, got, "one region per image");
+}
+
+void test_fold_admission_follows_the_alias_mask(void) {
+    /* The rotated copy is added second and its own mask admits the rotation, so
+     * an identity-only root is still a legal target — the root is stored at
+     * identity either way. */
+    nt_atlas_dedup_region_t open_alias[2] = {0};
+    collect_masked_pair(TMP_DIR "/dedup_f_mask_alias_open.ntpack", "dedup_f_mask_open", NT_ATLAS_TRANSFORMS_IDENTITY, NT_ATLAS_TRANSFORMS_ALL, open_alias);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(open_alias, 2), "an alias whose own mask admits the rotation must fold onto an identity-only root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, open_alias[0].transform, "the root is stored at identity");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_ATLAS_XFORM_IDENTITY, open_alias[1].transform, "the rotated copy must record a non-identity relative");
+    assert_transforms_in_mask(&open_alias[1], 1, NT_ATLAS_TRANSFORMS_ALL);
+
+    /* Swapped masks, same pair of images: now the joining sprite may only be
+     * stored at identity, and its pixels do not match there. */
+    nt_atlas_dedup_region_t closed_alias[2] = {0};
+    collect_masked_pair(TMP_DIR "/dedup_f_mask_alias_closed.ntpack", "dedup_f_mask_closed", NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_IDENTITY, closed_alias);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(closed_alias, 2), "an identity-only alias must not fold onto a rotated root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, closed_alias[1].transform, "an identity-only sprite must be stored at identity");
+}
+
 /* --- DEDUP-04: each alias decodes to its own source pixels through the page --- */
 
 /* u = a*lx + b*ly + c over the region's own y-up local space. */
@@ -669,6 +716,7 @@ int main(void) {
     RUN_TEST(test_four_rotations_fold_to_one_placement);
     RUN_TEST(test_identity_mask_never_folds_rotations);
     RUN_TEST(test_mirrors_fold_under_flips_mask);
+    RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_alias_region_matches_standalone_pack);
     RUN_TEST(test_concave_alias_hull_matches_standalone);

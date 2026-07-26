@@ -104,6 +104,14 @@ static inline void atlas_dedup_f_fixture_add(NtAtlasBuild *atlas, const uint8_t 
     atlas_dedup_f_fixture_add_shaped(atlas, transforms, count, sprite_mask, sprite_dedup, (uint8_t)NT_ATLAS_SPRITE_SHAPE_RECT);
 }
 
+/* One mask per sprite: the fold gate reads the ALIAS's own mask, so only a group
+ * whose members disagree can show which side of the pair decides. */
+static inline void atlas_dedup_f_fixture_add_masked(NtAtlasBuild *atlas, const uint8_t *transforms, const uint8_t *masks, uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) {
+        atlas_dedup_f_fixture_add_shaped(atlas, &transforms[i], 1, masks[i], 0U, (uint8_t)NT_ATLAS_SPRITE_SHAPE_RECT);
+    }
+}
+
 /* shape 0 = atlas default (concave), for comparing a derived hull against the
  * exact D4 image of the root's hull. */
 static inline void atlas_dedup_f_fixture_add_concave(NtAtlasBuild *atlas, const uint8_t *transforms, uint32_t count, uint8_t sprite_mask, uint8_t sprite_dedup) {

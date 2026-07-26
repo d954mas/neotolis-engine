@@ -293,6 +293,38 @@ void test_sprite_dedup_off_is_bidirectional(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT + 1, atlas_dedup_distinct_placements(regions, count), "exactly one placement is added by the off sprite");
 }
 
+/* Frame 3 is added after frames 0 and 6 of its state, so the case above can only
+ * prove the member side. Frame 0 is the state's lowest add index — the root the
+ * others would alias onto — so marking it off tests the target side. */
+void test_sprite_dedup_off_first_is_not_a_target(void) {
+    static const uint8_t per_frame[NT_ATLAS_DEDUP_FRAME_COUNT] = {NT_ATLAS_SPRITE_DEDUP_OFF, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    nt_atlas_dedup_region_t regions[NT_ATLAS_DEDUP_FRAME_COUNT] = {0};
+    uint32_t count = 0;
+    collect_fixture_opts(TMP_DIR "/dedup_off_first.ntpack", "dedup_off_first", true, per_frame, regions, &count);
+    for (uint32_t i = 1; i < count; ++i) {
+        const bool same_place = regions[i].page_index == regions[0].page_index && regions[i].u_min == regions[0].u_min && regions[i].v_min == regions[0].v_min;
+        TEST_ASSERT_FALSE_MESSAGE(same_place, "a dedup-off sprite must not become an alias target");
+    }
+    /* The state re-roots at the next eligible member instead of splitting. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[3].page_index, regions[6].page_index, "the remaining members must re-root onto one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[3].u_min, regions[6].u_min, "the remaining members must re-root onto one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[3].v_min, regions[6].v_min, "the remaining members must re-root onto one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT + 1, atlas_dedup_distinct_placements(regions, count), "exactly one placement is added by the off sprite");
+}
+
+/* The override is two-sided: an atlas-level off must not veto a per-sprite on.
+ * Frames 0 and 6 are the same art state, so exactly they may fold. */
+void test_sprite_dedup_on_overrides_atlas_off(void) {
+    static const uint8_t per_frame[NT_ATLAS_DEDUP_FRAME_COUNT] = {NT_ATLAS_SPRITE_DEDUP_ON, 0, 0, 0, 0, 0, NT_ATLAS_SPRITE_DEDUP_ON, 0, 0, 0};
+    nt_atlas_dedup_region_t regions[NT_ATLAS_DEDUP_FRAME_COUNT] = {0};
+    uint32_t count = 0;
+    collect_fixture_opts(TMP_DIR "/dedup_on_sprite.ntpack", "dedup_on_sprite", false, per_frame, regions, &count);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].page_index, regions[6].page_index, "two dedup-on sprites must share a page under an atlas-level off");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].u_min, regions[6].u_min, "two dedup-on sprites must share a placement U under an atlas-level off");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].v_min, regions[6].v_min, "two dedup-on sprites must share a placement V under an atlas-level off");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT - 1, atlas_dedup_distinct_placements(regions, count), "only the two overridden sprites may fold");
+}
+
 /* A shared cache that ignored the flags would replay the first run's placements
  * and hand back an identical pack. */
 void test_dedup_flags_change_the_atlas_cache_key(void) {
@@ -313,6 +345,34 @@ void test_dedup_flags_change_the_atlas_cache_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, count_atlas_cache_files(cache), "each dedup spelling must occupy its own cache key");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, off), "the atlas dedup flag must change the packed output");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, sprite_off), "a per-sprite dedup override must change the packed output");
+}
+
+/* The other half of the cache contract: the same key twice must be a real hit
+ * that replays the aliased placements, not just a second miss under one name. */
+void test_atlas_cache_hit_replays_the_aliases(void) {
+    const char *cache = TMP_DIR "/dedup_hit_cache";
+    const char *first = TMP_DIR "/dedup_hit_a.ntpack";
+    const char *second = TMP_DIR "/dedup_hit_b.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clear_atlas_cache_files(cache);
+    nt_atlas_stats_t miss = {0};
+    nt_atlas_stats_t hit = {0};
+    TEST_ASSERT_TRUE(build_dedup_pack_opts(first, "dedup_hit", cache, true, NULL, &miss));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_atlas_cache_files(cache), "the first run must write one key");
+    TEST_ASSERT_TRUE(build_dedup_pack_opts(second, "dedup_hit", cache, true, NULL, &hit));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_atlas_cache_files(cache), "the second run must reuse the key, not add one");
+    TEST_ASSERT_FALSE_MESSAGE(packs_differ(first, second), "a cache hit must reproduce the pack byte for byte");
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, hit.placements, "a cache hit must still report the folded placement count");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.placements, hit.placements, "a cache hit must report the same placements");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.folds_exact, hit.folds_exact, "a cache hit must report the same exact folds");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.folds_d4, hit.folds_d4, "a cache hit must report the same D4 folds");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(miss.area_saved_px, hit.area_saved_px, "a cache hit must report the same saved area");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.vertex_blocks_shared, hit.vertex_blocks_shared, "a cache hit must report the same shared blocks");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT, hit.folds_exact + hit.folds_d4 + hit.placements, "every sprite must be a placement or a fold on a cache hit");
 }
 
 /* Block sharing is a serialization property, so these cases use their own solid
@@ -801,7 +861,10 @@ int main(void) {
     RUN_TEST(test_post_trim_identical_frames_share_four_placements);
     RUN_TEST(test_dedup_disabled_at_atlas_level_gives_ten_placements);
     RUN_TEST(test_sprite_dedup_off_is_bidirectional);
+    RUN_TEST(test_sprite_dedup_off_first_is_not_a_target);
+    RUN_TEST(test_sprite_dedup_on_overrides_atlas_off);
     RUN_TEST(test_dedup_flags_change_the_atlas_cache_key);
+    RUN_TEST(test_atlas_cache_hit_replays_the_aliases);
     RUN_TEST(test_identity_aliases_share_one_vertex_block);
     RUN_TEST(test_distinct_sprites_do_not_share_blocks);
     RUN_TEST(test_alias_root_is_lowest_add_index);
