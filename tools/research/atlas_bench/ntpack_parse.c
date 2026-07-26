@@ -21,6 +21,25 @@
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 
+/* Same closed ring, ignoring which vertex it starts at and which way it turns —
+ * an alias emits its own vertex block, so neither is fixed. */
+static bool uv_rings_equal(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+    for (uint32_t s = 0; s < n; s++) {
+        bool fwd = true;
+        bool rev = true;
+        for (uint32_t i = 0; i < n && (fwd || rev); i++) {
+            const NtAtlasVertex *f = &b[(s + i) % n];
+            const NtAtlasVertex *r = &b[(s + n - i) % n];
+            fwd = fwd && a[i].atlas_u == f->atlas_u && a[i].atlas_v == f->atlas_v;
+            rev = rev && a[i].atlas_u == r->atlas_u && a[i].atlas_v == r->atlas_v;
+        }
+        if (fwd || rev) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Caller must have validated the region's vertex window against total_vertex_count. */
 static void region_uv_bbox(const NtAtlasVertex *verts, const NtAtlasRegion *r, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
     *umin = UINT16_MAX;
@@ -72,7 +91,9 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     }
 
     const uint64_t verts_end = (uint64_t)h->vertex_offset + ((uint64_t)h->total_vertex_count * sizeof(NtAtlasVertex));
-    if (verts_end > blob_size) {
+    /* A vertex array overlapping the header/pages/regions would read metadata as
+     * vertices — the same guard nt_bench_parse_selected_geometry applies. */
+    if (verts_end > blob_size || h->vertex_offset < regions_end) {
         return -6;
     }
 
@@ -138,16 +159,16 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
             }
             const uint8_t page = regions[i].page_index;
 
-            /* Dedup: regions sharing a placement rectangle occupy the SAME atlas
-             * pixels, so their polygon area counts ONCE — matching the packer's
-             * poly_area (unique-set fill). The key is the UV footprint, not the
-             * vertex span: a D4 alias owns its own vertex block but shares the
-             * rectangle, and a shared span always implies an equal footprint.
-             * Hull counts above stay per-region (region_count == sprite count).
-             * O(n^2) scan keeps the blob parser allocation-free. */
+            /* Dedup: regions sharing a placement occupy the SAME atlas pixels, so
+             * their polygon area counts ONCE — matching the packer's poly_area
+             * (unique-set fill). The key is the whole UV ring, not the vertex span
+             * (a D4 alias owns its own block) and not the bbox (two disjoint
+             * concave sprites can share one). Hull counts above stay per-region
+             * (region_count == sprite count). The bbox is the cheap reject before
+             * the ring compare; the O(n^2) scan keeps the parser allocation-free. */
             bool is_unique_placement = true;
             for (uint16_t j = 0; j < i; j++) {
-                if (regions[j].vertex_count < 3 || regions[j].page_index != page) {
+                if (regions[j].vertex_count != nv || regions[j].page_index != page) {
                     continue;
                 }
                 uint16_t jumin = 0;
@@ -155,7 +176,10 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                 uint16_t jvmin = 0;
                 uint16_t jvmax = 0;
                 region_uv_bbox(verts, &regions[j], &jumin, &jumax, &jvmin, &jvmax);
-                if (jumin == umin && jumax == umax && jvmin == vmin && jvmax == vmax) {
+                if (jumin != umin || jumax != umax || jvmin != vmin || jvmax != vmax) {
+                    continue;
+                }
+                if (uv_rings_equal(&verts[vstart], &verts[regions[j].vertex_start], nv)) {
                     is_unique_placement = false;
                     break;
                 }
