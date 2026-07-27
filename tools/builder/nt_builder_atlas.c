@@ -1694,10 +1694,16 @@ typedef struct {
 
 static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
 
-static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
+/* Rotate a ring to start at its lexicographically smallest vertex. Every emitted ring
+ * goes through this, so the same bitmap yields the same vertex and index bytes no
+ * matter whether it was traced from a contour or pulled back through a D4 transform. */
+static void geometry_canonicalize_ring(Point2D *poly, uint32_t count) {
+    if (poly == NULL || count < 3 || count > NT_POLYGON_MAX_VERTICES) {
+        return;
+    }
     uint32_t first = 0;
-    for (uint32_t i = 1; i < candidate->count; i++) {
-        if (geometry_point_less(candidate->poly[i], candidate->poly[first])) {
+    for (uint32_t i = 1; i < count; i++) {
+        if (geometry_point_less(poly[i], poly[first])) {
             first = i;
         }
     }
@@ -1705,11 +1711,13 @@ static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
         return;
     }
     Point2D canonical[NT_POLYGON_MAX_VERTICES];
-    for (uint32_t i = 0; i < candidate->count; i++) {
-        canonical[i] = candidate->poly[(first + i) % candidate->count];
+    for (uint32_t i = 0; i < count; i++) {
+        canonical[i] = poly[(first + i) % count];
     }
-    memcpy(candidate->poly, canonical, (size_t)candidate->count * sizeof(Point2D));
+    memcpy(poly, canonical, (size_t)count * sizeof(Point2D));
 }
+
+static void geometry_candidate_canonicalize(GeometryCandidate *candidate) { geometry_canonicalize_ring(candidate->poly, candidate->count); }
 
 static bool geometry_frontier_finalize(GeometryFrontier *frontier, GeometryCandidate *candidate) {
     if (!candidate->valid || !candidate->poly || candidate->count < 3 || candidate->count > frontier->max_vertices || candidate->count > NT_POLYGON_MAX_VERTICES) {
@@ -2607,6 +2615,10 @@ static void pipeline_derive_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_
 
     polygon_transform(p->hull_vertices[orig], n, inv, (int32_t)rw, (int32_t)rh, hull);
     polygon_transform(p->baseline_vertices[orig], bn, inv, (int32_t)rw, (int32_t)rh, base);
+    /* polygon_transform reverses the ring on odd parity, so the pull-back lands on a
+     * rotation the tracer would never emit — canonicalize before triangulating. */
+    geometry_canonicalize_ring(hull, n);
+    geometry_canonicalize_ring(base, bn);
     alias_retriangulate(hull, n, tris, idx_count);
     alias_retriangulate(base, bn, base_tris, bidx_count);
 
@@ -3207,19 +3219,58 @@ static void pipeline_cache_write(AtlasPipeline *p) {
     }
 }
 
-/* QUAD_* patterns match PNG-space CCW triangulation before winding swap. */
+/* Rotate a triangle to start at its lowest index — rotation preserves winding, and it
+ * is the only freedom the triangulator's start vertex has. */
+static void quad_tri_normalize(const uint16_t *in, uint16_t *out) {
+    uint32_t s = 0;
+    if (in[1] < in[s]) {
+        s = 1;
+    }
+    if (in[2] < in[s]) {
+        s = 2;
+    }
+    out[0] = in[s];
+    out[1] = in[(s + 1U) % 3U];
+    out[2] = in[(s + 2U) % 3U];
+}
+
+static bool quad_tri_less(const uint16_t *a, const uint16_t *b) {
+    for (uint32_t i = 0; i < 3U; i++) {
+        if (a[i] != b[i]) {
+            return a[i] < b[i];
+        }
+    }
+    return false;
+}
+
+/* Which diagonal a quad was split on, from PNG-space CCW indices before the winding
+ * swap. Matched up to triangle rotation and triangle order: Clipper2 picks its own
+ * start vertex, so demanding a literal 0,1,2,... matched nothing at all. */
 static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
     if (vertex_count != 4 || index_count != 6 || indices == NULL) {
         return 0;
     }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 0 && indices[4] == 2 && indices[5] == 3) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012023;
+    uint16_t lo[3];
+    uint16_t hi[3];
+    quad_tri_normalize(indices, lo);
+    quad_tri_normalize(indices + 3, hi);
+    if (quad_tri_less(hi, lo)) {
+        uint16_t swap[3];
+        memcpy(swap, lo, sizeof(swap));
+        memcpy(lo, hi, sizeof(lo));
+        memcpy(hi, swap, sizeof(hi));
     }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 0) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012130;
-    }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 2) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012132;
+    /* Canonical forms of 012+023, 012+130 and 012+132 under the same normalization. */
+    static const uint16_t k_patterns[3][6] = {
+        {0, 1, 2, 0, 2, 3},
+        {0, 1, 2, 0, 1, 3},
+        {0, 1, 2, 1, 3, 2},
+    };
+    static const uint8_t k_flags[3] = {NT_ATLAS_REGION_FLAG_QUAD_012023, NT_ATLAS_REGION_FLAG_QUAD_012130, NT_ATLAS_REGION_FLAG_QUAD_012132};
+    for (uint32_t k = 0; k < 3U; k++) {
+        if (memcmp(lo, k_patterns[k], sizeof(lo)) == 0 && memcmp(hi, k_patterns[k] + 3, sizeof(hi)) == 0) {
+            return k_flags[k];
+        }
     }
     return 0;
 }

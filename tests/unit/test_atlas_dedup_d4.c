@@ -543,6 +543,18 @@ static bool rings_match_up_to_rotation(const NtAtlasVertex *a, const NtAtlasVert
     return false;
 }
 
+/* Every emitted ring is rotated to its lexicographically smallest vertex, so an alias
+ * and a standalone pack of the same image agree at rotation zero — not merely up to
+ * one. This is what makes the index block, and therefore the render flags, agree. */
+static bool rings_match_exactly(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i) {
+        if (a[i].local_x != b[i].local_x || a[i].local_y != b[i].local_y) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Blob triangles read world-CCW and must tile this region's own ring exactly —
  * an index block inherited from a differently-oriented root would not. */
 static void assert_indices_tile_ring(const NtAtlasVertex *v, uint32_t n, const uint16_t *idx, uint32_t idx_count, const char *what) {
@@ -587,6 +599,8 @@ static void assert_region_pair_equivalent(const atlas_view_t *av, uint32_t ar, c
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(av, ar, &avx, &aidx), "alias region spans outside the blob");
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(bv, br, &bvx, &bidx), "standalone region spans outside the blob");
     TEST_ASSERT_TRUE_MESSAGE(rings_match_up_to_rotation(avx, bvx, a->vertex_count), what);
+    TEST_ASSERT_TRUE_MESSAGE(rings_match_exactly(avx, bvx, a->vertex_count), "canonical rotation must make the two rings identical, not merely congruent");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(bidx, aidx, (size_t)a->index_count * sizeof(uint16_t), "identical rings must triangulate identically");
     assert_indices_tile_ring(avx, a->vertex_count, aidx, a->index_count, "alias triangles must be world-CCW");
     assert_indices_tile_ring(bvx, b->vertex_count, bidx, b->index_count, "standalone triangles must be world-CCW");
 }
