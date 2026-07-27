@@ -1,12 +1,12 @@
 Transform-mask golden etalons.
 Captured from master BEFORE the Phase-81 allow_transform deletion, then
-re-captured at atlas format v7 (the header version byte moves the SHA; the
-region dumps are unaffected).
+re-captured at atlas format v7 and again once the QUAD_* hint started firing
+(both move the SHA; the region dumps are unaffected).
 Single-threaded (NT_BUILDER_THREADS=1), nt_atlas_opts_defaults().
 Atlas name "transform_golden" — the name seeds the texture page resource ids,
 so the SHA depends on it; re-capture with any other name will not match.
-etalon_all      = allow_transform=true  sha256 4076905b4ce57a1d887976826d9187610d48a16f3beac3276fdf12a42b44caf6
-etalon_identity = allow_transform=false sha256 e2c9c2ddfce703a9d04ae38f59c5d9c604ab7f513daa860c4edef7e622a14b7a
+etalon_all      = allow_transform=true  sha256 db3220ee91842fcb10374122b994d658036f03d8d8113ef4c6b16a158806a1b4
+etalon_identity = allow_transform=false sha256 b32bc8369c10cbe14ada3f77de2fc9b0a4ee8674c43522c3c8f1af118ad65dfe
 test_atlas_transform_mask re-packs the same fixture with allowed_transforms=0xFF/0x01
 and asserts byte-identity against these dump + sha256 files.
 Both packs are captured with atlas dedup explicitly OFF, so these etalons are a

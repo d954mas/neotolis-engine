@@ -1,5 +1,6 @@
-Dedup-ON golden etalon. Re-captured at atlas format v7 — the header version
-byte moves the SHA, the region dumps are unaffected.
+Dedup-ON golden etalon. Re-captured at atlas format v7, again once the QUAD_*
+hint started firing, and (for the D4 etalon) once alias rings became canonically
+rotated; the region dumps are unaffected by all three.
 Captured on the tree that shipped post-trim + D4-canonical dedup, AFTER
 byte-equal vertex-block sharing landed (blocks fold across pages, so an etalon
 captured before it would not match) and AFTER block identity gained the
@@ -13,7 +14,7 @@ atlas_dedup_fixture_add (4 art states on 10 distinct canvas sizes/offsets, so
 folding is reachable only after the alpha trim). 10 frames -> 4 placements.
 Atlas name "dedup_golden" — the name seeds the texture page resource ids, so
 the SHA depends on it; re-capture with any other name will not match.
-etalon_dedup_on sha256 6fe8728fd278217d6f2022c835ef9b105aee3e032e464bf78fe39de2af90c71b
+etalon_dedup_on sha256 4ace0c4e69e9e75b59360959e6cd7b04a1b681506dfd4cbbaa035989d9588e5e
 test_atlas_transform_mask::test_golden_byte_identity_dedup_on re-packs the same
 fixture, asserts the pack still folds to 4 distinct placements, then asserts
 byte-identity against this dump + sha256 pair.
@@ -32,7 +33,7 @@ IS its relative transform, and the dump reads back the inverse permutation
 0 1 2 3 4 6 5 7 — the ROT90/ROT270 swap is what makes this etalon sensitive to
 a relabelling of the D4 element codes.
 Atlas name "dedup_d4_golden" — same name-seeds-the-SHA caveat.
-etalon_dedup_d4 sha256 c38bfe24298c7b45964713a531ba57b55c8bdcf652bedc18c82022d4f25c093a
+etalon_dedup_d4 sha256 e257e751ef98f46bf44ba72c1f47a1c0a11b87a749a27c6ebb6f7029f5ff0c01
 test_atlas_transform_mask::test_golden_byte_identity_dedup_d4 re-packs the
 fixture, asserts one placement and eight pairwise-distinct region transforms,
 then asserts byte-identity against this dump + sha256 pair.

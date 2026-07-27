@@ -524,10 +524,11 @@ void test_alias_root_is_lowest_add_index(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[0].transform, "the first-added member is the root and is stored at identity");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, regions[1].transform, "the transposed member records its relative transform");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[2].transform, "a same-orientation member aliases at identity");
-    /* alias_retriangulate must leave a derived alias indistinguishable from a standalone
-     * pack — same quad shape, same render flags, whatever those resolve to. */
+    /* The canonical ring rotation is what makes a derived alias indistinguishable from
+     * a standalone pack, so the QUAD_* hint cannot depend on a member's orientation. */
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, regions[1].vertex_count, "a transposed RECT alias stays a quad");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(6, regions[1].index_count, "a transposed RECT alias keeps six indices");
+    TEST_ASSERT_TRUE_MESSAGE((regions[0].flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) != 0, "a RECT root must carry a QUAD_* hint");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].flags, regions[1].flags, "a transposed alias must carry the root's render flags");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].flags, regions[2].flags, "an identity alias must carry the root's render flags");
 
@@ -537,6 +538,7 @@ void test_alias_root_is_lowest_add_index(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, swapped[0].transform, "the root follows the add order, not the sprite dims");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, swapped[1].transform, "both later members now need the relative transform");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, swapped[2].transform, "both later members now need the relative transform");
+    TEST_ASSERT_TRUE_MESSAGE((swapped[0].flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) != 0, "a RECT root must carry a QUAD_* hint");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(swapped[0].flags, swapped[1].flags, "a transposed alias must carry the root's render flags");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(swapped[0].flags, swapped[2].flags, "a transposed alias must carry the root's render flags");
 }

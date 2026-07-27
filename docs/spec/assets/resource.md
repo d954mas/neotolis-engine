@@ -278,7 +278,9 @@ NtAtlasRegion[region_count] (48 bytes each, v6+)
                          placement orientation alone.)
   index_count:    u8    (triangle indices for this region; ≤ 255)
   flags:          u8    (builder-authored render hints, e.g. NT_ATLAS_REGION_FLAG_QUAD_*;
-                         bit 3 reserved)
+                         bit 3 reserved. The ring is stored rotated to its
+                         lexicographically smallest vertex, so the same image yields
+                         the same hint however it was produced.)
   _pad0:          u8    (alignment padding for uint16 slice9_lrtb)
   slice9_lrtb[4]: u16   (slice9 borders [left, right, top, bottom] in pixels;
                          all zero = no slice9. Non-zero values signal 9-cell
