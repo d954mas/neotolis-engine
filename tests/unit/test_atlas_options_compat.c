@@ -7,12 +7,13 @@
  * only. Round-trips every field (incl. allowed_transforms) and pins the
  * defaults mask to ALL. */
 
-/* Sprite opts pin the full positional field order; dedup sits inside the
- * override block, between extrude and the appended presence-bit controls. */
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, dedup) > offsetof(nt_atlas_sprite_opts_t, extrude), "dedup override sits after extrude");
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, dedup), "area budget sits after the dedup override");
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "threshold sits after the area budget");
-_Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "presence bits stay last");
+/* Sprite opts keep the append-only positional contract: every new control lands
+ * after the complete previous field list, so recompiled positional initializers
+ * keep their mapping. */
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, extrude), "sprite controls must be append-only");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, alpha_threshold) > offsetof(nt_atlas_sprite_opts_t, max_added_area_percent), "appended controls must stay after the legacy positional fields");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, has_max_added_area_percent) > offsetof(nt_atlas_sprite_opts_t, alpha_threshold), "appended controls must stay after the legacy positional fields");
+_Static_assert(offsetof(nt_atlas_sprite_opts_t, dedup) > offsetof(nt_atlas_sprite_opts_t, has_alpha_threshold), "the dedup override is appended, not inserted");
 
 /* Anchor the current atlas layout so the next reorder is loud, not silent. */
 _Static_assert(offsetof(nt_atlas_opts_t, max_added_area_percent) > offsetof(nt_atlas_opts_t, max_vertices), "atlas v2 layout: area budget sits after max_vertices");
@@ -89,7 +90,7 @@ int main(void) {
      * so the FULL field list is initialized positionally — reordering any field
      * lands a value in the wrong slot and fails the checks below. */
     const nt_atlas_sprite_opts_t sprite_positional = {
-        "legacy", 0.25F, 0.75F, 11, 12, 13, 14, NT_ATLAS_SPRITE_SHAPE_CONVEX, NT_ATLAS_TRANSFORMS_IDENTITY, 9, 15, 16, NT_ATLAS_SPRITE_DEDUP_OFF, 2.5F, 7, true, true,
+        "legacy", 0.25F, 0.75F, 11, 12, 13, 14, NT_ATLAS_SPRITE_SHAPE_CONVEX, NT_ATLAS_TRANSFORMS_IDENTITY, 9, 15, 16, 2.5F, 7, true, true, NT_ATLAS_SPRITE_DEDUP_OFF,
     };
     if (sprite_positional.name[0] != 'l' || sprite_positional.origin_x != 0.25F || sprite_positional.origin_y != 0.75F || sprite_positional.slice9_left != 11 || sprite_positional.slice9_right != 12 ||
         sprite_positional.slice9_top != 13 || sprite_positional.slice9_bottom != 14 || sprite_positional.shape != NT_ATLAS_SPRITE_SHAPE_CONVEX ||

@@ -212,6 +212,7 @@ typedef struct {
     uint32_t folds_d4;             /* aliases folded through a non-identity D4 transform */
     uint64_t area_saved_px;        /* summed post-trim area of every alias */
     uint32_t vertex_blocks_shared; /* vertex+index blocks folded by byte equality */
+    bool cache_hit;                /* placements came from the atlas cache, not the packer */
 } nt_atlas_stats_t;
 
 /* One entry per successfully committed atlas, in commit order (a failed commit
@@ -476,14 +477,14 @@ typedef struct {
      * whether inherited or overridden, requires the effective shape to be RECT.
      * The packing footprint reserves room for max(this, atlas extrude). */
     uint8_t extrude;
-    /* 0 = inherit atlas dedup, NT_ATLAS_SPRITE_DEDUP_ON = share a placement with
-     * matching content, NT_ATLAS_SPRITE_DEDUP_OFF = guaranteed private placement
-     * (never aliases onto another sprite and never becomes an alias target). */
-    uint8_t dedup;
     float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
     uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */
     bool has_alpha_threshold;        /* false = inherit atlas value; true preserves an explicit 0 */
+    /* 0 = inherit atlas dedup, NT_ATLAS_SPRITE_DEDUP_ON = share a placement with
+     * matching content, NT_ATLAS_SPRITE_DEDUP_OFF = guaranteed private placement
+     * (never aliases onto another sprite and never becomes an alias target). */
+    uint8_t dedup;
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

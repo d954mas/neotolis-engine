@@ -451,7 +451,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-        /* cached_pos/cached_uv bake is deferred to atlas_on_post_resolve where
+        /* The cached_pos bake is deferred to atlas_on_post_resolve where
          * ipu is finalized from pixels_per_unit metadata. The resource module
          * fires resolve and post_resolve in pairs within a single nt_resource_step,
          * so no caller can observe the unbaked state. */
@@ -542,11 +542,11 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-    /* cached_pos/cached_uv bake deferred to atlas_on_post_resolve once ipu
-     * is finalized from the (possibly updated) pixels_per_unit metadata.
-     * replace_payload_buffers may have realloc'd cached_pos/cached_uv and
-     * even unchanged common regions may now sit at different vertex_start
-     * offsets — post_resolve handles all of that in one pass. */
+    /* The cached_pos bake is deferred to atlas_on_post_resolve once ipu is
+     * finalized from the (possibly updated) pixels_per_unit metadata.
+     * replace_payload_buffers may have realloc'd cached_pos and even unchanged
+     * common regions may now sit at different vertex_start offsets —
+     * post_resolve handles all of that in one pass. */
     // #endregion
 }
 
@@ -605,9 +605,9 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
     } else {
         ad->ipu = 1.0F;
     }
-    /* Re-bake cached_pos with the correct ipu.
-     * cached_uv is unaffected by ipu but the loop is shared — cheap on
-     * small atlases and runs at resolve time, not in the hot path. */
+    /* Re-bake cached_pos with the correct ipu — cheap on small atlases, and
+     * it runs at resolve time, not in the hot path. UVs need no bake: they are
+     * read straight off the serialized vertices. */
     atlas_precompute_all(ad);
     // #endregion
 }
@@ -779,8 +779,8 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
      * so any non-zero value is fine. Tests pass 1 to mirror the real flow. */
     atlas_on_resolve(data, size, 1, user_data);
     /* Production fires on_post_resolve immediately after on_resolve in the
-     * same nt_resource_step. Mimic it here so cached_pos/cached_uv are
-     * baked before tests query them. We can't call atlas_on_post_resolve
+     * same nt_resource_step. Mimic it here so cached_pos is baked
+     * before tests query it. We can't call atlas_on_post_resolve
      * directly (it requires resource module + a real nt_resource_t to
      * fetch page textures and metadata) — but the only state it touches
      * besides those is the cached array bake. */

@@ -26,6 +26,7 @@
 #include "nt_builder_atlas_test.h"
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
+#include "test_helpers/atlas_dedup_f_fixture.h"
 #include "test_helpers/atlas_dedup_fixture.h"
 #include "test_helpers/atlas_transform_fixture.h"
 #include "unity.h"
@@ -39,6 +40,7 @@
  * page resource ids, so byte-identity to the etalons requires the same name. */
 #define GOLDEN_ATLAS_NAME "transform_golden"
 #define DEDUP_GOLDEN_ATLAS_NAME "dedup_golden"
+#define DEDUP_D4_GOLDEN_ATLAS_NAME "dedup_d4_golden"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -208,6 +210,30 @@ static bool build_dedup_golden_pack(const char *path) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, DEDUP_GOLDEN_ATLAS_NAME, &opts);
     atlas_dedup_fixture_add(atlas);
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return r == NT_BUILD_OK;
+}
+
+/* All eight F orientations at the atlas-default concave shape: they fold onto one
+ * placement through seven NON-identity relatives, so this etalon is the byte fence
+ * over derived alias geometry, re-triangulation and the composed-transform UV bake —
+ * none of which the identity-only dedup etalon reaches. */
+static bool build_dedup_d4_golden_pack(const char *path) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, DEDUP_D4_GOLDEN_ATLAS_NAME, &opts);
+    static const uint8_t transforms[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    atlas_dedup_f_fixture_add_concave(atlas, transforms, 8, 0U, 0U);
     (void)nt_atlas_commit(atlas);
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
@@ -537,6 +563,35 @@ void test_golden_byte_identity_dedup_on(void) {
     assert_matches_etalon(path, DEDUP_GOLDEN_DIR "/etalon_dedup_on.sha256", DEDUP_GOLDEN_DIR "/etalon_dedup_on.dump.txt", TMP_DIR "/dedup_golden_dump.txt");
 }
 
+void test_golden_byte_identity_dedup_d4(void) {
+    const char *path = TMP_DIR "/dedup_d4_golden.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_f_images_pairwise_distinct(), "the F probe must stay asymmetric under all eight orientations");
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_d4_golden_pack(path), "dedup D4 golden pack build failed");
+
+    /* Non-vacuity, in the two directions the etalon cannot show on its own:
+     * the eight orientations really share one rectangle, and their region
+     * transforms are pairwise distinct — with one placement that is only
+     * possible if seven relatives are non-identity. */
+    nt_atlas_dedup_region_t regions[8];
+    uint32_t count = 0;
+    size_t len = 0;
+    uint8_t *bytes = read_bin_file(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read dedup D4 golden pack");
+    const bool ok = atlas_dedup_collect_regions(bytes, len, regions, 8, &count);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect dedup D4 golden regions");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(8, count, "unexpected region count");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, count), "all eight orientations must fold onto one placement");
+    uint8_t seen = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        TEST_ASSERT_TRUE_MESSAGE(regions[i].transform < 8U, "region transform outside D4");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, seen & (uint8_t)(1U << regions[i].transform), "two regions of one placement share a transform");
+        seen |= (uint8_t)(1U << regions[i].transform);
+    }
+
+    assert_matches_etalon(path, DEDUP_GOLDEN_DIR "/etalon_dedup_d4.sha256", DEDUP_GOLDEN_DIR "/etalon_dedup_d4.dump.txt", TMP_DIR "/dedup_d4_golden_dump.txt");
+}
+
 /* --- An alias region's transform lies in its OWN effective mask --- */
 
 /* build_override_pack's layout with the wide strip doubled into a byte-identical
@@ -624,5 +679,6 @@ int main(void) {
     RUN_TEST(test_golden_byte_identity_all);
     RUN_TEST(test_golden_byte_identity_identity);
     RUN_TEST(test_golden_byte_identity_dedup_on);
+    RUN_TEST(test_golden_byte_identity_dedup_d4);
     return UNITY_END();
 }

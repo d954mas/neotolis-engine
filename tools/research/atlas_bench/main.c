@@ -367,7 +367,8 @@ int main(int argc, char *argv[]) {
     run.opts_alpha_threshold = opts.alpha_threshold;
     run.opts_max_added_area_percent = opts.max_added_area_percent;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;
-    /* The pack format does not expose cache counters. */
+    /* This tool never sets a builder cache dir, so every run is a cold pack and
+     * these counters carry no signal — kept at 0 so baselines stay comparable. */
     run.cache_hits = 0;
     run.cache_misses = 0;
 

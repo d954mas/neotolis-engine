@@ -388,6 +388,12 @@ void test_atlas_cache_hit_replays_the_aliases(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_atlas_cache_files(cache), "the second run must reuse the key, not add one");
     TEST_ASSERT_FALSE_MESSAGE(packs_differ(first, second), "a cache hit must reproduce the pack byte for byte");
 
+    /* Without this pair every assertion below holds by construction: dedup,
+     * geometry and serialize re-run on both builds and the packer is
+     * deterministic, so a build that never READ the cache would look identical. */
+    TEST_ASSERT_FALSE_MESSAGE(miss.cache_hit, "the first run must miss the cache");
+    TEST_ASSERT_TRUE_MESSAGE(hit.cache_hit, "the second run must replay from the cache, not re-pack");
+
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, hit.placements, "a cache hit must still report the folded placement count");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.placements, hit.placements, "a cache hit must report the same placements");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(miss.folds_exact, hit.folds_exact, "a cache hit must report the same exact folds");
@@ -738,6 +744,8 @@ void test_slice9_group_with_plain_sprite_stays_identity(void) {
     nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
     collect_resolved_pack(TMP_DIR "/dedup_slice9_group.ntpack", "dedup_slice9_group", &opts, sprites, 5, regions);
 
+    /* UVs are normalized per page, so equal u/v on different pages is not a fold. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[2].page_index, regions[3].page_index, "the nine-patch must alias onto its plain twin");
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].u_min, regions[3].u_min, "the nine-patch must alias onto its plain twin");
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].v_min, regions[3].v_min, "the nine-patch must alias onto its plain twin");
     /* Only the group is pinned. The three singletons keep the atlas-wide ALL mask,

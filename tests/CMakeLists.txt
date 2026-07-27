@@ -848,8 +848,8 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas_dedup_d4 PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_dedup_d4 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Designated-initializer round-trip + layout anchors: both opts structs pin their
-    # current field order, sprite opts positionally end to end.
+    # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
+    # (positional contract kept), atlas opts pin the current field order.
     add_executable(test_atlas_options_compat unit/test_atlas_options_compat.c)
     target_link_libraries(test_atlas_options_compat PRIVATE nt_builder)
     nt_setup_test_target(test_atlas_options_compat)

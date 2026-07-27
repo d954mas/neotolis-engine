@@ -16,8 +16,28 @@ etalon_dedup_on sha256 6211e908e976764d4b2254cf07c2725ccd3dc0dcbae976908d5215fa3
 test_atlas_transform_mask::test_golden_byte_identity_dedup_on re-packs the same
 fixture, asserts the pack still folds to 4 distinct placements, then asserts
 byte-identity against this dump + sha256 pair.
-To regenerate after an INTENTIONAL dedup or packer change: run
+
+Dedup-D4 golden etalon.
+Same tree and same single-threaded capture. Every fold in etalon_dedup_on is at
+relative transform identity, so it never reaches derived alias geometry,
+re-triangulation or the composed-transform UV bake — this second etalon is the
+byte fence over exactly those.
+Fixture: tests/unit/test_helpers/atlas_dedup_f_fixture.h via
+atlas_dedup_f_fixture_add_concave — all eight orientations of the 9x13 'F' at
+the atlas-default concave shape, allowed_transforms = ALL, dedup inherited.
+8 frames -> 1 placement, 0 exact folds, 7 D4 folds.
+The packer places the single rectangle at identity, so each region's transform
+IS its relative transform, and the dump reads back the inverse permutation
+0 1 2 3 4 6 5 7 — the ROT90/ROT270 swap is what makes this etalon sensitive to
+a relabelling of the D4 element codes.
+Atlas name "dedup_d4_golden" — same name-seeds-the-SHA caveat.
+etalon_dedup_d4 sha256 b373c1faf791fbf8ad3eb42a017523827b5d5c20686fc4d386500edaa2094691
+test_atlas_transform_mask::test_golden_byte_identity_dedup_d4 re-packs the
+fixture, asserts one placement and eight pairwise-distinct region transforms,
+then asserts byte-identity against this dump + sha256 pair.
+
+To regenerate either etalon after an INTENTIONAL dedup or packer change: run
 test_atlas_transform_mask, then take the SHA-256 of
-build/tests/tmp/dedup_golden.ntpack and copy
-build/tests/tmp/dedup_golden_dump.txt over the dump file (the test also prints
-the current dump on divergence). Keep both files LF — pinned in .gitattributes.
+build/tests/tmp/<name>.ntpack and copy build/tests/tmp/<name>_dump.txt over the
+dump file (the test also prints the current dump on divergence), where <name> is
+dedup_golden or dedup_d4_golden. Keep every file LF — pinned in .gitattributes.

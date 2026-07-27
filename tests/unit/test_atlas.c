@@ -1452,7 +1452,7 @@ static void assert_float_close(float expected, float actual, float tol, const ch
 }
 
 /* Build a one-region blob with hand-set corner UVs (0,0)/(1,0)/(0,1)/(1,1)
- * so cached_uv tests can assert each transform mapping. UVs are packed as
+ * so the UV test below can assert each transform mapping. UVs are packed as
  * uint16 0..65535 by the format; 0->0.0, 65535->1.0 exactly. */
 static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transform) {
     NtAtlasVertex verts[4];
@@ -1491,7 +1491,7 @@ static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transfo
     return build_mock_atlas_blob(out, cap, &spec);
 }
 
-/* Atlas cached_uv stores serialized atlas_u/v as-is. The builder already
+/* The runtime reads serialized atlas_u/v as-is — there is no UV bake. The builder already
  * applies any D4 placement transform while serializing vertices; runtime must
  * not apply transform a second time. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

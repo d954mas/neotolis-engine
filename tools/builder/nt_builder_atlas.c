@@ -483,6 +483,14 @@ enum { PER_SPRITE_SIZE = KEY_OV_OFF + (4 * sizeof(uint16_t)) + 5 + sizeof(float)
  * a mismatch truncates or over-reads the key input silently. */
 _Static_assert(PER_SPRITE_SIZE == KEY_OV_OFF + 17 + sizeof(float), "PER_SPRITE_SIZE must equal the last per-sprite write offset + 1");
 
+/* Sizes the opts run at compile time. A runtime check placed after the writes can
+ * only report an overrun, never prevent it. Trailing 6 = alpha_threshold, flags,
+ * allowed_transforms, shape, dedup, ATLAS_CACHE_KEY_VERSION. */
+enum {
+    ATLAS_OPTS_KEY_SIZE = sizeof(uint32_t) + sizeof(((const nt_atlas_opts_t *)0)->max_size) + sizeof(((const nt_atlas_opts_t *)0)->padding) + sizeof(((const nt_atlas_opts_t *)0)->margin) +
+                          sizeof(((const nt_atlas_opts_t *)0)->extrude) + sizeof(((const nt_atlas_opts_t *)0)->max_added_area_percent) + sizeof(((const nt_atlas_opts_t *)0)->max_vertices) + 6
+};
+
 static void atlas_key_write_sprite(uint8_t *out, const NtAtlasSpriteInput *s) {
     size_t off = 0;
     memcpy(out + off, &s->decoded_hash, sizeof(uint64_t));
@@ -529,7 +537,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
 
     /* Build key buffer: per-sprite data + serialized opts */
     /* Serialize opts fields (excluding compress pointer) */
-    uint8_t opts_buf[128];
+    uint8_t opts_buf[ATLAS_OPTS_KEY_SIZE];
     uint32_t pos = 0;
     /* Builder version — mirrors nt_builder_cache.c:nt_builder_compute_opts_hash
      * so any NT_BUILDER_VERSION bump automatically invalidates all atlas cache
@@ -562,7 +570,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     opts_buf[pos++] = (uint8_t)opts->shape;
     opts_buf[pos++] = opts->dedup ? 1 : 0;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
-    NT_BUILD_ASSERT(pos <= sizeof(opts_buf) && "compute_atlas_cache_key: opts_buf too small");
+    NT_BUILD_ASSERT(pos == ATLAS_OPTS_KEY_SIZE && "compute_atlas_cache_key: opts run does not fill its sized buffer");
 
     /* Combine into single buffer and hash */
     size_t total = per_sprite_bytes + pos;
@@ -1428,13 +1436,20 @@ static uint64_t atlas_sprite_canonical_hash(const AtlasPipeline *p, uint32_t i, 
     if (tw == 0 || th == 0) {
         return 0; /* Transparent after trim — already a content error. */
     }
+    /* nt_hash64 takes a uint32 length; a uint32 product would silently hash a
+     * prefix. pipeline_validate rejects such a sprite moments later, so refusing
+     * to group it costs nothing. */
+    const size_t bytes = (size_t)tw * th * 4U;
+    if (bytes > UINT32_MAX) {
+        return 0;
+    }
     const NtAtlasSpriteInput *s = &p->sprites[i];
     const size_t src_stride = (size_t)s->width * 4U;
     const uint8_t *src = s->rgba + ((size_t)p->trim_y[i] * src_stride) + ((size_t)p->trim_x[i] * 4U);
     uint64_t best = UINT64_MAX;
     for (uint8_t t = 0; t < orbit_count; t++) {
         atlas_write_oriented_trim(src, src_stride, tw, th, t, scratch);
-        const uint64_t h = nt_hash64(scratch, tw * th * 4U).value;
+        const uint64_t h = nt_hash64(scratch, (uint32_t)bytes).value;
         best = h < best ? h : best;
     }
     return best;
@@ -1476,25 +1491,30 @@ static size_t dedup_scratch_bytes(const AtlasPipeline *p, const DedupSortEntry *
 
 static void dedup_hash_bucket(const AtlasPipeline *p, DedupSortEntry *e, uint32_t lo, uint32_t hi, uint8_t *scratch, uint8_t orbit_count) {
     for (uint32_t k = lo; k < hi; k++) {
+        /* A dedup-off sprite is skipped in the fold search as member and as target
+         * alike, so its key is never read — keeping hash 0 costs it nothing. */
+        if (!atlas_sprite_dedup_enabled(&p->sprites[e[k].index], p->opts)) {
+            continue;
+        }
         e[k].hash = atlas_sprite_canonical_hash(p, e[k].index, scratch, orbit_count);
     }
 }
 
-/* Whole orbit only when some sprite could actually fold through a non-identity
- * relative — otherwise find_rel would try rel = 0 alone and seven of the eight raster
- * passes are provably dead. The decision is per atlas, never per sprite, so every
- * sprite is still keyed the same way. */
-static uint8_t dedup_orbit_count(const AtlasPipeline *p) {
+/* Whole orbit only when some member of THIS bucket could actually fold through a
+ * non-identity relative; 0 when none of them may fold at all. Never per sprite:
+ * minimum-over-orbit is only orientation-invariant when the orientation set is a
+ * subgroup, and a mask like {identity, rot90} is not closed. Per bucket is exactly
+ * as strict, because a run never crosses a dimension bucket, so a bucket is the
+ * widest set whose keys are ever compared to each other. */
+static uint8_t dedup_bucket_orbit_count(const AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
     uint8_t mask = 0;
-    bool any_dedup = false;
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (!atlas_sprite_dedup_enabled(&p->sprites[i], p->opts)) {
+    for (uint32_t k = lo; k < hi; k++) {
+        if (!atlas_sprite_dedup_enabled(&p->sprites[e[k].index], p->opts)) {
             continue;
         }
-        any_dedup = true;
-        mask |= atlas_sprite_effective_mask(p, i);
+        mask |= atlas_sprite_effective_mask(p, e[k].index);
     }
-    if (!any_dedup) {
+    if (mask == 0) {
         return 0;
     }
     return mask == NT_ATLAS_TRANSFORMS_IDENTITY ? 1U : 8U;
@@ -1503,13 +1523,9 @@ static uint8_t dedup_orbit_count(const AtlasPipeline *p) {
 /* Entries must already be dim_key-sorted. Only buckets that can fold pay the
  * orientation hashes; a singleton keeps hash 0 and cannot meet anything. */
 static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *e) {
-    const uint8_t orbit_count = dedup_orbit_count(p);
-    if (orbit_count == 0) {
-        return; /* Nothing may fold — every candidate dies at the admission guard. */
-    }
     const size_t scratch_bytes = dedup_scratch_bytes(p, e);
     if (scratch_bytes == 0) {
-        return;
+        return; /* No bucket holds two sprites — nothing can meet anything. */
     }
     /* One buffer for the whole pass — a per-sprite allocation in an O(8N) loop is wrong
      * even in an offline tool. */
@@ -1517,7 +1533,8 @@ static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *
     NT_BUILD_ASSERT(scratch && "pipeline_dedup: orientation scratch alloc failed");
     for (uint32_t lo = 0; lo < p->sprite_count;) {
         const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
-        if (hi - lo >= 2) {
+        const uint8_t orbit_count = (hi - lo >= 2) ? dedup_bucket_orbit_count(p, e, lo, hi) : 0U;
+        if (orbit_count != 0) {
             dedup_hash_bucket(p, e, lo, hi, scratch, orbit_count);
         }
         lo = hi;
@@ -1526,7 +1543,7 @@ static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *
 }
 
 #ifdef NT_TEST_ACCESS
-/* 0xFF disables. Corrupts the first alias of a build so a test can prove the coverage
+/* 0xFF disables. Corrupts the next alias recorded so a test can prove the coverage
  * proof rejects a wrong relative transform. */
 static uint8_t g_force_alias_rel = 0xFFU;
 void nt_atlas_test_force_alias_rel(uint8_t rel) { g_force_alias_rel = rel; }
@@ -1536,8 +1553,11 @@ static void pipeline_dedup_record_alias(AtlasPipeline *p, uint32_t a, uint32_t r
     p->dedup_map[a] = (int32_t)root;
     p->alias_rel[a] = rel;
 #ifdef NT_TEST_ACCESS
-    if (g_force_alias_rel != 0xFFU && p->folds_exact + p->folds_d4 == 0) {
+    /* One-shot and self-clearing: a leaked arm would otherwise corrupt the first
+     * alias of every later atlas in the same process. */
+    if (g_force_alias_rel != 0xFFU) {
         p->alias_rel[a] = g_force_alias_rel;
+        g_force_alias_rel = 0xFFU;
     }
 #endif
     if (p->alias_rel[a] == 0) {
@@ -2888,11 +2908,12 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (!unfittable[c]) {
             continue;
         }
-        /* Report the spacing actually reserved by the packer. Margin and extrude are
-         * resolved-equal across a group, but the dims are the named sprite's own — a
-         * transposed alias would otherwise be told its root's swapped size. */
-        uint32_t effective_margin = atlas_sprite_resolved_margin(p, c);
-        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, c);
+        /* Every field describes the NAMED sprite k, not its group root: a transposed
+         * alias would otherwise be told its root's swapped size. Margin and extrude
+         * are resolved-equal across a group, so reading them from k keeps the record
+         * self-consistent without depending on that. */
+        uint32_t effective_margin = atlas_sprite_resolved_margin(p, k);
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, k);
         uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
         nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE,
                               .w = p->trim_w[k],
@@ -3262,8 +3283,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
         /* The emit stage writes into fixed-size per-sprite storage; geometry
          * selection bounds both counts, so this can only fire on a builder bug. */
-        NT_BUILD_ASSERT(p->vertex_counts[i] <= NT_POLYGON_MAX_VERTICES && p->triangle_index_counts[i] <= NT_POLYGON_MAX_TRIANGLE_INDICES &&
-                        "pipeline_serialize: block exceeds per-sprite scratch bound");
+        const bool block_in_bounds = p->vertex_counts[i] <= NT_POLYGON_MAX_VERTICES && p->triangle_index_counts[i] <= NT_POLYGON_MAX_TRIANGLE_INDICES;
+        NT_BUILD_ASSERT(block_in_bounds && "pipeline_serialize: block exceeds per-sprite scratch bound");
+        /* Hard guard — a consumer may define NT_BUILD_ASSERT away, and this is the
+         * only bound on the emit-stage write into SerializeBlock. */
+        if (!block_in_bounds) {
+            abort();
+        }
     }
 
     /* Build placement lookup: original_sprite_index -> placement index.
@@ -3856,7 +3882,8 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
                                                                         .folds_exact = p.folds_exact,
                                                                         .folds_d4 = p.folds_d4,
                                                                         .area_saved_px = p.area_saved_px,
-                                                                        .vertex_blocks_shared = p.vertex_blocks_shared};
+                                                                        .vertex_blocks_shared = p.vertex_blocks_shared,
+                                                                        .cache_hit = p.cache_hit};
     }
 
     double bench_total = nt_time_now() - t_total;
