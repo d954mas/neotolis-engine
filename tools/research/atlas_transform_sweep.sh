@@ -23,6 +23,8 @@ done
 # name|glob|shape|max_size  (the nine-patch corpus is intentionally excluded)
 CORPORA=(
     "anim_heavy|assets/bench/anim_heavy/*.png|concave|2048"
+    # The only corpus built for orientation folding, so a mask regression shows here first.
+    "anim_trim|assets/bench/anim_trim/*.png|concave|2048"
     "mixed_aa|assets/sprites/bigatlas/*.png|concave|4096"
     "rect_only|assets/bench/rect_only/*.png|rect|2048"
 )

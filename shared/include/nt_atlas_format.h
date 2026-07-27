@@ -63,12 +63,17 @@ typedef struct {
                               *     Source-space (not trim-space) gives stable pivots across
                               *     animation frames where trim bounds vary. */
     float origin_y;          /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
-    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
+    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2).
+                              *     Regions may share a span only when their trim_offset_x/y also
+                              *     match — the runtime precomputes positions per span. */
     uint32_t index_start;    /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;    /* 32: number of vertices for this region (max 16 per builder limit) */
     uint8_t page_index;      /* 33: which texture page this region belongs to */
     uint8_t transform;       /* 34: orientation flags — bit0=flipH, bit1=flipV, bit2=diagonal.
-                              *     Apply order: diagonal → flipH → flipV. 0 = identity. */
+                              *     Apply order: diagonal → flipH → flipV. 0 = identity.
+                              *     Exporter metadata only: UVs are already baked. A dedup alias
+                              *     stores placement∘relative, so two regions sharing a placement
+                              *     may carry different values. */
     uint8_t index_count;     /* 35: triangle indices for this region. uint8_t caps at 255 =
                               *     85 triangles; with max_vertices=16 the ear-clip/fan output
                               *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */

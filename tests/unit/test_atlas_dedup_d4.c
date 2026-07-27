@@ -187,6 +187,18 @@ static void assert_transforms_pairwise_distinct(const nt_atlas_dedup_region_t *r
     }
 }
 
+/* Region i carries d4_compose(placement, rel_i) and image 0 is the root (rel 0), so
+ * the quotient against region 0 isolates rel_i whatever orientation the packer gave
+ * the shared rectangle. Image i is images[i](F) and the root is F, hence
+ * rel_i == d4_inverse(images[i]) exactly. Distinctness alone would pass with flip_h
+ * and flip_v swapped anywhere in the search or the emit. */
+static void assert_relatives_match_images(const nt_atlas_dedup_region_t *r, const uint8_t *images, uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint8_t rel = d4_compose(d4_inverse(r[0].transform), r[i].transform);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(d4_inverse(images[i]), rel, "alias must record the exact relative its image implies");
+    }
+}
+
 static void assert_transforms_in_mask(const nt_atlas_dedup_region_t *r, uint32_t count, uint8_t mask) {
     for (uint32_t i = 0; i < count; ++i) {
         TEST_ASSERT_TRUE_MESSAGE(r[i].transform < 8U, "transform value out of D4 range");
@@ -248,6 +260,7 @@ void test_four_rotations_fold_to_one_placement(void) {
     collect_f_regions(TMP_DIR "/dedup_f_fold_rot.ntpack", "dedup_f_fold_rot", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations, 4, false, regions);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 4), "four rotated copies must share one placement");
     assert_transforms_pairwise_distinct(regions, 4);
+    assert_relatives_match_images(regions, k_f_rotations, 4);
     assert_transforms_in_mask(regions, 4, NT_ATLAS_TRANSFORMS_ROTATIONS);
 }
 
@@ -268,6 +281,7 @@ void test_mirrors_fold_under_flips_mask(void) {
     collect_f_regions(TMP_DIR "/dedup_f_fold_flip.ntpack", "dedup_f_fold_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors, 4, false, regions);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 4), "four mirrored copies must share one placement");
     assert_transforms_pairwise_distinct(regions, 4);
+    assert_relatives_match_images(regions, k_f_mirrors, 4);
     assert_transforms_in_mask(regions, 4, NT_ATLAS_TRANSFORMS_FLIPS);
 }
 
@@ -425,9 +439,8 @@ static void assert_region_samples_its_own_image(const pack_file_t *pack, const a
     TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, checked, "no opaque texel was sampled");
 }
 
-void test_alias_uv_decode_samples_its_own_source_pixel(void) {
-    const char *path = TMP_DIR "/dedup_f_uv_decode.ntpack";
-    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(path, "dedup_f_uv", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations, 4, false), "UV-decode pack build failed");
+static void assert_uv_decode_for_images(const char *path, const char *name, uint8_t mask, const uint8_t *images) {
+    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(path, name, mask, images, 4, false), "UV-decode pack build failed");
     pack_file_t pack;
     pack_file_load(path, &pack);
     atlas_view_t view;
@@ -437,11 +450,19 @@ void test_alias_uv_decode_samples_its_own_source_pixel(void) {
         TEST_FAIL_MESSAGE("open the produced atlas blob");
         return;
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per rotation image");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per image");
     for (uint32_t r = 0; r < 4; ++r) {
-        assert_region_samples_its_own_image(&pack, &view, r, k_f_rotations[r]);
+        assert_region_samples_its_own_image(&pack, &view, r, images[r]);
     }
     pack_file_free(&pack);
+}
+
+void test_alias_uv_decode_samples_its_own_source_pixel(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode.ntpack", "dedup_f_uv", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations); }
+
+/* Mirrors are where the texel mapping (w-1-x) and the corner mapping (w-x) diverge,
+ * so the one oracle that reads real texels has to run on them too. */
+void test_mirror_alias_uv_decode_samples_its_own_source_pixel(void) {
+    assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors);
 }
 
 /* --- DEDUP-04: an alias carries the same geometry as a standalone pack --- */
@@ -570,20 +591,20 @@ static void assert_region_pair_equivalent(const atlas_view_t *av, uint32_t ar, c
     assert_indices_tile_ring(bvx, b->vertex_count, bidx, b->index_count, "standalone triangles must be world-CCW");
 }
 
-static void assert_folded_matches_standalone(bool concave, const char *tag) {
+static void assert_folded_matches_standalone(bool concave, const char *tag, uint8_t mask, const uint8_t *images) {
     char apath[256];
     (void)snprintf(apath, sizeof(apath), "%s/dedup_f_std_%s.ntpack", TMP_DIR, tag);
-    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(apath, "dedup_f_std", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations, 4, concave), "folded pack build failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(apath, "dedup_f_std", mask, images, 4, concave), "folded pack build failed");
     pack_file_t a;
     pack_file_load(apath, &a);
     atlas_view_t av;
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(a.bytes, a.len, &av), "open the folded atlas blob");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, av.region_count, "one region per rotation image");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, av.region_count, "one region per image");
 
     for (uint32_t r = 0; r < 4; ++r) {
         char bpath[256];
         (void)snprintf(bpath, sizeof(bpath), "%s/dedup_f_alone_%s_%u.ntpack", TMP_DIR, tag, r);
-        TEST_ASSERT_TRUE_MESSAGE(build_f_standalone_pack(bpath, "dedup_f_alone", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations[r], concave), "standalone pack build failed");
+        TEST_ASSERT_TRUE_MESSAGE(build_f_standalone_pack(bpath, "dedup_f_alone", mask, images[r], concave), "standalone pack build failed");
         pack_file_t b;
         pack_file_load(bpath, &b);
         atlas_view_t bv;
@@ -595,10 +616,18 @@ static void assert_folded_matches_standalone(bool concave, const char *tag) {
     pack_file_free(&a);
 }
 
-void test_alias_region_matches_standalone_pack(void) { assert_folded_matches_standalone(false, "rect"); }
+void test_alias_region_matches_standalone_pack(void) { assert_folded_matches_standalone(false, "rect", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations); }
 
 /* The derived concave hull, not only the RECT quad. */
-void test_concave_alias_hull_matches_standalone(void) { assert_folded_matches_standalone(true, "concave"); }
+void test_concave_alias_hull_matches_standalone(void) { assert_folded_matches_standalone(true, "concave", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations); }
+
+/* All four rotations are even-parity, so only a mirror exercises polygon_transform's
+ * ring reversal. The flag comparison inside assert_region_pair_equivalent is weak on
+ * this fixture — a RECT F carries no QUAD_* bit even standalone — but the vertex ring,
+ * the winding and the triangle tiling all bite here. */
+void test_mirrored_alias_region_matches_standalone_pack(void) { assert_folded_matches_standalone(false, "mirror_rect", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors); }
+
+void test_mirrored_concave_alias_hull_matches_standalone(void) { assert_folded_matches_standalone(true, "mirror_concave", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors); }
 
 void test_mirrored_alias_winding_is_world_ccw(void) {
     const char *path = TMP_DIR "/dedup_f_winding.ntpack";
@@ -740,8 +769,11 @@ int main(void) {
     RUN_TEST(test_mirrors_fold_under_flips_mask);
     RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
+    RUN_TEST(test_mirror_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_alias_region_matches_standalone_pack);
     RUN_TEST(test_concave_alias_hull_matches_standalone);
+    RUN_TEST(test_mirrored_alias_region_matches_standalone_pack);
+    RUN_TEST(test_mirrored_concave_alias_hull_matches_standalone);
     RUN_TEST(test_mirrored_alias_winding_is_world_ccw);
     RUN_TEST(test_wrong_relative_transform_is_rejected);
     return UNITY_END();

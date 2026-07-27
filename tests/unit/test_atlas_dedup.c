@@ -262,6 +262,28 @@ void test_post_trim_identical_frames_share_four_placements(void) {
     }
 }
 
+/* The runtime bakes trim_offset into cached_pos[], indexed by vertex_start, so two
+ * regions on one byte range would silently overwrite each other's positions — the
+ * later one wins and the earlier sprite renders displaced. Post-trim dedup is what
+ * made differing trim offsets reachable inside a group, so pin it here. */
+void test_shared_vertex_block_implies_equal_trim_offset(void) {
+    nt_atlas_dedup_region_t regions[NT_ATLAS_DEDUP_FRAME_COUNT] = {0};
+    uint32_t count = 0;
+    collect_fixture_opts(TMP_DIR "/dedup_block_trim.ntpack", "dedup_block_trim", true, NULL, regions, &count);
+    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_DEDUP_FRAME_COUNT, count);
+    /* Vacuous unless the fixture really folds — it shares 4 placements over 10 frames. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, atlas_dedup_distinct_placements(regions, count), "the fixture must fold before this proves anything");
+    for (uint32_t i = 0; i < count; ++i) {
+        for (uint32_t j = i + 1; j < count; ++j) {
+            if (regions[i].vertex_start != regions[j].vertex_start) {
+                continue;
+            }
+            TEST_ASSERT_EQUAL_INT16_MESSAGE(regions[i].trim_offset_x, regions[j].trim_offset_x, "regions sharing a vertex block must agree on trim_offset_x");
+            TEST_ASSERT_EQUAL_INT16_MESSAGE(regions[i].trim_offset_y, regions[j].trim_offset_y, "regions sharing a vertex block must agree on trim_offset_y");
+        }
+    }
+}
+
 /* Also pins the default: the previous case relies on dedup being on by default. */
 void test_dedup_disabled_at_atlas_level_gives_ten_placements(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_atlas_opts_defaults().dedup, "dedup must default to on");
@@ -567,6 +589,11 @@ typedef struct {
     uint8_t b;
     uint8_t margin;          /* per-sprite margin override (0 = inherit) */
     uint16_t slice9_lrtb[4]; /* all zero = no slice9 */
+    /* Appended so the positional initializers above keep their field mapping. */
+    uint8_t extrude;         /* 0 = inherit */
+    uint8_t max_vertices;    /* 0 = inherit */
+    uint8_t alpha_threshold; /* used only when has_alpha_threshold */
+    bool has_alpha_threshold;
 } resolved_sprite_t;
 
 static bool build_resolved_pack(const char *path, const char *atlas_name, const nt_atlas_opts_t *opts, const resolved_sprite_t *sprites, uint32_t count) {
@@ -592,6 +619,10 @@ static bool build_resolved_pack(const char *path, const char *atlas_name, const 
         nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
         sopts.name = s->name;
         sopts.margin = s->margin;
+        sopts.extrude = s->extrude;
+        sopts.max_vertices = s->max_vertices;
+        sopts.alpha_threshold = s->alpha_threshold;
+        sopts.has_alpha_threshold = s->has_alpha_threshold;
         sopts.slice9_left = s->slice9_lrtb[0];
         sopts.slice9_right = s->slice9_lrtb[1];
         sopts.slice9_top = s->slice9_lrtb[2];
@@ -620,9 +651,9 @@ static void collect_resolved_pack(const char *path, const char *atlas_name, cons
  * they group; margin 9 resolves higher and must keep its own placement. */
 void test_resolved_margin_groups_equivalent_spellings(void) {
     static const resolved_sprite_t sprites[3] = {
-        {"margin_inherit", 20, 14, 210, 120, 40, 0, {0, 0, 0, 0}},
-        {"margin_explicit", 20, 14, 210, 120, 40, 4, {0, 0, 0, 0}},
-        {"margin_raised", 20, 14, 210, 120, 40, 9, {0, 0, 0, 0}},
+        {"margin_inherit", 20, 14, 210, 120, 40, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"margin_explicit", 20, 14, 210, 120, 40, 4, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"margin_raised", 20, 14, 210, 120, 40, 9, {0, 0, 0, 0}, 0, 0, 0, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.margin = 4;
@@ -636,12 +667,47 @@ void test_resolved_margin_groups_equivalent_spellings(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 3), "a raised margin must keep its own placement");
 }
 
+/* Each remaining term of the resolved-value gate gets its own refusal. The art is a
+ * solid rect, so all three spellings below select the identical quad — only the gate
+ * itself can keep them apart, and dropping any one term silently merges sprites whose
+ * geometry was cut to a different budget. */
+void test_resolved_geometry_controls_each_refuse_a_fold(void) {
+    static const resolved_sprite_t extrude_pair[2] = {
+        {"extrude_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"extrude_wide", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 3, 0, 0, false},
+    };
+    static const resolved_sprite_t verts_pair[2] = {
+        {"verts_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"verts_eight", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 8, 0, false},
+    };
+    static const resolved_sprite_t alpha_pair[2] = {
+        {"alpha_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"alpha_high", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 200, true},
+    };
+    /* RECT keeps extrude legal and makes the selected quad independent of the
+     * budgets, so a fold here could only come from the gate being too loose. */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.max_vertices = 4;
+    opts.alpha_threshold = 1;
+
+    nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_extrude.ntpack", "dedup_resolved_extrude", &opts, extrude_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved extrude must not fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_verts.ntpack", "dedup_resolved_verts", &opts, verts_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved max_vertices must not fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_alpha.ntpack", "dedup_resolved_alpha", &opts, alpha_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved alpha threshold must not fold");
+}
+
 /* Borders are per-region metadata written from each sprite's own data, so the
  * same art with different borders is one placement and two border sets. */
 void test_slice9_same_art_different_borders_share_placement(void) {
     static const resolved_sprite_t sprites[2] = {
-        {"panel_even", 24, 40, 180, 90, 60, 0, {4, 4, 4, 4}},
-        {"panel_odd", 24, 40, 180, 90, 60, 0, {6, 2, 8, 3}},
+        {"panel_even", 24, 40, 180, 90, 60, 0, {4, 4, 4, 4}, 0, 0, 0, false},
+        {"panel_odd", 24, 40, 180, 90, 60, 0, {6, 2, 8, 3}, 0, 0, 0, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
@@ -661,8 +727,9 @@ void test_slice9_same_art_different_borders_share_placement(void) {
  * the shared placement into a rotation the runtime would reject. */
 void test_slice9_group_with_plain_sprite_stays_identity(void) {
     static const resolved_sprite_t sprites[5] = {
-        {"tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}},     {"tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}}, {"wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}},
-        {"wide_panel", 44, 8, 200, 90, 60, 0, {4, 4, 2, 2}}, {"tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}},
+        {"tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},     {"tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false}, {"wide_panel", 44, 8, 200, 90, 60, 0, {4, 4, 2, 2}, 0, 0, 0, false},
+        {"tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     /* RECT so the nine-patch and its plain twin resolve to the same shape. */
@@ -673,7 +740,9 @@ void test_slice9_group_with_plain_sprite_stays_identity(void) {
 
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].u_min, regions[3].u_min, "the nine-patch must alias onto its plain twin");
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[2].v_min, regions[3].v_min, "the nine-patch must alias onto its plain twin");
-    for (uint32_t i = 0; i < 5; ++i) {
+    /* Only the group is pinned. The three singletons keep the atlas-wide ALL mask,
+     * so the packer may legally orient them however it likes. */
+    for (uint32_t i = 2; i < 4; ++i) {
         TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[i].transform, "a group containing a nine-patch must pack at identity");
     }
 }
@@ -836,11 +905,25 @@ void test_stats_match_anim_heavy_shaped_corpus(void) {
 }
 
 void test_stats_report_shared_vertex_blocks(void) {
+    /* Every post-trim frame sits on its own canvas at its own offset, so no two
+     * regions may share a byte range: the runtime bakes trim_offset into
+     * cached_pos[], which is indexed by vertex_start. Folding the placement is
+     * still correct and still happens — only the block sharing is withheld. */
     nt_atlas_stats_t s = {0};
     TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(TMP_DIR "/dedup_stats_blocks.ntpack", "dedup_stats_blocks", NULL, true, NULL, &s), "block stats pack failed");
-    /* Each identity alias emits bytes equal to its root's, so every fold shares. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s.folds_exact, s.vertex_blocks_shared, "every identity fold must share its root's vertex block");
-    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, s.vertex_blocks_shared, "the fixture must share at least one block");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, s.folds_exact, "the fixture must fold at least one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s.vertex_blocks_shared, "frames with distinct trim offsets must not share a vertex block");
+
+    /* Same art on the same canvas at the same offset — now sharing is allowed. */
+    static const block_sprite_t twins[2] = {
+        {"stats_t0", 16, 12, 220, 60, 60},
+        {"stats_t1", 16, 12, 220, 60, 60},
+    };
+    nt_atlas_stats_t shared = {0};
+    TEST_ASSERT_TRUE_MESSAGE(build_block_pack(TMP_DIR "/dedup_stats_twin_blocks.ntpack", "dedup_stats_twin_blocks", twins, 2, &shared), "twin stats pack failed");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, shared.folds_exact, "the twins must fold onto one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(shared.folds_exact, shared.vertex_blocks_shared, "an identity fold at equal trim offsets shares its root's block");
+    assert_fold_identity(&shared);
 
     static const block_sprite_t distinct[3] = {
         {"stats_c0", 14, 10, 235, 200, 40},
@@ -859,6 +942,7 @@ int main(void) {
     RUN_TEST(test_dedup_fixture_builds);
     RUN_TEST(test_dedup_region_metadata_is_per_sprite);
     RUN_TEST(test_post_trim_identical_frames_share_four_placements);
+    RUN_TEST(test_shared_vertex_block_implies_equal_trim_offset);
     RUN_TEST(test_dedup_disabled_at_atlas_level_gives_ten_placements);
     RUN_TEST(test_sprite_dedup_off_is_bidirectional);
     RUN_TEST(test_sprite_dedup_off_first_is_not_a_target);
@@ -870,6 +954,7 @@ int main(void) {
     RUN_TEST(test_alias_root_is_lowest_add_index);
     RUN_TEST(test_mirrored_twin_folds_with_its_relative_transform);
     RUN_TEST(test_resolved_margin_groups_equivalent_spellings);
+    RUN_TEST(test_resolved_geometry_controls_each_refuse_a_fold);
     RUN_TEST(test_slice9_same_art_different_borders_share_placement);
     RUN_TEST(test_slice9_group_with_plain_sprite_stays_identity);
     RUN_TEST(test_dedup_pack_is_deterministic);
