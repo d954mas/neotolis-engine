@@ -5,8 +5,10 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-/* V6: slice9_lrtb added to NtAtlasRegion (40->48 bytes). */
-#define NT_ATLAS_VERSION 6
+/* V6: slice9_lrtb added to NtAtlasRegion (40->48 bytes).
+ * V7: same layout, new region semantics — transform became compose(placement,
+ *     relative) and a shared vertex_start gained the trim_offset precondition. */
+#define NT_ATLAS_VERSION 7
 
 /* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
