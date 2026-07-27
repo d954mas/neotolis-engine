@@ -483,9 +483,8 @@ enum { PER_SPRITE_SIZE = KEY_OV_OFF + (4 * sizeof(uint16_t)) + 5 + sizeof(float)
  * a mismatch truncates or over-reads the key input silently. */
 _Static_assert(PER_SPRITE_SIZE == KEY_OV_OFF + 17 + sizeof(float), "PER_SPRITE_SIZE must equal the last per-sprite write offset + 1");
 
-/* Sizes the opts run at compile time. A runtime check placed after the writes can
- * only report an overrun, never prevent it. Trailing 6 = alpha_threshold, flags,
- * allowed_transforms, shape, dedup, ATLAS_CACHE_KEY_VERSION. */
+/* Trailing 6 = alpha_threshold, flags, allowed_transforms, shape, dedup,
+ * ATLAS_CACHE_KEY_VERSION. */
 enum {
     ATLAS_OPTS_KEY_SIZE = sizeof(uint32_t) + sizeof(((const nt_atlas_opts_t *)0)->max_size) + sizeof(((const nt_atlas_opts_t *)0)->padding) + sizeof(((const nt_atlas_opts_t *)0)->margin) +
                           sizeof(((const nt_atlas_opts_t *)0)->extrude) + sizeof(((const nt_atlas_opts_t *)0)->max_added_area_percent) + sizeof(((const nt_atlas_opts_t *)0)->max_vertices) + 6
@@ -537,7 +536,10 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
 
     /* Build key buffer: per-sprite data + serialized opts */
     /* Serialize opts fields (excluding compress pointer) */
-    uint8_t opts_buf[ATLAS_OPTS_KEY_SIZE];
+    /* Slack: the size enum and the write run below are hand-maintained lists, so a
+     * field added to one and not the other must not smash the stack before the
+     * post-write assert can report the drift. */
+    uint8_t opts_buf[ATLAS_OPTS_KEY_SIZE + 16];
     uint32_t pos = 0;
     /* Builder version — mirrors nt_builder_cache.c:nt_builder_compute_opts_hash
      * so any NT_BUILDER_VERSION bump automatically invalidates all atlas cache
@@ -1344,10 +1346,8 @@ static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_id
     return true;
 }
 
-/* rel is the orientation the alias's own local space is stored at inside the shared
- * rectangle: root_bitmap == rel(a_bitmap), the same meaning pl->transform carries. The
- * opposite direction would force d4_inverse(rel) into reg->transform, which is not
- * generally a member of the alias's own mask. */
+/* rel means root_bitmap == rel(a_bitmap). The opposite direction would force
+ * d4_inverse(rel) into reg->transform, which need not be in the alias's own mask. */
 static bool pipeline_dedup_pixels_match_rel(const AtlasPipeline *p, uint32_t a_idx, uint32_t root_idx, uint8_t rel) {
     const uint32_t aw = p->trim_w[a_idx];
     const uint32_t ah = p->trim_h[a_idx];
@@ -1397,13 +1397,8 @@ static uint64_t atlas_sprite_dim_key(const AtlasPipeline *p, uint32_t i) {
     return ((uint64_t)(w < h ? w : h) << 32U) | (w < h ? h : w);
 }
 
-/* Minimum of the orientation hashes of the post-trim RGBA. Mask-independent by
- * construction: a mask is admission policy, so keying on it would give two sprites with
- * identical content different buckets. Strictly supersedes decoded_hash as the grouping key,
- * which keeps its global-asset-cache and atlas-cache-key roles.
- *
- * orbit_count is 8 or 1, never a per-sprite subset: min-over-orbit is only invariant when
- * the set is a subgroup, and a mask like {identity, rot90} is not closed. */
+/* Grouping key = minimum of the post-trim orientation hashes. Deliberately
+ * mask-independent: a mask is admission policy, not content identity. */
 static void atlas_write_oriented_trim(const uint8_t *src, size_t src_stride, uint32_t tw, uint32_t th, uint8_t t, uint8_t *scratch) {
     uint32_t ow = 0;
     uint32_t oh = 0;
@@ -1481,8 +1476,10 @@ static size_t dedup_scratch_bytes(const AtlasPipeline *p, const DedupSortEntry *
         const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
         if (hi - lo >= 2) {
             const uint32_t idx = e[lo].index;
-            const size_t need = (size_t)p->trim_w[idx] * p->trim_h[idx] * 4U;
-            bytes = need > bytes ? need : bytes;
+            /* Mirrors the bail in atlas_sprite_canonical_hash: a sprite it refuses to
+             * hash must not size the scratch either. */
+            const uint64_t need = (uint64_t)p->trim_w[idx] * p->trim_h[idx] * 4U;
+            bytes = (need <= UINT32_MAX && need > (uint64_t)bytes) ? (size_t)need : bytes;
         }
         lo = hi;
     }
@@ -1500,12 +1497,8 @@ static void dedup_hash_bucket(const AtlasPipeline *p, DedupSortEntry *e, uint32_
     }
 }
 
-/* Whole orbit only when some member of THIS bucket could actually fold through a
- * non-identity relative; 0 when none of them may fold at all. Never per sprite:
- * minimum-over-orbit is only orientation-invariant when the orientation set is a
- * subgroup, and a mask like {identity, rot90} is not closed. Per bucket is exactly
- * as strict, because a run never crosses a dimension bucket, so a bucket is the
- * widest set whose keys are ever compared to each other. */
+/* Per bucket, never per sprite: min-over-orbit is orientation-invariant only when the
+ * orientation set is a subgroup, and a mask like {identity, rot90} is not closed. */
 static uint8_t dedup_bucket_orbit_count(const AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
     uint8_t mask = 0;
     for (uint32_t k = lo; k < hi; k++) {
@@ -1586,10 +1579,8 @@ static bool pipeline_dedup_find_rel(const AtlasPipeline *p, uint32_t a, uint32_t
     return false;
 }
 
-/* One search over an equal-content run, walked in add order. The run's first eligible
- * member is the root, so the root is the lowest add index — after the D4 stage the root
- * decides every alias's relative transform and emitted block, so this is a correctness
- * requirement, not a nicety. */
+/* Walked in add order: the root decides every alias's relative transform and emitted
+ * block, so lowest-add-index roots are what keep a repack byte-identical. */
 static void pipeline_dedup_fold_run(AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
     for (uint32_t m = lo + 1; m < hi; m++) {
         const uint32_t a = e[m].index;
@@ -2545,11 +2536,9 @@ static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, 
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx);
 
-/* Triangulate the derived ring the same way a standalone pack would, instead of
- * remapping the root's indices through the ring reversal polygon_transform applies on
- * odd parity. Remapping produced a valid but non-canonical order, which then failed
- * atlas_region_flags_from_indices and silently dropped the QUAD_* hint on every
- * reflected alias. Triangle count is D4-invariant, so the caller's sizing holds. */
+/* Triangulate like a standalone pack would: remapping the root's indices survives the
+ * odd-parity ring reversal but in an order atlas_region_flags_from_indices rejects,
+ * dropping the QUAD_* hint. Triangle count is D4-invariant, so the sizing holds. */
 static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, uint32_t expected_index_count) {
     uint32_t produced = 0;
     const bool ok = nt_polygon_triangulate_validated(ring, n, out, &produced, NULL);
@@ -2561,10 +2550,8 @@ static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, 
     }
 }
 
-/* Re-prove an alias's already-derived geometry against the alias's OWN mask. This pass is
- * what catches a wrong relative transform or a wrong derivation, so it must never be
- * short-circuited by the area-preservation argument that makes the root's scalars valid
- * claims here. */
+/* Re-prove against the alias's OWN mask — this pass is what catches a wrong relative
+ * transform, so never short-circuit it on the root's area-preservation argument. */
 static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
     const nt_selected_geometry_proof_t *root_proof = &p->geometry_proofs[orig];
     uint8_t *binary = pipeline_geometry_binary_mask(p, i);
@@ -2573,16 +2560,19 @@ static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32
                                       p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], p->hull_vertices[i], p->vertex_counts[i], root_proof->selected_area2,
                                       p->triangle_indices[i], p->triangle_index_counts[i], p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
     free(binary);
+    const bool ok = proof.valid && nt_selected_geometry_proof_equal(&proof, root_proof);
+    NT_BUILD_ASSERT(ok && "alias geometry proof mismatch");
+    /* Hard gate — an asserts-off build must not store an invalid proof, which every
+     * downstream check would then wave through as well. */
+    if (!ok) {
+        abort();
+    }
     p->geometry_proofs[i] = proof;
-    NT_BUILD_ASSERT(proof.valid && nt_selected_geometry_proof_equal(&proof, root_proof) && "alias geometry proof mismatch");
 }
 
-/* Derive an alias's geometry as the exact integer D4 pre-image of its root's.
- *
- * alias_rel maps the alias's local space onto the root's, so the alias's own hull is the
- * root's pulled back through d4_inverse — with the ROOT's dims, which is the space that
- * pull-back starts in. Re-tracing instead would let the frontier pick a hull that is not
- * the exact D4 image of the root's and therefore no longer fits the shared rectangle. */
+/* Pull the root's hull back through d4_inverse, in the ROOT's dims — that is the space
+ * the pull-back starts in. Re-tracing could pick a hull that is not the exact D4 image
+ * of the root's and therefore no longer fits the shared rectangle. */
 static void pipeline_derive_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
     /* pipeline_dedup chain-follows to a root before comparing, so no composition along a
      * chain is ever needed. */
@@ -3328,6 +3318,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
+        if (pi >= p->placement_count) {
+            abort();
+        }
         AtlasPlacement *pl = &p->placements[pi];
         /* An alias borrows its root's placement, so only an original's placement
          * points back at itself. */
@@ -3423,14 +3417,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
     // #endregion
 
     // #region serialize block dedup
-    /* Assign each block a byte range, first writer in add order wins — which makes
-     * the assignment deterministic without any tie-break rule. The hash only
-     * narrows the search; identity is decided by memcmp, so a collision can share
-     * nothing.
-     * The trim offsets join that identity even though they are not in the block:
-     * the runtime bakes them into cached_pos[], which is indexed by vertex_start,
-     * so two regions sharing a range must agree on them or the later one wins.
-     * vertex_start/index_start are uint32_t in v3 — no practical bound until 4G. */
+    /* First writer in add order wins; identity is decided by memcmp, so a hash
+     * collision can share nothing. trim_offset joins that identity though it is not in
+     * the block: the runtime bakes it into cached_pos[], indexed by vertex_start. */
     uint32_t slot_capacity = 16;
     while (slot_capacity < p->sprite_count * 2U) {
         slot_capacity <<= 1U;
@@ -3544,6 +3533,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
+        if (pi >= p->placement_count) {
+            abort();
+        }
         AtlasPlacement *pl = &p->placements[pi];
         NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");
 
@@ -3875,8 +3868,8 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     /* Published, so the numbers describe a real atlas. Every sprite is either its
      * own placement or an alias of one — a miscounted fold shows up here. */
     NT_BUILD_ASSERT(p.folds_exact + p.folds_d4 + p.placement_count == p.sprite_count && "atlas_commit: folds and placements do not account for every sprite");
-    NT_BUILD_ASSERT(ctx->atlas_stats_count < NT_BUILD_MAX_ASSETS && "atlas_commit: more committed atlases than NT_BUILD_MAX_ASSETS");
-    if (ctx->atlas_stats_count < NT_BUILD_MAX_ASSETS) {
+    NT_BUILD_ASSERT(ctx->atlas_stats_count < NT_BUILD_MAX_ATLASES && "atlas_commit: more committed atlases than NT_BUILD_MAX_ATLASES -- raise the cap");
+    if (ctx->atlas_stats_count < NT_BUILD_MAX_ATLASES) {
         ctx->atlas_stats[ctx->atlas_stats_count++] = (nt_atlas_stats_t){.sprites = p.sprite_count,
                                                                         .placements = p.placement_count,
                                                                         .folds_exact = p.folds_exact,

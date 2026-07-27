@@ -202,7 +202,7 @@ struct NtBuilderContext {
      * count precedes its array so the 8-aligned array absorbs the pad this run of
      * uint32 counters would otherwise leave. */
     uint32_t atlas_stats_count;
-    nt_atlas_stats_t atlas_stats[NT_BUILD_MAX_ASSETS];
+    nt_atlas_stats_t atlas_stats[NT_BUILD_MAX_ATLASES];
 
     /* Atlas transaction currently collecting inputs. */
     NtAtlasBuild *active_atlas;

@@ -380,12 +380,10 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
         const float trim_off_y = (float)r->trim_offset_y;
         for (uint32_t v = 0; v < r->vertex_count; v++) {
             const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
-            /* Source-space position (NO origin baked). Builder dedups regions
-             * by pixel hash — duplicates share vertex_start/index_start with
-             * possibly different origin_x/y. Baking origin into cached_pos
-             * would let the last-baked region overwrite earlier ones, so the
-             * sprite renderer applies origin per-emit via the translation
-             * vector instead. */
+            /* Source-space position, NO origin baked: byte-identical blocks share one
+             * vertex_start across regions whose origin_x/y may differ, so baking it
+             * would let the last region win. The sprite renderer applies origin
+             * per-emit via the translation vector instead. */
             ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x) * ipu;
             ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y) * ipu;
         }
@@ -404,7 +402,13 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
 
     nt_atlas_blob_view_t view;
-    NT_ASSERT(atlas_try_validate_and_carve_blob(data, size, &view));
+    /* Hard gate — NT_ASSERT is ((void)0) in the OFF shipping config, and this call is
+     * both the only validation of the untrusted blob and what carves the view. */
+    const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
+    NT_ASSERT(blob_ok && "atlas blob: validation failed");
+    if (!blob_ok) {
+        return;
+    }
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 
