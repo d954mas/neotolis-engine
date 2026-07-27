@@ -1495,7 +1495,7 @@ static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transfo
  * applies any D4 placement transform while serializing vertices; runtime must
  * not apply transform a second time. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_cached_uv_d4_transform(void) {
+void test_atlas_uv_passthrough_d4_transform(void) {
     /* Reference corners in (u, v) before transform, matching build_corner_uv_blob. */
     const float src_u[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     const float src_v[4] = {0.0F, 0.0F, 1.0F, 1.0F};
@@ -2261,7 +2261,7 @@ int main(void) {
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
 
     /* Cached arrays + pixels_per_unit + SD/HD merge */
-    RUN_TEST(test_atlas_cached_uv_d4_transform);
+    RUN_TEST(test_atlas_uv_passthrough_d4_transform);
     RUN_TEST(test_atlas_cached_pos_origin_not_baked);
     RUN_TEST(test_atlas_cached_pos_includes_trim_offset);
     RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);

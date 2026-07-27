@@ -416,6 +416,7 @@ typedef struct {
     uint8_t r;
     uint8_t g;
     uint8_t b;
+    uint8_t shape; /* 0 = atlas default; RECT is what makes a QUAD_* hint reachable */
 } block_sprite_t;
 
 /* out_stats may be NULL. */
@@ -434,6 +435,8 @@ static bool build_block_pack(const char *path, const char *atlas_name, const blo
     for (uint32_t i = 0; i < count; ++i) {
         const block_sprite_t *s = &sprites[i];
         const uint32_t texels = (uint32_t)s->w * (uint32_t)s->h;
+        /* The table is data, not a type — a larger entry must fail loudly, not smash. */
+        TEST_ASSERT_TRUE_MESSAGE((size_t)texels * 4U <= sizeof(px), "block sprite exceeds BLOCK_SPRITE_MAX_DIM");
         for (uint32_t t = 0; t < texels; ++t) {
             px[(t * 4U) + 0U] = s->r;
             px[(t * 4U) + 1U] = s->g;
@@ -442,6 +445,7 @@ static bool build_block_pack(const char *path, const char *atlas_name, const blo
         }
         nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
         sopts.name = s->name;
+        sopts.shape = s->shape;
         nt_atlas_add_raw(atlas, px, s->w, s->h, &sopts);
     }
     nt_build_result_t commit = nt_atlas_commit(atlas);
@@ -465,9 +469,9 @@ static void collect_block_pack(const char *path, const char *atlas_name, const b
 
 void test_identity_aliases_share_one_vertex_block(void) {
     static const block_sprite_t sprites[3] = {
-        {"block_a0", 16, 12, 220, 60, 60},
-        {"block_a1", 16, 12, 220, 60, 60}, /* byte-identical to block_a0 */
-        {"block_b", 20, 8, 70, 90, 230},
+        {"block_a0", 16, 12, 220, 60, 60, 0},
+        {"block_a1", 16, 12, 220, 60, 60, 0}, /* byte-identical to block_a0 */
+        {"block_b", 20, 8, 70, 90, 230, 0},
     };
     nt_atlas_dedup_region_t regions[BLOCK_SPRITE_MAX_COUNT] = {0};
     collect_block_pack(TMP_DIR "/dedup_block_share.ntpack", "dedup_block_share", sprites, 3, regions);
@@ -486,9 +490,9 @@ void test_identity_aliases_share_one_vertex_block(void) {
 
 void test_distinct_sprites_do_not_share_blocks(void) {
     static const block_sprite_t sprites[3] = {
-        {"block_c0", 14, 10, 235, 200, 40},
-        {"block_c1", 18, 10, 60, 210, 80},
-        {"block_c2", 14, 16, 70, 90, 230},
+        {"block_c0", 14, 10, 235, 200, 40, 0},
+        {"block_c1", 18, 10, 60, 210, 80, 0},
+        {"block_c2", 14, 16, 70, 90, 230, 0},
     };
     nt_atlas_dedup_region_t regions[BLOCK_SPRITE_MAX_COUNT] = {0};
     collect_block_pack(TMP_DIR "/dedup_block_distinct.ntpack", "dedup_block_distinct", sprites, 3, regions);
@@ -502,15 +506,17 @@ void test_distinct_sprites_do_not_share_blocks(void) {
  * carries the relative transform — so the region transforms read straight back
  * which sprite the group was rooted at. Swapping the add order moves it. */
 void test_alias_root_is_lowest_add_index(void) {
+    /* RECT so every region is a 4-vertex quad — the only shape that can carry a
+     * QUAD_* hint, and therefore the only one that can prove an alias keeps it. */
     static const block_sprite_t wide_first[3] = {
-        {"root_w0", 20, 14, 120, 180, 60},
-        {"root_t1", 14, 20, 120, 180, 60},
-        {"root_w2", 20, 14, 120, 180, 60},
+        {"root_w0", 20, 14, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
+        {"root_t1", 14, 20, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
+        {"root_w2", 20, 14, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
     };
     static const block_sprite_t tall_first[3] = {
-        {"root2_t0", 14, 20, 120, 180, 60},
-        {"root2_w1", 20, 14, 120, 180, 60},
-        {"root2_w2", 20, 14, 120, 180, 60},
+        {"root2_t0", 14, 20, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
+        {"root2_w1", 20, 14, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
+        {"root2_w2", 20, 14, 120, 180, 60, NT_ATLAS_SPRITE_SHAPE_RECT},
     };
     nt_atlas_dedup_region_t regions[BLOCK_SPRITE_MAX_COUNT] = {0};
     collect_block_pack(TMP_DIR "/dedup_root_wide.ntpack", "dedup_root_wide", wide_first, 3, regions);
@@ -518,6 +524,12 @@ void test_alias_root_is_lowest_add_index(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[0].transform, "the first-added member is the root and is stored at identity");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, regions[1].transform, "the transposed member records its relative transform");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, regions[2].transform, "a same-orientation member aliases at identity");
+    /* alias_retriangulate must leave a derived alias indistinguishable from a standalone
+     * pack — same quad shape, same render flags, whatever those resolve to. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, regions[1].vertex_count, "a transposed RECT alias stays a quad");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(6, regions[1].index_count, "a transposed RECT alias keeps six indices");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].flags, regions[1].flags, "a transposed alias must carry the root's render flags");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].flags, regions[2].flags, "an identity alias must carry the root's render flags");
 
     nt_atlas_dedup_region_t swapped[BLOCK_SPRITE_MAX_COUNT] = {0};
     collect_block_pack(TMP_DIR "/dedup_root_tall.ntpack", "dedup_root_tall", tall_first, 3, swapped);
@@ -525,6 +537,8 @@ void test_alias_root_is_lowest_add_index(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, swapped[0].transform, "the root follows the add order, not the sprite dims");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, swapped[1].transform, "both later members now need the relative transform");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_TRANSPOSE, swapped[2].transform, "both later members now need the relative transform");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(swapped[0].flags, swapped[1].flags, "a transposed alias must carry the root's render flags");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(swapped[0].flags, swapped[2].flags, "a transposed alias must carry the root's render flags");
 }
 
 /* A mirrored relative is the only case that separates the texel mapping
@@ -616,6 +630,8 @@ static bool build_resolved_pack(const char *path, const char *atlas_name, const 
     for (uint32_t i = 0; i < count; ++i) {
         const resolved_sprite_t *s = &sprites[i];
         const uint32_t texels = (uint32_t)s->w * (uint32_t)s->h;
+        /* The table is data, not a type — a larger entry must fail loudly, not smash. */
+        TEST_ASSERT_TRUE_MESSAGE((size_t)texels * 4U <= sizeof(px), "resolved sprite exceeds RESOLVED_SPRITE_MAX_DIM");
         for (uint32_t t = 0; t < texels; ++t) {
             px[(t * 4U) + 0U] = s->r;
             px[(t * 4U) + 1U] = s->g;
@@ -912,6 +928,98 @@ void test_stats_match_anim_heavy_shaped_corpus(void) {
     assert_fold_identity(&s);
 }
 
+/* Reading stats[n-1] everywhere would also pass for an implementation that always
+ * wrote index 0, or that published a record on a failed commit — so index the array
+ * by commit order instead, across a failing commit. The same failure also pins that
+ * an UNFITTABLE record describes the sprite it names, not that sprite's group root. */
+void test_atlas_stats_and_errors_are_per_commit(void) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/dedup_stats_multi.ntpack");
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start pack");
+    nt_builder_set_threads(ctx, 1);
+
+    static uint8_t px[BLOCK_SPRITE_MAX_PX];
+    memset(px, 0xFF, sizeof(px));
+    nt_atlas_sprite_opts_t s = nt_atlas_sprite_opts_defaults();
+
+    nt_atlas_opts_t o1 = nt_atlas_opts_defaults();
+    NtAtlasBuild *a1 = nt_atlas_begin(ctx, "stats_multi_1", &o1);
+    s.name = "m1_a";
+    nt_atlas_add_raw(a1, px, 16, 12, &s);
+    s.name = "m1_b"; /* byte-identical to m1_a */
+    nt_atlas_add_raw(a1, px, 16, 12, &s);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(a1), "the first atlas must commit");
+
+    /* A transposed pair that folds into one group, on a page too small for it. */
+    nt_atlas_opts_t o2 = nt_atlas_opts_defaults();
+    o2.max_size = 16;
+    NtAtlasBuild *a2 = nt_atlas_begin(ctx, "stats_multi_fail", &o2);
+    s.name = "m2_wide";
+    nt_atlas_add_raw(a2, px, 24, 18, &s);
+    s.name = "m2_tall";
+    nt_atlas_add_raw(a2, px, 18, 24, &s);
+    TEST_ASSERT_TRUE_MESSAGE(nt_atlas_commit(a2) != NT_BUILD_OK, "an unfittable group must fail its commit");
+
+    nt_atlas_opts_t o3 = nt_atlas_opts_defaults();
+    NtAtlasBuild *a3 = nt_atlas_begin(ctx, "stats_multi_3", &o3);
+    s.name = "m3_a";
+    nt_atlas_add_raw(a3, px, 14, 10, &s);
+    s.name = "m3_b"; /* different dimensions, so nothing folds */
+    nt_atlas_add_raw(a3, px, 18, 10, &s);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(a3), "the third atlas must commit");
+
+    /* Same pair at a page size that fits: proves the failing atlas above really did
+     * form a D4 group, so its per-sprite error records are not vacuously correct. */
+    nt_atlas_opts_t o4 = nt_atlas_opts_defaults();
+    NtAtlasBuild *a4 = nt_atlas_begin(ctx, "stats_multi_group", &o4);
+    s.name = "m4_wide";
+    nt_atlas_add_raw(a4, px, 24, 18, &s);
+    s.name = "m4_tall";
+    nt_atlas_add_raw(a4, px, 18, 24, &s);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(a4), "the fitting group must commit");
+
+    uint32_t n = 0;
+    const nt_atlas_stats_t *stats = nt_builder_get_atlas_stats(ctx, &n);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, n, "a failed commit must publish no stats record");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[2].folds_d4, "the transposed pair folds through a D4 transform");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[2].placements, "the transposed pair shares one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[0].sprites, "record 0 is the first committed atlas");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[0].folds_exact, "the identical pair folds once");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[0].placements, "the identical pair shares one placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[1].sprites, "record 1 is the third commit, not the failed one");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, stats[1].folds_exact, "differently sized sprites cannot fold");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[1].placements, "differently sized sprites need two placements");
+    /* out_count is documented as optional. */
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(stats, nt_builder_get_atlas_stats(ctx, NULL), "a NULL out_count must still return the array");
+
+    uint32_t err_count = 0;
+    const nt_build_error_t *errors = nt_builder_get_errors(ctx, &err_count);
+    TEST_ASSERT_TRUE_MESSAGE(err_count >= 2, "both members of the unfittable group must be reported");
+    bool saw_wide = false;
+    bool saw_tall = false;
+    for (uint32_t i = 0; i < err_count; ++i) {
+        const nt_build_error_t *e = &errors[i];
+        if (e->kind != NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE) {
+            continue;
+        }
+        if (strcmp(e->sprite, "m2_wide") == 0) {
+            saw_wide = true;
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(24, e->w, "the record must carry the named sprite's own width");
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(18, e->h, "the record must carry the named sprite's own height");
+        } else if (strcmp(e->sprite, "m2_tall") == 0) {
+            saw_tall = true;
+            /* The alias is transposed: its root's dims would be the swapped pair. */
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(18, e->w, "an alias must not be told its root's swapped width");
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(24, e->h, "an alias must not be told its root's swapped height");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw_wide && saw_tall, "both group members must appear in the error channel");
+
+    nt_builder_free_pack(ctx);
+}
+
 void test_stats_report_shared_vertex_blocks(void) {
     /* Every post-trim frame sits on its own canvas at its own offset, so no two
      * regions may share a byte range: the runtime bakes trim_offset into
@@ -924,8 +1032,8 @@ void test_stats_report_shared_vertex_blocks(void) {
 
     /* Same art on the same canvas at the same offset — now sharing is allowed. */
     static const block_sprite_t twins[2] = {
-        {"stats_t0", 16, 12, 220, 60, 60},
-        {"stats_t1", 16, 12, 220, 60, 60},
+        {"stats_t0", 16, 12, 220, 60, 60, 0},
+        {"stats_t1", 16, 12, 220, 60, 60, 0},
     };
     nt_atlas_stats_t shared = {0};
     TEST_ASSERT_TRUE_MESSAGE(build_block_pack(TMP_DIR "/dedup_stats_twin_blocks.ntpack", "dedup_stats_twin_blocks", twins, 2, &shared), "twin stats pack failed");
@@ -934,9 +1042,9 @@ void test_stats_report_shared_vertex_blocks(void) {
     assert_fold_identity(&shared);
 
     static const block_sprite_t distinct[3] = {
-        {"stats_c0", 14, 10, 235, 200, 40},
-        {"stats_c1", 18, 10, 60, 210, 80},
-        {"stats_c2", 14, 16, 70, 90, 230},
+        {"stats_c0", 14, 10, 235, 200, 40, 0},
+        {"stats_c1", 18, 10, 60, 210, 80, 0},
+        {"stats_c2", 14, 16, 70, 90, 230, 0},
     };
     nt_atlas_stats_t none = {0};
     TEST_ASSERT_TRUE_MESSAGE(build_block_pack(TMP_DIR "/dedup_stats_no_blocks.ntpack", "dedup_stats_no_blocks", distinct, 3, &none), "distinct-sprite stats pack failed");
@@ -970,5 +1078,6 @@ int main(void) {
     RUN_TEST(test_stats_report_d4_folds);
     RUN_TEST(test_stats_match_anim_heavy_shaped_corpus);
     RUN_TEST(test_stats_report_shared_vertex_blocks);
+    RUN_TEST(test_atlas_stats_and_errors_are_per_commit);
     return UNITY_END();
 }

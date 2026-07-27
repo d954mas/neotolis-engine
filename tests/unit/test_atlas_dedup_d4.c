@@ -751,9 +751,11 @@ void test_wrong_relative_transform_is_rejected(void) {
     NT_TEST_LSAN_ENABLE();
     nt_build_assert_handler = NULL;
     nt_atlas_test_force_alias_rel(0xFFU);
-    const bool proof_rejected = s_build_assert_expr != NULL && strstr(s_build_assert_expr, "proof") != NULL;
+    /* The alias-derivation message, not just "proof": the serialize-stage re-proof
+     * carries its own and would let a deleted pipeline_reprove_alias_geometry pass. */
+    const bool proof_rejected = s_build_assert_expr != NULL && strstr(s_build_assert_expr, "alias geometry proof mismatch") != NULL;
     nt_builder_free_pack(ctx);
-    TEST_ASSERT_TRUE_MESSAGE(proof_rejected, "a wrong relative must be rejected by a coverage proof");
+    TEST_ASSERT_TRUE_MESSAGE(proof_rejected, "a wrong relative must be rejected by the alias geometry proof");
 
     /* And the same build succeeds again — the hook is provably disarmed. */
     assert_twins_fold_at_identity(TMP_DIR "/dedup_f_twins_disarmed.ntpack", "the forced-relative hook must not leak into a later case");

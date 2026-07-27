@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* clang-format off */
@@ -110,6 +111,10 @@ static inline void atlas_dedup_fixture_add_opts(NtAtlasBuild *atlas, const uint8
     uint8_t px[NT_ATLAS_DEDUP_MAX_PX];
     for (uint32_t i = 0; i < (uint32_t)NT_ATLAS_DEDUP_FRAME_COUNT; ++i) {
         const nt_atlas_dedup_frame_t *f = &k_atlas_dedup_frames[i];
+        /* The frame table is data — a larger canvas must abort, not smash the stack. */
+        if ((size_t)f->canvas_w * f->canvas_h * 4U > sizeof(px)) {
+            abort();
+        }
         atlas_dedup_fixture_fill_frame(f, px);
         nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
         opts.name = f->name; /* raw sprites require an explicit name */
@@ -259,7 +264,9 @@ static inline uint32_t atlas_dedup_distinct_placements(const nt_atlas_dedup_regi
     for (uint32_t i = 0; i < count; ++i) {
         bool seen = false;
         for (uint32_t j = 0; j < i; ++j) {
-            if (r[j].page_index == r[i].page_index && r[j].u_min == r[i].u_min && r[j].v_min == r[i].v_min) {
+            /* Full box, not just the min corner: two nested concave hulls can share a
+             * min corner and would then count as one placement. */
+            if (r[j].page_index == r[i].page_index && r[j].u_min == r[i].u_min && r[j].v_min == r[i].v_min && r[j].u_max == r[i].u_max && r[j].v_max == r[i].v_max) {
                 seen = true;
                 break;
             }
