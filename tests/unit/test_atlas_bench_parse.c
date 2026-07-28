@@ -195,7 +195,7 @@ static uint32_t build_placement_blob(uint8_t *buf, uint32_t cap, middle_kind_t m
 /* Two triangles that split one UV box. COMPLEMENTARY halves are disjoint but
  * share the box, so a bbox key would fold them; DUPLICATE is the same ring from
  * a rotated start vertex, which must still fold. */
-typedef enum { TRI_COMPLEMENTARY, TRI_DUPLICATE, TRI_SINGLE } tri_kind_t;
+typedef enum { TRI_COMPLEMENTARY, TRI_DUPLICATE, TRI_REVERSED, TRI_SINGLE } tri_kind_t;
 
 static void write_tri(NtAtlasVertex *dst, const uint16_t *us, const uint16_t *vs, uint16_t rotate) {
     for (uint16_t i = 0; i < 3; i++) {
@@ -221,6 +221,11 @@ static uint32_t build_triangle_blob(uint8_t *buf, uint32_t cap, tri_kind_t kind)
         write_tri(&verts[3], upper_u, upper_v, 0);
     } else {
         write_tri(&verts[3], lower_u, lower_v, 1);
+        if (kind == TRI_REVERSED) {
+            const NtAtlasVertex tmp = verts[4];
+            verts[4] = verts[5];
+            verts[5] = tmp;
+        }
     }
 
     const uint16_t region_count = (kind == TRI_SINGLE) ? 1 : 2;
@@ -318,6 +323,16 @@ static void repeated_ring_counts_once(void) {
     uint64_t r_bits = 0;
     uint64_t o_bits = 0;
     memcpy(&r_bits, &repeated, sizeof(r_bits));
+    memcpy(&o_bits, &one, sizeof(o_bits));
+    TEST_ASSERT_EQUAL_HEX64(o_bits, r_bits);
+}
+
+static void reversed_ring_counts_once(void) {
+    const double reversed = parse_tri_area(TRI_REVERSED);
+    const double one = parse_tri_area(TRI_SINGLE);
+    uint64_t r_bits = 0;
+    uint64_t o_bits = 0;
+    memcpy(&r_bits, &reversed, sizeof(r_bits));
     memcpy(&o_bits, &one, sizeof(o_bits));
     TEST_ASSERT_EQUAL_HEX64(o_bits, r_bits);
 }
@@ -526,6 +541,7 @@ int main(void) {
     RUN_TEST(distinct_placement_adds_area);
     RUN_TEST(complementary_triangles_each_count);
     RUN_TEST(repeated_ring_counts_once);
+    RUN_TEST(reversed_ring_counts_once);
     RUN_TEST(reject_bad_magic);
     RUN_TEST(reject_bad_version);
     RUN_TEST(reject_oob_vertex_offset);

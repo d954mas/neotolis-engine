@@ -502,6 +502,58 @@ void test_distinct_sprites_do_not_share_blocks(void) {
     TEST_ASSERT_NOT_EQUAL_MESSAGE(regions[1].vertex_start, regions[2].vertex_start, "distinct sprites must not share a block");
 }
 
+/* The OFF guarantee is pixels and placement, not blob bytes: serialize-stage block
+ * sharing is byte-equality only and does not consult the off-switch. Alone on its
+ * own page at the same (x, y), the OFF twin emits byte-identical vertices and
+ * legally shares the read-only range — extending OFF to blob bytes, or re-merging
+ * the placements, would each break one of the two pins below. */
+void test_sprite_dedup_off_shares_bytes_but_not_placement(void) {
+    const char *path = TMP_DIR "/dedup_off_block.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    /* One 40x40 sprite per 64-page: both twins land at their page's origin, so
+     * the emitted UVs — and therefore the blocks — come out byte-identical. */
+    opts.max_size = 64;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_off_block", &opts);
+    static uint8_t px[40 * 40 * 4];
+    for (uint32_t t = 0; t < 40U * 40U; ++t) {
+        px[(t * 4U) + 0U] = 140U;
+        px[(t * 4U) + 1U] = 60U;
+        px[(t * 4U) + 2U] = 200U;
+        px[(t * 4U) + 3U] = 255U;
+    }
+    nt_atlas_sprite_opts_t on = nt_atlas_sprite_opts_defaults();
+    on.name = "off_twin_on";
+    nt_atlas_add_raw(atlas, px, 40, 40, &on);
+    nt_atlas_sprite_opts_t off = nt_atlas_sprite_opts_defaults();
+    off.name = "off_twin_off";
+    off.dedup = NT_ATLAS_SPRITE_DEDUP_OFF;
+    nt_atlas_add_raw(atlas, px, 40, 40, &off);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "finish_pack failed");
+    nt_builder_free_pack(ctx);
+
+    size_t len = 0;
+    uint8_t *bytes = read_bin_file(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
+    nt_atlas_dedup_region_t regions[2] = {0};
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(bytes, len, regions, 2, &got);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, got, "one region per sprite");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(regions[0].page_index, regions[1].page_index, "each twin must sit alone on its own page");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "OFF must keep a private placement");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(regions[0].vertex_start, regions[1].vertex_start, "byte-identical blocks share one vertex range regardless of the off-switch");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(regions[0].index_start, regions[1].index_start, "byte-identical blocks share one index range regardless of the off-switch");
+}
+
 /* The root of a group is the member stored at identity, and a transposed member
  * carries the relative transform — so the region transforms read straight back
  * which sprite the group was rooted at. Swapping the add order moves it. */
@@ -616,6 +668,9 @@ typedef struct {
     uint8_t max_vertices;    /* 0 = inherit */
     uint8_t alpha_threshold; /* used only when has_alpha_threshold */
     bool has_alpha_threshold;
+    uint8_t shape;                /* 0 = inherit */
+    float max_added_area_percent; /* used only when has_max_added_area_percent */
+    bool has_max_added_area_percent;
 } resolved_sprite_t;
 
 static bool build_resolved_pack(const char *path, const char *atlas_name, const nt_atlas_opts_t *opts, const resolved_sprite_t *sprites, uint32_t count) {
@@ -647,6 +702,9 @@ static bool build_resolved_pack(const char *path, const char *atlas_name, const 
         sopts.max_vertices = s->max_vertices;
         sopts.alpha_threshold = s->alpha_threshold;
         sopts.has_alpha_threshold = s->has_alpha_threshold;
+        sopts.shape = s->shape;
+        sopts.max_added_area_percent = s->max_added_area_percent;
+        sopts.has_max_added_area_percent = s->has_max_added_area_percent;
         sopts.slice9_left = s->slice9_lrtb[0];
         sopts.slice9_right = s->slice9_lrtb[1];
         sopts.slice9_top = s->slice9_lrtb[2];
@@ -675,9 +733,9 @@ static void collect_resolved_pack(const char *path, const char *atlas_name, cons
  * they group; margin 9 resolves higher and must keep its own placement. */
 void test_resolved_margin_groups_equivalent_spellings(void) {
     static const resolved_sprite_t sprites[3] = {
-        {"margin_inherit", 20, 14, 210, 120, 40, 0, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"margin_explicit", 20, 14, 210, 120, 40, 4, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"margin_raised", 20, 14, 210, 120, 40, 9, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"margin_inherit", 20, 14, 210, 120, 40, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"margin_explicit", 20, 14, 210, 120, 40, 4, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"margin_raised", 20, 14, 210, 120, 40, 9, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.margin = 4;
@@ -697,16 +755,24 @@ void test_resolved_margin_groups_equivalent_spellings(void) {
  * geometry was cut to a different budget. */
 void test_resolved_geometry_controls_each_refuse_a_fold(void) {
     static const resolved_sprite_t extrude_pair[2] = {
-        {"extrude_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"extrude_wide", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 3, 0, 0, false},
+        {"extrude_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"extrude_wide", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 3, 0, 0, false, 0, 0.0F, false},
     };
     static const resolved_sprite_t verts_pair[2] = {
-        {"verts_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"verts_eight", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 8, 0, false},
+        {"verts_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"verts_eight", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 8, 0, false, 0, 0.0F, false},
     };
     static const resolved_sprite_t alpha_pair[2] = {
-        {"alpha_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"alpha_high", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 200, true},
+        {"alpha_base", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"alpha_high", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 200, true, 0, 0.0F, false},
+    };
+    static const resolved_sprite_t shape_pair[2] = {
+        {"shape_rect", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, NT_ATLAS_SPRITE_SHAPE_RECT, 0.0F, false},
+        {"shape_convex", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, NT_ATLAS_SPRITE_SHAPE_CONVEX, 0.0F, false},
+    };
+    static const resolved_sprite_t area_pair[2] = {
+        {"area_zero", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, true},
+        {"area_wide", 20, 14, 90, 160, 200, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 25.0F, true},
     };
     /* RECT keeps extrude legal and makes the selected quad independent of the
      * budgets, so a fold here could only come from the gate being too loose. */
@@ -724,14 +790,20 @@ void test_resolved_geometry_controls_each_refuse_a_fold(void) {
 
     collect_resolved_pack(TMP_DIR "/dedup_resolved_alpha.ntpack", "dedup_resolved_alpha", &opts, alpha_pair, 2, regions);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved alpha threshold must not fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_shape.ntpack", "dedup_resolved_shape", &opts, shape_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved shape must not fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_resolved_area.ntpack", "dedup_resolved_area", &opts, area_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved area budget must not fold");
 }
 
 /* Borders are per-region metadata written from each sprite's own data, so the
  * same art with different borders is one placement and two border sets. */
 void test_slice9_same_art_different_borders_share_placement(void) {
     static const resolved_sprite_t sprites[2] = {
-        {"panel_even", 24, 40, 180, 90, 60, 0, {4, 4, 4, 4}, 0, 0, 0, false},
-        {"panel_odd", 24, 40, 180, 90, 60, 0, {6, 2, 8, 3}, 0, 0, 0, false},
+        {"panel_even", 24, 40, 180, 90, 60, 0, {4, 4, 4, 4}, 0, 0, 0, false, 0, 0.0F, false},
+        {"panel_odd", 24, 40, 180, 90, 60, 0, {6, 2, 8, 3}, 0, 0, 0, false, 0, 0.0F, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
@@ -751,15 +823,26 @@ void test_slice9_same_art_different_borders_share_placement(void) {
  * the shared placement into a rotation the runtime would reject. */
 void test_slice9_group_with_plain_sprite_stays_identity(void) {
     static const resolved_sprite_t sprites[5] = {
-        {"tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},     {"tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},
-        {"wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false}, {"wide_panel", 44, 8, 200, 90, 60, 0, {4, 4, 2, 2}, 0, 0, 0, false},
-        {"tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false},
+        {"tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},     {"tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false}, {"wide_panel", 44, 8, 200, 90, 60, 0, {4, 4, 2, 2}, 0, 0, 0, false, 0, 0.0F, false},
+        {"tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+    };
+    /* A/B control: the same layout with the borders zeroed. The packer must
+     * transpose the folded wide pair here, or the identity assert below would
+     * pass vacuously on a packer that never rotates. */
+    static const resolved_sprite_t control[5] = {
+        {"ctl_tall_a", 8, 44, 180, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},     {"ctl_tall_b", 8, 44, 190, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"ctl_wide_plain", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false}, {"ctl_wide_twin", 44, 8, 200, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"ctl_tall_c", 8, 40, 210, 90, 60, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
     };
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     /* RECT so the nine-patch and its plain twin resolve to the same shape. */
     opts.shape = NT_ATLAS_SHAPE_RECT;
     opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
     nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_slice9_ctrl.ntpack", "dedup_slice9_ctrl", &opts, control, 5, regions);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(0, regions[2].transform, "control: the packer must transpose the unbordered wide pair");
+
     collect_resolved_pack(TMP_DIR "/dedup_slice9_group.ntpack", "dedup_slice9_group", &opts, sprites, 5, regions);
 
     /* UVs are normalized per page, so equal u/v on different pages is not a fold. */
@@ -820,7 +903,7 @@ void test_stats_fold_identity_holds(void) {
 
 /* out_stats may be NULL. The mask covers both the atlas and every sprite, so a
  * member's effective mask is exactly the atlas mask. */
-static bool build_f_stats_pack(const char *path, const char *atlas_name, uint8_t mask, const uint8_t *transforms, uint32_t count, nt_atlas_stats_t *out_stats) {
+static bool build_f_stats_pack(const char *path, const char *atlas_name, const char *cache, uint8_t mask, const uint8_t *transforms, uint32_t count, nt_atlas_stats_t *out_stats) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -829,6 +912,10 @@ static bool build_f_stats_pack(const char *path, const char *atlas_name, uint8_t
         return false;
     }
     nt_builder_set_threads(ctx, 1);
+    if (cache != NULL) {
+        (void)MKDIR(cache);
+        nt_builder_set_cache_dir(ctx, cache);
+    }
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.allowed_transforms = mask;
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, atlas_name, &opts);
@@ -844,7 +931,7 @@ void test_stats_report_d4_folds(void) {
     static const uint8_t rotations[4] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90, NT_ATLAS_XFORM_ROT180, NT_ATLAS_XFORM_ROT270};
     TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_f_images_pairwise_distinct(), "the F probe must stay asymmetric under D4");
     nt_atlas_stats_t s = {0};
-    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4.ntpack", "dedup_stats_d4", NT_ATLAS_TRANSFORMS_ROTATIONS, rotations, 4, &s), "F rotation stats pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4.ntpack", "dedup_stats_d4", NULL, NT_ATLAS_TRANSFORMS_ROTATIONS, rotations, 4, &s), "F rotation stats pack failed");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, s.sprites, "four rotated copies were added");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, s.placements, "four rotated copies must share one placement");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s.folds_exact, "no rotation folds at identity");
@@ -854,10 +941,29 @@ void test_stats_report_d4_folds(void) {
 
     /* Same four images, identity-only mask: the counters must follow the mask. */
     nt_atlas_stats_t masked = {0};
-    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4_off.ntpack", "dedup_stats_d4_off", NT_ATLAS_TRANSFORMS_IDENTITY, rotations, 4, &masked), "F identity-mask stats pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(build_f_stats_pack(TMP_DIR "/dedup_stats_d4_off.ntpack", "dedup_stats_d4_off", NULL, NT_ATLAS_TRANSFORMS_IDENTITY, rotations, 4, &masked),
+                             "F identity-mask stats pack failed");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, masked.placements, "an identity-only mask must not fold rotations");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, masked.folds_d4, "an identity-only mask must report no D4 folds");
     assert_fold_identity(&masked);
+}
+
+void test_d4_cache_hit_replays_nonidentity_aliases(void) {
+    static const uint8_t rotations[4] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90, NT_ATLAS_XFORM_ROT180, NT_ATLAS_XFORM_ROT270};
+    const char *cache = TMP_DIR "/dedup_d4_hit_cache";
+    const char *first = TMP_DIR "/dedup_d4_hit_a.ntpack";
+    const char *second = TMP_DIR "/dedup_d4_hit_b.ntpack";
+    (void)MKDIR(cache);
+    clear_atlas_cache_files(cache);
+
+    nt_atlas_stats_t miss = {0};
+    nt_atlas_stats_t hit = {0};
+    TEST_ASSERT_TRUE(build_f_stats_pack(first, "dedup_d4_hit", cache, NT_ATLAS_TRANSFORMS_ROTATIONS, rotations, 4, &miss));
+    TEST_ASSERT_TRUE(build_f_stats_pack(second, "dedup_d4_hit", cache, NT_ATLAS_TRANSFORMS_ROTATIONS, rotations, 4, &hit));
+    TEST_ASSERT_FALSE_MESSAGE(miss.cache_hit, "the first D4 build must miss");
+    TEST_ASSERT_TRUE_MESSAGE(hit.cache_hit, "the second D4 build must replay cached placements");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, hit.folds_d4, "cache replay must preserve nonidentity aliases");
+    TEST_ASSERT_FALSE_MESSAGE(packs_differ(first, second), "D4 cache replay must reproduce the pack byte for byte");
 }
 
 /* An in-memory mirror of the shipped anim_heavy corpus: three sequences of 10, 8
@@ -1069,6 +1175,7 @@ int main(void) {
     RUN_TEST(test_atlas_cache_hit_replays_the_aliases);
     RUN_TEST(test_identity_aliases_share_one_vertex_block);
     RUN_TEST(test_distinct_sprites_do_not_share_blocks);
+    RUN_TEST(test_sprite_dedup_off_shares_bytes_but_not_placement);
     RUN_TEST(test_alias_root_is_lowest_add_index);
     RUN_TEST(test_mirrored_twin_folds_with_its_relative_transform);
     RUN_TEST(test_resolved_margin_groups_equivalent_spellings);
@@ -1078,6 +1185,7 @@ int main(void) {
     RUN_TEST(test_dedup_pack_is_deterministic);
     RUN_TEST(test_stats_fold_identity_holds);
     RUN_TEST(test_stats_report_d4_folds);
+    RUN_TEST(test_d4_cache_hit_replays_nonidentity_aliases);
     RUN_TEST(test_stats_match_anim_heavy_shaped_corpus);
     RUN_TEST(test_stats_report_shared_vertex_blocks);
     RUN_TEST(test_atlas_stats_and_errors_are_per_commit);

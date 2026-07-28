@@ -36,7 +36,7 @@ extern nt_build_assert_handler_t nt_build_assert_handler;
 #endif
 /* Committed atlases per context — sized for the stats array, not for assets. */
 #ifndef NT_BUILD_MAX_ATLASES
-#define NT_BUILD_MAX_ATLASES 64
+#define NT_BUILD_MAX_ATLASES 1024
 #endif
 #ifndef NT_BUILD_MAX_VERTICES
 #define NT_BUILD_MAX_VERTICES 65536

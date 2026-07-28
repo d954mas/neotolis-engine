@@ -201,13 +201,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 // #endregion
 
 // #region activator callbacks
-/* Trivial no-op activator. The real work happens in on_resolve;
- * activate only materializes a stable runtime winner handle for stacking. */
-static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
-    (void)data;
-    (void)size;
-    return 1; /* non-zero fake handle marks slot READY */
-}
+static uint32_t atlas_activate(const uint8_t *data, uint32_t size);
 
 /* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
@@ -300,7 +294,10 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
         if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
             return false;
         }
-        if (hdr->page_count > 0 && region->page_index >= hdr->page_count) {
+        /* page_index must stay inside the page_resources slot array even for the
+         * zero-page blobs merge tests build — a stale in-bounds slot reads as
+         * NT_RESOURCE_INVALID, an out-of-bounds one reads past the struct. */
+        if (region->page_index >= NT_ATLAS_MAX_PAGES || (hdr->page_count > 0 && region->page_index >= hdr->page_count)) {
             return false;
         }
         if (region->vertex_start > hdr->total_vertex_count || region->vertex_count > hdr->total_vertex_count - region->vertex_start) {
@@ -320,6 +317,13 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     out->vertex_bytes = vertex_bytes;
     out->index_bytes = index_bytes;
     return true;
+}
+
+/* AUX_BACKED slots become READY after activate, so malformed blobs must fail
+ * before the resource registry publishes a winner. */
+static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
+    nt_atlas_blob_view_t view;
+    return atlas_try_validate_and_carve_blob(data, size, &view) ? 1U : 0U;
 }
 
 /* Grow one cached float[2] array to new_cap.
@@ -794,6 +798,8 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
 }
 
 void nt_atlas_test_drive_cleanup(void *user_data) { atlas_on_cleanup(user_data); }
+
+uint32_t nt_atlas_test_activate(const uint8_t *data, uint32_t size) { return atlas_activate(data, size); }
 
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index) {
     NT_ASSERT(ad != NULL);

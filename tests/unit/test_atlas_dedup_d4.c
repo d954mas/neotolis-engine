@@ -409,34 +409,38 @@ static void assert_texel_round_trip(const uv_probe_t *probe, const uint8_t *src,
 }
 
 /* Every opaque texel of ONE image must sample back its own colour through that
- * region's own local->UV map. The F colour encodes the source texel, so a wrong
+ * region's own local->UV map. The colour encodes the source texel, so a wrong
  * relative, a missed dimension swap or an inverted direction all fail here. */
-static void assert_region_samples_its_own_image(const pack_file_t *pack, const atlas_view_t *view, uint32_t r, uint8_t transform) {
+static void assert_region_samples_image(const pack_file_t *pack, const atlas_view_t *view, uint32_t r, uint8_t label, const uint8_t *img, uint32_t iw, uint32_t ih) {
     const NtAtlasRegion *reg = &view->regions[r];
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, reg->vertex_count, "a RECT sprite must emit a 4-vertex quad");
     const NtAtlasVertex *verts = NULL;
     const uint16_t *idx = NULL;
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(view, r, &verts, &idx), "region spans outside the blob");
-    uv_probe_t probe = {.page = NULL, .page_w = 0, .page_h = 0, .map = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}, .region = r, .transform = transform};
+    uv_probe_t probe = {.page = NULL, .page_w = 0, .page_h = 0, .map = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}, .region = r, .transform = label};
     TEST_ASSERT_TRUE_MESSAGE(solve_local_to_uv(verts, reg->vertex_count, &probe.map), "the region's local->UV map is degenerate");
     TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_read_page_rgba(pack->bytes, pack->len, reg->page_index, &probe.page, &probe.page_w, &probe.page_h), "read the atlas page pixels");
 
-    uint8_t img[NT_ATLAS_F_MAX_PX];
-    uint16_t iw = 0;
-    uint16_t ih = 0;
-    atlas_dedup_f_fill(transform, img, &iw, &ih);
     uint32_t checked = 0;
-    for (uint32_t y = 0; y < (uint32_t)ih; ++y) {
-        for (uint32_t x = 0; x < (uint32_t)iw; ++x) {
+    for (uint32_t y = 0; y < ih; ++y) {
+        for (uint32_t x = 0; x < iw; ++x) {
             const uint8_t *src = img + ((((size_t)y * iw) + x) * 4U);
             if (src[3] != 255U) {
                 continue;
             }
-            assert_texel_round_trip(&probe, src, x, y, (uint32_t)ih);
+            assert_texel_round_trip(&probe, src, x, y, ih);
             ++checked;
         }
     }
     TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, checked, "no opaque texel was sampled");
+}
+
+static void assert_region_samples_its_own_image(const pack_file_t *pack, const atlas_view_t *view, uint32_t r, uint8_t transform) {
+    uint8_t img[NT_ATLAS_F_MAX_PX];
+    uint16_t iw = 0;
+    uint16_t ih = 0;
+    atlas_dedup_f_fill(transform, img, &iw, &ih);
+    assert_region_samples_image(pack, view, r, transform, img, (uint32_t)iw, (uint32_t)ih);
 }
 
 static void assert_uv_decode_for_images(const char *path, const char *name, uint8_t mask, const uint8_t *images) {
@@ -451,6 +455,12 @@ static void assert_uv_decode_for_images(const char *path, const char *name, uint
         return;
     }
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per image");
+    /* Non-vacuity: 4 unfolded regions would each trivially sample their own
+     * standalone pixels, passing this oracle without any D4 fold happening. */
+    nt_atlas_dedup_region_t folded[4] = {0};
+    uint32_t folded_count = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, folded, 4, &folded_count), "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(folded, 4), "the images must fold before UV decode proves anything");
     for (uint32_t r = 0; r < 4; ++r) {
         assert_region_samples_its_own_image(&pack, &view, r, images[r]);
     }
@@ -463,6 +473,168 @@ void test_alias_uv_decode_samples_its_own_source_pixel(void) { assert_uv_decode_
  * so the one oracle that reads real texels has to run on them too. */
 void test_mirror_alias_uv_decode_samples_its_own_source_pixel(void) {
     assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors);
+}
+
+/* One equal-content run may hold two groups: a member whose own mask forbids the
+ * relative it would need becomes a second root, and later members fold onto the
+ * FIRST eligible root in add order — even though the second root here matches the
+ * third image at identity. Fold targets are roots only, tried in add order. */
+void test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first(void) {
+    const char *path = TMP_DIR "/dedup_f_two_roots.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_f_two_roots", &opts);
+    const uint8_t transforms[3] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90, NT_ATLAS_XFORM_ROT90};
+    const uint8_t masks[3] = {NT_ATLAS_TRANSFORMS_ALL, NT_ATLAS_TRANSFORMS_IDENTITY, NT_ATLAS_TRANSFORMS_ALL};
+    /* Not atlas_dedup_f_fixture_add_masked: it derives names from the transform
+     * value, and this run deliberately repeats ROT90. */
+    uint8_t fpx[NT_ATLAS_F_MAX_PX];
+    for (uint32_t i = 0; i < 3; ++i) {
+        uint16_t w = 0;
+        uint16_t h = 0;
+        atlas_dedup_f_fill(transforms[i], fpx, &w, &h);
+        char name[16];
+        (void)snprintf(name, sizeof(name), "two_roots_%u", (unsigned)i);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = name;
+        so.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
+        so.allowed_transforms = masks[i];
+        nt_atlas_add_raw(atlas, fpx, w, h, &so);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "two-roots commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "two-roots finish_pack failed");
+    nt_builder_free_pack(ctx);
+
+    pack_file_t f;
+    pack_file_load(path, &f);
+    nt_atlas_dedup_region_t regions[3] = {0};
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(f.bytes, f.len, regions, 3, &got);
+    pack_file_free(&f);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, got, "one region per image");
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 3), "the identity-masked rotation must stay a second root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[0].page_index, regions[2].page_index, "the open-masked copy must fold onto the first root");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].u_min, regions[2].u_min, "the open-masked copy must fold onto the first root");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[0].v_min, regions[2].v_min, "the open-masked copy must fold onto the first root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[1].transform, "an identity-only second root is stored at identity");
+    /* Quotient, not the raw transform — the packer may orient the shared rectangle. */
+    const uint8_t rel = d4_compose(d4_inverse(regions[0].transform), regions[2].transform);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_ATLAS_XFORM_IDENTITY, rel, "the fold must go through a non-identity relative");
+}
+
+/* --- composed transform: non-identity placement x non-identity relative --- */
+
+#define AO_W 44
+#define AO_H 8
+#define AO_TWIN_A 2
+#define AO_TWIN_B 3
+
+/* Colour encodes the source texel, so the art is asymmetric under every D4
+ * element except the horizontal mirror that relates the two twins. */
+static void ao_fill(uint8_t *px, bool mirrored) {
+    for (uint32_t y = 0; y < (uint32_t)AO_H; ++y) {
+        for (uint32_t x = 0; x < (uint32_t)AO_W; ++x) {
+            const uint32_t sx = mirrored ? ((uint32_t)AO_W - 1U - x) : x;
+            uint8_t *p = px + ((((size_t)y * AO_W) + x) * 4U);
+            p[0] = (uint8_t)(sx * 5U);
+            p[1] = (uint8_t)(y * 30U);
+            p[2] = 200U;
+            p[3] = 255U;
+        }
+    }
+}
+
+/* Every dedup etalon packs its group at an identity placement, where
+ * d4_compose(placement, rel) == d4_compose(rel, placement) == rel — a swapped
+ * composition in the emit stage is invisible there. This layout (proven in the
+ * twin-mask test) transposes the shared rectangle AND the pair folds through a
+ * mirror, so the composed transform differs from both factors and the UV decode
+ * is the oracle that catches a swapped argument order. */
+void test_transposed_placement_composes_with_the_relative(void) {
+    const char *path = TMP_DIR "/dedup_ao_compose.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_ao_compose", &opts);
+
+    uint8_t px[(size_t)AO_W * AO_H * 4U];
+    const uint16_t filler_dims[3][2] = {{8, 44}, {8, 44}, {8, 40}};
+    const char *filler_names[3] = {"ao_w0", "ao_w1", "ao_w3"};
+    for (int i = 0; i < 2; ++i) {
+        const uint32_t texels = (uint32_t)filler_dims[i][0] * filler_dims[i][1];
+        for (uint32_t t = 0; t < texels; ++t) {
+            px[(t * 4U) + 0U] = (uint8_t)(60 + (i * 30));
+            px[(t * 4U) + 1U] = 90U;
+            px[(t * 4U) + 2U] = 60U;
+            px[(t * 4U) + 3U] = 255U;
+        }
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = filler_names[i];
+        nt_atlas_add_raw(atlas, px, filler_dims[i][0], filler_dims[i][1], &so);
+    }
+    for (int i = 0; i < 2; ++i) {
+        ao_fill(px, i == 1);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = (i == 0) ? "ao_twin_a" : "ao_twin_b";
+        nt_atlas_add_raw(atlas, px, AO_W, AO_H, &so);
+    }
+    {
+        const uint32_t texels = (uint32_t)filler_dims[2][0] * filler_dims[2][1];
+        for (uint32_t t = 0; t < texels; ++t) {
+            px[(t * 4U) + 0U] = 120U;
+            px[(t * 4U) + 1U] = 90U;
+            px[(t * 4U) + 2U] = 60U;
+            px[(t * 4U) + 3U] = 255U;
+        }
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = filler_names[2];
+        nt_atlas_add_raw(atlas, px, filler_dims[2][0], filler_dims[2][1], &so);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "compose fixture commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "compose fixture finish_pack failed");
+    nt_builder_free_pack(ctx);
+
+    pack_file_t pack;
+    pack_file_load(path, &pack);
+    nt_atlas_dedup_region_t regions[5] = {0};
+    uint32_t got = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, regions, 5, &got), "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(5, got, "one region per sprite");
+
+    /* Non-vacuity in both factors: the pair folds, the placement is transposed,
+     * and the relative is engaged (the twins carry different transforms). */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[AO_TWIN_A].page_index, regions[AO_TWIN_B].page_index, "the mirrored twins must share one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[AO_TWIN_A].u_min, regions[AO_TWIN_B].u_min, "the mirrored twins must share one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[AO_TWIN_A].v_min, regions[AO_TWIN_B].v_min, "the mirrored twins must share one placement");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[AO_TWIN_A].transform, "control: the packer must transpose the folded pair");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(regions[AO_TWIN_A].transform, regions[AO_TWIN_B].transform, "the mirror relative must reach the stored transform");
+
+    atlas_view_t view;
+    const bool ok = atlas_view_open(pack.bytes, pack.len, &view);
+    if (!ok) {
+        pack_file_free(&pack);
+        TEST_FAIL_MESSAGE("open the produced atlas blob");
+        return;
+    }
+    uint8_t img[(size_t)AO_W * AO_H * 4U];
+    ao_fill(img, false);
+    assert_region_samples_image(&pack, &view, AO_TWIN_A, regions[AO_TWIN_A].transform, img, AO_W, AO_H);
+    ao_fill(img, true);
+    assert_region_samples_image(&pack, &view, AO_TWIN_B, regions[AO_TWIN_B].transform, img, AO_W, AO_H);
+    pack_file_free(&pack);
 }
 
 /* --- DEDUP-04: an alias carries the same geometry as a standalone pack --- */
@@ -614,6 +786,12 @@ static void assert_folded_matches_standalone(bool concave, const char *tag, uint
     atlas_view_t av;
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(a.bytes, a.len, &av), "open the folded atlas blob");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, av.region_count, "one region per image");
+    /* Non-vacuity: unfolded regions match their standalone packs by construction,
+     * so this oracle proves nothing unless the fold actually happened. */
+    nt_atlas_dedup_region_t folded[4] = {0};
+    uint32_t folded_count = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(a.bytes, a.len, folded, 4, &folded_count), "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(folded, 4), "the images must fold before alias geometry proves anything");
 
     for (uint32_t r = 0; r < 4; ++r) {
         char bpath[256];
@@ -786,6 +964,8 @@ int main(void) {
     RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_mirror_alias_uv_decode_samples_its_own_source_pixel);
+    RUN_TEST(test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first);
+    RUN_TEST(test_transposed_placement_composes_with_the_relative);
     RUN_TEST(test_alias_region_matches_standalone_pack);
     RUN_TEST(test_concave_alias_hull_matches_standalone);
     RUN_TEST(test_mirrored_alias_region_matches_standalone_pack);

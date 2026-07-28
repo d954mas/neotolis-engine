@@ -2558,6 +2558,12 @@ static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, 
     }
 }
 
+/* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing. */
+static _Noreturn void atlas_invariant_abort(const AtlasPipeline *p, const char *what) {
+    NT_LOG_ERROR("atlas '%s': internal invariant broken (%s)", p->state->name, what);
+    abort();
+}
+
 /* Re-prove against the alias's OWN mask — this pass is what catches a wrong relative
  * transform, so never short-circuit it on the root's area-preservation argument. */
 static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
@@ -2573,7 +2579,7 @@ static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32
     /* Hard gate — an asserts-off build must not store an invalid proof, which every
      * downstream check would then wave through as well. */
     if (!ok) {
-        abort();
+        atlas_invariant_abort(p, "alias geometry proof mismatch");
     }
     p->geometry_proofs[i] = proof;
 }
@@ -3075,14 +3081,15 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
         const uint32_t root = (uint32_t)p->dedup_map[i];
         NT_BUILD_ASSERT(root < p->sprite_count && "pipeline_tile_pack: alias root out of range");
-        /* A consumer may define NT_BUILD_ASSERT away, so bound the read itself. */
+        /* A consumer may define NT_BUILD_ASSERT away, so bound the read itself — and a
+         * skipped narrowing would ship placements outside a member's mask, so die loud. */
         if (root >= p->sprite_count) {
-            continue;
+            atlas_invariant_abort(p, "alias root out of range");
         }
         const uint32_t u = unique_slot[root];
         NT_BUILD_ASSERT(u < p->unique_count && "pipeline_tile_pack: alias root is not a unique sprite");
         if (u >= p->unique_count) {
-            continue;
+            atlas_invariant_abort(p, "alias root is not a unique sprite");
         }
         u_eff_transforms[u] &= atlas_alias_admissible_placements(p, i);
         u_eff_transforms[u] |= NT_ATLAS_TRANSFORMS_IDENTITY;
@@ -3329,7 +3336,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         /* Hard guard — a consumer may define NT_BUILD_ASSERT away, and this is the
          * only bound on the emit-stage write into SerializeBlock. */
         if (!block_in_bounds) {
-            abort();
+            atlas_invariant_abort(p, "block exceeds per-sprite scratch bound");
         }
     }
 
@@ -3371,7 +3378,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
         if (pi >= p->placement_count) {
-            abort();
+            atlas_invariant_abort(p, "sprite has no placement");
         }
         AtlasPlacement *pl = &p->placements[pi];
         /* An alias borrows its root's placement, so only an original's placement
@@ -3381,6 +3388,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * packer placements whose product stays inside this sprite's own mask. */
         uint8_t rt = d4_compose(pl->transform, p->alias_rel[i]);
         NT_BUILD_ASSERT((atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt)) && "pipeline_serialize: region transform outside the sprite's own mask");
+        /* Hard gate — asserts-off must not ship an orientation the sprite's mask forbids. */
+        if (!(atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt))) {
+            atlas_invariant_abort(p, "region transform outside the sprite's own mask");
+        }
         region_transform[i] = rt;
 
         uint32_t vertex_count = p->vertex_counts[i];
@@ -3586,7 +3597,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
         if (pi >= p->placement_count) {
-            abort();
+            atlas_invariant_abort(p, "sprite has no placement");
         }
         AtlasPlacement *pl = &p->placements[pi];
         NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");

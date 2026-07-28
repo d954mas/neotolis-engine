@@ -198,6 +198,9 @@ uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t 
 void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data);
 void nt_atlas_test_drive_cleanup(void *user_data);
 
+/* Drive the production activator without a resource registry. */
+uint32_t nt_atlas_test_activate(const uint8_t *data, uint32_t size);
+
 /* Return the cached page_resources[page_index] slot handle's .id field.
  * 0 means NT_RESOURCE_INVALID (not yet post-resolve primed). */
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index);

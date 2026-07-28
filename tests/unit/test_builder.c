@@ -5367,6 +5367,18 @@ void test_atlas_add_raw_max_vertices_override_too_low_asserts(void) {
     free(s);
 }
 
+void test_atlas_add_raw_invalid_dedup_override_asserts(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_bad_dedup_override.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "bad_dedup_override", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "bad.png";
+    opts.dedup = 3;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &opts), "dedup override");
+    free(s);
+}
+
 /* Basis compression has no RG8/R8 equivalent. */
 void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -8303,6 +8315,7 @@ int main(void) {
     RUN_TEST(test_atlas_begin_bad_shape_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);
     RUN_TEST(test_atlas_add_raw_max_vertices_override_too_low_asserts);
+    RUN_TEST(test_atlas_add_raw_invalid_dedup_override_asserts);
     RUN_TEST(test_atlas_begin_compress_bad_format_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_bad_compress_mode_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_bad_compress_quality_asserts_after_failed_pack);

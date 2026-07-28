@@ -1179,6 +1179,15 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_wrap, valid_size), "vertex_offset wrap should fail");
 }
 
+void test_atlas_activator_rejects_invalid_blob(void) {
+    uint8_t buf[512];
+    uint32_t size = 0;
+    build_fixture_blob(buf, sizeof(buf), &size);
+
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "valid atlas must activate");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, sizeof(NtAtlasHeader) - 1U), "truncated atlas must fail activation before publication");
+}
+
 /* ---- Test 15: Region slice validation rejects corrupt page / payload refs ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_region_slice_validation_rejects_corruption(void) {
@@ -1213,6 +1222,15 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     regions = (NtAtlasRegion *)(corrupt_page_index + sizeof(NtAtlasHeader) + page_bytes);
     regions[0].page_index = (uint8_t)hdr->page_count;
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_index, size_with_pages), "page_index OOB should fail");
+
+    /* Zero-page blob: page_index past the page_resources slot array would read
+     * beyond the struct in nt_atlas_get_region_handles — must fail validation. */
+    uint8_t corrupt_page_slot[512];
+    uint32_t zero_page_size = 0;
+    build_fixture_blob(corrupt_page_slot, sizeof(corrupt_page_slot), &zero_page_size);
+    regions = (NtAtlasRegion *)(corrupt_page_slot + sizeof(NtAtlasHeader));
+    regions[0].page_index = 200;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, zero_page_size), "page_index past NT_ATLAS_MAX_PAGES should fail even with zero pages");
 }
 
 /* ---- Test 16: Direct-drive on_resolve stores page ids and invalidates handles ----
@@ -2256,6 +2274,7 @@ int main(void) {
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
     RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
+    RUN_TEST(test_atlas_activator_rejects_invalid_blob);
     RUN_TEST(test_atlas_region_slice_validation_rejects_corruption);
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);

@@ -734,7 +734,7 @@ static const int k_dup_order_shuffled[] = {4, 0, 3, 2, 1};
 static const int k_dup_order_swapped[]  = {2, 1, 0, 3, 4};
 /* clang-format on */
 
-static bool pack_dup_corpus(const char *path, const int *order) {
+static bool pack_dup_corpus_threads(const char *path, const int *order, uint32_t threads) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
@@ -742,7 +742,7 @@ static bool pack_dup_corpus(const char *path, const int *order) {
     if (!ctx) {
         return false;
     }
-    nt_builder_set_threads(ctx, 1);
+    nt_builder_set_threads(ctx, threads);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_dup", &opts);
     for (int i = 0; i < DUP_CORPUS_COUNT; ++i) {
@@ -760,6 +760,8 @@ static bool pack_dup_corpus(const char *path, const int *order) {
     nt_builder_free_pack(ctx);
     return result == NT_BUILD_OK;
 }
+
+static bool pack_dup_corpus(const char *path, const int *order) { return pack_dup_corpus_threads(path, order, 1); }
 
 static uint8_t *read_pack_bytes(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -842,6 +844,21 @@ void test_repeat_build_is_byte_identical_with_dedup(void) {
     TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two dedup builds of one corpus must be byte-identical");
 }
 
+/* The dedup search itself runs pre-pack on one thread, but the packer and the
+ * stats replay do not — a scheduling dependence would diverge only here. */
+void test_dedup_threads_are_byte_deterministic(void) {
+    const char *a_path = TMP_DIR "/det_dup_mt_a.ntpack";
+    const char *b_path = TMP_DIR "/det_dup_mt_b.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(a_path, k_dup_order_declared, 4), "threaded dedup pack A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(b_path, k_dup_order_declared, 4), "threaded dedup pack B failed");
+    assert_dup_root_is(a_path, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the threaded build must still fold the pair");
+    char sha_a[65];
+    char sha_b[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(a_path, sha_a), "hash threaded dedup pack A");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(b_path, sha_b), "hash threaded dedup pack B");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two threaded dedup builds must be byte-identical");
+}
+
 void test_alias_root_survives_unrelated_reordering(void) {
     const char *declared = TMP_DIR "/det_dup_declared.ntpack";
     const char *shuffled = TMP_DIR "/det_dup_shuffled.ntpack";
@@ -871,6 +888,7 @@ int main(void) {
     RUN_TEST(test_allowed_transforms_changes_cache_key);
     RUN_TEST(test_sprite_transforms_override_changes_cache_key);
     RUN_TEST(test_repeat_build_is_byte_identical_with_dedup);
+    RUN_TEST(test_dedup_threads_are_byte_deterministic);
     RUN_TEST(test_alias_root_survives_unrelated_reordering);
     return UNITY_END();
 }
