@@ -7424,6 +7424,55 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     }
 }
 
+/* The cap itself is the contract: NT_ATLAS_MAX_PAGES one-per-page sprites are
+ * legal, one more is a graceful PAGES_EXHAUSTED — a cap regression (8 -> 64)
+ * moves this exact boundary, which the 70-sprite exhaustion test cannot see. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_page_cap_boundary(void) {
+    (void)MKDIR(TMP_DIR);
+    for (uint32_t n = NT_ATLAS_MAX_PAGES; n <= NT_ATLAS_MAX_PAGES + 1U; n++) {
+        char path[256];
+        (void)snprintf(path, sizeof(path), "%s/atlas_pagecap_%u.ntpack", TMP_DIR, n);
+        (void)remove(path);
+        NtBuilderContext *ctx = nt_builder_start_pack(path);
+        TEST_ASSERT_NOT_NULL(ctx);
+
+        nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+        opts.max_size = 64;
+        opts.margin = 2;
+        opts.padding = 2;
+        opts.shape = NT_ATLAS_SHAPE_RECT;
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "page_cap", &opts);
+
+        uint8_t *sprites[NT_ATLAS_MAX_PAGES + 1U];
+        for (uint32_t i = 0; i < n; i++) {
+            /* Distinct red channels keep decoded_hash unique so dedup cannot collapse. */
+            sprites[i] = make_test_sprite(57, 57, (uint8_t)(i + 1), 50, 100, 255);
+            char name[32];
+            (void)snprintf(name, sizeof(name), "cap_%u.png", i);
+            nt_atlas_add_raw(atlas, sprites[i], 57, 57, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        }
+
+        const nt_build_result_t commit = nt_atlas_commit(atlas);
+        uint32_t err_count = 0;
+        const nt_build_error_t *errs = nt_builder_get_errors(ctx, &err_count);
+        if (n == NT_ATLAS_MAX_PAGES) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, commit, "exactly the page cap must still commit");
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, err_count, "exactly the page cap must produce no error");
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "exactly the page cap must produce a pack");
+        } else {
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, err_count, "one sprite past the cap must produce exactly one error");
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, errs[0].kind, "the error past the cap must be PAGES_EXHAUSTED");
+            TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "a pages-exhausted build must not finish");
+        }
+
+        nt_builder_free_pack(ctx);
+        for (uint32_t i = 0; i < n; i++) {
+            free(sprites[i]);
+        }
+    }
+}
+
 /* Pixel-identical sprites share geometry while each region keeps its serialized pivot. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_pixels_different_origin(void) {
@@ -8368,6 +8417,7 @@ int main(void) {
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
+    RUN_TEST(test_atlas_page_cap_boundary);
 
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);

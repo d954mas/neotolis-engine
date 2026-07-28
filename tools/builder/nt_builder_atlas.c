@@ -599,6 +599,15 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
  */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Order-sensitive fold over the cache payload — the corruption net for in-range
+ * bit flips the per-field bounds checks cannot see (placement coords, pixels). */
+static uint64_t atlas_cache_combine(uint64_t acc, const void *data, size_t len) {
+    /* nt_hash64 takes a uint32 length; the largest section (a 16384^2 RGBA page)
+     * stays within it. */
+    const uint64_t h = nt_hash64(data, (uint32_t)len).value;
+    return acc ^ (h + 0x9E3779B97F4A7C15ULL + (acc << 6U) + (acc >> 2U));
+}
+
 static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const AtlasPlacement *placements, uint32_t placement_count, const uint32_t *page_w, const uint32_t *page_h,
                               uint32_t page_count, uint8_t **page_pixels) {
     char path[1024];
@@ -612,15 +621,25 @@ static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const A
     }
 
     bool ok = true;
+    uint64_t checksum = cache_key;
     ok = ok && fwrite(&placement_count, sizeof(uint32_t), 1, f) == 1;
+    checksum = atlas_cache_combine(checksum, &placement_count, sizeof(uint32_t));
     ok = ok && fwrite(&page_count, sizeof(uint32_t), 1, f) == 1;
+    checksum = atlas_cache_combine(checksum, &page_count, sizeof(uint32_t));
     ok = ok && fwrite(page_w, sizeof(uint32_t), page_count, f) == page_count;
+    checksum = atlas_cache_combine(checksum, page_w, (size_t)page_count * sizeof(uint32_t));
     ok = ok && fwrite(page_h, sizeof(uint32_t), page_count, f) == page_count;
+    checksum = atlas_cache_combine(checksum, page_h, (size_t)page_count * sizeof(uint32_t));
     ok = ok && fwrite(placements, sizeof(AtlasPlacement), placement_count, f) == placement_count;
+    checksum = atlas_cache_combine(checksum, placements, (size_t)placement_count * sizeof(AtlasPlacement));
     for (uint32_t p = 0; p < page_count && ok; p++) {
         size_t pixel_bytes = (size_t)page_w[p] * page_h[p] * 4;
         ok = ok && fwrite(page_pixels[p], 1, pixel_bytes, f) == pixel_bytes;
+        checksum = atlas_cache_combine(checksum, page_pixels[p], pixel_bytes);
     }
+    /* Trailing checksum self-invalidates pre-checksum cache files: reading it
+     * from them hits EOF, which is a graceful miss. */
+    ok = ok && fwrite(&checksum, sizeof(uint64_t), 1, f) == 1;
 
     (void)fclose(f);
 
@@ -662,6 +681,9 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f);
         return false;
     }
+    uint64_t checksum = cache_key;
+    checksum = atlas_cache_combine(checksum, &placement_count, sizeof(uint32_t));
+    checksum = atlas_cache_combine(checksum, &page_count_val, sizeof(uint32_t));
 
     if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > NT_BUILD_MAX_ASSETS) {
         (void)fclose(f);
@@ -673,6 +695,8 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f); // NOLINT(clang-analyzer-unix.Malloc)
         return false;
     }
+    checksum = atlas_cache_combine(checksum, out_page_w, (size_t)page_count_val * sizeof(uint32_t));
+    checksum = atlas_cache_combine(checksum, out_page_h, (size_t)page_count_val * sizeof(uint32_t));
 
     /* Validate page dimensions (max 16384 to bound allocation) */
     for (uint32_t p = 0; p < page_count_val; p++) {
@@ -693,6 +717,7 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f);
         return false;
     }
+    checksum = atlas_cache_combine(checksum, placements, (size_t)placement_count * sizeof(AtlasPlacement));
 
     /* Validate per-placement fields — a corrupted cache file with valid outer
      * counts but garbage placement records would cause OOB access downstream
@@ -740,6 +765,20 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
             (void)fclose(f);
             return false;
         }
+        checksum = atlas_cache_combine(checksum, page_pixels_arr[p], pixel_bytes);
+    }
+
+    /* Whole-payload checksum: in-range corruption (placement coords, pixels)
+     * passes every bounds check above yet must still be a graceful miss. */
+    uint64_t stored_checksum = 0;
+    if (fread(&stored_checksum, sizeof(uint64_t), 1, f) != 1 || stored_checksum != checksum) {
+        for (uint32_t q = 0; q < page_count_val; q++) {
+            free(page_pixels_arr[q]);
+        }
+        free((void *)page_pixels_arr);
+        free(placements);
+        (void)fclose(f);
+        return false;
     }
 
     (void)fclose(f);

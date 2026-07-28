@@ -20,11 +20,11 @@
 extern "C" {
 #endif
 
-/* Maximum number of atlas pages (each page = one texture). Defaults to the
- * format cap: packing more pages than the runtime can mount is a dead atlas. */
-#ifndef ATLAS_MAX_PAGES
+/* Maximum number of atlas pages (each page = one texture). Unconditional alias
+ * of the format cap: packing more pages than the runtime can mount is a dead
+ * atlas, so the ONLY override point is NT_ATLAS_MAX_PAGES — and overriding that
+ * must be applied to the builder and runtime builds together. */
 #define ATLAS_MAX_PAGES NT_ATLAS_MAX_PAGES
-#endif
 
 /* Sprite placement result after packing.
  * transform is a D4 element VALUE 0..7 (bit0=flipH, bit1=flipV, bit2=diagonal),

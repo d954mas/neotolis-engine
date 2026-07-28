@@ -226,7 +226,8 @@ typedef struct {
  * nt_builder_free_pack() (dangles afterward); never read it off the NtAtlasBuild
  * handle, which commit frees. ctx must be non-NULL; the returned data is valid
  * when *out_count > 0; out_count may be NULL. Commits past NT_BUILD_MAX_ATLASES
- * assert in dev builds and drop their record in asserts-off builds. */
+ * fail the always-on NT_BUILD_ASSERT; only a consumer that overrides the assert
+ * macro away gets the record silently dropped instead. */
 const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, uint32_t *out_count);
 
 /* --- Texture options (game controls format and resize per-texture) --- */
