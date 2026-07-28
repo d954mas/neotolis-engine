@@ -685,7 +685,9 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
     checksum = atlas_cache_combine(checksum, &placement_count, sizeof(uint32_t));
     checksum = atlas_cache_combine(checksum, &page_count_val, sizeof(uint32_t));
 
-    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > NT_BUILD_MAX_ASSETS) {
+    /* Placements are regions, not pack assets — bound by the region cap, or every
+     * atlas above NT_BUILD_MAX_ASSETS placements would be a permanent cache miss. */
+    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > UINT16_MAX) {
         (void)fclose(f);
         return false;
     }
@@ -734,9 +736,17 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
             (void)fclose(f);
             return false;
         }
-        /* Bounds-check placement against its page dimensions */
-        if (placements[i].x >= out_page_w[pg] || placements[i].y >= out_page_h[pg] || placements[i].trimmed_w > out_page_w[pg] || placements[i].trimmed_h > out_page_h[pg] ||
-            placements[i].transform > 7) {
+        if (placements[i].transform > 7) {
+            free(placements);
+            (void)fclose(f);
+            return false;
+        }
+        /* Bounds-check placement against its page dimensions — the far edge too, or
+         * a forged-but-checksummed record bakes UVs past the page. trimmed_w/h are
+         * pre-transform; a diagonal placement occupies them swapped. */
+        const uint32_t fw = (placements[i].transform & 4U) ? placements[i].trimmed_h : placements[i].trimmed_w;
+        const uint32_t fh = (placements[i].transform & 4U) ? placements[i].trimmed_w : placements[i].trimmed_h;
+        if (placements[i].x >= out_page_w[pg] || placements[i].y >= out_page_h[pg] || fw > out_page_w[pg] - placements[i].x || fh > out_page_h[pg] - placements[i].y) {
             free(placements);
             (void)fclose(f);
             return false;
@@ -1691,6 +1701,11 @@ static void pipeline_dedup(AtlasPipeline *p) {
         lo = hi;
     }
     free(dedup_entries);
+#ifdef NT_TEST_ACCESS
+    /* Scope the arm to this commit: a zero-fold commit never consumes it, and a
+     * leaked arm would corrupt the first alias of a later atlas in this process. */
+    g_force_alias_rel = 0xFFU;
+#endif
 
     pipeline_dedup_collect_unique(p);
 }
@@ -3412,6 +3427,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
         NT_BUILD_ASSERT(p->geometry_proofs[i].valid && "pipeline_serialize: selected geometry proof missing");
+        /* Hard gate — asserts-off must not serialize geometry the proof system never accepted. */
+        if (!p->geometry_proofs[i].valid) {
+            atlas_invariant_abort(p, "selected geometry proof missing");
+        }
         uint32_t tri = p->triangle_index_counts[i] / 3U;
         NT_BUILD_ASSERT(p->triangle_index_counts[i] == (p->vertex_counts[i] - 2U) * 3U && "pipeline_serialize: selected triangle span mismatch");
         NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
@@ -3467,9 +3486,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
             atlas_invariant_abort(p, "sprite has no placement");
         }
         AtlasPlacement *pl = &p->placements[pi];
-        /* An alias borrows its root's placement, so only an original's placement
-         * points back at itself. */
-        NT_BUILD_ASSERT((pl->sprite_index == i || p->dedup_map[i] >= 0) && "pipeline_serialize: placement belongs to another sprite");
+        /* An alias borrows exactly its root's placement; UV correctness for aliases
+         * rests on this routing, which no downstream proof re-checks. */
+        NT_BUILD_ASSERT((p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i]) && "pipeline_serialize: placement does not belong to this sprite's root");
         /* alias local -> root local -> placement local. tile_pack only offered the
          * packer placements whose product stays inside this sprite's own mask. */
         uint8_t rt = d4_compose(pl->transform, p->alias_rel[i]);
@@ -3561,6 +3580,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
                                           p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
         free(binary);
         NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
+        /* Hard gate — asserts-off must not ship a blob whose emitted bytes disprove
+         * the selected geometry; mirrors the reprove gate on the alias path. */
+        if (!serialized_proof.valid || !nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i])) {
+            atlas_invariant_abort(p, "serialized geometry proof mismatch");
+        }
     }
     // #endregion
 

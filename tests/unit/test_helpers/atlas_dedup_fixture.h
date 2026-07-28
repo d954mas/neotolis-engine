@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "unity.h" /* every includer is a Unity TU; failures must be red tests, not abort() */
+
 /* clang-format off */
 #include "nt_builder.h"        /* NtAtlasBuild, nt_atlas_add_raw, sprite opts */
 #include "nt_pack_format.h"    /* NtPackHeader, NtAssetEntry, NT_ASSET_ATLAS */
@@ -111,9 +113,10 @@ static inline void atlas_dedup_fixture_add_opts(NtAtlasBuild *atlas, const uint8
     uint8_t px[NT_ATLAS_DEDUP_MAX_PX];
     for (uint32_t i = 0; i < (uint32_t)NT_ATLAS_DEDUP_FRAME_COUNT; ++i) {
         const nt_atlas_dedup_frame_t *f = &k_atlas_dedup_frames[i];
-        /* The frame table is data — a larger canvas must abort, not smash the stack. */
+        /* The frame table is data — a larger canvas must fail the test, not smash
+         * the stack (abort() stalls ctest on this machine instead of going red). */
         if ((size_t)f->canvas_w * f->canvas_h * 4U > sizeof(px)) {
-            abort();
+            TEST_FAIL_MESSAGE("atlas_dedup_fixture: frame canvas exceeds NT_ATLAS_DEDUP_MAX_PX");
         }
         atlas_dedup_fixture_fill_frame(f, px);
         nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
@@ -126,6 +129,9 @@ static inline void atlas_dedup_fixture_add_opts(NtAtlasBuild *atlas, const uint8
 }
 
 static inline void atlas_dedup_fixture_add(NtAtlasBuild *atlas) { atlas_dedup_fixture_add_opts(atlas, NULL); }
+
+/* Regions never exceed the builder's 16-vertex polygon cap. */
+#define NT_ATLAS_DEDUP_MAX_RING 16
 
 typedef struct {
     uint16_t index;
@@ -147,7 +153,35 @@ typedef struct {
     uint16_t v_min;
     uint16_t u_max;
     uint16_t v_max;
+    /* Canonical UV ring (unused tail zeroed) — the placement identity. */
+    uint16_t ring_uv[NT_ATLAS_DEDUP_MAX_RING][2];
 } nt_atlas_dedup_region_t;
+
+/* Lexicographically smallest rotation over both traversal directions. Any
+ * consistent total order works — both sides of a comparison canonicalize the
+ * same way, so plain memcmp order is fine. */
+static inline void atlas_dedup_canonical_uv_ring(const NtAtlasVertex *verts, uint32_t vstart, uint32_t nv, uint16_t out[][2]) {
+    uint16_t best[NT_ATLAS_DEDUP_MAX_RING][2];
+    bool have = false;
+    for (uint32_t dir = 0; dir < 2U; ++dir) {
+        for (uint32_t start = 0; start < nv; ++start) {
+            uint16_t cand[NT_ATLAS_DEDUP_MAX_RING][2];
+            for (uint32_t k = 0; k < nv; ++k) {
+                const uint32_t idx = (dir == 0) ? ((start + k) % nv) : ((start + nv - k) % nv);
+                cand[k][0] = verts[vstart + idx].atlas_u;
+                cand[k][1] = verts[vstart + idx].atlas_v;
+            }
+            if (!have || memcmp(cand, best, (size_t)nv * sizeof(cand[0])) < 0) {
+                memcpy(best, cand, (size_t)nv * sizeof(cand[0]));
+                have = true;
+            }
+        }
+    }
+    memset(out, 0, (size_t)NT_ATLAS_DEDUP_MAX_RING * sizeof(out[0]));
+    if (nv > 0) {
+        memcpy(out, best, (size_t)nv * sizeof(out[0]));
+    }
+}
 
 /* Locate the first asset entry of `type`, returning its bounds-checked blob. */
 static inline const uint8_t *atlas_dedup_find_asset(const void *pack_bytes, size_t pack_len, uint8_t type, uint32_t nth, uint32_t *out_size) {
@@ -213,7 +247,7 @@ static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pa
     for (uint16_t i = 0; i < ah->region_count; ++i) {
         const uint32_t vstart = regions[i].vertex_start;
         const uint32_t nv = regions[i].vertex_count;
-        if ((uint64_t)vstart + nv > ah->total_vertex_count) {
+        if ((uint64_t)vstart + nv > ah->total_vertex_count || nv > NT_ATLAS_DEDUP_MAX_RING) {
             return false;
         }
         nt_atlas_dedup_region_t *r = &out[i];
@@ -253,6 +287,7 @@ static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pa
         r->v_min = vmin;
         r->u_max = umax;
         r->v_max = vmax;
+        atlas_dedup_canonical_uv_ring(verts, vstart, nv, r->ring_uv);
     }
     *out_count = ah->region_count;
     return true;
@@ -264,9 +299,9 @@ static inline uint32_t atlas_dedup_distinct_placements(const nt_atlas_dedup_regi
     for (uint32_t i = 0; i < count; ++i) {
         bool seen = false;
         for (uint32_t j = 0; j < i; ++j) {
-            /* Full box, not just the min corner: two nested concave hulls can share a
-             * min corner and would then count as one placement. */
-            if (r[j].page_index == r[i].page_index && r[j].u_min == r[i].u_min && r[j].v_min == r[i].v_min && r[j].u_max == r[i].u_max && r[j].v_max == r[i].v_max) {
+            /* Full canonical ring, not the UV bbox — two disjoint concave sprites
+             * can share a bbox but never a ring (the spec's placement identity). */
+            if (r[j].page_index == r[i].page_index && r[j].vertex_count == r[i].vertex_count && memcmp(r[j].ring_uv, r[i].ring_uv, sizeof(r[i].ring_uv)) == 0) {
                 seen = true;
                 break;
             }

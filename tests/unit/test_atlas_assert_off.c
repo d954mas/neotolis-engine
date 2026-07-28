@@ -115,6 +115,20 @@ void test_vertex_offset_gap_rejected(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a non-canonical vertex_offset must be a hard reject");
 }
 
+void test_index_offset_gap_rejected(void) {
+    uint8_t buf[512];
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    ((NtAtlasHeader *)buf)->index_offset += 4;
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a non-canonical index_offset must be a hard reject");
+}
+
+void test_truncated_index_section_rejected(void) {
+    uint8_t buf[512];
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    /* Blob ends mid-index-section: the span math must reject, not read past. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size - 2U), "an index section past the blob end must be a hard reject");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid_blob_activates);
@@ -126,5 +140,7 @@ int main(void) {
     RUN_TEST(test_vertex_span_oob_rejected);
     RUN_TEST(test_index_span_oob_rejected);
     RUN_TEST(test_vertex_offset_gap_rejected);
+    RUN_TEST(test_index_offset_gap_rejected);
+    RUN_TEST(test_truncated_index_section_rejected);
     return UNITY_END();
 }

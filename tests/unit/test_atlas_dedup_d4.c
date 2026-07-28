@@ -475,6 +475,70 @@ void test_mirror_alias_uv_decode_samples_its_own_source_pixel(void) {
     assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors);
 }
 
+/* The UV write quantizes with +0.5 truncation, so the round decode is exact
+ * for any page dimension up to 65535. */
+static uint32_t uv_to_page_px(uint16_t uv, uint32_t page_dim) { return (uint32_t)((((double)uv * (double)page_dim) / 65535.0) + 0.5); }
+
+/* Each ring texel must equal the placed edge texel it extrudes (corners skipped —
+ * they belong to the corner band, whose fill rule differs per axis order). */
+static void assert_ring_replicates_edges(const uint8_t *page, uint32_t pw, uint32_t x0, uint32_t x1, uint32_t y0, uint32_t y1, uint32_t extrude) {
+    for (uint32_t e = 1; e <= extrude; ++e) {
+        for (uint32_t x = x0; x < x1; ++x) {
+            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(page + ((((size_t)y0 * pw) + x) * 4U), page + ((((size_t)(y0 - e) * pw) + x) * 4U), 4, "top ring must replicate the top edge");
+            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(page + ((((size_t)(y1 - 1U) * pw) + x) * 4U), page + ((((size_t)(y1 - 1U + e) * pw) + x) * 4U), 4, "bottom ring must replicate the bottom edge");
+        }
+        for (uint32_t y = y0; y < y1; ++y) {
+            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(page + ((((size_t)y * pw) + x0) * 4U), page + ((((size_t)y * pw) + (x0 - e)) * 4U), 4, "left ring must replicate the left edge");
+            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(page + ((((size_t)y * pw) + (x1 - 1U)) * 4U), page + ((((size_t)y * pw) + (x1 - 1U + e)) * 4U), 4, "right ring must replicate the right edge");
+        }
+    }
+}
+
+/* The interior-texel oracle above never reads the extruded band; only this test
+ * would catch a ring written from the joining sprite's untransformed edge. */
+void test_extruded_ring_replicates_the_shared_placement_edge(void) {
+    enum { RING_EXTRUDE = 2 };
+    const char *path = TMP_DIR "/dedup_f_extrude.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ROTATIONS;
+    opts.shape = NT_ATLAS_SHAPE_RECT; /* extrude > 0 requires the RECT packing mode */
+    opts.extrude = RING_EXTRUDE;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_f_extrude", &opts);
+    const uint8_t pair[2] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90};
+    atlas_dedup_f_fixture_add(atlas, pair, 2, NT_ATLAS_TRANSFORMS_ROTATIONS, 0U);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "extrude pack commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "extrude pack finish failed");
+    nt_builder_free_pack(ctx);
+
+    pack_file_t pack;
+    pack_file_load(path, &pack);
+    nt_atlas_dedup_region_t regions[2] = {0};
+    uint32_t count = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, regions, 2, &count), "collect regions from extrude pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count, "one region per sprite");
+    /* Non-vacuity: without the fold there is no SHARED ring to test. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "the rotated pair must fold");
+
+    const uint8_t *page = NULL;
+    uint32_t pw = 0;
+    uint32_t ph = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_read_page_rgba(pack.bytes, pack.len, regions[0].page_index, &page, &pw, &ph), "read the atlas page pixels");
+    const uint32_t x0 = uv_to_page_px(regions[0].u_min, pw);
+    const uint32_t x1 = uv_to_page_px(regions[0].u_max, pw);
+    const uint32_t y0 = uv_to_page_px(regions[0].v_min, ph);
+    const uint32_t y1 = uv_to_page_px(regions[0].v_max, ph);
+    TEST_ASSERT_TRUE_MESSAGE(x1 > x0 && y1 > y0, "degenerate placement box");
+    TEST_ASSERT_TRUE_MESSAGE(x0 >= RING_EXTRUDE && y0 >= RING_EXTRUDE && x1 + RING_EXTRUDE <= pw && y1 + RING_EXTRUDE <= ph, "the extrude band must fit the page");
+    assert_ring_replicates_edges(page, pw, x0, x1, y0, y1, (uint32_t)RING_EXTRUDE);
+    pack_file_free(&pack);
+}
+
 /* One equal-content run may hold two groups: a member whose own mask forbids the
  * relative it would need becomes a second root, and later members fold onto the
  * FIRST eligible root in add order — even though the second root here matches the
@@ -964,6 +1028,7 @@ int main(void) {
     RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_mirror_alias_uv_decode_samples_its_own_source_pixel);
+    RUN_TEST(test_extruded_ring_replicates_the_shared_placement_edge);
     RUN_TEST(test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first);
     RUN_TEST(test_transposed_placement_composes_with_the_relative);
     RUN_TEST(test_alias_region_matches_standalone_pack);

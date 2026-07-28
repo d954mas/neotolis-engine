@@ -271,8 +271,9 @@ NtAtlasRegion[region_count] (48 bytes each, v6+)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
   page_index:     u8    (which texture page)
-  transform:      u8    (D4 element VALUE 0..7, not a mask — the mask domain is
-                         allowed_transforms: bit0=flipH, bit1=flipV, bit2=diagonal.
+  transform:      u8    (D4 element VALUE 0..7, encoded flipH=bit0, flipV=bit1,
+                         diagonal=bit2 — not a mask; the mask domain is
+                         allowed_transforms, where mask bit i permits stored VALUE i.
                          Exporter metadata only — UVs are already baked. v7 stores
                          compose(placement, relative), so two regions sharing one
                          placement may carry different values; v6 stored the

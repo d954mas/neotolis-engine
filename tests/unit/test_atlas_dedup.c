@@ -130,7 +130,12 @@ static uint32_t count_atlas_cache_files(const char *dir) {
         return 0;
     }
     do {
-        ++n;
+        /* Suffix check mirrors the POSIX branch: the glob also matches longer
+         * extensions through 8.3 short names (atlas_x.binmeta). */
+        const size_t name_len = strlen(fd.cFileName);
+        if (name_len > 4 && strcmp(fd.cFileName + name_len - 4, ".bin") == 0) {
+            ++n;
+        }
     } while (FindNextFileA(h, &fd));
     (void)FindClose(h);
 #else
@@ -1134,6 +1139,8 @@ void test_atlas_stats_and_errors_are_per_commit(void) {
     nt_atlas_add_raw(a3, px, 14, 10, &s);
     s.name = "m3_b"; /* different dimensions, so nothing folds */
     nt_atlas_add_raw(a3, px, 18, 10, &s);
+    s.name = "m3_c"; /* byte-identical twin of m1_a — must NOT fold across commits */
+    nt_atlas_add_raw(a3, px, 16, 12, &s);
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(a3), "the third atlas must commit");
 
     /* Same pair at a page size that fits: proves the failing atlas above really did
@@ -1154,9 +1161,10 @@ void test_atlas_stats_and_errors_are_per_commit(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[0].sprites, "record 0 is the first committed atlas");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[0].folds_exact, "the identical pair folds once");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, stats[0].placements, "the identical pair shares one placement");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[1].sprites, "record 1 is the third commit, not the failed one");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, stats[1].folds_exact, "differently sized sprites cannot fold");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, stats[1].placements, "differently sized sprites need two placements");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, stats[1].sprites, "record 1 is the third commit, not the failed one");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, stats[1].folds_exact, "a twin of an EARLIER atlas's sprite must not fold across commits");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, stats[1].folds_d4, "no intra-atlas pair is a D4 image here");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, stats[1].placements, "three intra-atlas-distinct sprites need three placements");
     /* out_count is documented as optional. */
     TEST_ASSERT_EQUAL_PTR_MESSAGE(stats, nt_builder_get_atlas_stats(ctx, NULL), "a NULL out_count must still return the array");
 

@@ -7461,6 +7461,7 @@ void test_atlas_page_cap_boundary(void) {
             TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, err_count, "exactly the page cap must produce no error");
             TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "exactly the page cap must produce a pack");
         } else {
+            TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_BUILD_OK, commit, "a pages-exhausted commit must fail, not queue the error silently");
             TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, err_count, "one sprite past the cap must produce exactly one error");
             TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, errs[0].kind, "the error past the cap must be PAGES_EXHAUSTED");
             TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "a pages-exhausted build must not finish");
