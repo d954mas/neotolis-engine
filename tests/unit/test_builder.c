@@ -7384,7 +7384,7 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* Tiny max_size + sprite that fills each page → one sprite per page. Need
-     * > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. RECT shape; 57×57
+     * more sprites than the page cap to trigger the overflow. RECT shape; 57×57
      * fills a 64 page (footprint == max_size), so no second sprite fits. */
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = 64;

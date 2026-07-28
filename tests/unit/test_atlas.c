@@ -1224,13 +1224,16 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_index, size_with_pages), "page_index OOB should fail");
 
     /* Zero-page blob: page_index past the page_resources slot array would read
-     * beyond the struct in nt_atlas_get_region_handles — must fail validation. */
+     * beyond the struct in nt_atlas_get_region_handles — must fail validation.
+     * Pinned at the boundary: the FIRST out-of-bounds slot must already reject. */
     uint8_t corrupt_page_slot[512];
     uint32_t zero_page_size = 0;
     build_fixture_blob(corrupt_page_slot, sizeof(corrupt_page_slot), &zero_page_size);
     regions = (NtAtlasRegion *)(corrupt_page_slot + sizeof(NtAtlasHeader));
+    regions[0].page_index = NT_ATLAS_MAX_PAGES;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, zero_page_size), "page_index == NT_ATLAS_MAX_PAGES is the first OOB slot and must fail");
     regions[0].page_index = 200;
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, zero_page_size), "page_index past NT_ATLAS_MAX_PAGES should fail even with zero pages");
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, zero_page_size), "page_index far past NT_ATLAS_MAX_PAGES should fail even with zero pages");
 }
 
 /* ---- Test 16: Direct-drive on_resolve stores page ids and invalidates handles ----

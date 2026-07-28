@@ -34,9 +34,10 @@ extern nt_build_assert_handler_t nt_build_assert_handler;
 #ifndef NT_BUILD_MAX_ASSETS
 #define NT_BUILD_MAX_ASSETS 1024
 #endif
-/* Committed atlases per context — sized for the stats array, not for assets. */
+/* Committed atlases per context — sized for the stats array. Tracks the asset
+ * ceiling so raising NT_BUILD_MAX_ASSETS can never make stats the lower limit. */
 #ifndef NT_BUILD_MAX_ATLASES
-#define NT_BUILD_MAX_ATLASES 1024
+#define NT_BUILD_MAX_ATLASES NT_BUILD_MAX_ASSETS
 #endif
 #ifndef NT_BUILD_MAX_VERTICES
 #define NT_BUILD_MAX_VERTICES 65536
@@ -224,7 +225,8 @@ typedef struct {
  * context — the caller must NOT free it, and it is valid only until
  * nt_builder_free_pack() (dangles afterward); never read it off the NtAtlasBuild
  * handle, which commit frees. ctx must be non-NULL; the returned data is valid
- * when *out_count > 0; out_count may be NULL. */
+ * when *out_count > 0; out_count may be NULL. Commits past NT_BUILD_MAX_ATLASES
+ * assert in dev builds and drop their record in asserts-off builds. */
 const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, uint32_t *out_count);
 
 /* --- Texture options (game controls format and resize per-texture) --- */

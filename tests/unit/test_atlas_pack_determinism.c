@@ -845,18 +845,25 @@ void test_repeat_build_is_byte_identical_with_dedup(void) {
 }
 
 /* The dedup search itself runs pre-pack on one thread, but the packer and the
- * stats replay do not — a scheduling dependence would diverge only here. */
+ * stats replay do not. The oracle is the 1-thread pack: two 4-thread runs could
+ * agree on stable-but-thread-count-dependent bytes and still poison a cache
+ * shared across thread counts. */
 void test_dedup_threads_are_byte_deterministic(void) {
+    const char *st_path = TMP_DIR "/det_dup_mt_st.ntpack";
     const char *a_path = TMP_DIR "/det_dup_mt_a.ntpack";
     const char *b_path = TMP_DIR "/det_dup_mt_b.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(st_path, k_dup_order_declared, 1), "single-thread dedup pack failed");
     TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(a_path, k_dup_order_declared, 4), "threaded dedup pack A failed");
     TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(b_path, k_dup_order_declared, 4), "threaded dedup pack B failed");
     assert_dup_root_is(a_path, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the threaded build must still fold the pair");
+    char sha_st[65];
     char sha_a[65];
     char sha_b[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(st_path, sha_st), "hash single-thread dedup pack");
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(a_path, sha_a), "hash threaded dedup pack A");
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(b_path, sha_b), "hash threaded dedup pack B");
     TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two threaded dedup builds must be byte-identical");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_st, sha_a, "threaded dedup bytes must match the single-threaded pack");
 }
 
 void test_alias_root_survives_unrelated_reordering(void) {

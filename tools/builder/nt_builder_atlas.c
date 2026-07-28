@@ -1656,6 +1656,40 @@ static void pipeline_dedup(AtlasPipeline *p) {
     pipeline_dedup_collect_unique(p);
 }
 
+/* A cache file passes atlas_cache_read's bounds checks yet can still disagree with
+ * this run's dedup (bit rot, foreign writer). The cache contract is fail-gracefully-
+ * rebuild, so the serialize hard gates must stay unreachable from disk data. */
+static bool pipeline_cache_placements_consistent(const AtlasPipeline *p) {
+    if (p->placement_count != p->unique_count) {
+        return false;
+    }
+    uint32_t *pl_of = (uint32_t *)malloc((size_t)p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(pl_of && "cache consistency: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        pl_of[i] = UINT32_MAX;
+    }
+    bool ok = true;
+    for (uint32_t pi = 0; ok && pi < p->placement_count; pi++) {
+        const AtlasPlacement *pl = &p->placements[pi];
+        ok = pl->sprite_index < p->sprite_count && p->dedup_map[pl->sprite_index] < 0 && pl_of[pl->sprite_index] == UINT32_MAX && pl->transform < 8U;
+        if (ok) {
+            pl_of[pl->sprite_index] = pi;
+        }
+    }
+    for (uint32_t i = 0; ok && i < p->sprite_count; i++) {
+        const uint32_t root = p->dedup_map[i] < 0 ? i : (uint32_t)p->dedup_map[i];
+        const uint32_t pi = pl_of[root];
+        if (pi == UINT32_MAX) {
+            ok = false;
+            break;
+        }
+        const uint8_t rt = d4_compose(p->placements[pi].transform, p->alias_rel[i]);
+        ok = (atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt)) != 0;
+    }
+    free(pl_of);
+    return ok;
+}
+
 /* Candidate ownership transfers only through the frontier. */
 
 typedef struct {
@@ -2558,9 +2592,13 @@ static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, 
     }
 }
 
-/* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing. */
+/* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing.
+ * The handler is the embedder's observation channel; it may not return (test traps). */
 static _Noreturn void atlas_invariant_abort(const AtlasPipeline *p, const char *what) {
     NT_LOG_ERROR("atlas '%s': internal invariant broken (%s)", p->state->name, what);
+    if (nt_build_assert_handler) {
+        nt_build_assert_handler(what, __FILE__, __LINE__);
+    }
     abort();
 }
 
@@ -2787,6 +2825,13 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     free(binary_source);
                     free(binary);
                     push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, tw, th);
+                    /* An alias shares the root's pixels, so it fails identically — report
+                     * every bad sprite in one pass instead of one per rebuild. */
+                    for (uint32_t a = 0; a < p->sprite_count; a++) {
+                        if (p->dedup_map[a] == (int32_t)idx) {
+                            push_content_error(p->state, p->sprites[a].add_seq, p->sprites[a].name, NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, p->trim_w[a], p->trim_h[a]);
+                        }
+                    }
                     continue;
                 }
 
@@ -3267,7 +3312,9 @@ static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t i
         memcpy(lo, hi, sizeof(lo));
         memcpy(hi, swap, sizeof(hi));
     }
-    /* Canonical forms of 012+023, 012+130 and 012+132 under the same normalization. */
+    /* Canonical forms of 012+023, 012+130 and 012+132 under the same normalization.
+     * The fourth split {013,123} has no flag bit — an unmatched quad legally ships
+     * flags = 0 and takes the generic path, so absence here is never wrong. */
     static const uint16_t k_patterns[3][6] = {
         {0, 1, 2, 0, 2, 3},
         {0, 1, 2, 0, 1, 3},
@@ -3876,6 +3923,22 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     t0 = nt_time_now();
     pipeline_dedup(&p);
     double bench_dedup = nt_time_now() - t0;
+
+    if (p.cache_hit && !pipeline_cache_placements_consistent(&p)) {
+        NT_LOG_WARN("atlas '%s': cached placements are inconsistent — discarding the entry and repacking", state->name);
+        free(p.placements);
+        p.placements = NULL;
+        p.placement_count = 0;
+        if (p.page_pixels) {
+            for (uint32_t pg = 0; pg < p.page_count; pg++) {
+                free(p.page_pixels[pg]);
+            }
+            free((void *)p.page_pixels);
+            p.page_pixels = NULL;
+        }
+        p.page_count = 0;
+        p.cache_hit = false;
+    }
 
     NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", p.sprite_count, p.unique_count);
     t0 = nt_time_now();

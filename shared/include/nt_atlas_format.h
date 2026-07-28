@@ -10,6 +10,13 @@
  *     relative) and a shared vertex_start gained the trim_offset precondition. */
 #define NT_ATLAS_VERSION 7
 
+/* Effective format-wide page cap. The runtime preallocates this many resource
+ * slots per atlas (no heap), so a blob above it can never load — the builder
+ * packer therefore stops at the same bound and errors gracefully. */
+#ifndef NT_ATLAS_MAX_PAGES
+#define NT_ATLAS_MAX_PAGES 8
+#endif
+
 /* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))

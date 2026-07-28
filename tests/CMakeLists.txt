@@ -835,7 +835,6 @@ if(NOT EMSCRIPTEN)
     # distinct, so a wrong relative transform cannot pass by symmetry.
     add_executable(test_atlas_dedup_d4
         unit/test_atlas_dedup_d4.c
-        unit/test_helpers/nt_assert_trap.c
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
     )
     target_link_libraries(test_atlas_dedup_d4 PRIVATE nt_builder nt_log unity)

@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-_Static_assert(NT_BUILD_MAX_ATLASES == 1024, "the default stats capacity must cover the full asset ceiling");
+_Static_assert(NT_BUILD_MAX_ATLASES == NT_BUILD_MAX_ASSETS, "the stats capacity must track the asset ceiling, not a parallel literal");
 
 /* Atlas opts carry NO positional-initializer contract — designated initializers
  * only. Round-trips every field (incl. allowed_transforms) and pins the

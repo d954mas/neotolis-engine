@@ -140,7 +140,10 @@ static uint32_t count_atlas_cache_files(const char *dir) {
     }
     const struct dirent *ent = NULL;
     while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
-        if (strncmp(ent->d_name, "atlas_", 6) == 0) {
+        /* Suffix too — a future sidecar (.tmp/.meta) must not skew the POSIX count
+         * while the Windows glob ignores it. */
+        const size_t name_len = strlen(ent->d_name);
+        if (strncmp(ent->d_name, "atlas_", 6) == 0 && name_len > 4 && strcmp(ent->d_name + name_len - 4, ".bin") == 0) {
             ++n;
         }
     }
@@ -216,7 +219,10 @@ void test_dedup_fixture_builds(void) {
     for (uint32_t i = 0; i < count; ++i) {
         TEST_ASSERT_GREATER_THAN_UINT8_MESSAGE(0, regions[i].vertex_count, "region has no geometry");
     }
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, count), "no placements measured");
+    /* Smoke bounds only — the exact fold pin lives in the headline test below. */
+    const uint32_t placements = atlas_dedup_distinct_placements(regions, count);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_STATE_COUNT, placements, "fewer placements than distinct art states");
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT, placements, "more placements than frames");
 }
 
 void test_dedup_region_metadata_is_per_sprite(void) {
@@ -235,7 +241,9 @@ void test_dedup_region_metadata_is_per_sprite(void) {
         /* trim_offset_y counts from the bottom edge in y-up source space. */
         const int16_t expect_y = (int16_t)(f->canvas_h - f->art_y - NT_ATLAS_DEDUP_ART_H);
         TEST_ASSERT_EQUAL_INT16_MESSAGE(expect_y, regions[i].trim_offset_y, "trim_offset_y must be this frame's y-up art offset");
-        TEST_ASSERT_EQUAL_UINT16_MESSAGE(0, regions[i].slice9_lrtb[0], "fixture has no slice9 borders");
+        for (uint32_t k = 0; k < 4; ++k) {
+            TEST_ASSERT_EQUAL_UINT16_MESSAGE(0, regions[i].slice9_lrtb[k], "fixture has no slice9 borders");
+        }
     }
 }
 
@@ -798,6 +806,56 @@ void test_resolved_geometry_controls_each_refuse_a_fold(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, atlas_dedup_distinct_placements(regions, 2), "a different resolved area budget must not fold");
 }
 
+/* The other direction of the resolved-value gate: an inherited knob and an explicit
+ * spelling equal to the atlas value are one packing decision and must still fold.
+ * A "simplification" back to raw-override comparison keeps every refusal pair red
+ * above but silently stops these from folding — a pure density regression. */
+void test_resolved_spellings_still_fold(void) {
+    static const resolved_sprite_t extrude_pair[2] = {
+        {"spell_ex_inherit", 20, 14, 30, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"spell_ex_explicit", 20, 14, 30, 200, 90, 0, {0, 0, 0, 0}, 2, 0, 0, false, 0, 0.0F, false},
+    };
+    static const resolved_sprite_t verts_pair[2] = {
+        {"spell_mv_inherit", 20, 14, 40, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"spell_mv_explicit", 20, 14, 40, 200, 90, 0, {0, 0, 0, 0}, 0, 8, 0, false, 0, 0.0F, false},
+    };
+    static const resolved_sprite_t alpha_pair[2] = {
+        {"spell_at_inherit", 20, 14, 50, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"spell_at_explicit", 20, 14, 50, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 5, true, 0, 0.0F, false},
+    };
+    static const resolved_sprite_t shape_pair[2] = {
+        {"spell_sh_inherit", 20, 14, 60, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"spell_sh_explicit", 20, 14, 60, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, NT_ATLAS_SPRITE_SHAPE_RECT, 0.0F, false},
+    };
+    static const resolved_sprite_t area_pair[2] = {
+        {"spell_ar_inherit", 20, 14, 70, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 0.0F, false},
+        {"spell_ar_explicit", 20, 14, 70, 200, 90, 0, {0, 0, 0, 0}, 0, 0, 0, false, 0, 25.0F, true},
+    };
+    /* Atlas values the explicit spellings repeat verbatim. */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.max_vertices = 8;
+    opts.extrude = 2;
+    opts.alpha_threshold = 5;
+    opts.max_added_area_percent = 25.0F;
+
+    nt_atlas_dedup_region_t regions[RESOLVED_SPRITE_MAX_COUNT] = {0};
+    collect_resolved_pack(TMP_DIR "/dedup_spell_extrude.ntpack", "dedup_spell_extrude", &opts, extrude_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "an explicit extrude equal to the atlas value must still fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_spell_verts.ntpack", "dedup_spell_verts", &opts, verts_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "an explicit max_vertices equal to the atlas value must still fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_spell_alpha.ntpack", "dedup_spell_alpha", &opts, alpha_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "an explicit alpha threshold equal to the atlas value must still fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_spell_shape.ntpack", "dedup_spell_shape", &opts, shape_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "an explicit shape equal to the atlas value must still fold");
+
+    collect_resolved_pack(TMP_DIR "/dedup_spell_area.ntpack", "dedup_spell_area", &opts, area_pair, 2, regions);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(regions, 2), "an explicit area budget equal to the atlas value must still fold");
+}
+
 /* Borders are per-region metadata written from each sprite's own data, so the
  * same art with different borders is one placement and two border sets. */
 void test_slice9_same_art_different_borders_share_placement(void) {
@@ -1180,6 +1238,7 @@ int main(void) {
     RUN_TEST(test_mirrored_twin_folds_with_its_relative_transform);
     RUN_TEST(test_resolved_margin_groups_equivalent_spellings);
     RUN_TEST(test_resolved_geometry_controls_each_refuse_a_fold);
+    RUN_TEST(test_resolved_spellings_still_fold);
     RUN_TEST(test_slice9_same_art_different_borders_share_placement);
     RUN_TEST(test_slice9_group_with_plain_sprite_stays_identity);
     RUN_TEST(test_dedup_pack_is_deterministic);

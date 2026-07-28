@@ -397,7 +397,7 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
+    (void)runtime_handle; /* always 1 — atlas_activate publishes it only for blobs that passed validation */
 
     /* Blob eviction edge case (R2 / §Q2): if the winning blob is no longer
      * resident, keep existing user_data as-is. */

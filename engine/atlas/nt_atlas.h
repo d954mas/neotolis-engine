@@ -16,9 +16,7 @@
 #define NT_ATLAS_INVALID_REGION ((uint32_t)0xFFFFFFFFU)
 #define NT_ATLAS_TOMBSTONE_HASH ((uint64_t)0xFFFFFFFFFFFFFFFFULL)
 
-#ifndef NT_ATLAS_MAX_PAGES
-#define NT_ATLAS_MAX_PAGES 8
-#endif
+/* NT_ATLAS_MAX_PAGES comes from nt_atlas_format.h — one cap shared with the builder. */
 
 /* ---- Public types ---- */
 
@@ -73,7 +71,10 @@ typedef struct {
     uint8_t vertex_count;    /* 32: 0 = dead marker (removed by merge or degenerate) */
     uint8_t index_count;     /* 33 */
     uint8_t page_index;      /* 34 */
-    uint8_t transform;       /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t transform;       /* 35: D4 element VALUE 0..7 (bit0=flipH, bit1=flipV, bit2=diagonal).
+                              *     Exporter metadata only — UVs are baked. v7: stores
+                              *     compose(placement, relative), so two regions sharing one
+                              *     placement may carry different values. */
     uint8_t flags;           /* 36: builder-authored render hints */
     uint8_t _pad0;           /* 37: alignment padding for uint16 */
     uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
