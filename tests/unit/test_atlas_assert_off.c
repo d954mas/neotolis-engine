@@ -1,19 +1,16 @@
-/* Compiled with NT_ASSERT_MODE=0 — the shipping config. Every rejection below
- * must come from the hard guards alone: NT_ASSERT is ((void)0) here, so a
- * deleted `return false` in the validator goes unnoticed by the normal test
- * binaries, whose asserts fire first. */
+/* Drives nt_atlas.c compiled with NT_ASSERT_MODE=0 (see nt_atlas_assert_off_tu.c)
+ * — the shipping config. Every rejection below must come from the hard guards
+ * alone: NT_ASSERT is ((void)0) there, so a deleted `return false` in the
+ * validator goes unnoticed by the normal test binaries, whose asserts fire first. */
+#undef NT_ASSERT_MODE
+#define NT_ASSERT_MODE 0
 
 #include <stdint.h>
 #include <string.h>
 
 #include "atlas/nt_atlas.h"
-#include "core/nt_assert.h"
 #include "nt_atlas_format.h"
 #include "unity.h"
-
-#if NT_ASSERT_MODE != 0
-#error "this binary exists to pin the hard guards with asserts compiled out"
-#endif
 
 void setUp(void) {}
 void tearDown(void) {}

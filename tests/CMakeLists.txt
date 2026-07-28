@@ -462,11 +462,13 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_atlas)
 
     # nt_atlas.c recompiled with NT_ASSERT_MODE=0 (shipping config): pins that the
-    # validator's hard guards reject corrupt blobs without NT_ASSERT's help.
-    add_executable(test_atlas_assert_off unit/test_atlas_assert_off.c ${CMAKE_SOURCE_DIR}/engine/atlas/nt_atlas.c)
+    # validator's hard guards reject corrupt blobs without NT_ASSERT's help. The
+    # mode is forced by #undef in the wrapper TU, not -D — a per-target define
+    # collides with CI's global -DNT_ASSERT_MODE.
+    add_executable(test_atlas_assert_off unit/test_atlas_assert_off.c unit/test_helpers/nt_atlas_assert_off_tu.c)
     target_link_libraries(test_atlas_assert_off PRIVATE nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_include_directories(test_atlas_assert_off PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit" "${CMAKE_SOURCE_DIR}/engine" "${CMAKE_SOURCE_DIR}/engine/atlas" "${CMAKE_SOURCE_DIR}/shared/include")
-    target_compile_definitions(test_atlas_assert_off PRIVATE NT_ASSERT_MODE=0 NT_LOG_DOMAIN="atlas" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_definitions(test_atlas_assert_off PRIVATE NT_LOG_DOMAIN="atlas" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas_assert_off)
 
     # Parser stays independently testable without linking the benchmark executable.
