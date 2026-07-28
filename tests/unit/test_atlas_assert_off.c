@@ -58,24 +58,62 @@ static uint32_t build_blob_pages(uint8_t *out, uint32_t cap, uint16_t page_count
 
 static uint32_t build_blob(uint8_t *out, uint32_t cap) { return build_blob_pages(out, cap, 1); }
 
+/* Both entry points must reject on their own: activate gates publication, and
+ * resolve is what merges re-run — its hard return is the only guard once
+ * NT_ASSERT is compiled out. */
+static void assert_blob_hard_rejected(uint8_t *buf, uint32_t size, const char *what) {
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), what);
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_NULL_MESSAGE(user_data, what);
+}
+
 void test_valid_blob_activates(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a valid blob must activate with asserts off");
+    /* Control for the rejection helper: the resolve path does create state. */
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(user_data, "a valid blob must resolve with asserts off");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, nt_atlas_test_region_count((const struct nt_atlas_data *)user_data), "resolved atlas must carry its region");
+    nt_atlas_test_drive_cleanup(user_data);
+}
+
+void test_pageless_regioned_blob_rejected(void) {
+    uint8_t buf[512];
+    /* The only input separating the strict page rule from the old lenient
+     * page_count > 0 form — a revert must fail here, not pass the suite. */
+    const uint32_t size = build_blob_pages(buf, sizeof(buf), 0);
+    assert_blob_hard_rejected(buf, size, "a region with no backing page must be a hard reject");
+}
+
+void test_corrupt_merge_blob_leaves_atlas_unchanged(void) {
+    uint8_t buf[512];
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    void *user_data = NULL;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(user_data, "baseline resolve must succeed");
+    ((NtAtlasHeader *)buf)->magic = 0xDEADBEEFU;
+    void *before = user_data;
+    nt_atlas_test_drive_resolve(buf, size, &user_data);
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(before, user_data, "a corrupt merge blob must not replace user_data");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, nt_atlas_test_region_count((const struct nt_atlas_data *)user_data), "a corrupt merge blob must not touch existing regions");
+    nt_atlas_test_drive_cleanup(user_data);
 }
 
 void test_bad_magic_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->magic = 0xDEADBEEFU;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "bad magic must be a hard reject, not assert-only");
+    assert_blob_hard_rejected(buf, size, "bad magic must be a hard reject, not assert-only");
 }
 
 void test_bad_version_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->version = NT_ATLAS_VERSION + 1;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "wrong version must be a hard reject, not assert-only");
+    assert_blob_hard_rejected(buf, size, "wrong version must be a hard reject, not assert-only");
 }
 
 void test_page_count_over_cap_rejected(void) {
@@ -84,7 +122,7 @@ void test_page_count_over_cap_rejected(void) {
      * to reject — mutating page_count on a 1-page blob would also break the
      * section offsets and let any other check mask a deleted cap guard. */
     const uint32_t size = build_blob_pages(buf, sizeof(buf), NT_ATLAS_MAX_PAGES + 1);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "page_count past the cap must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "page_count past the cap must be a hard reject");
     /* Control: the same layout at exactly the cap is accepted. */
     const uint32_t ok_size = build_blob_pages(buf, sizeof(buf), NT_ATLAS_MAX_PAGES);
     TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, ok_size), "exactly the cap must activate");
@@ -105,9 +143,9 @@ void test_page_index_unbacked_rejected(void) {
     NtAtlasRegion *region = blob_region0(buf);
     /* Boundary: page_index == page_count is the first slot without a page. */
     region->page_index = 1;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a region on an unbacked page must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "a region on an unbacked page must be a hard reject");
     region->page_index = NT_ATLAS_MAX_PAGES;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "page_index past the slot array must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "page_index past the slot array must be a hard reject");
 }
 
 void test_vertex_span_oob_rejected(void) {
@@ -116,7 +154,7 @@ void test_vertex_span_oob_rejected(void) {
     NtAtlasRegion *region = blob_region0(buf);
     region->vertex_start = 3;
     region->vertex_count = 4;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a vertex span past total_vertex_count must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "a vertex span past total_vertex_count must be a hard reject");
 }
 
 void test_index_span_oob_rejected(void) {
@@ -125,33 +163,35 @@ void test_index_span_oob_rejected(void) {
     NtAtlasRegion *region = blob_region0(buf);
     region->index_start = 5;
     region->index_count = 6;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "an index span past total_index_count must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "an index span past total_index_count must be a hard reject");
 }
 
 void test_vertex_offset_gap_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->vertex_offset += 4;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a non-canonical vertex_offset must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "a non-canonical vertex_offset must be a hard reject");
 }
 
 void test_index_offset_gap_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     ((NtAtlasHeader *)buf)->index_offset += 4;
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "a non-canonical index_offset must be a hard reject");
+    assert_blob_hard_rejected(buf, size, "a non-canonical index_offset must be a hard reject");
 }
 
 void test_truncated_index_section_rejected(void) {
     uint8_t buf[512];
     const uint32_t size = build_blob(buf, sizeof(buf));
     /* Blob ends mid-index-section: the span math must reject, not read past. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size - 2U), "an index section past the blob end must be a hard reject");
+    assert_blob_hard_rejected(buf, size - 2U, "an index section past the blob end must be a hard reject");
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid_blob_activates);
+    RUN_TEST(test_pageless_regioned_blob_rejected);
+    RUN_TEST(test_corrupt_merge_blob_leaves_atlas_unchanged);
     RUN_TEST(test_bad_magic_rejected);
     RUN_TEST(test_bad_version_rejected);
     RUN_TEST(test_page_count_over_cap_rejected);

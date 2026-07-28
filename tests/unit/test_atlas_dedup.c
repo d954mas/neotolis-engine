@@ -168,9 +168,13 @@ static void clear_atlas_cache_files(const char *dir) {
         return;
     }
     do {
-        char p[512];
-        (void)snprintf(p, sizeof(p), "%s\\%s", dir, fd.cFileName);
-        (void)DeleteFileA(p);
+        /* Same 8.3-short-name caveat as the count helper: the glob over-matches. */
+        const size_t name_len = strlen(fd.cFileName);
+        if (name_len > 4 && strcmp(fd.cFileName + name_len - 4, ".bin") == 0) {
+            char p[512];
+            (void)snprintf(p, sizeof(p), "%s\\%s", dir, fd.cFileName);
+            (void)DeleteFileA(p);
+        }
     } while (FindNextFileA(h, &fd));
     (void)FindClose(h);
 #else
@@ -252,7 +256,7 @@ void test_dedup_region_metadata_is_per_sprite(void) {
     }
 }
 
-/* The DEDUP-01 headline: the 10 frames carry 4 art states on 10 different
+/* The headline case: the 10 frames carry 4 art states on 10 different
  * canvases, so nothing but a post-trim key can bring them together. */
 void test_post_trim_identical_frames_share_four_placements(void) {
     nt_atlas_dedup_region_t regions[NT_ATLAS_DEDUP_FRAME_COUNT] = {0};
@@ -360,6 +364,10 @@ void test_sprite_dedup_on_overrides_atlas_off(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_DEDUP_FRAME_COUNT - 1, atlas_dedup_distinct_placements(regions, count), "only the two overridden sprites may fold");
 }
 
+static void build_flag_variant(const char *path, const char *cache, bool atlas_dedup, const uint8_t *per_frame) {
+    TEST_ASSERT_TRUE_MESSAGE(build_dedup_pack_opts(path, "dedup_flag", cache, atlas_dedup, per_frame, NULL), "flag variant build failed");
+}
+
 /* A shared cache that ignored the flags would replay the first run's placements
  * and hand back an identical pack. */
 void test_dedup_flags_change_the_atlas_cache_key(void) {
@@ -367,19 +375,26 @@ void test_dedup_flags_change_the_atlas_cache_key(void) {
     const char *on = TMP_DIR "/dedup_flag_on.ntpack";
     const char *off = TMP_DIR "/dedup_flag_off.ntpack";
     const char *sprite_off = TMP_DIR "/dedup_flag_sprite_off.ntpack";
+    const char *sprite_on = TMP_DIR "/dedup_flag_sprite_on.ntpack";
     static const uint8_t per_frame[NT_ATLAS_DEDUP_FRAME_COUNT] = {0, 0, 0, NT_ATLAS_SPRITE_DEDUP_OFF, 0, 0, 0, 0, 0, 0};
+    /* Same slot as OFF above: only the raw tri-state VALUE separates these keys. */
+    static const uint8_t per_frame_on[NT_ATLAS_DEDUP_FRAME_COUNT] = {0, 0, 0, NT_ATLAS_SPRITE_DEDUP_ON, 0, 0, 0, 0, 0, 0};
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
     (void)MKDIR(cache);
     clear_atlas_cache_files(cache);
     TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(on, "dedup_flag", cache, true, NULL, NULL));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(off, "dedup_flag", cache, false, NULL, NULL));
-    TEST_ASSERT_TRUE(build_dedup_pack_opts(sprite_off, "dedup_flag", cache, true, per_frame, NULL));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, count_atlas_cache_files(cache), "each dedup spelling must occupy its own cache key");
+    build_flag_variant(on, cache, true, NULL);
+    build_flag_variant(off, cache, false, NULL);
+    build_flag_variant(sprite_off, cache, true, per_frame);
+    /* ON vs OFF at one slot: a key that collapses the tri-state to a boolean
+     * (override != 0) would give these two the same cache entry. */
+    build_flag_variant(sprite_on, cache, true, per_frame_on);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, count_atlas_cache_files(cache), "each dedup spelling must occupy its own cache key");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, off), "the atlas dedup flag must change the packed output");
     TEST_ASSERT_TRUE_MESSAGE(packs_differ(on, sprite_off), "a per-sprite dedup override must change the packed output");
+    TEST_ASSERT_TRUE_MESSAGE(packs_differ(sprite_on, sprite_off), "ON and OFF overrides at one slot must pack differently");
 }
 
 /* The other half of the cache contract: the same key twice must be a real hit

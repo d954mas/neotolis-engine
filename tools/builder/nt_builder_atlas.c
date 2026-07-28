@@ -206,7 +206,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  *
  *  Pages grow dynamically as needed (vector_pack handles its own
  *  page creation when no fit on existing pages).
- *  New pages only when max_size exhausted (ATLAS-18).
+ *  New pages only when max_size exhausted.
  * =================================================================== */
 
 // #region Duplicate detection — identify identical sprites by content
@@ -1206,7 +1206,7 @@ typedef struct {
     /* Dedup */
     int32_t *dedup_map;
     uint32_t *unique_indices;
-    /* Orientation sprite i's own local space is stored at inside the shared placement
+    /* Orientation at which sprite i's local space is stored inside the shared placement
      * rectangle, i.e. root_bitmap == alias_rel[i](sprite_i_bitmap) — same meaning as
      * pl->transform. Identity everywhere until the D4 stage populates it. */
     uint8_t *alias_rel;
@@ -1703,18 +1703,18 @@ static void pipeline_dedup(AtlasPipeline *p) {
     }
     free(dedup_entries);
 #ifdef NT_TEST_ACCESS
-    /* Scope the arm to this commit: a zero-fold commit never consumes it, and a
-     * leaked arm would corrupt the first alias of a later atlas in this process. */
+    /* Disarm even on a zero-fold pass — a leaked arm would corrupt the first alias
+     * of a later atlas in this process. An all-failed commit returns before dedup,
+     * so the arm is per-dedup-pass, not per-commit. */
     g_force_alias_rel = 0xFFU;
 #endif
 
     pipeline_dedup_collect_unique(p);
 }
 
-/* Full packing footprint, in THIS run's trim dims: cache hits skip pack AND
- * compose, so a forged record placing the trim box in-page but the extrude or
- * margin band out of it must fall back to a repack. Serialize bakes UVs from
- * these dims, not the cached trimmed_w/h. */
+/* Cache hits skip pack AND compose, so this check alone re-imposes the packer's
+ * reserved footprint — pad over-approximates the in-page bound the UV bake needs.
+ * Serialize bakes UVs from THIS run's trim dims, not the cached trimmed_w/h. */
 static bool cache_placement_footprint_ok(const AtlasPipeline *p, const AtlasPlacement *pl) {
     const uint32_t root = pl->sprite_index;
     const uint32_t fw = (pl->transform & 4U) ? p->trim_h[root] : p->trim_w[root];
@@ -3205,6 +3205,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
             atlas_invariant_abort(p, "alias root is not a unique sprite");
         }
         u_eff_transforms[u] &= atlas_alias_admissible_placements(p, i);
+        /* No-op for valid data (a recorded rel keeps identity admissible); only the
+         * corrupted-rel test hook reaches it — the proof stage, not the packer, must reject. */
         u_eff_transforms[u] |= NT_ATLAS_TRANSFORMS_IDENTITY;
     }
     free(unique_slot);
@@ -3365,7 +3367,7 @@ static bool quad_tri_less(const uint16_t *a, const uint16_t *b) {
 
 /* Which diagonal a quad was split on, from PNG-space CCW indices before the winding
  * swap. Matched up to triangle rotation and triangle order: Clipper2 picks its own
- * start vertex, so demanding a literal 0,1,2,... matched nothing at all. */
+ * start vertex, so demanding a literal 0,1,2,... would match nothing at all. */
 static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
     if (vertex_count != 4 || index_count != 6 || indices == NULL) {
         return 0;

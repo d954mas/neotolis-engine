@@ -253,7 +253,7 @@ void test_f_fixture_packs(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, count, "one region per rotation image");
 }
 
-/* --- DEDUP-04: folding is mask-gated and records a per-copy relative --- */
+/* --- folding is mask-gated and records a per-copy relative --- */
 
 void test_four_rotations_fold_to_one_placement(void) {
     nt_atlas_dedup_region_t regions[F_MAX_IMAGES] = {0};
@@ -332,7 +332,7 @@ void test_fold_admission_follows_the_alias_mask(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, closed_alias[1].transform, "an identity-only sprite must be stored at identity");
 }
 
-/* --- DEDUP-04: each alias decodes to its own source pixels through the page --- */
+/* --- each alias decodes to its own source pixels through the page --- */
 
 /* u = a*lx + b*ly + c over the region's own y-up local space. */
 typedef struct {
@@ -701,7 +701,118 @@ void test_transposed_placement_composes_with_the_relative(void) {
     pack_file_free(&pack);
 }
 
-/* --- DEDUP-04: an alias carries the same geometry as a standalone pack --- */
+/* B = R90(A) in an 8x44 canvas, texel-mapped like the F fixture. */
+static void ao_fill_rot90(uint8_t *out_px) {
+    uint8_t base[(size_t)AO_W * AO_H * 4U];
+    ao_fill(base, false);
+    for (uint32_t y = 0; y < (uint32_t)AO_H; ++y) {
+        for (uint32_t x = 0; x < (uint32_t)AO_W; ++x) {
+            int32_t tx = 0;
+            int32_t ty = 0;
+            transform_point_texel((int32_t)x, (int32_t)y, NT_ATLAS_XFORM_ROT90, AO_W, AO_H, &tx, &ty);
+            memcpy(out_px + ((((size_t)(uint32_t)ty * AO_H) + (uint32_t)tx) * 4U), base + ((((size_t)y * AO_W) + x) * 4U), 4U);
+        }
+    }
+}
+
+/* The alias mask {IDENTITY, ROT270} is not closed under composition with the
+ * placements the packer prefers here: a naive mask INTERSECTION would admit a
+ * ROT270 placement whose composed transform ROT180 is outside the alias's own
+ * mask. Only the per-placement narrowing keeps the shipped transform legal. */
+void test_partial_mask_narrowing_keeps_composed_transform_in_mask(void) {
+    const char *path = TMP_DIR "/dedup_ao_partial_mask.ntpack";
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ctx, "start_pack failed");
+    nt_builder_set_threads(ctx, 1);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_ALL;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "dedup_ao_partial", &opts);
+
+    uint8_t px[(size_t)AO_W * AO_H * 4U];
+    const uint16_t filler_dims[3][2] = {{8, 44}, {8, 44}, {8, 40}};
+    const char *filler_names[3] = {"aop_w0", "aop_w1", "aop_w3"};
+    for (int i = 0; i < 2; ++i) {
+        const uint32_t texels = (uint32_t)filler_dims[i][0] * filler_dims[i][1];
+        for (uint32_t t = 0; t < texels; ++t) {
+            px[(t * 4U) + 0U] = (uint8_t)(60 + (i * 30));
+            px[(t * 4U) + 1U] = 90U;
+            px[(t * 4U) + 2U] = 60U;
+            px[(t * 4U) + 3U] = 255U;
+        }
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = filler_names[i];
+        nt_atlas_add_raw(atlas, px, filler_dims[i][0], filler_dims[i][1], &so);
+    }
+    {
+        ao_fill(px, false);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = "aop_twin_a";
+        nt_atlas_add_raw(atlas, px, AO_W, AO_H, &so);
+    }
+    {
+        ao_fill_rot90(px);
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = "aop_twin_b";
+        /* rel(B) = ROT270 (root = R270(B)), so ROT270 must be admitted; the
+         * mask deliberately excludes every other non-identity element. */
+        so.allowed_transforms = NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_ROT270;
+        nt_atlas_add_raw(atlas, px, AO_H, AO_W, &so);
+    }
+    {
+        const uint32_t texels = (uint32_t)filler_dims[2][0] * filler_dims[2][1];
+        for (uint32_t t = 0; t < texels; ++t) {
+            px[(t * 4U) + 0U] = 120U;
+            px[(t * 4U) + 1U] = 90U;
+            px[(t * 4U) + 2U] = 60U;
+            px[(t * 4U) + 3U] = 255U;
+        }
+        nt_atlas_sprite_opts_t so = nt_atlas_sprite_opts_defaults();
+        so.name = filler_names[2];
+        nt_atlas_add_raw(atlas, px, filler_dims[2][0], filler_dims[2][1], &so);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_atlas_commit(atlas), "partial-mask fixture commit failed");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "partial-mask fixture finish_pack failed");
+    nt_builder_free_pack(ctx);
+
+    pack_file_t pack;
+    pack_file_load(path, &pack);
+    nt_atlas_dedup_region_t regions[5] = {0};
+    uint32_t got = 0;
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, regions, 5, &got), "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(5, got, "one region per sprite");
+
+    /* Non-vacuity: the pair folds AND the packer engaged a non-identity
+     * placement — at identity every composition bug is invisible. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[AO_TWIN_A].page_index, regions[AO_TWIN_B].page_index, "the rotated twins must share one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[AO_TWIN_A].u_min, regions[AO_TWIN_B].u_min, "the rotated twins must share one placement");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[AO_TWIN_A].v_min, regions[AO_TWIN_B].v_min, "the rotated twins must share one placement");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_ATLAS_XFORM_IDENTITY, regions[AO_TWIN_A].transform, "control: the packer must pick a non-identity placement");
+
+    /* The shipped transform must sit inside the alias's OWN mask, and the
+     * quotient against the root must recover exactly the admitted relative. */
+    const uint8_t mask_b = NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_ROT270;
+    TEST_ASSERT_TRUE_MESSAGE((mask_b & (uint8_t)(1U << regions[AO_TWIN_B].transform)) != 0U, "alias transform escaped its own partial mask");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_ROT270, d4_compose(d4_inverse(regions[AO_TWIN_A].transform), regions[AO_TWIN_B].transform), "quotient must recover the ROT270 relative");
+
+    atlas_view_t view;
+    const bool ok = atlas_view_open(pack.bytes, pack.len, &view);
+    if (!ok) {
+        pack_file_free(&pack);
+        TEST_FAIL_MESSAGE("open the produced atlas blob");
+        return;
+    }
+    uint8_t img[(size_t)AO_W * AO_H * 4U];
+    ao_fill(img, false);
+    assert_region_samples_image(&pack, &view, AO_TWIN_A, regions[AO_TWIN_A].transform, img, AO_W, AO_H);
+    ao_fill_rot90(img);
+    assert_region_samples_image(&pack, &view, AO_TWIN_B, regions[AO_TWIN_B].transform, img, AO_H, AO_W);
+    pack_file_free(&pack);
+}
+
+/* --- an alias carries the same geometry as a standalone pack --- */
 
 #define FILLER_W 20
 #define FILLER_H 12
@@ -1031,6 +1142,7 @@ int main(void) {
     RUN_TEST(test_extruded_ring_replicates_the_shared_placement_edge);
     RUN_TEST(test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first);
     RUN_TEST(test_transposed_placement_composes_with_the_relative);
+    RUN_TEST(test_partial_mask_narrowing_keeps_composed_transform_in_mask);
     RUN_TEST(test_alias_region_matches_standalone_pack);
     RUN_TEST(test_concave_alias_hull_matches_standalone);
     RUN_TEST(test_mirrored_alias_region_matches_standalone_pack);

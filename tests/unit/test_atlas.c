@@ -123,7 +123,7 @@ static void fake_texture_deactivate(uint32_t runtime_handle) { (void)runtime_han
 #define FIXTURE_PAGE1_ID 0xBBBULL
 
 /* Every mock blob carries real pages: the validator rejects a region whose
- * page_index has no backing page, so the old zero-page convention is illegal. */
+ * page_index has no backing page. */
 static const uint64_t k_mock_page_ids[2] = {FIXTURE_PAGE0_ID, FIXTURE_PAGE1_ID};
 
 static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {

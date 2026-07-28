@@ -2405,7 +2405,7 @@ void test_early_dedup_different_opts_not_deduped(void) {
     /* Since the 2x2 image is smaller than max_size=256, both will encode
      * identically and late dedup WILL merge them. So we just check both
      * entries exist and have valid sizes. The key validation is that the
-     * build succeeds (DEDUP-02 says different opts must not be early-deduped). */
+     * build succeeds (different opts must not be early-deduped). */
     TEST_ASSERT_TRUE(entries[0].size > 0);
     TEST_ASSERT_TRUE(entries[1].size > 0);
     (void)fclose(f);

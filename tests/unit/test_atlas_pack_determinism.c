@@ -707,7 +707,7 @@ void test_sprite_transforms_override_changes_cache_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "per-sprite transforms override must change the atlas cache key");
 }
 
-/* --- DEDUP-03: repack stability and alias-root stability --- */
+/* --- repack stability and alias-root stability --- */
 
 /* k_corpus holds no duplicate pair, so it cannot say anything about dedup. This
  * corpus adds a quarter-turned twin. The L shape is deliberate: a solid rectangle

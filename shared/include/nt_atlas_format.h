@@ -76,8 +76,9 @@ typedef struct {
                               *     animation frames where trim bounds vary. */
     float origin_y;          /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
     uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2).
-                              *     Regions may share a span only when their trim_offset_x/y also
-                              *     match — the runtime precomputes positions per span. */
+                              *     Builder-enforced, runtime-trusted (v7): regions share a span
+                              *     only when trim_offset_x/y match — the runtime bakes cached_pos
+                              *     per span and never re-checks. */
     uint32_t index_start;    /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;    /* 32: number of vertices for this region (max 16 per builder limit) */
     uint8_t page_index;      /* 33: which texture page this region belongs to */
@@ -93,7 +94,7 @@ typedef struct {
     uint8_t _pad0;           /* 37: alignment padding for uint16 slice9_lrtb */
     uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
     uint8_t _reserved2[2];   /* 46: must be zero */
-} NtAtlasRegion;             /* 48 bytes (v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
+} NtAtlasRegion;             /* 48 bytes (layout unchanged since v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 48, "NtAtlasRegion must be 48 bytes");
 

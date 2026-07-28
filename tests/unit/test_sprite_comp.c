@@ -90,7 +90,7 @@ static uint8_t s_pack_blob_count;
 /* ---- Atlas fixture: full resource pipeline ---- */
 
 static uint32_t build_fixture_atlas_blob(uint8_t *atlas_blob, uint32_t cap, float r0_origin_x, float r0_origin_y, float r1_origin_x, float r1_origin_y) {
-    // #region Build 2-region atlas blob (no pages for simplicity)
+    // #region Build 2-region atlas blob (one mock page)
     NtAtlasVertex verts[8];
     uint16_t indices[12];
     for (uint16_t i = 0; i < 8; i++) {

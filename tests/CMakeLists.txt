@@ -839,6 +839,18 @@ if(NOT EMSCRIPTEN)
 
     # D4 alias probe contract: the F glyph's 8 orientations must stay pairwise
     # distinct, so a wrong relative transform cannot pass by symmetry.
+    # Builder -> pack -> runtime: the only place the two format implementations
+    # meet; a serializer/validator skew is invisible to every other suite.
+    add_executable(test_atlas_builder_runtime_e2e unit/test_atlas_builder_runtime_e2e.c)
+    target_link_libraries(test_atlas_builder_runtime_e2e PRIVATE nt_builder nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity)
+    target_include_directories(test_atlas_builder_runtime_e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_builder_runtime_e2e PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_builder_runtime_e2e WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     add_executable(test_atlas_dedup_d4 unit/test_atlas_dedup_d4.c)
     target_link_libraries(test_atlas_dedup_d4 PRIVATE nt_builder nt_log unity)
     target_include_directories(test_atlas_dedup_d4 PRIVATE
