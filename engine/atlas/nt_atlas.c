@@ -294,10 +294,12 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
         if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
             return false;
         }
-        /* page_index must stay inside the page_resources slot array even for the
-         * zero-page blobs merge tests build — a stale in-bounds slot reads as
-         * NT_RESOURCE_INVALID, an out-of-bounds one reads past the struct. */
-        if (region->page_index >= NT_ATLAS_MAX_PAGES || (hdr->page_count > 0 && region->page_index >= hdr->page_count)) {
+        /* Strict: the builder never emits a region without a backing page, so a
+         * pageless-but-regioned blob is corruption — reject before the registry
+         * publishes a winner whose every emit would resolve NT_RESOURCE_INVALID.
+         * page_count <= NT_ATLAS_MAX_PAGES (checked above) also bounds the slot
+         * array read in nt_atlas_get_region_handles. */
+        if (region->page_index >= hdr->page_count) {
             return false;
         }
         if (region->vertex_start > hdr->total_vertex_count || region->vertex_count > hdr->total_vertex_count - region->vertex_start) {
@@ -320,7 +322,9 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
 }
 
 /* AUX_BACKED slots become READY after activate, so malformed blobs must fail
- * before the resource registry publishes a winner. */
+ * before the resource registry publishes a winner. on_resolve re-validates the
+ * same bytes: both entry points stay independently safe (tests drive resolve
+ * directly), and the duplicate scan runs once per blob change, not per frame. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     nt_atlas_blob_view_t view;
     return atlas_try_validate_and_carve_blob(data, size, &view) ? 1U : 0U;

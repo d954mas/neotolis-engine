@@ -16,6 +16,9 @@
 #ifndef NT_ATLAS_MAX_PAGES
 #define NT_ATLAS_MAX_PAGES 8
 #endif
+/* The runtime page counter, page_index and the public API are all uint8-wide;
+ * an override past 255 would truncate page_count on the (uint8_t) cast. */
+_Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MAX_PAGES must fit uint8_t");
 
 /* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))

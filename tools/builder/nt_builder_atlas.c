@@ -1269,9 +1269,10 @@ static uint32_t atlas_sprite_resolved_margin(const AtlasPipeline *p, uint32_t i)
 static uint32_t atlas_sprite_resolved_extrude(const AtlasPipeline *p, uint32_t i) { return p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude; }
 
 /* Placements a group may take without pushing sprite i's region transform outside
- * its own mask. D4 is not closed under composition member-wise, so this is computed
- * per placement candidate rather than assumed; the group mask is the intersection
- * over its members. Identity is always in the result because rel itself is. */
+ * its own mask. A mask subset need not be closed under D4 composition (the group
+ * is, an arbitrary mask is not), so this is computed per placement candidate
+ * rather than assumed; the group mask is the intersection over its members.
+ * Identity is always in the result because rel itself is. */
 static uint8_t atlas_alias_admissible_placements(const AtlasPipeline *p, uint32_t i) {
     const uint8_t mask = atlas_sprite_effective_mask(p, i);
     const uint8_t rel = p->alias_rel[i];
@@ -1710,6 +1711,18 @@ static void pipeline_dedup(AtlasPipeline *p) {
     pipeline_dedup_collect_unique(p);
 }
 
+/* Full packing footprint, in THIS run's trim dims: cache hits skip pack AND
+ * compose, so a forged record placing the trim box in-page but the extrude or
+ * margin band out of it must fall back to a repack. Serialize bakes UVs from
+ * these dims, not the cached trimmed_w/h. */
+static bool cache_placement_footprint_ok(const AtlasPipeline *p, const AtlasPlacement *pl) {
+    const uint32_t root = pl->sprite_index;
+    const uint32_t fw = (pl->transform & 4U) ? p->trim_h[root] : p->trim_w[root];
+    const uint32_t fh = (pl->transform & 4U) ? p->trim_w[root] : p->trim_h[root];
+    const uint64_t pad = (2ULL * atlas_sprite_resolved_extrude(p, root)) + (atlas_sprite_resolved_margin(p, root) - p->opts->margin);
+    return pl->trimmed_w == p->trim_w[root] && pl->trimmed_h == p->trim_h[root] && (uint64_t)pl->x + pad + fw <= p->page_w[pl->page] && (uint64_t)pl->y + pad + fh <= p->page_h[pl->page];
+}
+
 /* A cache file passes atlas_cache_read's bounds checks yet can still disagree with
  * this run's dedup (bit rot, foreign writer). The cache contract is fail-gracefully-
  * rebuild, so the serialize hard gates must stay unreachable from disk data. */
@@ -1725,7 +1738,8 @@ static bool pipeline_cache_placements_consistent(const AtlasPipeline *p) {
     bool ok = true;
     for (uint32_t pi = 0; ok && pi < p->placement_count; pi++) {
         const AtlasPlacement *pl = &p->placements[pi];
-        ok = pl->sprite_index < p->sprite_count && p->dedup_map[pl->sprite_index] < 0 && pl_of[pl->sprite_index] == UINT32_MAX && pl->transform < 8U;
+        ok = pl->sprite_index < p->sprite_count && p->dedup_map[pl->sprite_index] < 0 && pl_of[pl->sprite_index] == UINT32_MAX && pl->transform < 8U && pl->page < p->page_count &&
+             cache_placement_footprint_ok(p, pl);
         if (ok) {
             pl_of[pl->sprite_index] = pi;
         }

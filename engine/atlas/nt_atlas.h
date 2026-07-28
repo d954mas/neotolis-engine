@@ -48,7 +48,7 @@ typedef struct {
     uint16_t atlas_v;
 } nt_atlas_vertex_t;
 
-/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v6).
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v7).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:

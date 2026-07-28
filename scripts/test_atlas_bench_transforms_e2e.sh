@@ -43,6 +43,8 @@ fi
 # pairwise-distinct counters, so a swapped field mapping in main.c fails here.
 NT_BUILDER_THREADS=1 "${EXE}" "${DEDUP_OUT}" "assets/bench/anim_trim/*.png" dedup_e2e concave 2048 0 >/dev/null
 grep -Eq '"sprites":[[:space:]]*28([,}])' "${DEDUP_OUT}"
+# unique carries stats.placements; without this pin a dropped mapping stays green.
+grep -Eq '"unique":[[:space:]]*7([,}])' "${DEDUP_OUT}"
 grep -Eq '"folds_exact":[[:space:]]*12([,}])' "${DEDUP_OUT}"
 grep -Eq '"folds_d4":[[:space:]]*9([,}])' "${DEDUP_OUT}"
 grep -Eq '"area_saved_px":[[:space:]]*3876([,}])' "${DEDUP_OUT}"
