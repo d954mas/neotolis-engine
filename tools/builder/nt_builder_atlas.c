@@ -474,6 +474,11 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
+/* One region cap for the validate stage and the cache-read bound: the true
+ * source is the uint16 NtAtlasHeader.region_count, and the two sites drifting
+ * apart re-opens either forged-file headroom or permanent cache misses. */
+enum { ATLAS_MAX_REGIONS = UINT16_MAX };
+
 enum { ATLAS_CACHE_KEY_VERSION = 22 };
 
 /* Per-sprite key record: hash + source dims + origin, then the raw override block. */
@@ -687,7 +692,7 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
 
     /* Placements are regions, not pack assets — bound by the region cap, or every
      * atlas above NT_BUILD_MAX_ASSETS placements would be a permanent cache miss. */
-    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > UINT16_MAX) {
+    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > ATLAS_MAX_REGIONS) {
         (void)fclose(f);
         return false;
     }
@@ -2662,13 +2667,16 @@ static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, 
 
 /* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing.
  * The handler is the embedder's observation channel; it may not return (test traps). */
-static _Noreturn void atlas_invariant_abort(const AtlasPipeline *p, const char *what) {
+static _Noreturn void atlas_invariant_abort_at(const AtlasPipeline *p, const char *what, const char *file, int line) {
     NT_LOG_ERROR("atlas '%s': internal invariant broken (%s)", p->state->name, what);
     if (nt_build_assert_handler) {
-        nt_build_assert_handler(what, __FILE__, __LINE__);
+        nt_build_assert_handler(what, file, line);
     }
     abort();
 }
+/* Call-site file:line — a handler keying diagnostics on location must not see
+ * every gate collapsed onto the helper's own line. */
+#define atlas_invariant_abort(p, what) atlas_invariant_abort_at((p), (what), __FILE__, __LINE__)
 
 /* Re-prove against the alias's OWN mask — this pass is what catches a wrong relative
  * transform, so never short-circuit it on the root's area-preservation argument. */
@@ -3050,7 +3058,7 @@ static void pipeline_validate(AtlasPipeline *p) {
     free(unfittable);
 
     /* Region cap and duplicate names are independent content errors. */
-    if (p->sprite_count > UINT16_MAX) {
+    if (p->sprite_count > ATLAS_MAX_REGIONS) {
         push_content_error(p->state, p->state->add_seq_counter, NULL, NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, 0, 0);
     }
     if (p->sprite_count > 0) {
@@ -3505,6 +3513,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
         /* An alias borrows exactly its root's placement; UV correctness for aliases
          * rests on this routing, which no downstream proof re-checks. */
         NT_BUILD_ASSERT((p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i]) && "pipeline_serialize: placement does not belong to this sprite's root");
+        /* Hard gate — asserts-off must not bake an alias's UVs from a foreign placement. */
+        if (!(p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i])) {
+            atlas_invariant_abort(p, "placement does not belong to this sprite's root");
+        }
         /* alias local -> root local -> placement local. tile_pack only offered the
          * packer placements whose product stays inside this sprite's own mask. */
         uint8_t rt = d4_compose(pl->transform, p->alias_rel[i]);

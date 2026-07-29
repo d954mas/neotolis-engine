@@ -544,6 +544,9 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
             r->index_start = 0;
             r->vertex_count = 0;
             r->index_count = 0;
+            /* A page-shrinking merge would otherwise leave a stale page_index the
+             * validated invariant page_index < page_count no longer covers. */
+            r->page_index = 0;
         }
     }
     // #endregion
