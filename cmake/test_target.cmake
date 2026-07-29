@@ -36,8 +36,9 @@ function(nt_setup_test_target target_name)
         set(ARG_TIMEOUT 120)
     endif()
     set_tests_properties(${target_name} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
-    # Real-GL tests share one display (xvfb on CI): never run two concurrently.
-    if(target_name MATCHES "^(test_window_native|test_nt_gfx_render_target_native)$")
+    # Display-touching tests (real GLFW/GL) share one xvfb display on headless
+    # runners: never run two concurrently.
+    if(target_name MATCHES "^(test_window_native|test_nt_gfx_render_target_native|test_clipboard)$")
         set_tests_properties(${target_name} PROPERTIES RESOURCE_LOCK gl_display)
     endif()
 endfunction()

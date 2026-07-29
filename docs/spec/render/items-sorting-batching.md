@@ -135,9 +135,10 @@ The UI walker has **three independent ordering axes** — do not conflate them:
 2. **Scissor / custom commands** — hard flush barriers. A segment is a run of
    same-zIndex segmentable commands; SCISSOR and CUSTOM cut it, forcing a batch
    flush on each side.
-3. **layer** — batch order *within* a segment (≤8 layers, bitmask multipass).
-   Layer comes from the **widget call** (`data->layer`, `label_layer`), never
-   from a style — so a game can batch e.g. all sprites before all text.
+3. **layer** — batch order *within* a segment (256 layers, `uint8_t`; 240-255
+   are engine-reserved for debug overlays; bitmask multipass). Layer comes from
+   the **widget call** (`data->layer`, `label_layer`), never from a style — so
+   a game can batch e.g. all sprites before all text.
 
 Rich text's [per-atom z-layers](../ui/rich-text.md#per-atom-z-layers-explicit-draw-order)
 are a *different*, block-internal mechanism (band flushes inside one CUSTOM

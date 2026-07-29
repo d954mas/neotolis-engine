@@ -109,6 +109,16 @@ echo "$SOURCES" | tr ' ' '\n' | xargs -n 4 -P "$PARALLEL_JOBS" clang-tidy -p "$B
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
 
+# A clang-tidy CRASH mid-batch (-n 4) can lose its chunk-mates with rc 1-125 and
+# no "error:" diagnostics — never let that read as green.
+TIDY_CRASHES=$(grep -E '^Error|LLVM ERROR|PLEASE submit a bug' "$TIDY_OUTPUT" || true)
+if [ -n "$TIDY_CRASHES" ] && [ -z "$PROJECT_ERRORS" ]; then
+    printf '%s\n' "$TIDY_CRASHES"
+    echo "clang-tidy: FAILED — tool crash/load error (batch may be partially unlinted)"
+    rm -f "$TIDY_OUTPUT"
+    exit 1
+fi
+
 # Windows + xargs -P: clang-tidy sporadically fails to open a file under
 # parallel load (sharing violation → "no such file"/"expected exactly one
 # compiler job"). Retry error files serially once: real diagnostics

@@ -210,12 +210,7 @@ if(NOT EMSCRIPTEN)
     # --- Native window smoke test (real GLFW, hidden window) ---
     add_executable(test_window_native unit/test_window_native.c)
     target_link_libraries(test_window_native PRIVATE nt_window nt_input_stub nt_log unity)
-    nt_set_warning_flags(test_window_native)
-    nt_set_sanitizer_flags(test_window_native)
-    set_target_properties(test_window_native PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_window_native COMMAND test_window_native)
+    nt_setup_test_target(test_window_native)
     set_tests_properties(test_window_native PROPERTIES LABELS "native")
 
     # --- Input module tests ---
@@ -1196,3 +1191,13 @@ if(EMSCRIPTEN)
         message(STATUS "Node.js not found; skipping CTest registration for test_wasm_smoke")
     endif()
 endif()
+
+# Every test gets a hang ceiling, including raw add_test registrations that
+# bypass nt_setup_test_target. Tests with an explicit (larger) TIMEOUT keep it.
+get_directory_property(_nt_all_tests TESTS)
+foreach(_nt_t IN LISTS _nt_all_tests)
+    get_test_property(${_nt_t} TIMEOUT _nt_t_timeout)
+    if(NOT _nt_t_timeout)
+        set_tests_properties(${_nt_t} PROPERTIES TIMEOUT 120)
+    endif()
+endforeach()

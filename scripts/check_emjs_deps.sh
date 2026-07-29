@@ -34,8 +34,8 @@ while IFS= read -r f; do
         echo "  Declare each one: JS-library helpers with '\$' (\$UTF8ToString), wasmExports['x'] bare (x)."
         fail=1
     fi
-done < <( { git ls-files -- 'engine/**/*.c' 'examples/**/*.c';
-            git ls-files --others --exclude-standard -- 'engine/**/*.c' 'examples/**/*.c'; } |
+done < <( { git ls-files -- 'engine/*.c' 'engine/**/*.c' 'examples/*.c' 'examples/**/*.c';
+            git ls-files --others --exclude-standard -- 'engine/*.c' 'engine/**/*.c' 'examples/*.c' 'examples/**/*.c'; } |
     grep -v 'deps/' | sort -u |
     xargs -r grep -lE 'EM_JS\(|EM_ASM' 2>/dev/null || true)
 

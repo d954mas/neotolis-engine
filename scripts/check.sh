@@ -43,9 +43,11 @@ ok() {
 
 print_summary() {
     local status=$?
-    # A format/tidy failure exits while ctest still runs — reap it or it holds test exes locked.
+    # A format/tidy failure exits while ctest still runs — reap the TREE (plain
+    # kill leaves Windows grandchild test exes alive, holding their file locks).
     if [ -n "${CTEST_PID:-}" ]; then
-        kill "$CTEST_PID" 2> /dev/null || true
+        WINPID="$(ps -p "$CTEST_PID" 2> /dev/null | awk 'NR == 2 { print $4 }' || true)"
+        { [ -n "$WINPID" ] && taskkill //PID "$WINPID" //T //F > /dev/null 2>&1; } || kill "$CTEST_PID" 2> /dev/null || true
         wait "$CTEST_PID" 2> /dev/null || true
         rm -f "${CTEST_LOG:-}"
     fi
@@ -69,8 +71,16 @@ trap print_summary EXIT
 source "$SCRIPT_DIR/lib/changed_files.sh"
 CHANGED_FILES="$(compute_changed_files)"
 
-# Format set: changed .c/.h outside vendored deps/.
-FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'deps/' || true)"
+# Union WITHOUT the exists-filter: deletions must still trigger test selection.
+CHANGED_NAMES_ALL="$( {
+    git rev-parse --verify --quiet origin/master > /dev/null && git diff --name-only origin/master...HEAD
+    git diff --name-only HEAD
+    git ls-files --others --exclude-standard
+} 2> /dev/null | sort -u)"
+
+# Format set: changed .c/.h outside vendored deps/ and generated/ (fmt.sh skips
+# generated too — they are generator outputs, "revert don't commit" per AGENTS).
+FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'deps/\|/generated/' || true)"
 # Tidy set: changed .c under tidy.sh's find roots, minus its exclusions.
 TIDY_FILES="$(printf '%s\n' "$CHANGED_FILES" \
     | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
@@ -100,8 +110,8 @@ ensure_tidy_ci() {
     # Stale DB silently SKIPS new TUs in tidy (fail-open) — reconfigure when any
     # build file is newer than the DB. Warm reconfigure costs ~1 s.
     local stale
-    stale="$(find CMakeLists.txt cmake engine shared tools examples tests \
-        \( -name CMakeLists.txt -o -name '*.cmake' \) -newer "$db" -print -quit 2>/dev/null || true)"
+    stale="$(find CMakeLists.txt CMakePresets.json cmake engine shared tools examples tests deps \
+        \( -name CMakeLists.txt -o -name '*.cmake' -o -name CMakePresets.json \) -newer "$db" -print -quit 2>/dev/null || true)"
     if [ -n "$stale" ]; then
         echo "tidy-ci DB stale (newer: $stale) — reconfiguring..."
         cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}" > /dev/null
@@ -158,6 +168,27 @@ run_tidy_gate() {
             bash scripts/tidy.sh "$build_dir"
             return
         fi
+        # The dep log comes from native-debug, which lacks the TUs present only
+        # in the tidy-ci DB (devapi-gated) — if any of those includes a changed
+        # header (by basename), lint them too; else this scope would fail open.
+        local root_win="$ROOT_DIR" ci_only devapi_hits
+        command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
+        ci_only="$(python -c "
+import json, sys
+def files(p):
+    return {e['file'].replace(chr(92), '/') for e in json.load(open(p))}
+extra = files(sys.argv[1]) - files(sys.argv[2])
+root = sys.argv[3].rstrip('/') + '/'
+print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
+" "$build_dir/compile_commands.json" "$NATIVE_BUILD_DIR/compile_commands.json" "$root_win" 2> /dev/null || true)"
+        devapi_hits=""
+        if [ -n "$ci_only" ]; then
+            local hdr_names
+            hdr_names="$(printf '%s\n' "$CHANGED_HEADERS" | xargs -r -n 1 basename | paste -sd '|' -)"
+            # shellcheck disable=SC2086
+            devapi_hits="$(grep -lE "#include .*($hdr_names)" $ci_only 2> /dev/null || true)"
+        fi
+        scoped="$(printf '%s\n%s\n' "$scoped" "$devapi_hits")"
         # Keep only TUs tidy would ever lint, then union with changed .c.
         scoped="$(printf '%s\n' "$scoped" \
             | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
@@ -205,9 +236,12 @@ ok
 # they run ONLY when the change set touches those areas; --push/--full (and CI)
 # always run them, so nothing ships unchecked.
 step "ctest (native-debug, parallel with format+tidy)"
-GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|shared/include/nt_atlas|scripts/(bench_|atlas/|test_atlas_|test_bench_|lib/hull_)|tests/unit/test_atlas_|tests/unit/test_helpers/atlas_)'
+# Everything the guards depend on: builder+bench sources, their deps libraries,
+# fixtures/goldens, the scripts they source, and the test-registration infra.
+# Matched against the UNFILTERED name union so deletions also trigger them.
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_|test_bench_|generate_hull_visual_|lib/hull_)|tests/fixtures/hull_visual_acceptance/|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/)'
 CTEST_ARGS=()
-if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_FILES" | grep -qE "$GUARD_RELEVANT"; then
+if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$GUARD_RELEVANT"; then
     echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"
     CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
 fi
