@@ -97,13 +97,13 @@ typedef struct {
     uint32_t retry_time_ms;
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_pins; /* Phase 72: PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
-    uint8_t blob_evict_skip_logged; /* Phase 72: edge-trigger for the AUTO-as-KEEP one-shot log */
+    uint32_t blob_pins; /* PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
+    uint8_t blob_evict_skip_logged; /* edge-trigger for the AUTO-as-KEEP one-shot log */
     char load_path[256];
 } NtPackMeta;
 ```
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` (Phase 72) is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see [Resource System — blob pinning](resource.md) for the full lifecycle.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see [Resource System — blob pinning](resource.md) for the full lifecycle.
 
 ## JS bridge — fetch contract
 

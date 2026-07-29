@@ -189,6 +189,7 @@ void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
 void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
+/* Set/clear, NOT push/pop: link_id starts a pending link, 0 ends it. Links never nest. */
 void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id);
 void nt_ui_rich_pop(nt_ui_context_t *ctx);
 void nt_ui_rich_end(nt_ui_context_t *ctx);

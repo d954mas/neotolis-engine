@@ -11,6 +11,11 @@ Check the spec before making code changes:
 
 If code and spec diverge, flag it explicitly in the response. Do not silently "normalize" behavior by guessing.
 
+## Workflow
+
+- Start work with a GitHub issue + feature branch **before** the first commit; never stack commits on local master. Branch naming: `{issue_number}-{slug}`, no `feature/` prefix.
+- Navigate C code with clangd LSP first (definition / references / call hierarchy) — exact and cheaper than grep at this codebase size. After adding new `.c` files, rebuild `native-debug` so `compile_commands.json` picks them up; until then clangd diagnostics on new or platform-`#if` files are unreliable ("file not found", wrong `#if` branch) — confirm against a real build before chasing them.
+
 ## Build
 
 - **Runtime**: WASM via Emscripten (`emcc`)
@@ -58,7 +63,7 @@ Packs depend only on the builder exe — after editing shader/asset sources, del
 - **Platform abstraction** — all platform calls go through engine wrappers, never call browser/OS API directly from modules.
 - **No heap in hot path** — use compile-time limits (`#define`), preallocated storages, frame scratch memory.
 - **Builder validates, runtime is a safety net** — runtime checks only magic/version/type, handles fallbacks gracefully. No heavy validation at runtime.
-- **Fail early, prefer asserts** — when something is wrong, prefer crashing over silent fallbacks. `NT_ASSERT` for invariants and unexpected states, `NT_BUILD_ASSERT` in the builder. Error returns are fine as part of public API contracts (e.g. resource not found → return NULL), but don't use error codes to silently swallow problems that indicate bugs or broken data. Release default is TRAP (immediate crash, no strings); OFF mode is available via CMake override for final production builds. In the builder, programmer invariants, unexpected states, and OOM assert (`NT_BUILD_ASSERT`) — the developer sees the problem instantly instead of waiting for the build to finish. A missing or unreadable file also asserts, and the single-asset adds (`add_texture`/`add_mesh`/`add_font`) assert on a decode/parse failure. But CONTENT-dependent failures of sprite images inside the ATLAS builder — undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate names, size/page limits, unfittable sprites — route to the graceful content-error channel (`nt_builder_get_errors`) instead of aborting, so the atlas builder and any GUI survive one bad sprite with an actionable message.
+- **Fail early, prefer asserts** — when something is wrong, prefer crashing over silent fallbacks. `NT_ASSERT` for invariants and unexpected states, `NT_BUILD_ASSERT` in the builder. Error returns are fine as part of public API contracts (e.g. resource not found → return NULL), but don't use error codes to silently swallow problems that indicate bugs or broken data. Release default is TRAP (immediate crash, no strings); OFF mode is available via CMake override for final production builds. In the builder, programmer invariants, unexpected states, and OOM assert (`NT_BUILD_ASSERT`) — the developer sees the problem instantly instead of waiting for the build to finish. A missing or unreadable file also asserts, and the single-asset adds (`add_texture`/`add_mesh`/`add_font`) assert on a decode/parse failure. `NT_ASSERT` compiles to `((void)0)` under `NT_ASSERT_MODE=OFF` (a legal shipping config): never put side effects or the only bounds check inside an assert — runtime parsers of untrusted data need hard guards that survive assert-off. But CONTENT-dependent failures of sprite images inside the ATLAS builder — undecodable/oversized/zero-dimension sprite images, transparent-after-trim sprites, oversized slice9 borders, contour-vertex overflow, trim-offset overflow, duplicate names, size/page limits, unfittable sprites — route to the graceful content-error channel (`nt_builder_get_errors`) instead of aborting, so the atlas builder and any GUI survive one bad sprite with an actionable message.
 
 ## Code style
 
@@ -66,6 +71,7 @@ Packs depend only on the builder exe — after editing shader/asset sources, del
   - **Do not write**: historical context (`Pre-fix the X was Y, then commit ab6d235 moved it…`), Phase/REVIEW/CHUNK tags, commit SHAs, PR numbers, issue numbers, test-name pins (`pin: test_X`), user quotes, "what changed and why" narratives, `EXPERIMENTAL` boilerplate paragraphs. Those belong in commit messages, PR descriptions, or the changelog — not in source.
   - **Do write**: one-line invariants the reader can't derive from the code (`Walker layer-sort relies on debug layers being >= 240.`), short safety notes (`Pointer must outlive the layout solve.`), or a brief WHY where a non-obvious choice was made (`Direct-map avoids hash-table realloc in hot path.`).
 - Use `// #region name` / `// #endregion` to mark logical sections inside long functions (VS Code foldable regions). No blank line after `// #region` or before `// #endregion`. Do not remove existing short inline comments when adding regions — regions group, comments explain.
+- Organize large files with regions instead of splitting into more TUs — cross-TU calls block inlining on the hot path (no LTO).
 
 ## Before adding a new subsystem
 
@@ -81,6 +87,8 @@ Packs depend only on the builder exe — after editing shader/asset sources, del
 - Do not move game responsibility into the engine without explicit architectural justification.
 - When adding a new subsystem, verify it does not conflict with the spec on explicit-over-implicit and runtime simplicity.
 - If a temporary deviation from the spec is necessary, mark it explicitly in the change comment and the final report.
+- New UI widget demos go into the existing `examples/ui_showcase` vitrine (new tab) — never a new example dir.
+- Never id sibling widgets as `base_id + index`: Clay's anonymous child ids are additive (`seed + offset`), so consecutive seeds collide → DUPLICATE_ID. Salt sub-ids with a mixed hash (`nt_ui_child_id` / `nt_ui_fmix_id`). Virtualized widgets must RECYCLE ids (see `nt_ui_vlist`'s ring) or Clay's element hashmap saturates until `build_tree` asserts.
 
 ## Performance and hot path
 
@@ -103,7 +111,31 @@ It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index 
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.
 
-Known CI-only failure class after a green `--push`: GNU ld link order. The Linux linker resolves archives left-to-right; Windows/wasm links don't, so a wrong link order only fails in CI's native job. If CI fails at link while local passes, fix the archive order (see the comment in `tests/submodule/CMakeLists.txt`).
+### Known CI-only failure classes after a green `--push`
+
+Environment differences a local Windows host cannot reproduce:
+
+- **GNU ld link order** — Linux resolves archives left-to-right; Windows/wasm links don't. Swappable impls + stubs must trail every consumer (`... nt_resource ... nt_http_stub nt_fs_stub nt_log_stub` last; see `tests/submodule/CMakeLists.txt`). A standalone test using libm also needs `if(NOT WIN32) target_link_libraries(<test> PRIVATE m) endif()`.
+- **clang-format version skew** — CI's Linux clang-format flags multi-space-aligned trailing comments the local one accepts. Keep trailing comments single-spaced.
+- **emsdk pin skew** — CI installs `.emsdk-version`; if local `emcc --version` differs, wasm-release/Closure can false-green locally. Compare versions before trusting it.
+- **clang-tidy skips `#if defined(__linux__)` blocks off-Linux** — reason about platform-`#if` code as Linux code or add `NOLINT` defensively.
+- **Browser Smoke runs under LeakSanitizer, headless** — skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is set.
+- **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
+- **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/native-debug <file>` directly; that reproduces CI. A bogus `'X.h' file not found` attributed to a header in CI tidy output is a tidy.sh retry artifact — fix the header's real diagnostic and it disappears.
+
+## Test-infra & debugging gotchas
+
+- Only a fresh full `check.sh` run is authoritative — targeted builds + ctest can pass on stale binaries after an edit burst.
+- A failed `NT_BUILD_ASSERT` aborts the test process; if a dead process still holds the exe (next link fails with permission denied), `taskkill //F //IM <test>.exe`. Deliberate assert-trip tests: run the binary directly, not through ctest.
+- A crashing test that prints nothing: diagnose with `lldb -b -o run -o bt <exe>` (gdb absent; MSVC CRT buffers stdout to pipes and ignores stdbuf).
+- `UNITY_EXCLUDE_FLOAT` is defined — float Unity asserts compile to nothing; compare small exact values via `(int32_t)` casts.
+- `nt_atlas_begin` requires atlas-level `shape == RECT` when `extrude > 0`.
+- Changing a validator contract: first grep every constructor of that data shape — spec literals AND parameterized helpers.
+- `nt_builder.lib` is not linkable ad hoc from a shell (unresolved glad/cgltf externals outside its CMake `PUBLIC` link set) — behavioural probes need a real CMake target.
+- `examples/{atlas,bunnymark,text}/generated/*.h` are stale in git (pack targets aren't in the default build). Revert, don't commit, if a generator run dirties them.
+- Visual QA: self-capture of GL windows (GDI/PrintWindow) does not work here. Pixel-exact checks: devapi `capture.frame` (glReadPixels, works headless, needs `NT_DEVAPI_ENABLED=ON` + CAPTURE group). Aesthetics/layout: ask the user to run and look — say explicitly what to check.
+- Browser smoke tests drive `tests/browser/app` (`window.__nt` hooks), not the showcase.
+- New EM_JS that allocates into the wasm heap: use `wasmExports['malloc']` — `Module['_malloc']` fails at runtime under emmalloc, bare `_malloc` fails Closure (pattern: `engine/http/web/nt_http_web.c`).
 
 ## Reviewing a branch
 

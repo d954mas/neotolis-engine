@@ -41,7 +41,7 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 
 ## AssetMeta stability
 
-**Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** (Phase 25) clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
+**Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
 
 `NT_BLOB_AUTO` eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
 - simple assets stay usable from the runtime handle alone
@@ -148,7 +148,7 @@ Publication change detection uses three pieces of state: published asset identit
 
 `resource_step()` may run more than one resolve pass in the same frame when `on_post_resolve` work creates new slots that need resolution. The pass count is bounded.
 
-### Blob pinning (Phase 72 addition)
+### Blob pinning
 
 Two consumption models exist for asset types that derive state from pack bytes:
 
@@ -162,9 +162,18 @@ Two consumption models exist for asset types that derive state from pack bytes:
 - **AUTO-as-KEEP (D-07):** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 - **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
 
-**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider and degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out (`AUX_BACKED`) consumers are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
+
+## Pack lifetime (mount / unmount)
+
+Asset lifetime is **explicit pack-level mount/unmount, owned by the developer** —
+there is **no refcounting by design** (declined: it hides lifetime instead of
+expressing it; see api-contracts "Do not introduce refcounting"). Group assets by
+lifetime: level assets go in level packs, mounted on enter and unmounted on
+leave. `blob_pins` above is a *pin* (a derived residency requirement), not a
+refcount — nothing counts consumers, and unmount always wins.
 
 ## Virtual packs
 

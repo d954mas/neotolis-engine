@@ -28,7 +28,7 @@ emits. There is no file format, no versioned binary, no offline-bakeable source
 being re-parsed; the parser only routes display content the game produces this
 frame. It DRIVES the shared builder (`begin` / `push_*` / `text_n` / `image` /
 `pop` / `end`), so a markup string and the equivalent builder calls produce a
-byte-identical run-list — one composition path, two front ends (D-67-02).
+byte-identical run-list — one composition path, two front ends.
 
 **Intrinsic vs tagset-resolved tag values.** The **intrinsic** tags resolve
 directly off the markup, no tagset needed: `<b>`, `<i>`, `<scale=N>`,
@@ -62,7 +62,7 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   object) to a box at a container width, stacking lines on a per-line max
   baseline. Horizontal alignment (L/C/R) offsets each line.
 - **One Clay FIXED block.** The solved total size feeds a single
-  `CLAY_SIZING_FIXED` Clay element (D-67-03); text emits during that element's
+  `CLAY_SIZING_FIXED` Clay element; text emits during that element's
   custom-walk via `NT_UI_CUSTOM_TYPE_RICH_TEXT`. Keeping text under one measured
   block is what lets the whole paragraph wrap and align as a unit.
 - **Base font size is a STYLE FIELD.** `nt_ui_rich_style_t.font_size` (px, > 0)
@@ -70,7 +70,7 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   per-call param. `nt_ui_rich_style_defaults()` seeds it from
   `NT_UI_RICH_DEFAULT_FONT_SIZE` (16). Per-run `<scale>` *multiplies* it (the relative
   model is unchanged): `size = style.font_size × composed scale`. Per-run **absolute**
-  `<size=N>` stays deferred (D-67-30).
+  `<size=N>` stays deferred.
 - **Synthetic italic (faux-italic).** An italic-requested run whose resolved family has no italic
   face (the `BI→B→R` variant fallback drops the italic member) raises
   `NT_UI_RICH_RUN_SYNTH_ITALIC`; the emit pass leans it via
@@ -147,8 +147,8 @@ panel/scroll automatically — by the live scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image
 self-clip-to-bbox and **over-draws** past its solved box (same as OBJECT atoms;
 consistent and accepted). Images resolve **by atlas + region name** — the atlas
-IS the registry (see [Spec ↔ #184-proposal divergences](#spec--184-proposal-divergences-per-agentsmd), D-67-13). The per-band z-ordering / drain model that
-sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-order)** (D-67-29).
+IS the registry (see [Spec ↔ #184-proposal divergences](#spec--184-proposal-divergences-per-agentsmd)). The per-band z-ordering / drain model that
+sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-order)**.
 
 ## Effects (visual-only) and links
 
@@ -181,9 +181,9 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
   custom-fx table as game-supplied fns (a tuned effect carries an `effect_id >=
   NT_UI_RICH_FX_CUSTOM_BASE`). Markup `k=v` params apply to **stock effects only** —
   a `<fx=name>` resolving to a custom fn carries that fn's own `user_data`, so
-  passing `k=v` on a custom name is **logged once (`nt_log_warn_unique`) and the params ignored** (D-67-27).
+  passing `k=v` on a custom name is **logged once (`nt_log_warn_unique`) and the params ignored**.
   This **revises** the original
-  #184/D-67 stance that per-effect tuning was compile-time constants and NOT tag
+  proposal's stance that per-effect tuning was compile-time constants and NOT tag
   params; the catalogue constants are now the defaults.
 - **Stock + custom effect catalog (extensible).** A stock catalogue
   (wave / shake / rainbow / pulse / fade_in / bounce / glow / sway) ships as a
@@ -204,23 +204,35 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
   `effect_id`, and an id `>= NT_UI_RICH_FX_CUSTOM_BASE` indexes a per-block
   fixed-cap `(fn, user_data)` table (no heap, no 48 B style ABI growth); a smaller
   id is a stock catalogue index resolved via `nt_ui_rich_fx_stock`. An unknown
-  stock id falls back to identity (D-67-26). The 48 B `nt_ui_rich_style_t` ABI is
+  stock id falls back to identity. The 48 B `nt_ui_rich_style_t` ABI is
   unchanged; the per-block custom table is in-memory-only frame scratch, never
   serialized.
 - **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
   the pointer (offset by the block's prev-frame bbox origin) and reports
   `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
   Link hover gates effects (an effect sees `hovered == true` only for the hovered
-  link's atoms). The Model-D game reacts to the reported click.
+  link's atoms). The Model-D game reacts to the reported click. The builder call
+  is **set/clear, NOT push/pop**: `nt_ui_rich_link(ctx, id)` starts a pending
+  link, `nt_ui_rich_link(ctx, 0)` ends it (`</link>` does the same); links never
+  nest (HTML no-nested-anchor rule). Style push/pop is separate — popping past
+  the base style asserts in debug and hard-no-ops in shipping.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
   a box via `measure_fn` (text wraps around it); the widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
-  never draws the object (renderer-agnostic, D-67-05). `x,y,w,h` are LAYOUT (logical,
+  never draws the object (renderer-agnostic). `x,y,w,h` are LAYOUT (logical,
   Clay Y-down) px; `world_mat4` is the frame's column-major LAYOUT→world matrix — the
   **same** matrix every other engine emit uses, with the screen Y-flip baked in for the
   default 2D ctx — so the game multiplies its positions by it (or composes it on the
   LEFT of its model) and the object lands correctly under the UI transform incl. the
-  Y-flip (D-67-28). `color` is the **absolute resolved RGBA**
+  Y-flip. The complement: the frame UBO ortho itself is **Y-flip-free**
+  (LAYOUT→clip, logical px), so a `draw_fn` composing its own projection instead of
+  using `world_mat4` must apply the flip itself. Box-exact drawing uses
+  `nt_sprite_renderer_emit_geometry` (explicit corners); `emit_region` draws at
+  native source size. A 3D object renders inside the box by remapping its
+  clip-space output into the box's NDC sub-rect
+  (`clip'.xy = half·clip.xy + center·clip.w`, aspect from box pixels) — it must
+  **not** touch `glViewport`/scissor: the walk's live scroll scissor stays intact.
+  `color` is the **absolute resolved RGBA**
   the engine resolved for the atom — the run's `<color>` with parent opacity folded
   into alpha plus any per-atom effect tint, the SAME color the TEXT and IMAGE paths
   render with — so a custom object honours opacity / `<color>` / effects consistently
@@ -246,7 +258,7 @@ emit order. To give the game explicit control of overlap z, each atom carries a
   produces a **byte-identical** run-list to `push_layer(N)`. Malformed / out-of-range
   (`255`, `>254`, empty, non-numeric) is a builder-validate assert in DEBUG and a
   **hard skip to AUTO** that survives `NT_ASSERT` OFF (untrusted-markup hard-guard
-  rule, D-67-29).
+  rule).
 - **Layer-ordered self-emit.** The self-emit gathers the **distinct** layers present
   (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
   drop guard — the over-cap distinct layers are dropped **by encounter order**, not by
