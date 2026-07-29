@@ -85,6 +85,10 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.step: only valid in 'manual' mode");
         return false;
     }
+    if (!nt_devapi_can_defer_current()) {
+        set_bad_params(err, "time.step: deferred response unavailable");
+        return false;
+    }
     nt_app_step(count);
     return nt_devapi_defer_current(count);
 }

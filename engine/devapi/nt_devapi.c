@@ -43,6 +43,7 @@ static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 /* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
    third "deferred" outcome without changing the bool handler ABI (out-param route). */
 static bool *s_out_deferred;
+static bool s_defer_allowed;
 static int s_defer_frames;
 static double s_defer_seconds;
 static bool s_defer_by_time;
@@ -52,6 +53,20 @@ static void *s_defer_producer_ctx;
 static nt_devapi_ctx_free_fn s_defer_producer_ctx_free;
 static const char *s_defer_fail_code; /* wire error the core yields if a producer returns NULL — command-supplied. */
 static const char *s_defer_fail_msg;
+
+static bool deferred_has_capacity(void) {
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (!s_deferred[i].in_use) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool nt_devapi_can_defer_current(void) {
+    NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
+    return s_defer_allowed && deferred_has_capacity();
+}
 
 bool nt_devapi_defer_current(int frames) {
     NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
@@ -382,6 +397,7 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
        the statics so a handler re-entering nt_devapi_submit can't clobber the outer dispatch. */
     bool deferred = false;
     bool *prev_out_deferred = s_out_deferred;
+    bool prev_defer_allowed = s_defer_allowed;
     int prev_defer_frames = s_defer_frames;
     double prev_defer_seconds = s_defer_seconds;
     bool prev_defer_by_time = s_defer_by_time;
@@ -391,6 +407,7 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     const char *prev_defer_fail_code = s_defer_fail_code;
     const char *prev_defer_fail_msg = s_defer_fail_msg;
     s_out_deferred = &deferred;
+    s_defer_allowed = allow_defer;
     s_defer_frames = 0;
     s_defer_seconds = 0.0;
     s_defer_by_time = false;
@@ -411,6 +428,7 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
         .fail_msg = s_defer_fail_msg,
     };
     s_out_deferred = prev_out_deferred;
+    s_defer_allowed = prev_defer_allowed;
     s_defer_frames = prev_defer_frames;
     s_defer_seconds = prev_defer_seconds;
     s_defer_by_time = prev_defer_by_time;

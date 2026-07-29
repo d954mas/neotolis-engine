@@ -7,7 +7,7 @@ Replies are correlated by request_id via a pending-map, never by arrival order
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .transport import Transport
 
@@ -41,6 +41,8 @@ class DevApiClient:
         self._next_id = 1
         # request_id -> already-received response object waiting to be claimed.
         self._pending: Dict[Any, Dict[str, Any]] = {}
+        # Replies for paired requests abandoned after their sibling failed.
+        self._abandoned: Set[Any] = set()
 
     def _alloc_id(self) -> int:
         rid = self._next_id
@@ -50,6 +52,9 @@ class DevApiClient:
     def _stash(self, obj_id: Any, obj: Dict[str, Any]) -> None:
         """Hold an out-of-order reply for a later request. A None id can't be claimed -> dropped."""
         if obj_id is None:
+            return
+        if obj_id in self._abandoned:
+            self._abandoned.remove(obj_id)
             return
         if obj_id not in self._pending and len(self._pending) >= self._MAX_PENDING:
             raise ConnectionError("pending reply map overflow — server replies not being claimed (framing desync)")
@@ -496,6 +501,10 @@ class DevApiClient:
         self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": count}}))
         step_resp = self._recv_until(step_id)
         if step_resp.get("ok") is not True:
+            if cap_id in self._pending:
+                self._pending.pop(cap_id)
+            else:
+                self._abandoned.add(cap_id)
             err = step_resp.get("error") or {}
             raise DevApiResultError(
                 f"time.step failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
