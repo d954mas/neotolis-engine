@@ -256,6 +256,9 @@
             "configurePreset": "native-debug",
             "output": {
                 "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 4
             }
         },
         {
@@ -263,6 +266,9 @@
             "configurePreset": "native-debug-test",
             "output": {
                 "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 4
             }
         },
         {
@@ -270,6 +276,9 @@
             "configurePreset": "native-release-test",
             "output": {
                 "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 4
             }
         }
     ]

@@ -18,8 +18,12 @@ FAIL=0
 # Upstream-vendored deps keep their own build files (see AGENTS.md); our thin
 # wrapper CMakeLists under deps/ (cjson, stb, ...) ARE checked.
 UPSTREAM_DEPS='^\./deps/(clay|cglm|unity|basisu|glfw)/'
+# .git/node_modules exclusions are pure speed: --include already filters what
+# is REPORTED, but grep -R still walks and sniffs every file without them.
 GREP_SCOPE=(-RnI --include=CMakeLists.txt --include='*.cmake'
-    --exclude-dir=build --exclude-dir=.claude --exclude-dir=emsdk)
+    --exclude-dir=build --exclude-dir=.claude --exclude-dir=emsdk
+    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.planning
+    --exclude-dir=dev)
 
 CRT_HITS="$(grep "${GREP_SCOPE[@]}" -e '-U_DLL|MSVC_RUNTIME_LIBRARY|_ITERATOR_DEBUG_LEVEL' -E . 2>/dev/null |
     grep -vE "$UPSTREAM_DEPS" |
