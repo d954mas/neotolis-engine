@@ -109,11 +109,17 @@ echo "$SOURCES" | tr ' ' '\n' | xargs -n 4 -P "$PARALLEL_JOBS" clang-tidy -p "$B
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
 
-# A clang-tidy CRASH mid-batch (-n 4) can lose its chunk-mates with rc 1-125 and
-# no "error:" diagnostics — never let that read as green.
-TIDY_CRASHES=$(grep -E '^Error|LLVM ERROR|PLEASE submit a bug' "$TIDY_OUTPUT" || true)
-if [ -n "$TIDY_CRASHES" ] && [ -z "$PROJECT_ERRORS" ]; then
+# A clang-tidy CRASH mid-batch (-n 4) can lose its chunk-mates with rc 1-125
+# and no "error:" diagnostics — never let that read as green. Checked
+# UNCONDITIONALLY (a coexisting transient project diagnostic must not mask a
+# crash); "Error while processing <file>." is clang-tidy's normal footer for
+# any diagnosed TU and is excluded, so real-error runs still take the
+# retry path below.
+TIDY_CRASHES=$(grep -E '^Error|LLVM ERROR|PLEASE submit a bug' "$TIDY_OUTPUT" \
+    | grep -v '^Error while processing ' || true)
+if [ -n "$TIDY_CRASHES" ]; then
     printf '%s\n' "$TIDY_CRASHES"
+    [ -n "$PROJECT_ERRORS" ] && printf '%s\n' "$PROJECT_ERRORS"
     echo "clang-tidy: FAILED — tool crash/load error (batch may be partially unlinted)"
     rm -f "$TIDY_OUTPUT"
     exit 1

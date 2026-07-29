@@ -70,13 +70,7 @@ trap print_summary EXIT
 # shellcheck source=lib/changed_files.sh
 source "$SCRIPT_DIR/lib/changed_files.sh"
 CHANGED_FILES="$(compute_changed_files)"
-
-# Union WITHOUT the exists-filter: deletions must still trigger test selection.
-CHANGED_NAMES_ALL="$( {
-    git rev-parse --verify --quiet origin/master > /dev/null && git diff --name-only origin/master...HEAD
-    git diff --name-only HEAD
-    git ls-files --others --exclude-standard
-} 2> /dev/null | sort -u)"
+CHANGED_NAMES_ALL="$(compute_changed_names_all)"
 
 # Format set: changed .c/.h outside vendored deps/ and generated/ (fmt.sh skips
 # generated too — they are generator outputs, "revert don't commit" per AGENTS).
@@ -169,9 +163,10 @@ run_tidy_gate() {
             return
         fi
         # The dep log comes from native-debug, which lacks the TUs present only
-        # in the tidy-ci DB (devapi-gated) — if any of those includes a changed
-        # header (by basename), lint them too; else this scope would fail open.
-        local root_win="$ROOT_DIR" ci_only devapi_hits
+        # in the tidy-ci DB (devapi-gated). A direct-include grep misses
+        # TRANSITIVE consumers, so on any header change lint ALL ci-only TUs
+        # (fail-closed; the set is small and batches into one tidy round).
+        local root_win="$ROOT_DIR" ci_only
         command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
         ci_only="$(python -c "
 import json, sys
@@ -181,14 +176,7 @@ extra = files(sys.argv[1]) - files(sys.argv[2])
 root = sys.argv[3].rstrip('/') + '/'
 print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
 " "$build_dir/compile_commands.json" "$NATIVE_BUILD_DIR/compile_commands.json" "$root_win" 2> /dev/null || true)"
-        devapi_hits=""
-        if [ -n "$ci_only" ]; then
-            local hdr_names
-            hdr_names="$(printf '%s\n' "$CHANGED_HEADERS" | xargs -r -n 1 basename | paste -sd '|' -)"
-            # shellcheck disable=SC2086
-            devapi_hits="$(grep -lE "#include .*($hdr_names)" $ci_only 2> /dev/null || true)"
-        fi
-        scoped="$(printf '%s\n%s\n' "$scoped" "$devapi_hits")"
+        scoped="$(printf '%s\n%s\n' "$scoped" "$ci_only")"
         # Keep only TUs tidy would ever lint, then union with changed .c.
         scoped="$(printf '%s\n' "$scoped" \
             | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
@@ -216,7 +204,10 @@ bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
-bash scripts/check_tests_registered.sh
+# Registration gate reads the tidy-ci compile DB + CTestTestfiles (devapi ON,
+# so devapi-gated tests are visible) — keep the DB fresh first.
+ensure_tidy_ci
+bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
 ok
 
 step "build (native-debug)"
@@ -240,7 +231,7 @@ step "ctest (native-debug, parallel with format+tidy)"
 # Everything the guards depend on: builder+bench sources, their deps libraries,
 # fixtures/goldens, the scripts they source, and the test-registration infra.
 # Matched against the UNFILTERED name union so deletions also trigger them.
-GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_|test_bench_|generate_hull_visual_|lib/hull_)|tests/fixtures/hull_visual_acceptance/|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/)'
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_|test_bench_|generate_hull_visual_|lib/hull_)|tests/fixtures/hull_visual_acceptance/|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
 CTEST_ARGS=()
 if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$GUARD_RELEVANT"; then
     echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"

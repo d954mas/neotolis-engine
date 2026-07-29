@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .transport import Transport
 
+# Mirrors NT_DEVAPI_STEP_MAX (engine/devapi/nt_devapi_time_internal.h): a larger
+# count is rejected engine-side, orphaning any capture already sent with it.
+_STEP_MAX = 1 << 20
+
 
 class DevApiResultError(RuntimeError):
     """Raised by result() when the server returns {ok:false}, surfacing error.code/message."""
@@ -471,11 +475,14 @@ class DevApiClient:
 
         capture.frame defers until a frame is presented — under manual time mode sending it
         alone deadlocks (no frame will ever present until time.step, which was never sent).
-        Both requests go out before any read; responses may arrive in either order and
-        _recv_until's stash absorbs that.
+        Both requests go out before any read. The step reply is read FIRST: a rejected step
+        means no frame ever presents and the capture reply never arrives — waiting on the
+        capture first would turn that clear error into a read timeout.
         """
         if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
             raise ValueError("count must be a positive integer")
+        if count > _STEP_MAX:
+            raise ValueError(f"count {count} exceeds NT_DEVAPI_STEP_MAX ({_STEP_MAX})")
         cap_params: Dict[str, Any] = {}
         if scale is not None:
             cap_params["scale"] = scale
@@ -483,16 +490,21 @@ class DevApiClient:
         step_id = self._alloc_id()
         self._transport.send(json.dumps({"method": "capture.frame", "request_id": cap_id, "params": cap_params}))
         self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": count}}))
-        results = []
-        for rid, method in ((cap_id, "capture.frame"), (step_id, "time.step")):
-            resp = self._recv_until(rid)
-            if resp.get("ok") is not True:
-                err = resp.get("error") or {}
-                raise DevApiResultError(
-                    f"{method} failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
-                )
-            results.append(resp.get("result", {}))
-        return results[0], results[1]
+        step_resp = self._recv_until(step_id)
+        if step_resp.get("ok") is not True:
+            err = step_resp.get("error") or {}
+            raise DevApiResultError(
+                f"time.step failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
+            )
+        # Step succeeded, so a frame presented and the capture reply is on the wire
+        # (an immediate bad_params reply is stashed by _recv_until either way).
+        cap_resp = self._recv_until(cap_id)
+        if cap_resp.get("ok") is not True:
+            err = cap_resp.get("error") or {}
+            raise DevApiResultError(
+                f"capture.frame failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
+            )
+        return cap_resp.get("result", {}), step_resp.get("result", {})
 
     # #endregion
 

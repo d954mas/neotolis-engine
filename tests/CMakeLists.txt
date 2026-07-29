@@ -1192,6 +1192,16 @@ if(EMSCRIPTEN)
     endif()
 endif()
 
+# Crash output survives on EVERY test exe, incl. raw add_executable targets
+# that bypass nt_setup_test_target (MSVC CRT buffers stdout to pipes).
+get_directory_property(_nt_test_targets BUILDSYSTEM_TARGETS)
+foreach(_nt_t IN LISTS _nt_test_targets)
+    get_target_property(_nt_t_type ${_nt_t} TYPE)
+    if(_nt_t_type STREQUAL "EXECUTABLE")
+        target_sources(${_nt_t} PRIVATE "${NT_ENGINE_ROOT}/tests/unit/test_helpers/nt_test_unbuffered.c")
+    endif()
+endforeach()
+
 # Every test gets a hang ceiling, including raw add_test registrations that
 # bypass nt_setup_test_target. Tests with an explicit (larger) TIMEOUT keep it.
 get_directory_property(_nt_all_tests TESTS)

@@ -63,7 +63,7 @@ class SocketTransport(Transport):
         # Binary makefile handles partial-recv reassembly; readline frames on b'\n' and caps the read in
         # BYTES (a text-mode makefile would cap MAX_LINE_BYTES in CHARACTERS, diverging from the contract).
         # 256 KB buffer: multi-MB base64 capture lines through the default 8 KB reader recv so slowly
-        # they can trip the ENGINE's send timeout mid-line (game-67-idle studio hit this in production).
+        # they can trip the ENGINE's send timeout mid-line.
         self._f = self._sock.makefile("rb", buffering=256 * 1024)
 
     def __enter__(self) -> "SocketTransport":

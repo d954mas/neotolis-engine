@@ -169,7 +169,8 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
   into per-block storage — they are read at emit, so they must outlive the transient
   caller struct) and the markup `<fx=name amp=8 speed=3>` (the tag value is the
   effect name followed by space-separated `key=value` pairs; keys `amp`/`speed`,
-  float values; a malformed pair fails-early via `NT_ASSERT`). **Convention: a field
+  float values; a malformed pair logs once and is skipped — markup is untrusted
+localization content, never an assert). **Convention: a field
   `<= 0` means "use the effect's compile-time default"**, so a partly-specified
   struct tunes only the field it sets. `params == NULL` (the plain
   `nt_ui_rich_push_effect` / bare `<fx=name>` path) is **byte-identical** to the

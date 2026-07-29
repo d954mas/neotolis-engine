@@ -21,9 +21,6 @@ function(nt_setup_test_target target_name)
     set_target_properties(${target_name} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
-    # Crash output survives (MSVC CRT buffers pipes); every test gets it for free.
-    target_sources(${target_name} PRIVATE "${NT_ENGINE_ROOT}/tests/unit/test_helpers/nt_test_unbuffered.c")
-
     if(ARG_WORKING_DIRECTORY)
         add_test(NAME ${target_name} COMMAND ${target_name}
             WORKING_DIRECTORY "${ARG_WORKING_DIRECTORY}"
