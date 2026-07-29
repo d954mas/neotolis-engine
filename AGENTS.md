@@ -124,6 +124,7 @@ Environment differences a local Windows host cannot reproduce:
 - **emsdk pin skew** — CI installs `.emsdk-version`; if local `emcc --version` differs, wasm-release/Closure can false-green locally. Compare versions before trusting it.
 - **clang-tidy skips `#if defined(__linux__)` blocks off-Linux** — reason about platform-`#if` code as Linux code or add `NOLINT` defensively.
 - **Browser Smoke runs under LeakSanitizer, headless** — skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is set.
+- **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the two GL tests hold `RESOURCE_LOCK gl_display`.
 - **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
 - **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/native-debug <file>` directly; that reproduces CI. A bogus `'X.h' file not found` attributed to a header in CI tidy output is a tidy.sh retry artifact — fix the header's real diagnostic and it disappears.
 
@@ -139,6 +140,7 @@ Environment differences a local Windows host cannot reproduce:
 - `examples/{atlas,bunnymark,text}/generated/*.h` are stale in git (pack targets aren't in the default build). Revert, don't commit, if a generator run dirties them.
 - Visual QA: self-capture of GL windows (GDI/PrintWindow) does not work here. Pixel-exact checks: devapi `capture.frame` (glReadPixels, works headless, needs `NT_DEVAPI_ENABLED=ON` + CAPTURE group). Aesthetics/layout: ask the user to run and look — say explicitly what to check.
 - Browser smoke tests drive `tests/browser/app` (`window.__nt` hooks), not the showcase.
+- wasm links failing with `node.exe ... returned 3221225794` (0xC0000142) on random emscripten tools = transient Windows process-spawn exhaustion under parallel links — retry once before investigating.
 - New EM_JS that allocates into the wasm heap: use `wasmExports['malloc']` — `Module['_malloc']` fails at runtime under emmalloc, bare `_malloc` fails Closure (pattern: `engine/http/web/nt_http_web.c`).
 
 ## Reviewing a branch

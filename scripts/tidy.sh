@@ -102,7 +102,9 @@ TIDY_RC=0
 
 PARALLEL_JOBS="${TIDY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
-echo "$SOURCES" | tr ' ' '\n' | xargs -n 1 -P "$PARALLEL_JOBS" -I {} clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" {} > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
+# -n 4 batches several TUs per process: Windows spawn cost dominates a per-file
+# clang-tidy fleet. Diagnostics keep per-file paths, so the retry parse is unaffected.
+echo "$SOURCES" | tr ' ' '\n' | xargs -n 4 -P "$PARALLEL_JOBS" clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)

@@ -46,6 +46,12 @@ ok() {
 
 print_summary() {
     local status=$?
+    # A format/tidy failure exits while ctest still runs — reap it or it holds test exes locked.
+    if [ -n "${CTEST_PID:-}" ]; then
+        kill "$CTEST_PID" 2> /dev/null || true
+        wait "$CTEST_PID" 2> /dev/null || true
+        rm -f "${CTEST_LOG:-}"
+    fi
     echo ""
     echo "=================================================="
     echo "check.sh summary (mode: $MODE)"
@@ -88,31 +94,94 @@ TIDY_CI_FLAGS=(
     -DNT_DEVAPI_GROUP_CAPTURE=ON
 )
 ensure_tidy_ci() {
-    if [ ! -f "$TIDY_CI_DIR/compile_commands.json" ]; then
+    local db="$TIDY_CI_DIR/compile_commands.json"
+    if [ ! -f "$db" ]; then
         echo "Configuring $TIDY_CI_DIR (one-time; devapi groups ON to match CI lint)..."
         cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
+        return
+    fi
+    # Stale DB silently SKIPS new TUs in tidy (fail-open) — reconfigure when any
+    # build file is newer than the DB. Warm reconfigure costs ~1 s.
+    local stale
+    stale="$(find CMakeLists.txt cmake engine shared tools examples tests \
+        \( -name CMakeLists.txt -o -name '*.cmake' \) -newer "$db" -print -quit 2>/dev/null || true)"
+    if [ -n "$stale" ]; then
+        echo "tidy-ci DB stale (newer: $stale) — reconfiguring..."
+        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}" > /dev/null
     fi
 }
 
-# Runs tidy on changed .c files, or the full tree when headers changed.
-# --fast skips the full-tree fallback: the default pre-commit run still catches it.
+# Exact TU set including the changed headers, from ninja's dep log (the build
+# step ran just before, so the log is fresh). Prints repo-relative .c paths;
+# prints NOTHING when resolution is incomplete — a changed header unseen in ANY
+# dep block (devapi-only TU, deleted, or graph gap) fails closed to full tidy.
+resolve_header_scoped_tus() {
+    local root_win="$ROOT_DIR"
+    command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
+    ninja -C "$NATIVE_BUILD_DIR" -t deps 2> /dev/null | awk -v root="$root_win/" -v headers="$CHANGED_HEADERS" '
+        BEGIN {
+            nh = split(headers, harr, "\n")
+            for (i = 1; i <= nh; i++) if (harr[i] != "") want[harr[i]] = 1
+        }
+        function flush_block() {
+            if (hit && src != "") tus[src] = 1
+            src = ""; hit = 0
+        }
+        /^[^ \t]/ { flush_block(); next }
+        /^[ \t]/ {
+            p = $0
+            gsub(/^[ \t]+|[ \t\r]+$/, "", p)
+            gsub(/\\/, "/", p)
+            if (index(p, root) == 1) {
+                rel = substr(p, length(root) + 1)
+                if (src == "" && rel ~ /\.c$/) src = rel
+                if (rel in want) { seen[rel] = 1; hit = 1 }
+            }
+            next
+        }
+        { flush_block() }
+        END {
+            flush_block()
+            for (h in want) if (!(h in seen)) exit 1
+            for (t in tus) print t
+        }
+    '
+}
+
+# Runs tidy on changed .c files; changed headers add their exact including-TU
+# set (fail-closed to the full tree). --fast never full-scans: the default
+# pre-commit run still catches whatever fast skipped.
 run_tidy_gate() {
     local build_dir="$1"
-    if [ -n "$CHANGED_HEADERS" ] && [ "$MODE" = "fast" ]; then
-        echo "fast mode: headers changed ($(printf '%s' "$CHANGED_HEADERS" | grep -c .)) — full tidy DEFERRED to the default pre-commit run"
-        if [ -n "$TIDY_FILES" ]; then
-            # shellcheck disable=SC2086
-            bash scripts/tidy.sh "$build_dir" $TIDY_FILES
+    local scoped=""
+    if [ -n "$CHANGED_HEADERS" ]; then
+        if [ "$MODE" = "fast" ]; then
+            echo "fast mode: headers changed — tidy on changed .c only; exact header scope runs in the default gate"
+        else
+            scoped="$(resolve_header_scoped_tus)" || scoped=""
+            if [ -z "$scoped" ]; then
+                echo "Changed headers, deps resolution incomplete — running FULL clang-tidy (fail-closed):"
+                printf '  %s\n' $CHANGED_HEADERS
+                bash scripts/tidy.sh "$build_dir"
+                return
+            fi
+            # Keep only TUs tidy would ever lint, then union with changed .c.
+            scoped="$(printf '%s\n' "$scoped" \
+                | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
+                | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
         fi
-    elif [ -n "$CHANGED_HEADERS" ]; then
-        echo "Changed headers detected — they affect unchanged .c files, running FULL clang-tidy:"
-        printf '  %s\n' $CHANGED_HEADERS
-        bash scripts/tidy.sh "$build_dir"
-    elif [ -n "$TIDY_FILES" ]; then
-        echo "Changed .c files:"
-        printf '  %s\n' $TIDY_FILES
+    fi
+    local files
+    files="$(printf '%s\n%s\n' "$TIDY_FILES" "$scoped" | grep -v '^$' | sort -u || true)"
+    if [ -n "$files" ]; then
+        if [ -n "$scoped" ]; then
+            echo "Changed .c + TUs including the changed headers ($(printf '%s\n' "$files" | grep -c .) files):"
+        else
+            echo "Changed .c files:"
+        fi
+        printf '  %s\n' $files
         # shellcheck disable=SC2086 — newline-split into file args; repo paths have no spaces
-        bash scripts/tidy.sh "$build_dir" $TIDY_FILES
+        bash scripts/tidy.sh "$build_dir" $files
     else
         echo "tidy: nothing to check"
     fi
@@ -137,10 +206,36 @@ fi
 cmake --build "$NATIVE_BUILD_DIR"
 ok
 
-step "ctest (native-debug)"
-# Parallel halves the suite wall time; RUN_SERIAL tests still isolate themselves.
-ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure
-ok
+# ctest runs in the BACKGROUND while format+tidy use the idle cores — its
+# critical path is one single-threaded test. The wait + report happens after
+# the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
+# --fast skips the three research-bench guard tests (~29 s of the suite; they
+# exercise the atlas_bench provenance tooling, not engine code) — the default
+# pre-commit run still covers them.
+step "ctest (native-debug, parallel with format+tidy)"
+CTEST_FAST_ARGS=()
+if [ "$MODE" = "fast" ]; then
+    CTEST_FAST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
+fi
+CTEST_LOG="$(mktemp)"
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_FAST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
+CTEST_PID=$!
+echo "(backgrounded, pid $CTEST_PID)"
+
+collect_ctest() {
+    CURRENT_STEP="ctest (native-debug)"
+    local rc=0
+    wait "$CTEST_PID" || rc=$?
+    CTEST_PID=""
+    if [ "$rc" -ne 0 ]; then
+        cat "$CTEST_LOG"
+        rm -f "$CTEST_LOG"
+        return "$rc"
+    fi
+    tail -n 3 "$CTEST_LOG"
+    rm -f "$CTEST_LOG"
+    RESULTS+=("PASS  ctest (native-debug)")
+}
 
 if [ "$MODE" = "full" ]; then
     step "clang-format (whole tree)"
@@ -170,6 +265,8 @@ else
     run_tidy_gate "$TIDY_CI_DIR"
     ok
 fi
+
+collect_ctest
 
 if [ "$MODE" = "push" ]; then
     step "build (wasm-debug)"

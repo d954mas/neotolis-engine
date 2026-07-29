@@ -34,7 +34,10 @@ while IFS= read -r f; do
         echo "  Declare each one: JS-library helpers with '\$' (\$UTF8ToString), wasmExports['x'] bare (x)."
         fail=1
     fi
-done < <(grep -RlE 'EM_JS\(|EM_ASM' engine examples --include='*.c' --exclude-dir=deps 2>/dev/null || true)
+done < <( { git ls-files -- 'engine/**/*.c' 'examples/**/*.c';
+            git ls-files --others --exclude-standard -- 'engine/**/*.c' 'examples/**/*.c'; } |
+    grep -v 'deps/' | sort -u |
+    xargs -r grep -lE 'EM_JS\(|EM_ASM' 2>/dev/null || true)
 
 if [ "$fail" -ne 0 ]; then
     echo "EM_JS_DEPS GUARD: FAILED (see above)."
