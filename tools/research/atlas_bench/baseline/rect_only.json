@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "meta": {
     "tool_version": "2.0.0",
     "builder_version": 1,
@@ -23,10 +23,14 @@
     {
       "name": "rect_only",
       "sprites": 32,
-      "unique": 0,
+      "unique": 32,
+      "folds_exact": 0,
+      "folds_d4": 0,
+      "area_saved_px": 0,
+      "vertex_blocks_shared": 0,
       "pages": 1,
       "region_count": 32,
-      "pack_ms": 229.3075,
+      "pack_ms": 56.9486,
       "density_fill_frontier": 0.7412,
       "density_fill_texture": 0.7239,
       "hull_verts": {

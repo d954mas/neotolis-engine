@@ -122,6 +122,10 @@ static void fake_texture_deactivate(uint32_t runtime_handle) { (void)runtime_han
 #define FIXTURE_PAGE0_ID 0xAAAULL
 #define FIXTURE_PAGE1_ID 0xBBBULL
 
+/* Every mock blob carries real pages: the validator rejects a region whose
+ * page_index has no backing page. */
+static const uint64_t k_mock_page_ids[2] = {FIXTURE_PAGE0_ID, FIXTURE_PAGE1_ID};
+
 static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
     /* 3 regions: 4 + 3 + 5 = 12 vertices, 6 + 3 + 9 = 18 indices.
      * Region 0: verts [0..4),  indices [0..6),  page 0, hash 0x100
@@ -184,8 +188,8 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
         .total_vertex_count = 12,
         .indices = indices,
         .total_index_count = 18,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     *out_size = build_mock_atlas_blob(buf, cap, &spec);
@@ -275,7 +279,7 @@ void test_atlas_parse_valid_blob(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
     TEST_ASSERT_EQUAL_UINT32(12, nt_atlas_test_vertex_count(ad));
     TEST_ASSERT_EQUAL_UINT32(18, nt_atlas_test_index_count(ad));
-    TEST_ASSERT_EQUAL_UINT8(0, nt_atlas_test_page_count(ad));
+    TEST_ASSERT_EQUAL_UINT8(2, nt_atlas_test_page_count(ad));
 }
 
 /* Test 2: find_region by name hash
@@ -350,8 +354,8 @@ void test_atlas_get_region_returns_field_passthrough(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[256];
@@ -493,14 +497,14 @@ static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_
 
 /* ---- Test 6: merge common region updates metadata in place ---- */
 void test_atlas_merge_common_region_updates_in_place(void) {
-    /* Pages omitted — page tests use full resource system (test 16/17). */
+    /* Mock pages only — page RESOLUTION tests use the full resource system (test 16/17). */
 
     /* blob1: single region hash=0x111, 4 verts / 6 indices, payload seed 10 */
     merge_region_spec_t blob1_specs[1] = {
         {.name_hash = 0x111ULL, .vertex_count = 4, .index_count = 6, .source_w = 100, .page_index = 0, .transform = 0, .payload_seed = 10},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 1, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 1, k_mock_page_ids, 2);
 
     /* blob2: same hash=0x111 but source_w=200, DIFFERENT payload (seed=500).
      * Same vertex/index counts so we can assert exact cursor positions. */
@@ -508,7 +512,7 @@ void test_atlas_merge_common_region_updates_in_place(void) {
         {.name_hash = 0x111ULL, .vertex_count = 4, .index_count = 6, .source_w = 200, .page_index = 0, .transform = 0, .payload_seed = 500},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, k_mock_page_ids, 2);
 
     /* First parse */
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
@@ -573,8 +577,8 @@ void test_atlas_merge_preserves_shared_payload_slices(void) {
         .total_vertex_count = 4,
         .indices = indices1,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     NtAtlasVertex verts2[7] = {
@@ -619,8 +623,8 @@ void test_atlas_merge_preserves_shared_payload_slices(void) {
         .total_vertex_count = 7,
         .indices = indices2,
         .total_index_count = 9,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf1[512];
@@ -661,7 +665,7 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
         {.name_hash = 0xBBBULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 20},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, k_mock_page_ids, 2);
 
     merge_region_spec_t blob2_specs[3] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
@@ -669,7 +673,7 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 3, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 3, k_mock_page_ids, 2);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
@@ -695,7 +699,7 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, k_mock_page_ids, 2);
 
     /* blob2 drops B. */
     merge_region_spec_t blob2_specs[2] = {
@@ -703,7 +707,7 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, k_mock_page_ids, 2);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
@@ -754,8 +758,8 @@ void test_atlas_find_region_returns_same_index_after_revive(void) {
 
     uint8_t buf_a[512];
     uint8_t buf_ab[512];
-    uint32_t size_a = build_merge_blob(buf_a, sizeof(buf_a), only_a, 1, NULL, 0);
-    uint32_t size_ab = build_merge_blob(buf_ab, sizeof(buf_ab), a_and_b, 2, NULL, 0);
+    uint32_t size_a = build_merge_blob(buf_a, sizeof(buf_a), only_a, 1, k_mock_page_ids, 2);
+    uint32_t size_ab = build_merge_blob(buf_ab, sizeof(buf_ab), a_and_b, 2, k_mock_page_ids, 2);
 
     /* Merge 1: parse {A, B} (first parse) */
     nt_atlas_test_drive_resolve(buf_ab, size_ab, &s_user_data);
@@ -802,8 +806,8 @@ void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
 
     uint8_t buf1[512];
     uint8_t buf2[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, k_mock_page_ids, 2);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, k_mock_page_ids, 2);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
@@ -887,8 +891,8 @@ void test_atlas_hash_collisions_probe_correctly(void) {
         .total_vertex_count = 9,
         .indices = indices,
         .total_index_count = 9,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[512];
@@ -980,8 +984,8 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         .total_vertex_count = total_verts_1,
         .indices = inds1,
         .total_index_count = total_indices_1,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
     uint32_t size1 = build_mock_atlas_blob(buf1, blob_cap, &spec1);
 
@@ -1043,8 +1047,8 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         .total_vertex_count = total_verts_2,
         .indices = inds2,
         .total_index_count = total_indices_2,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
     uint32_t size2 = build_mock_atlas_blob(buf2, blob_cap, &spec2);
 
@@ -1096,7 +1100,7 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
         {.name_hash = 0xA03ULL, .vertex_count = 4, .index_count = 6, .source_w = 48, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, k_mock_page_ids, 2);
 
     /* First parse */
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
@@ -1110,7 +1114,7 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
         {.name_hash = 0xA05ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 130},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 4, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 4, k_mock_page_ids, 2);
 
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
 
@@ -1179,6 +1183,15 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_wrap, valid_size), "vertex_offset wrap should fail");
 }
 
+void test_atlas_activator_rejects_invalid_blob(void) {
+    uint8_t buf[512];
+    uint32_t size = 0;
+    build_fixture_blob(buf, sizeof(buf), &size);
+
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, size), "valid atlas must activate");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_atlas_test_activate(buf, sizeof(NtAtlasHeader) - 1U), "truncated atlas must fail activation before publication");
+}
+
 /* ---- Test 15: Region slice validation rejects corrupt page / payload refs ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_region_slice_validation_rejects_corruption(void) {
@@ -1189,7 +1202,8 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     uint8_t corrupt_vertex_slice[512];
     memcpy(corrupt_vertex_slice, buf, size);
     NtAtlasHeader *hdr = (NtAtlasHeader *)corrupt_vertex_slice;
-    NtAtlasRegion *regions = (NtAtlasRegion *)(corrupt_vertex_slice + sizeof(NtAtlasHeader));
+    uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
+    NtAtlasRegion *regions = (NtAtlasRegion *)(corrupt_vertex_slice + sizeof(NtAtlasHeader) + page_bytes);
     regions[0].vertex_start = hdr->total_vertex_count - 1U;
     regions[0].vertex_count = 4;
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_slice, size), "vertex slice OOB should fail");
@@ -1197,7 +1211,7 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     uint8_t corrupt_index_slice[512];
     memcpy(corrupt_index_slice, buf, size);
     hdr = (NtAtlasHeader *)corrupt_index_slice;
-    regions = (NtAtlasRegion *)(corrupt_index_slice + sizeof(NtAtlasHeader));
+    regions = (NtAtlasRegion *)(corrupt_index_slice + sizeof(NtAtlasHeader) + page_bytes);
     regions[1].index_start = hdr->total_index_count - 1U;
     regions[1].index_count = 3;
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_index_slice, size), "index slice OOB should fail");
@@ -1209,10 +1223,22 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
     uint8_t corrupt_page_index[512];
     memcpy(corrupt_page_index, buf_with_pages, size_with_pages);
     hdr = (NtAtlasHeader *)corrupt_page_index;
-    const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
+    page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
     regions = (NtAtlasRegion *)(corrupt_page_index + sizeof(NtAtlasHeader) + page_bytes);
     regions[0].page_index = (uint8_t)hdr->page_count;
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_index, size_with_pages), "page_index OOB should fail");
+
+    /* Pinned at the boundary: page_index == page_count is the FIRST slot without
+     * a backing page and must already reject; far past the cap must too. */
+    uint8_t corrupt_page_slot[512];
+    uint32_t slot_size = 0;
+    build_fixture_blob(corrupt_page_slot, sizeof(corrupt_page_slot), &slot_size);
+    hdr = (NtAtlasHeader *)corrupt_page_slot;
+    regions = (NtAtlasRegion *)(corrupt_page_slot + sizeof(NtAtlasHeader) + ((size_t)hdr->page_count * sizeof(uint64_t)));
+    regions[0].page_index = (uint8_t)hdr->page_count;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, slot_size), "page_index == page_count is the first unbacked slot and must fail");
+    regions[0].page_index = 200;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_slot, slot_size), "page_index far past the page cap must fail");
 }
 
 /* ---- Test 16: Direct-drive on_resolve stores page ids and invalidates handles ----
@@ -1452,7 +1478,7 @@ static void assert_float_close(float expected, float actual, float tol, const ch
 }
 
 /* Build a one-region blob with hand-set corner UVs (0,0)/(1,0)/(0,1)/(1,1)
- * so cached_uv tests can assert each transform mapping. UVs are packed as
+ * so the UV test below can assert each transform mapping. UVs are packed as
  * uint16 0..65535 by the format; 0->0.0, 65535->1.0 exactly. */
 static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transform) {
     NtAtlasVertex verts[4];
@@ -1485,17 +1511,17 @@ static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transfo
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
     return build_mock_atlas_blob(out, cap, &spec);
 }
 
-/* Atlas cached_uv stores serialized atlas_u/v as-is. The builder already
+/* The runtime reads serialized atlas_u/v as-is — there is no UV bake. The builder already
  * applies any D4 placement transform while serializing vertices; runtime must
  * not apply transform a second time. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_cached_uv_d4_transform(void) {
+void test_atlas_uv_passthrough_d4_transform(void) {
     /* Reference corners in (u, v) before transform, matching build_corner_uv_blob. */
     const float src_u[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     const float src_v[4] = {0.0F, 0.0F, 1.0F, 1.0F};
@@ -1568,8 +1594,8 @@ void test_atlas_cached_pos_origin_not_baked(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[512];
@@ -1639,8 +1665,8 @@ void test_atlas_cached_pos_includes_trim_offset(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[512];
@@ -1705,8 +1731,8 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t atlas_blob[512];
@@ -1870,7 +1896,8 @@ void test_atlas_cached_recompute_on_merge(void) {
     r1.origin_y = 0.5F;
     r1.vertex_count = 4;
     r1.index_count = 6;
-    mock_atlas_spec_t spec1 = {.regions = &r1, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = NULL, .page_count = 0};
+    mock_atlas_spec_t spec1 = {
+        .regions = &r1, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = k_mock_page_ids, .page_count = 2};
 
     /* Same hash, same vertex layout, but origin (0.0, 0.0). */
     NtAtlasRegion r2;
@@ -1882,7 +1909,8 @@ void test_atlas_cached_recompute_on_merge(void) {
     r2.origin_y = 0.0F;
     r2.vertex_count = 4;
     r2.index_count = 6;
-    mock_atlas_spec_t spec2 = {.regions = &r2, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = NULL, .page_count = 0};
+    mock_atlas_spec_t spec2 = {
+        .regions = &r2, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = k_mock_page_ids, .page_count = 2};
 
     uint8_t buf1[512];
     uint8_t buf2[512];
@@ -1925,8 +1953,8 @@ void test_atlas_tombstone_cached_zero(void) {
 
     uint8_t buf1[512];
     uint8_t buf2[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, NULL, 0);
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, NULL, 0);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, k_mock_page_ids, 2);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, k_mock_page_ids, 2);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
@@ -2002,7 +2030,8 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
     regions[1].vertex_count = 4;
     regions[1].index_count = 6;
 
-    mock_atlas_spec_t spec = {.regions = regions, .region_count = 2, .vertices = verts, .total_vertex_count = 8, .indices = indices, .total_index_count = 12, .page_ids = NULL, .page_count = 0};
+    mock_atlas_spec_t spec = {
+        .regions = regions, .region_count = 2, .vertices = verts, .total_vertex_count = 8, .indices = indices, .total_index_count = 12, .page_ids = k_mock_page_ids, .page_count = 2};
 
     uint8_t atlas_blob[512];
     uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
@@ -2151,8 +2180,8 @@ void test_atlas_slice9_roundtrip(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[512];
@@ -2206,8 +2235,8 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 2,
     };
 
     uint8_t buf[512];
@@ -2256,12 +2285,13 @@ int main(void) {
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
     RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
+    RUN_TEST(test_atlas_activator_rejects_invalid_blob);
     RUN_TEST(test_atlas_region_slice_validation_rejects_corruption);
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
 
     /* Cached arrays + pixels_per_unit + SD/HD merge */
-    RUN_TEST(test_atlas_cached_uv_d4_transform);
+    RUN_TEST(test_atlas_uv_passthrough_d4_transform);
     RUN_TEST(test_atlas_cached_pos_origin_not_baked);
     RUN_TEST(test_atlas_cached_pos_includes_trim_offset);
     RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);

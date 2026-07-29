@@ -62,6 +62,43 @@ def fill_disc(buf, w, h, cx, cy, radius, col):
                 put(buf, w, x, y, *col)
 
 
+def blit(dst, dst_w, src, src_w, src_h, ox, oy):
+    for y in range(src_h):
+        di = (((oy + y) * dst_w) + ox) * 4
+        si = (y * src_w) * 4
+        dst[di : di + (src_w * 4)] = src[si : si + (src_w * 4)]
+
+
+def mirror_h(src, w, h):
+    out = canvas(w, h)
+    for y in range(h):
+        for x in range(w):
+            si = ((y * w) + (w - 1 - x)) * 4
+            di = ((y * w) + x) * 4
+            out[di : di + 4] = src[si : si + 4]
+    return out
+
+
+def mirror_v(src, w, h):
+    out = canvas(w, h)
+    for y in range(h):
+        si = ((h - 1 - y) * w) * 4
+        di = (y * w) * 4
+        out[di : di + (w * 4)] = src[si : si + (w * 4)]
+    return out
+
+
+def transpose(src, w, h):
+    # Result is h x w: (x, y) -> (y, x).
+    out = canvas(h, w)
+    for y in range(h):
+        for x in range(w):
+            si = ((y * w) + x) * 4
+            di = ((x * h) + y) * 4
+            out[di : di + 4] = src[si : si + 4]
+    return out
+
+
 def rounded_panel(width, height, radius, border, fill, edge):
     # 9-slice panel: rounded transparent corners, `border`-px frame in `edge`,
     # interior filled with `fill`. Transparent corners force a non-rect hull.
@@ -156,6 +193,55 @@ def gen_anim_heavy(out):
             write_png(os.path.join(out, f"{name}_{idx:02d}.png"), 64, 64, cache[state])
             count += 1
     return count
+
+
+def _trim_art(state):
+    # F-shaped glyph: asymmetric under all eight D4 orientations, and it touches
+    # every edge of its box so the alpha trim recovers exactly the art rect.
+    aw = 14 + ((state * 2) % 6)
+    ah = 10 + ((state * 4) % 8)
+    buf = canvas(aw, ah)
+    col = (70 + (state * 45) % 180, 90 + (state * 65) % 160, 50 + (state * 85) % 200, 255)
+    fill_rect(buf, aw, 0, 0, 3, ah, col)  # stem — left, top and bottom edges
+    fill_rect(buf, aw, 0, 0, aw, 3, col)  # top bar — right edge
+    fill_rect(buf, aw, 0, ah // 2, aw - 4, (ah // 2) + 2, col)  # middle bar
+    return aw, ah, buf
+
+
+def gen_anim_trim(out):
+    # Two groups so each dedup stage is measured on its own: trim_* is
+    # byte-identical only AFTER the alpha trim (same art, different canvas and
+    # offset), d4_* only through a D4 orientation (mirrored/transposed art).
+    os.makedirs(out, exist_ok=True)
+    count = 0
+    offsets = ((0, 0), (3, 5), (7, 2), (11, 9))
+    for state in range(4):
+        aw, ah, art = _trim_art(state)
+        for k, (ox, oy) in enumerate(offsets):
+            cw = aw + ox + 2 + (k * 3)
+            ch = ah + oy + 2 + (k * 2)
+            buf = canvas(cw, ch)
+            blit(buf, cw, art, aw, ah, ox, oy)
+            write_png(os.path.join(out, f"trim_s{state}_{k}.png"), cw, ch, buf)
+            count += 1
+    for state in range(4, 7):
+        aw, ah, art = _trim_art(state)
+        variants = (
+            ("id", aw, ah, art),
+            ("mh", aw, ah, mirror_h(art, aw, ah)),
+            ("mv", aw, ah, mirror_v(art, aw, ah)),
+            ("tr", ah, aw, transpose(art, aw, ah)),
+        )
+        # A 1px transparent frame on every variant keeps the trim uniform, so a
+        # fold here can only come from the orientation search.
+        for tag, vw, vh, vbuf in variants:
+            cw = vw + 2
+            ch = vh + 2
+            buf = canvas(cw, ch)
+            blit(buf, cw, vbuf, vw, vh, 1, 1)
+            write_png(os.path.join(out, f"d4_s{state}_{tag}.png"), cw, ch, buf)
+            count += 1
+    return count
 # #endregion
 
 
@@ -164,10 +250,12 @@ def main():
     n_rect = gen_rect_only(os.path.join(root, "rect_only"))
     n_slice = gen_slice9(os.path.join(root, "slice9"))
     n_anim = gen_anim_heavy(os.path.join(root, "anim_heavy"))
+    n_trim = gen_anim_trim(os.path.join(root, "anim_trim"))
     print(f"rect_only:  {n_rect} pngs")
     print(f"slice9:     {n_slice} pngs")
     print(f"anim_heavy: {n_anim} pngs")
-    print(f"total:      {n_rect + n_slice + n_anim} pngs under {root}/")
+    print(f"anim_trim:  {n_trim} pngs")
+    print(f"total:      {n_rect + n_slice + n_anim + n_trim} pngs under {root}/")
 
 
 if __name__ == "__main__":

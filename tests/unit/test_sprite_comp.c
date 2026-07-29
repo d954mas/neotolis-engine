@@ -30,6 +30,10 @@ typedef struct {
     uint16_t page_count;
 } mock_atlas_spec_t;
 
+/* The validator rejects regions without a backing page; the texture id is
+ * deliberately absent from the pack — pages fail independently of the atlas. */
+static const uint64_t k_mock_page_ids[1] = {0xFEED0001ULL};
+
 static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atlas_spec_t *spec) {
     const uint32_t page_bytes = (uint32_t)spec->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)spec->region_count * (uint32_t)sizeof(NtAtlasRegion);
@@ -86,7 +90,7 @@ static uint8_t s_pack_blob_count;
 /* ---- Atlas fixture: full resource pipeline ---- */
 
 static uint32_t build_fixture_atlas_blob(uint8_t *atlas_blob, uint32_t cap, float r0_origin_x, float r0_origin_y, float r1_origin_x, float r1_origin_y) {
-    // #region Build 2-region atlas blob (no pages for simplicity)
+    // #region Build 2-region atlas blob (one mock page)
     NtAtlasVertex verts[8];
     uint16_t indices[12];
     for (uint16_t i = 0; i < 8; i++) {
@@ -132,8 +136,8 @@ static uint32_t build_fixture_atlas_blob(uint8_t *atlas_blob, uint32_t cap, floa
         .total_vertex_count = 8,
         .indices = indices,
         .total_index_count = 12,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 1,
     };
     uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, cap, &spec);
     // #endregion
@@ -495,8 +499,8 @@ static uint32_t build_fixture_atlas_blob_r0_only(uint8_t *atlas_blob, uint32_t c
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = k_mock_page_ids,
+        .page_count = 1,
     };
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }

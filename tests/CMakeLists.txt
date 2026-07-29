@@ -461,6 +461,16 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 
+    # nt_atlas.c recompiled with NT_ASSERT_MODE=0 (shipping config): pins that the
+    # validator's hard guards reject corrupt blobs without NT_ASSERT's help. The
+    # mode is forced by #undef in the wrapper TU, not -D — a per-target define
+    # collides with CI's global -DNT_ASSERT_MODE.
+    add_executable(test_atlas_assert_off unit/test_atlas_assert_off.c unit/test_helpers/nt_atlas_assert_off_tu.c)
+    target_link_libraries(test_atlas_assert_off PRIVATE nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
+    target_include_directories(test_atlas_assert_off PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit" "${CMAKE_SOURCE_DIR}/engine" "${CMAKE_SOURCE_DIR}/engine/atlas" "${CMAKE_SOURCE_DIR}/shared/include")
+    target_compile_definitions(test_atlas_assert_off PRIVATE NT_LOG_DOMAIN="atlas" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_atlas_assert_off)
+
     # Parser stays independently testable without linking the benchmark executable.
     add_executable(test_atlas_bench_parse
         unit/test_atlas_bench_parse.c
@@ -782,6 +792,7 @@ if(NOT EMSCRIPTEN)
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
     )
     target_compile_definitions(test_atlas_pack_determinism PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_pack_determinism WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -802,6 +813,53 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(test_atlas_transform_mask PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_atlas_transform_mask WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # D4 group axioms over the composition/inverse tables, plus their agreement
+    # with transform_point_texel — a transposed entry fails here, not downstream.
+    add_executable(test_atlas_d4 unit/test_atlas_d4.c)
+    target_link_libraries(test_atlas_d4 PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_d4 PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+    )
+    target_compile_definitions(test_atlas_d4 PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_d4)
+
+    # Post-trim dedup baseline: fixture determinism plus per-alias region metadata
+    # read back from the unpacked atlas. The test_helpers fixture is header-only.
+    add_executable(test_atlas_dedup unit/test_atlas_dedup.c)
+    target_link_libraries(test_atlas_dedup PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_dedup PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_dedup PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_dedup WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # D4 alias probe contract: the F glyph's 8 orientations must stay pairwise
+    # distinct, so a wrong relative transform cannot pass by symmetry.
+    # Builder -> pack -> runtime: the only place the two format implementations
+    # meet; a serializer/validator skew is invisible to every other suite.
+    add_executable(test_atlas_builder_runtime_e2e unit/test_atlas_builder_runtime_e2e.c)
+    target_link_libraries(test_atlas_builder_runtime_e2e PRIVATE nt_builder nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity)
+    target_include_directories(test_atlas_builder_runtime_e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_builder_runtime_e2e PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_builder_runtime_e2e WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    add_executable(test_atlas_dedup_d4 unit/test_atlas_dedup_d4.c)
+    target_link_libraries(test_atlas_dedup_d4 PRIVATE nt_builder nt_log unity)
+    target_include_directories(test_atlas_dedup_d4 PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_atlas_dedup_d4 PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_atlas_dedup_d4 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Designated-initializer round-trip + layout anchors: sprite opts stay append-only
     # (positional contract kept), atlas opts pin the current field order.

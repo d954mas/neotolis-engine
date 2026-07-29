@@ -78,6 +78,7 @@ static bool parse_added_area_percent(const char *text, float *out_value) {
 typedef struct {
     uint32_t sprite_count;
     double pack_ms;
+    nt_atlas_stats_t stats;
     char first_path[1024];
 } bench_pack_result_t;
 
@@ -130,10 +131,18 @@ static bool build_production_pack(const char *pack_path, const char *corpus_glob
         nt_builder_free_pack(ctx);
         return false;
     }
+    /* The stats view is borrowed from the ctx and dies with it — read before free. */
+    uint32_t stats_count = 0U;
+    const nt_atlas_stats_t *stats = nt_builder_get_atlas_stats(ctx, &stats_count);
+    nt_atlas_stats_t atlas_stats = {0};
+    if (stats_count > 0U) {
+        atlas_stats = stats[stats_count - 1U]; /* this tool commits one atlas per run */
+    }
     nt_builder_free_pack(ctx);
     memset(out, 0, sizeof(*out));
     out->sprite_count = add.count;
     out->pack_ms = pack_ms;
+    out->stats = atlas_stats;
     (void)snprintf(out->first_path, sizeof(out->first_path), "%s", add.first_path);
     return true;
 }
@@ -358,7 +367,8 @@ int main(int argc, char *argv[]) {
     run.opts_alpha_threshold = opts.alpha_threshold;
     run.opts_max_added_area_percent = opts.max_added_area_percent;
     run.opts_power_of_two = opts.power_of_two ? 1 : 0;
-    /* The pack format does not expose dedup or cache counters. */
+    /* This tool never sets a builder cache dir, so every run is a cold pack and
+     * these counters carry no signal — kept at 0 so baselines stay comparable. */
     run.cache_hits = 0;
     run.cache_misses = 0;
 
@@ -366,7 +376,11 @@ int main(int argc, char *argv[]) {
     nt_bench_atlas_result_t *a = &run.atlases[0];
     (void)snprintf(a->name, sizeof(a->name), "%s", atlas_name);
     a->sprites = m.region_count;
-    a->unique = 0; /* not recoverable from the pack (see cache note above) */
+    a->unique = selected_run.stats.placements;
+    a->folds_exact = selected_run.stats.folds_exact;
+    a->folds_d4 = selected_run.stats.folds_d4;
+    a->area_saved_px = selected_run.stats.area_saved_px;
+    a->vertex_blocks_shared = selected_run.stats.vertex_blocks_shared;
     a->pages = m.page_count;
     a->region_count = m.region_count;
     a->pack_ms = selected_run.pack_ms;

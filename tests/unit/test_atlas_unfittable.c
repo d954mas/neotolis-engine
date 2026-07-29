@@ -213,7 +213,7 @@ void test_atlas_pages_exhausted_graceful(void) {
     NtAtlasBuild *atlas_build_179 = nt_atlas_begin(ctx, "toomany", &opts);
 
     /* 57×57 fills a 64 page (footprint == max_size) → one sprite per page.
-     * 70 > ATLAS_MAX_PAGES (64) forces exhaustion. */
+     * 70 > ATLAS_MAX_PAGES forces exhaustion. */
     enum { N_SPRITES = 70 };
     uint8_t *sprites[N_SPRITES];
     for (uint32_t i = 0; i < N_SPRITES; i++) {

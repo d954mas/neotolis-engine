@@ -25,7 +25,7 @@ texture="0.7239"
 if [[ "$out_json" == *anim_heavy* ]]; then
     texture="0.5169"
 elif [[ "$out_json" == *mixed_aa* ]]; then
-    texture="0.6332"
+    texture="0.6303"
 fi
 cat > "$out_json" <<JSON
 {

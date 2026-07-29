@@ -1858,6 +1858,40 @@ void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw
     }
 }
 
+/* d4_compose_table[a][b] applies b first, then a; the table is not symmetric. */
+/* clang-format off */
+static const uint8_t d4_compose_table[8][8] = {
+    {0, 1, 2, 3, 4, 5, 6, 7},
+    {1, 0, 3, 2, 5, 4, 7, 6},
+    {2, 3, 0, 1, 6, 7, 4, 5},
+    {3, 2, 1, 0, 7, 6, 5, 4},
+    {4, 6, 5, 7, 0, 2, 1, 3},
+    {5, 7, 4, 6, 1, 3, 0, 2},
+    {6, 4, 7, 5, 2, 0, 3, 1},
+    {7, 5, 6, 4, 3, 1, 2, 0},
+};
+/* clang-format on */
+
+/* Only the two quarter-turns (5, 6) are non-involutive. */
+static const uint8_t d4_inverse_table[8] = {0, 1, 2, 3, 4, 6, 5, 7};
+
+uint8_t d4_compose(uint8_t a, uint8_t b) {
+    NT_BUILD_ASSERT(a < 8 && b < 8 && "d4_compose: transform value outside D4");
+    /* Mask independently of the assert — an asserts-off build must not over-read. */
+    return d4_compose_table[a & 7U][b & 7U];
+}
+
+uint8_t d4_inverse(uint8_t v) {
+    NT_BUILD_ASSERT(v < 8 && "d4_inverse: transform value outside D4");
+    return d4_inverse_table[v & 7U];
+}
+
+void d4_dims_after(uint8_t v, uint32_t w, uint32_t h, uint32_t *out_w, uint32_t *out_h) {
+    NT_BUILD_ASSERT(v < 8 && out_w && out_h && "d4_dims_after: bad argument");
+    *out_w = (v & 4U) ? h : w;
+    *out_h = (v & 4U) ? w : h;
+}
+
 uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count) {
     uint64_t twice_area = polygon_abs_twice_area(poly, count);
     return (twice_area >> 1U) + (twice_area & 1U);

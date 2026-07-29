@@ -31,6 +31,10 @@ uint32_t nt_atlas_test_concave_frontier_slot_mask(const uint8_t *binary, uint32_
 bool nt_atlas_test_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count);
 uint32_t nt_atlas_test_collect_transform_values(uint8_t mask, uint8_t out_values[8]);
 
+/* Force the NEXT alias recorded anywhere in the process to this relative transform,
+ * then disarm; 0xFF disables. Negative control for the per-alias coverage proof. */
+void nt_atlas_test_force_alias_rel(uint8_t rel);
+
 /* Directed Hausdorff distance from the full reference boundary to the
  * candidate boundary. Both polygons are closed implicitly. */
 double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count);

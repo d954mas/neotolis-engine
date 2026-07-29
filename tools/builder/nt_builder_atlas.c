@@ -206,31 +206,32 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  *
  *  Pages grow dynamically as needed (vector_pack handles its own
  *  page creation when no fit on existing pages).
- *  New pages only when max_size exhausted (ATLAS-18).
+ *  New pages only when max_size exhausted.
  * =================================================================== */
 
-// #region Duplicate detection — identify identical sprites by hash
+// #region Duplicate detection — identify identical sprites by content
 /* --- Duplicate detection sort comparator --- */
 
 typedef struct {
     uint32_t index;
-    uint64_t hash;
+    uint64_t dim_key; /* D4-invariant post-trim dimension pair */
+    uint64_t hash;    /* canonical post-trim content hash */
 } DedupSortEntry;
 
+/* Sorting by dim_key first keeps the orientation hashes confined to buckets that can
+ * actually fold; the index tie-break is what makes the first entry of a run its
+ * lowest-add-index member, which is the group root. */
 static int dedup_sort_cmp(const void *a, const void *b) {
     const DedupSortEntry *ea = (const DedupSortEntry *)a;
     const DedupSortEntry *eb = (const DedupSortEntry *)b;
-    if (ea->hash < eb->hash) {
-        return -1;
+    if (ea->dim_key != eb->dim_key) {
+        return ea->dim_key < eb->dim_key ? -1 : 1;
     }
-    if (ea->hash > eb->hash) {
-        return 1;
+    if (ea->hash != eb->hash) {
+        return ea->hash < eb->hash ? -1 : 1;
     }
-    if (ea->index < eb->index) {
-        return -1;
-    }
-    if (ea->index > eb->index) {
-        return 1;
+    if (ea->index != eb->index) {
+        return ea->index < eb->index ? -1 : 1;
     }
     return 0;
 }
@@ -473,51 +474,77 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation --- */
 
-enum { ATLAS_CACHE_KEY_VERSION = 20 };
+/* One region cap for the validate stage and the cache-read bound: the true
+ * source is the uint16 NtAtlasHeader.region_count, and the two sites drifting
+ * apart re-opens either forged-file headroom or permanent cache misses. */
+enum { ATLAS_MAX_REGIONS = UINT16_MAX };
+
+enum { ATLAS_CACHE_KEY_VERSION = 22 };
+
+/* Per-sprite key record: hash + source dims + origin, then the raw override block. */
+enum { KEY_OV_OFF = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) };
+enum { PER_SPRITE_SIZE = KEY_OV_OFF + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (4 * sizeof(uint8_t)) };
+/* Nothing else ties the hand-summed size to the hand-computed write offsets;
+ * a mismatch truncates or over-reads the key input silently. */
+_Static_assert(PER_SPRITE_SIZE == KEY_OV_OFF + 17 + sizeof(float), "PER_SPRITE_SIZE must equal the last per-sprite write offset + 1");
+
+/* Trailing 6 = alpha_threshold, flags, allowed_transforms, shape, dedup,
+ * ATLAS_CACHE_KEY_VERSION. */
+enum {
+    ATLAS_OPTS_KEY_SIZE = sizeof(uint32_t) + sizeof(((const nt_atlas_opts_t *)0)->max_size) + sizeof(((const nt_atlas_opts_t *)0)->padding) + sizeof(((const nt_atlas_opts_t *)0)->margin) +
+                          sizeof(((const nt_atlas_opts_t *)0)->extrude) + sizeof(((const nt_atlas_opts_t *)0)->max_added_area_percent) + sizeof(((const nt_atlas_opts_t *)0)->max_vertices) + 6
+};
+
+static void atlas_key_write_sprite(uint8_t *out, const NtAtlasSpriteInput *s) {
+    size_t off = 0;
+    memcpy(out + off, &s->decoded_hash, sizeof(uint64_t));
+    off += sizeof(uint64_t);
+    memcpy(out + off, &s->width, sizeof(uint32_t));
+    off += sizeof(uint32_t);
+    memcpy(out + off, &s->height, sizeof(uint32_t));
+    off += sizeof(uint32_t);
+    memcpy(out + off, &s->origin_x, sizeof(float));
+    off += sizeof(float);
+    memcpy(out + off, &s->origin_y, sizeof(float));
+    const size_t ov_off = KEY_OV_OFF;
+    memcpy(out + ov_off, &s->slice9_left, sizeof(uint16_t));
+    memcpy(out + ov_off + 2, &s->slice9_right, sizeof(uint16_t));
+    memcpy(out + ov_off + 4, &s->slice9_top, sizeof(uint16_t));
+    memcpy(out + ov_off + 6, &s->slice9_bottom, sizeof(uint16_t));
+    out[ov_off + 8] = s->shape_override;
+    out[ov_off + 9] = s->transforms_override;
+    out[ov_off + 10] = s->max_verts_override;
+    out[ov_off + 11] = s->margin_override;
+    out[ov_off + 12] = s->extrude_override;
+    float area_percent = s->has_max_added_area_percent_override ? s->max_added_area_percent_override : 0.0F;
+    memcpy(out + ov_off + 13, &area_percent, sizeof(float));
+    out[ov_off + 13 + sizeof(float)] = s->alpha_threshold_override;
+    out[ov_off + 14 + sizeof(float)] = s->has_alpha_threshold_override ? 1 : 0;
+    out[ov_off + 15 + sizeof(float)] = s->has_max_added_area_percent_override ? 1 : 0;
+    /* Tri-state, so the value already carries its own presence. */
+    out[ov_off + 16 + sizeof(float)] = s->dedup_override;
+}
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Atlas cache stores raw page pixels + placements; post-pack texture
      * encoding knobs belong to the texture cache. */
     /* Bump when a change alters packed output — a stale cache must miss and rebuild. */
-    /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
-     * cached placements store sprite_index in add-order, so the key must be
-     * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(uint32_t)) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 5 + sizeof(float) + (3 * sizeof(uint8_t)) };
+    /* Per-sprite records stay in add-order, NOT sorted — cached placements store
+     * sprite_index in add-order, so the key must be order-sensitive to avoid
+     * mismatching placements after reordering. */
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        size_t off = (size_t)i * PER_SPRITE_SIZE;
-        memcpy(sprite_buf + off, &sprites[i].decoded_hash, sizeof(uint64_t));
-        off += sizeof(uint64_t);
-        memcpy(sprite_buf + off, &sprites[i].width, sizeof(uint32_t));
-        off += sizeof(uint32_t);
-        memcpy(sprite_buf + off, &sprites[i].height, sizeof(uint32_t));
-        off += sizeof(uint32_t);
-        memcpy(sprite_buf + off, &sprites[i].origin_x, sizeof(float));
-        off += sizeof(float);
-        memcpy(sprite_buf + off, &sprites[i].origin_y, sizeof(float));
-        off += sizeof(float);
-        size_t ov_off = off;
-        memcpy(sprite_buf + ov_off, &sprites[i].slice9_left, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 2, &sprites[i].slice9_right, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 4, &sprites[i].slice9_top, sizeof(uint16_t));
-        memcpy(sprite_buf + ov_off + 6, &sprites[i].slice9_bottom, sizeof(uint16_t));
-        sprite_buf[ov_off + 8] = sprites[i].shape_override;
-        sprite_buf[ov_off + 9] = sprites[i].transforms_override;
-        sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
-        sprite_buf[ov_off + 11] = sprites[i].margin_override;
-        sprite_buf[ov_off + 12] = sprites[i].extrude_override;
-        float area_percent = sprites[i].has_max_added_area_percent_override ? sprites[i].max_added_area_percent_override : 0.0F;
-        memcpy(sprite_buf + ov_off + 13, &area_percent, sizeof(float));
-        sprite_buf[ov_off + 13 + sizeof(float)] = sprites[i].alpha_threshold_override;
-        sprite_buf[ov_off + 14 + sizeof(float)] = sprites[i].has_alpha_threshold_override ? 1 : 0;
-        sprite_buf[ov_off + 15 + sizeof(float)] = sprites[i].has_max_added_area_percent_override ? 1 : 0;
+        atlas_key_write_sprite(sprite_buf + ((size_t)i * PER_SPRITE_SIZE), &sprites[i]);
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
     /* Serialize opts fields (excluding compress pointer) */
-    uint8_t opts_buf[128];
+    /* Slack: the size enum and the write run below are hand-maintained lists, so a
+     * field added to one and not the other must not smash the stack before the
+     * post-write assert can report the drift. */
+    uint8_t opts_buf[ATLAS_OPTS_KEY_SIZE + 16];
     uint32_t pos = 0;
     /* Builder version — mirrors nt_builder_cache.c:nt_builder_compute_opts_hash
      * so any NT_BUILDER_VERSION bump automatically invalidates all atlas cache
@@ -548,7 +575,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     opts_buf[pos++] = flags;
     opts_buf[pos++] = opts->allowed_transforms;
     opts_buf[pos++] = (uint8_t)opts->shape;
+    opts_buf[pos++] = opts->dedup ? 1 : 0;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
+    NT_BUILD_ASSERT(pos == ATLAS_OPTS_KEY_SIZE && "compute_atlas_cache_key: opts run does not fill its sized buffer");
 
     /* Combine into single buffer and hash */
     size_t total = per_sprite_bytes + pos;
@@ -575,6 +604,15 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
  */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Order-sensitive fold over the cache payload — the corruption net for in-range
+ * bit flips the per-field bounds checks cannot see (placement coords, pixels). */
+static uint64_t atlas_cache_combine(uint64_t acc, const void *data, size_t len) {
+    /* nt_hash64 takes a uint32 length; the largest section (a 16384^2 RGBA page)
+     * stays within it. */
+    const uint64_t h = nt_hash64(data, (uint32_t)len).value;
+    return acc ^ (h + 0x9E3779B97F4A7C15ULL + (acc << 6U) + (acc >> 2U));
+}
+
 static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const AtlasPlacement *placements, uint32_t placement_count, const uint32_t *page_w, const uint32_t *page_h,
                               uint32_t page_count, uint8_t **page_pixels) {
     char path[1024];
@@ -588,15 +626,25 @@ static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const A
     }
 
     bool ok = true;
+    uint64_t checksum = cache_key;
     ok = ok && fwrite(&placement_count, sizeof(uint32_t), 1, f) == 1;
+    checksum = atlas_cache_combine(checksum, &placement_count, sizeof(uint32_t));
     ok = ok && fwrite(&page_count, sizeof(uint32_t), 1, f) == 1;
+    checksum = atlas_cache_combine(checksum, &page_count, sizeof(uint32_t));
     ok = ok && fwrite(page_w, sizeof(uint32_t), page_count, f) == page_count;
+    checksum = atlas_cache_combine(checksum, page_w, (size_t)page_count * sizeof(uint32_t));
     ok = ok && fwrite(page_h, sizeof(uint32_t), page_count, f) == page_count;
+    checksum = atlas_cache_combine(checksum, page_h, (size_t)page_count * sizeof(uint32_t));
     ok = ok && fwrite(placements, sizeof(AtlasPlacement), placement_count, f) == placement_count;
+    checksum = atlas_cache_combine(checksum, placements, (size_t)placement_count * sizeof(AtlasPlacement));
     for (uint32_t p = 0; p < page_count && ok; p++) {
         size_t pixel_bytes = (size_t)page_w[p] * page_h[p] * 4;
         ok = ok && fwrite(page_pixels[p], 1, pixel_bytes, f) == pixel_bytes;
+        checksum = atlas_cache_combine(checksum, page_pixels[p], pixel_bytes);
     }
+    /* Trailing checksum self-invalidates pre-checksum cache files: reading it
+     * from them hits EOF, which is a graceful miss. */
+    ok = ok && fwrite(&checksum, sizeof(uint64_t), 1, f) == 1;
 
     (void)fclose(f);
 
@@ -638,8 +686,13 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f);
         return false;
     }
+    uint64_t checksum = cache_key;
+    checksum = atlas_cache_combine(checksum, &placement_count, sizeof(uint32_t));
+    checksum = atlas_cache_combine(checksum, &page_count_val, sizeof(uint32_t));
 
-    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > NT_BUILD_MAX_ASSETS) {
+    /* Placements are regions, not pack assets — bound by the region cap, or every
+     * atlas above NT_BUILD_MAX_ASSETS placements would be a permanent cache miss. */
+    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > ATLAS_MAX_REGIONS) {
         (void)fclose(f);
         return false;
     }
@@ -649,6 +702,8 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f); // NOLINT(clang-analyzer-unix.Malloc)
         return false;
     }
+    checksum = atlas_cache_combine(checksum, out_page_w, (size_t)page_count_val * sizeof(uint32_t));
+    checksum = atlas_cache_combine(checksum, out_page_h, (size_t)page_count_val * sizeof(uint32_t));
 
     /* Validate page dimensions (max 16384 to bound allocation) */
     for (uint32_t p = 0; p < page_count_val; p++) {
@@ -669,6 +724,7 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
         (void)fclose(f);
         return false;
     }
+    checksum = atlas_cache_combine(checksum, placements, (size_t)placement_count * sizeof(AtlasPlacement));
 
     /* Validate per-placement fields — a corrupted cache file with valid outer
      * counts but garbage placement records would cause OOB access downstream
@@ -685,9 +741,17 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
             (void)fclose(f);
             return false;
         }
-        /* Bounds-check placement against its page dimensions */
-        if (placements[i].x >= out_page_w[pg] || placements[i].y >= out_page_h[pg] || placements[i].trimmed_w > out_page_w[pg] || placements[i].trimmed_h > out_page_h[pg] ||
-            placements[i].transform > 7) {
+        if (placements[i].transform > 7) {
+            free(placements);
+            (void)fclose(f);
+            return false;
+        }
+        /* Bounds-check placement against its page dimensions — the far edge too, or
+         * a forged-but-checksummed record bakes UVs past the page. trimmed_w/h are
+         * pre-transform; a diagonal placement occupies them swapped. */
+        const uint32_t fw = (placements[i].transform & 4U) ? placements[i].trimmed_h : placements[i].trimmed_w;
+        const uint32_t fh = (placements[i].transform & 4U) ? placements[i].trimmed_w : placements[i].trimmed_h;
+        if (placements[i].x >= out_page_w[pg] || placements[i].y >= out_page_h[pg] || fw > out_page_w[pg] - placements[i].x || fh > out_page_h[pg] - placements[i].y) {
             free(placements);
             (void)fclose(f);
             return false;
@@ -716,6 +780,20 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
             (void)fclose(f);
             return false;
         }
+        checksum = atlas_cache_combine(checksum, page_pixels_arr[p], pixel_bytes);
+    }
+
+    /* Whole-payload checksum: in-range corruption (placement coords, pixels)
+     * passes every bounds check above yet must still be a graceful miss. */
+    uint64_t stored_checksum = 0;
+    if (fread(&stored_checksum, sizeof(uint64_t), 1, f) != 1 || stored_checksum != checksum) {
+        for (uint32_t q = 0; q < page_count_val; q++) {
+            free(page_pixels_arr[q]);
+        }
+        free((void *)page_pixels_arr);
+        free(placements);
+        (void)fclose(f);
+        return false;
     }
 
     (void)fclose(f);
@@ -853,6 +931,7 @@ static void atlas_assert_sprite_opts(const nt_atlas_sprite_opts_t *sopts) {
     NT_BUILD_ASSERT(sopts->shape <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     /* allowed_transforms: any uint8 mask is legal (identity floor applied downstream). */
     NT_BUILD_ASSERT((sopts->max_vertices == 0 || (sopts->max_vertices >= 4 && sopts->max_vertices <= 16)) && "max_vertices override must be 0 (atlas default) or 4..16");
+    NT_BUILD_ASSERT(sopts->dedup <= NT_ATLAS_SPRITE_DEDUP_OFF && "dedup override must be 0 (atlas default), NT_ATLAS_SPRITE_DEDUP_ON or _OFF");
 }
 
 /* Atlas-shape-dependent sprite cross-field asserts (slice9→RECT, extrude>0→RECT
@@ -893,6 +972,7 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->max_verts_override = sopts->max_vertices;
     sprite->margin_override = sopts->margin;
     sprite->extrude_override = sopts->extrude;
+    sprite->dedup_override = sopts->dedup;
     /* Slice9 auto-force: RECT shape + identity-only transform mask. */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
@@ -1131,6 +1211,10 @@ typedef struct {
     /* Dedup */
     int32_t *dedup_map;
     uint32_t *unique_indices;
+    /* Orientation at which sprite i's local space is stored inside the shared placement
+     * rectangle, i.e. root_bitmap == alias_rel[i](sprite_i_bitmap) — same meaning as
+     * pl->transform. Identity everywhere until the D4 stage populates it. */
+    uint8_t *alias_rel;
 
     /* Geometry */
     uint32_t *vertex_counts;
@@ -1155,6 +1239,14 @@ typedef struct {
     PackStats stats;
     uint32_t sprite_count;
     uint32_t unique_count;
+    /* Blocks folded by byte equality in pipeline_serialize — the only observable
+     * proving that sharing actually happens. */
+    uint32_t vertex_blocks_shared;
+    /* Aliases split by relative transform, plus the post-trim area their shared
+     * placements save. */
+    uint32_t folds_exact;
+    uint32_t folds_d4;
+    uint64_t area_saved_px;
     uint32_t placement_count;
     uint32_t page_count;
     uint32_t thread_count;
@@ -1162,6 +1254,45 @@ typedef struct {
     uint32_t page_h[ATLAS_MAX_PAGES];
     bool cache_hit;
 } AtlasPipeline;
+
+/* Single expression for the effective D4 mask, shared by the packer, the group
+ * narrowing and the output check. A non-zero sprite mask replaces the atlas
+ * default; identity stays mandatory. */
+static uint8_t atlas_sprite_effective_mask(const AtlasPipeline *p, uint32_t i) {
+    const uint8_t sm = p->sprites[i].transforms_override;
+    return (uint8_t)((sm ? sm : p->opts->allowed_transforms) | NT_ATLAS_TRANSFORMS_IDENTITY);
+}
+
+/* Raise-only: a per-sprite margin below the atlas margin is clamped up. */
+static uint32_t atlas_sprite_resolved_margin(const AtlasPipeline *p, uint32_t i) {
+    const uint32_t sm = p->sprites[i].margin_override;
+    return sm > p->opts->margin ? sm : p->opts->margin;
+}
+
+/* A per-sprite extrude replaces the atlas value in either direction; 0 inherits,
+ * so a zero bleed cannot be expressed per sprite. */
+static uint32_t atlas_sprite_resolved_extrude(const AtlasPipeline *p, uint32_t i) { return p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude; }
+
+/* Placements a group may take without pushing sprite i's region transform outside
+ * its own mask. A mask subset need not be closed under D4 composition (the group
+ * is, an arbitrary mask is not), so this is computed per placement candidate
+ * rather than assumed; the group mask is the intersection over its members.
+ * Identity is always in the result because rel itself is. */
+static uint8_t atlas_alias_admissible_placements(const AtlasPipeline *p, uint32_t i) {
+    const uint8_t mask = atlas_sprite_effective_mask(p, i);
+    const uint8_t rel = p->alias_rel[i];
+    uint8_t out = 0;
+    for (uint8_t t = 0; t < 8U; t++) {
+        if (mask & (uint8_t)(1U << d4_compose(t, rel))) {
+            out |= (uint8_t)(1U << t);
+        }
+    }
+    return out;
+}
+
+/* Pixels stripped from the BOTTOM edge in y-up source space. Alpha-trim records
+ * trim_y from the PNG-top, so the y-up conversion is source_h - trim_y - trim_h. */
+static int32_t atlas_sprite_trim_offset_y_up(const AtlasPipeline *p, uint32_t i) { return (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i]; }
 
 static void pipeline_resolve_geometry_opts(AtlasPipeline *p) {
     p->geometry_opts = (AtlasGeometryOpts *)malloc((size_t)p->sprite_count * sizeof(AtlasGeometryOpts));
@@ -1238,15 +1369,16 @@ static void pipeline_cache_check(AtlasPipeline *p) {
 
 /* --- pipeline_dedup: detect duplicate sprites by hash + pixel comparison --- */
 
+/* Resolved effective values only: two spellings of the same packing decision are the
+ * same content. The slice9 borders are per-region metadata that never reaches the
+ * packed pixels, and the transform mask is admission policy — comparing it would
+ * make every group mask-uniform and the group intersection dead code. */
 static bool pipeline_dedup_meta_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
-    const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
-    const NtAtlasSpriteInput *so = &p->sprites[orig_idx];
-    return sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
-           sc->has_max_added_area_percent_override == so->has_max_added_area_percent_override &&
-           (!sc->has_max_added_area_percent_override || sc->max_added_area_percent_override == so->max_added_area_percent_override) &&
-           p->geometry_opts[curr_idx].effective_alpha_threshold == p->geometry_opts[orig_idx].effective_alpha_threshold && sc->shape_override == so->shape_override &&
-           sc->transforms_override == so->transforms_override && sc->max_verts_override == so->max_verts_override && sc->margin_override == so->margin_override &&
-           sc->extrude_override == so->extrude_override;
+    const AtlasGeometryOpts *gc = &p->geometry_opts[curr_idx];
+    const AtlasGeometryOpts *go = &p->geometry_opts[orig_idx];
+    return gc->shape == go->shape && gc->max_vertices == go->max_vertices && gc->effective_alpha_threshold == go->effective_alpha_threshold &&
+           gc->max_added_area_percent == go->max_added_area_percent && atlas_sprite_resolved_margin(p, curr_idx) == atlas_sprite_resolved_margin(p, orig_idx) &&
+           atlas_sprite_resolved_extrude(p, curr_idx) == atlas_sprite_resolved_extrude(p, orig_idx);
 }
 
 static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_idx, uint32_t orig_idx) {
@@ -1269,49 +1401,366 @@ static bool pipeline_dedup_pixels_match(const AtlasPipeline *p, uint32_t curr_id
     return true;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void pipeline_dedup(AtlasPipeline *p) {
-    DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(p->sprite_count * sizeof(DedupSortEntry));
-    NT_BUILD_ASSERT(dedup_entries && "pipeline_dedup: alloc failed");
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        dedup_entries[i].index = i;
-        dedup_entries[i].hash = p->sprites[i].decoded_hash;
+/* rel means root_bitmap == rel(a_bitmap). The opposite direction would force
+ * d4_inverse(rel) into reg->transform, which need not be in the alias's own mask. */
+static bool pipeline_dedup_pixels_match_rel(const AtlasPipeline *p, uint32_t a_idx, uint32_t root_idx, uint8_t rel) {
+    const uint32_t aw = p->trim_w[a_idx];
+    const uint32_t ah = p->trim_h[a_idx];
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    if (aw == 0 || ah == 0) {
+        return false; /* Degenerate trim is a content error, not content two sprites share. */
     }
-    qsort(dedup_entries, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
-
-    /* Map duplicate -> original. -1 = unique. */
-    p->dedup_map = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
-    NT_BUILD_ASSERT(p->dedup_map && "pipeline_dedup: alloc failed");
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        p->dedup_map[i] = -1;
+    d4_dims_after(rel, aw, ah, &ow, &oh);
+    if (ow != p->trim_w[root_idx] || oh != p->trim_h[root_idx]) {
+        return false; /* Reject before any read: the two buffers have different shapes. */
     }
-
-    for (uint32_t i = 1; i < p->sprite_count; i++) {
-        const uint32_t curr_idx = dedup_entries[i].index;
-        uint32_t j = i;
-        while (j > 0 && dedup_entries[j - 1].hash == dedup_entries[i].hash) {
-            j--;
-            uint32_t orig = dedup_entries[j].index;
-            while (p->dedup_map[orig] >= 0) {
-                orig = (uint32_t)p->dedup_map[orig];
+    if (rel == 0) {
+        return pipeline_dedup_pixels_match(p, a_idx, root_idx);
+    }
+    const NtAtlasSpriteInput *sa = &p->sprites[a_idx];
+    const NtAtlasSpriteInput *sr = &p->sprites[root_idx];
+    const size_t a_stride = (size_t)sa->width * 4U;
+    const size_t r_stride = (size_t)sr->width * 4U;
+    const uint8_t *a_org = sa->rgba + ((size_t)p->trim_y[a_idx] * a_stride) + ((size_t)p->trim_x[a_idx] * 4U);
+    const uint8_t *r_org = sr->rgba + ((size_t)p->trim_y[root_idx] * r_stride) + ((size_t)p->trim_x[root_idx] * 4U);
+    for (uint32_t y = 0; y < ah; y++) {
+        for (uint32_t x = 0; x < aw; x++) {
+            int32_t tx = 0;
+            int32_t ty = 0;
+            /* Texel variant: the corner variant maps 0..w and is off by one on every mirror. */
+            transform_point_texel((int32_t)x, (int32_t)y, rel, (int32_t)aw, (int32_t)ah, &tx, &ty);
+            /* Hard bound — the read crosses into another sprite's buffer. */
+            if (tx < 0 || ty < 0 || (uint32_t)tx >= ow || (uint32_t)ty >= oh) {
+                return false;
             }
-            if (pipeline_dedup_meta_match(p, curr_idx, orig) && pipeline_dedup_pixels_match(p, curr_idx, orig)) {
-                p->dedup_map[curr_idx] = (int32_t)orig;
+            const uint8_t *px_a = a_org + ((size_t)y * a_stride) + ((size_t)x * 4U);
+            const uint8_t *px_r = r_org + ((size_t)(uint32_t)ty * r_stride) + ((size_t)(uint32_t)tx * 4U);
+            if (memcmp(px_a, px_r, 4U) != 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* Unordered post-trim dimension pair: D4-invariant, so any two sprites related by a
+ * transform share it, and it costs no raster pass. */
+static uint64_t atlas_sprite_dim_key(const AtlasPipeline *p, uint32_t i) {
+    const uint32_t w = p->trim_w[i];
+    const uint32_t h = p->trim_h[i];
+    return ((uint64_t)(w < h ? w : h) << 32U) | (w < h ? h : w);
+}
+
+/* Grouping key = minimum of the post-trim orientation hashes. Deliberately
+ * mask-independent: a mask is admission policy, not content identity. */
+static void atlas_write_oriented_trim(const uint8_t *src, size_t src_stride, uint32_t tw, uint32_t th, uint8_t t, uint8_t *scratch) {
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    d4_dims_after(t, tw, th, &ow, &oh);
+    for (uint32_t y = 0; y < th; y++) {
+        const uint8_t *row = src + ((size_t)y * src_stride);
+        if (t == 0) {
+            memcpy(scratch + ((size_t)y * tw * 4U), row, (size_t)tw * 4U);
+            continue;
+        }
+        for (uint32_t x = 0; x < tw; x++) {
+            int32_t tx = 0;
+            int32_t ty = 0;
+            /* Texel variant: the corner variant maps 0..w and is off by one on every mirror. */
+            transform_point_texel((int32_t)x, (int32_t)y, t, (int32_t)tw, (int32_t)th, &tx, &ty);
+            /* Hard bound — this indexes a WRITE into scratch, and NT_ASSERT_MODE=OFF
+             * compiles the assert away. Mirrors the guard on the compare path. */
+            NT_BUILD_ASSERT(tx >= 0 && ty >= 0 && (uint32_t)tx < ow && (uint32_t)ty < oh && "canonical hash: texel outside the scratch buffer");
+            if (tx < 0 || ty < 0 || (uint32_t)tx >= ow || (uint32_t)ty >= oh) {
+                continue;
+            }
+            memcpy(scratch + ((((size_t)(uint32_t)ty * ow) + (uint32_t)tx) * 4U), row + ((size_t)x * 4U), 4U);
+        }
+    }
+}
+
+static uint64_t atlas_sprite_canonical_hash(const AtlasPipeline *p, uint32_t i, uint8_t *scratch, uint8_t orbit_count) {
+    const uint32_t tw = p->trim_w[i];
+    const uint32_t th = p->trim_h[i];
+    if (tw == 0 || th == 0) {
+        return 0; /* Transparent after trim — already a content error. */
+    }
+    /* nt_hash64 takes a uint32 length; a uint32 product would silently hash a
+     * prefix. pipeline_validate rejects such a sprite moments later, so refusing
+     * to group it costs nothing. */
+    const size_t bytes = (size_t)tw * th * 4U;
+    if (bytes > UINT32_MAX) {
+        return 0;
+    }
+    const NtAtlasSpriteInput *s = &p->sprites[i];
+    const size_t src_stride = (size_t)s->width * 4U;
+    const uint8_t *src = s->rgba + ((size_t)p->trim_y[i] * src_stride) + ((size_t)p->trim_x[i] * 4U);
+    uint64_t best = UINT64_MAX;
+    for (uint8_t t = 0; t < orbit_count; t++) {
+        atlas_write_oriented_trim(src, src_stride, tw, th, t, scratch);
+        const uint64_t h = nt_hash64(scratch, (uint32_t)bytes).value;
+        best = h < best ? h : best;
+    }
+    return best;
+}
+
+/* End of the dim_key bucket starting at lo. */
+static uint32_t dedup_bucket_end(const DedupSortEntry *e, uint32_t count, uint32_t lo) {
+    uint32_t hi = lo + 1;
+    while (hi < count && e[hi].dim_key == e[lo].dim_key) {
+        hi++;
+    }
+    return hi;
+}
+
+/* End of the equal-content run starting at lo. */
+static uint32_t dedup_group_end(const DedupSortEntry *e, uint32_t count, uint32_t lo) {
+    uint32_t hi = lo + 1;
+    while (hi < count && e[hi].dim_key == e[lo].dim_key && e[hi].hash == e[lo].hash) {
+        hi++;
+    }
+    return hi;
+}
+
+/* Largest post-trim area among buckets that can actually fold — every member of a bucket
+ * shares its dimension pair, so one entry sizes the whole bucket. */
+static size_t dedup_scratch_bytes(const AtlasPipeline *p, const DedupSortEntry *e) {
+    size_t bytes = 0;
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
+        if (hi - lo >= 2) {
+            const uint32_t idx = e[lo].index;
+            /* Mirrors the bail in atlas_sprite_canonical_hash: a sprite it refuses to
+             * hash must not size the scratch either. */
+            const uint64_t need = (uint64_t)p->trim_w[idx] * p->trim_h[idx] * 4U;
+            bytes = (need <= UINT32_MAX && need > (uint64_t)bytes) ? (size_t)need : bytes;
+        }
+        lo = hi;
+    }
+    return bytes;
+}
+
+static void dedup_hash_bucket(const AtlasPipeline *p, DedupSortEntry *e, uint32_t lo, uint32_t hi, uint8_t *scratch, uint8_t orbit_count) {
+    for (uint32_t k = lo; k < hi; k++) {
+        /* A dedup-off sprite is skipped in the fold search as member and as target
+         * alike, so its key is never read — keeping hash 0 costs it nothing. */
+        if (!atlas_sprite_dedup_enabled(&p->sprites[e[k].index], p->opts)) {
+            continue;
+        }
+        e[k].hash = atlas_sprite_canonical_hash(p, e[k].index, scratch, orbit_count);
+    }
+}
+
+/* Per bucket, never per sprite: min-over-orbit is orientation-invariant only when the
+ * orientation set is a subgroup, and a mask like {identity, rot90} is not closed. */
+static uint8_t dedup_bucket_orbit_count(const AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
+    uint8_t mask = 0;
+    for (uint32_t k = lo; k < hi; k++) {
+        if (!atlas_sprite_dedup_enabled(&p->sprites[e[k].index], p->opts)) {
+            continue;
+        }
+        mask |= atlas_sprite_effective_mask(p, e[k].index);
+    }
+    if (mask == 0) {
+        return 0;
+    }
+    return mask == NT_ATLAS_TRANSFORMS_IDENTITY ? 1U : 8U;
+}
+
+/* Entries must already be dim_key-sorted. Only buckets that can fold pay the
+ * orientation hashes; a singleton keeps hash 0 and cannot meet anything. */
+static void pipeline_dedup_hash_buckets(const AtlasPipeline *p, DedupSortEntry *e) {
+    const size_t scratch_bytes = dedup_scratch_bytes(p, e);
+    if (scratch_bytes == 0) {
+        return; /* No bucket holds two sprites — nothing can meet anything. */
+    }
+    /* One buffer for the whole pass — a per-sprite allocation in an O(8N) loop is wrong
+     * even in an offline tool. */
+    uint8_t *scratch = (uint8_t *)malloc(scratch_bytes);
+    NT_BUILD_ASSERT(scratch && "pipeline_dedup: orientation scratch alloc failed");
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_bucket_end(e, p->sprite_count, lo);
+        const uint8_t orbit_count = (hi - lo >= 2) ? dedup_bucket_orbit_count(p, e, lo, hi) : 0U;
+        if (orbit_count != 0) {
+            dedup_hash_bucket(p, e, lo, hi, scratch, orbit_count);
+        }
+        lo = hi;
+    }
+    free(scratch);
+}
+
+#ifdef NT_TEST_ACCESS
+/* 0xFF disables. Corrupts the next alias recorded so a test can prove the coverage
+ * proof rejects a wrong relative transform. */
+static uint8_t g_force_alias_rel = 0xFFU;
+void nt_atlas_test_force_alias_rel(uint8_t rel) { g_force_alias_rel = rel; }
+#endif
+
+static void pipeline_dedup_record_alias(AtlasPipeline *p, uint32_t a, uint32_t root, uint8_t rel) {
+    p->dedup_map[a] = (int32_t)root;
+    p->alias_rel[a] = rel;
+#ifdef NT_TEST_ACCESS
+    /* One-shot and self-clearing: a leaked arm would otherwise corrupt the first
+     * alias of every later atlas in the same process. */
+    if (g_force_alias_rel != 0xFFU) {
+        p->alias_rel[a] = g_force_alias_rel;
+        g_force_alias_rel = 0xFFU;
+    }
+#endif
+    if (p->alias_rel[a] == 0) {
+        p->folds_exact++;
+    } else {
+        p->folds_d4++;
+    }
+    p->area_saved_px += (uint64_t)p->trim_w[a] * p->trim_h[a];
+}
+
+/* Lowest relative transform the alias's own mask permits and its pixels confirm. Ascending
+ * order is what makes the choice deterministic when symmetric art matches under several
+ * relatives; rel == 0 IS the exact stage, so there is no separate exact pass. */
+static bool pipeline_dedup_find_rel(const AtlasPipeline *p, uint32_t a, uint32_t root, uint8_t *out_rel) {
+    const uint8_t mask = atlas_sprite_effective_mask(p, a);
+    for (uint8_t rel = 0; rel < 8U; rel++) {
+        if (!(mask & (uint8_t)(1U << rel))) {
+            continue; /* A sprite may only join with a relative its own mask permits. */
+        }
+        if (!pipeline_dedup_pixels_match_rel(p, a, root, rel)) {
+            continue;
+        }
+        *out_rel = rel;
+        return true;
+    }
+    return false;
+}
+
+/* Walked in add order: the root decides every alias's relative transform and emitted
+ * block, so lowest-add-index roots are what keep a repack byte-identical. */
+static void pipeline_dedup_fold_run(AtlasPipeline *p, const DedupSortEntry *e, uint32_t lo, uint32_t hi) {
+    for (uint32_t m = lo + 1; m < hi; m++) {
+        const uint32_t a = e[m].index;
+        /* dedup = off is bidirectional: excluded here as a member and below as a target.
+         * Because this one search subsumes the exact stage, that also covers the
+         * source-identical case — no second guard exists or is needed. */
+        if (!atlas_sprite_dedup_enabled(&p->sprites[a], p->opts)) {
+            continue;
+        }
+        for (uint32_t r = lo; r < m; r++) {
+            const uint32_t root = e[r].index;
+            /* Only roots are targets; a non-root's own root sits earlier in the run and was
+             * already tried, so no chain-follow is needed. */
+            if (p->dedup_map[root] >= 0 || !atlas_sprite_dedup_enabled(&p->sprites[root], p->opts)) {
+                continue;
+            }
+            uint8_t rel = 0;
+            if (pipeline_dedup_meta_match(p, a, root) && pipeline_dedup_find_rel(p, a, root, &rel)) {
+                pipeline_dedup_record_alias(p, a, root, rel);
                 break;
             }
         }
     }
-    free(dedup_entries);
+}
 
-    /* Count unique sprites */
+static DedupSortEntry *pipeline_dedup_sorted_entries(const AtlasPipeline *p) {
+    DedupSortEntry *e = (DedupSortEntry *)calloc(p->sprite_count, sizeof(DedupSortEntry));
+    NT_BUILD_ASSERT(e && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        /* The add-order root rule rests on the sprite array being in add order. A rejected
+         * add consumes an add_seq without appending, so the two only rise together. */
+        NT_BUILD_ASSERT((i == 0 || p->sprites[i].add_seq > p->sprites[i - 1].add_seq) && "pipeline_dedup: sprite array is not in add order");
+        e[i].index = i;
+        e[i].dim_key = atlas_sprite_dim_key(p, i);
+    }
+    qsort(e, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    pipeline_dedup_hash_buckets(p, e);
+    qsort(e, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    return e;
+}
+
+static void pipeline_dedup_collect_unique(AtlasPipeline *p) {
     p->unique_count = 0;
     p->unique_indices = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(p->unique_indices && "pipeline_dedup: alloc failed");
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] < 0) {
             p->unique_indices[p->unique_count++] = i;
+            continue;
+        }
+        NT_BUILD_ASSERT(p->dedup_map[(uint32_t)p->dedup_map[i]] < 0 && "pipeline_dedup: every alias must point at a root");
+    }
+}
+
+static void pipeline_dedup(AtlasPipeline *p) {
+    DedupSortEntry *dedup_entries = pipeline_dedup_sorted_entries(p);
+
+    /* Map duplicate -> original. -1 = unique. */
+    p->dedup_map = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
+    p->alias_rel = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(p->dedup_map && p->alias_rel && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        p->dedup_map[i] = -1;
+    }
+
+    for (uint32_t lo = 0; lo < p->sprite_count;) {
+        const uint32_t hi = dedup_group_end(dedup_entries, p->sprite_count, lo);
+        pipeline_dedup_fold_run(p, dedup_entries, lo, hi);
+        lo = hi;
+    }
+    free(dedup_entries);
+#ifdef NT_TEST_ACCESS
+    /* Disarm even on a zero-fold pass — a leaked arm would corrupt the first alias
+     * of a later atlas in this process. An all-failed commit returns before dedup,
+     * so the arm is per-dedup-pass, not per-commit. */
+    g_force_alias_rel = 0xFFU;
+#endif
+
+    pipeline_dedup_collect_unique(p);
+}
+
+/* Cache hits skip pack AND compose, so this check alone re-imposes the packer's
+ * reserved footprint — pad over-approximates the in-page bound the UV bake needs.
+ * Serialize bakes UVs from THIS run's trim dims, not the cached trimmed_w/h. */
+static bool cache_placement_footprint_ok(const AtlasPipeline *p, const AtlasPlacement *pl) {
+    const uint32_t root = pl->sprite_index;
+    const uint32_t fw = (pl->transform & 4U) ? p->trim_h[root] : p->trim_w[root];
+    const uint32_t fh = (pl->transform & 4U) ? p->trim_w[root] : p->trim_h[root];
+    const uint64_t pad = (2ULL * atlas_sprite_resolved_extrude(p, root)) + (atlas_sprite_resolved_margin(p, root) - p->opts->margin);
+    return pl->trimmed_w == p->trim_w[root] && pl->trimmed_h == p->trim_h[root] && (uint64_t)pl->x + pad + fw <= p->page_w[pl->page] && (uint64_t)pl->y + pad + fh <= p->page_h[pl->page];
+}
+
+/* A cache file passes atlas_cache_read's bounds checks yet can still disagree with
+ * this run's dedup (bit rot, foreign writer). The cache contract is fail-gracefully-
+ * rebuild, so the serialize hard gates must stay unreachable from disk data. */
+static bool pipeline_cache_placements_consistent(const AtlasPipeline *p) {
+    if (p->placement_count != p->unique_count) {
+        return false;
+    }
+    uint32_t *pl_of = (uint32_t *)malloc((size_t)p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(pl_of && "cache consistency: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        pl_of[i] = UINT32_MAX;
+    }
+    bool ok = true;
+    for (uint32_t pi = 0; ok && pi < p->placement_count; pi++) {
+        const AtlasPlacement *pl = &p->placements[pi];
+        ok = pl->sprite_index < p->sprite_count && p->dedup_map[pl->sprite_index] < 0 && pl_of[pl->sprite_index] == UINT32_MAX && pl->transform < 8U && pl->page < p->page_count &&
+             cache_placement_footprint_ok(p, pl);
+        if (ok) {
+            pl_of[pl->sprite_index] = pi;
         }
     }
+    for (uint32_t i = 0; ok && i < p->sprite_count; i++) {
+        const uint32_t root = p->dedup_map[i] < 0 ? i : (uint32_t)p->dedup_map[i];
+        const uint32_t pi = pl_of[root];
+        if (pi == UINT32_MAX) {
+            ok = false;
+            break;
+        }
+        const uint8_t rt = d4_compose(p->placements[pi].transform, p->alias_rel[i]);
+        ok = (atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt)) != 0;
+    }
+    free(pl_of);
+    return ok;
 }
 
 /* Candidate ownership transfers only through the frontier. */
@@ -1352,10 +1801,16 @@ typedef struct {
 
 static bool geometry_point_less(Point2D left, Point2D right) { return left.x != right.x ? left.x < right.x : left.y < right.y; }
 
-static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
+/* Rotate a ring to start at its lexicographically smallest vertex. Every emitted ring
+ * goes through this, so the same bitmap yields the same vertex and index bytes no
+ * matter whether it was traced from a contour or pulled back through a D4 transform. */
+static void geometry_canonicalize_ring(Point2D *poly, uint32_t count) {
+    if (poly == NULL || count < 3 || count > NT_POLYGON_MAX_VERTICES) {
+        return;
+    }
     uint32_t first = 0;
-    for (uint32_t i = 1; i < candidate->count; i++) {
-        if (geometry_point_less(candidate->poly[i], candidate->poly[first])) {
+    for (uint32_t i = 1; i < count; i++) {
+        if (geometry_point_less(poly[i], poly[first])) {
             first = i;
         }
     }
@@ -1363,11 +1818,13 @@ static void geometry_candidate_canonicalize(GeometryCandidate *candidate) {
         return;
     }
     Point2D canonical[NT_POLYGON_MAX_VERTICES];
-    for (uint32_t i = 0; i < candidate->count; i++) {
-        canonical[i] = candidate->poly[(first + i) % candidate->count];
+    for (uint32_t i = 0; i < count; i++) {
+        canonical[i] = poly[(first + i) % count];
     }
-    memcpy(candidate->poly, canonical, (size_t)candidate->count * sizeof(Point2D));
+    memcpy(poly, canonical, (size_t)count * sizeof(Point2D));
 }
+
+static void geometry_candidate_canonicalize(GeometryCandidate *candidate) { geometry_canonicalize_ring(candidate->poly, candidate->count); }
 
 static bool geometry_frontier_finalize(GeometryFrontier *frontier, GeometryCandidate *candidate) {
     if (!candidate->valid || !candidate->poly || candidate->count < 3 || candidate->count > frontier->max_vertices || candidate->count > NT_POLYGON_MAX_VERTICES) {
@@ -2194,6 +2651,104 @@ static bool pipeline_install_geometry_selection(AtlasPipeline *p, uint32_t idx, 
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx);
 
+/* Triangulate like a standalone pack would: remapping the root's indices survives the
+ * odd-parity ring reversal but in an order atlas_region_flags_from_indices rejects,
+ * dropping the QUAD_* hint. Triangle count is D4-invariant, so the sizing holds. */
+static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, uint32_t expected_index_count) {
+    uint32_t produced = 0;
+    const bool ok = nt_polygon_triangulate_validated(ring, n, out, &produced, NULL);
+    NT_BUILD_ASSERT(ok && produced == expected_index_count && "alias geometry: derived ring failed to retriangulate");
+    /* Hard fallback — on the failure path the callee may not have written `out` at
+     * all, and NT_ASSERT_MODE=OFF would let malloc garbage reach the blob. */
+    if (!ok || produced != expected_index_count) {
+        memset(out, 0, (size_t)expected_index_count * sizeof(uint16_t));
+    }
+}
+
+/* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing.
+ * The handler is the embedder's observation channel; it may not return (test traps). */
+static _Noreturn void atlas_invariant_abort_at(const AtlasPipeline *p, const char *what, const char *file, int line) {
+    NT_LOG_ERROR("atlas '%s': internal invariant broken (%s)", p->state->name, what);
+    if (nt_build_assert_handler) {
+        nt_build_assert_handler(what, file, line);
+    }
+    abort();
+}
+/* Call-site file:line — a handler keying diagnostics on location must not see
+ * every gate collapsed onto the helper's own line. */
+#define atlas_invariant_abort(p, what) atlas_invariant_abort_at((p), (what), __FILE__, __LINE__)
+
+/* Re-prove against the alias's OWN mask — this pass is what catches a wrong relative
+ * transform, so never short-circuit it on the root's area-preservation argument. */
+static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
+    const nt_selected_geometry_proof_t *root_proof = &p->geometry_proofs[orig];
+    uint8_t *binary = pipeline_geometry_binary_mask(p, i);
+    nt_selected_geometry_proof_t proof =
+        nt_selected_geometry_validate(binary, p->trim_w[i], p->trim_h[i], root_proof->opaque_area2, p->baseline_vertices[i], p->baseline_vertex_counts[i], root_proof->base_area2,
+                                      p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], p->hull_vertices[i], p->vertex_counts[i], root_proof->selected_area2,
+                                      p->triangle_indices[i], p->triangle_index_counts[i], p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
+    free(binary);
+    const bool ok = proof.valid && nt_selected_geometry_proof_equal(&proof, root_proof);
+    NT_BUILD_ASSERT(ok && "alias geometry proof mismatch");
+    /* Hard gate — an asserts-off build must not store an invalid proof, which every
+     * downstream check would then wave through as well. */
+    if (!ok) {
+        atlas_invariant_abort(p, "alias geometry proof mismatch");
+    }
+    p->geometry_proofs[i] = proof;
+}
+
+/* Pull the root's hull back through d4_inverse, in the ROOT's dims — that is the space
+ * the pull-back starts in. Re-tracing could pick a hull that is not the exact D4 image
+ * of the root's and therefore no longer fits the shared rectangle. */
+static void pipeline_derive_alias_geometry(AtlasPipeline *p, uint32_t i, uint32_t orig) {
+    /* pipeline_dedup chain-follows to a root before comparing, so no composition along a
+     * chain is ever needed. */
+    NT_BUILD_ASSERT(p->dedup_map[orig] < 0 && "alias geometry: dedup_map must point at a root, never at another alias");
+    if (p->hull_vertices[orig] == NULL) {
+        return; /* Root produced no geometry (content error / degenerate trim). */
+    }
+
+    const uint8_t inv = d4_inverse(p->alias_rel[i]);
+    const uint32_t rw = p->trim_w[orig];
+    const uint32_t rh = p->trim_h[orig];
+    uint32_t aw = 0;
+    uint32_t ah = 0;
+    d4_dims_after(inv, rw, rh, &aw, &ah);
+    NT_BUILD_ASSERT(aw == p->trim_w[i] && ah == p->trim_h[i] && "alias geometry: relative transform disagrees with the alias trim dims");
+
+    /* Vertex and index counts are D4-invariant. */
+    const uint32_t n = p->vertex_counts[orig];
+    const uint32_t idx_count = p->triangle_index_counts[orig];
+    const uint32_t bn = p->baseline_vertex_counts[orig];
+    const uint32_t bidx_count = p->baseline_triangle_index_counts[orig];
+    p->vertex_counts[i] = n;
+    p->triangle_index_counts[i] = idx_count;
+    p->baseline_vertex_counts[i] = bn;
+    p->baseline_triangle_index_counts[i] = bidx_count;
+
+    Point2D *hull = (Point2D *)malloc((size_t)n * sizeof(Point2D));
+    uint16_t *tris = (uint16_t *)malloc((size_t)idx_count * sizeof(uint16_t));
+    Point2D *base = (Point2D *)malloc((size_t)bn * sizeof(Point2D));
+    uint16_t *base_tris = (uint16_t *)malloc((size_t)bidx_count * sizeof(uint16_t));
+    NT_BUILD_ASSERT(hull && tris && base && base_tris && "pipeline_derive_alias_geometry: alloc failed");
+
+    polygon_transform(p->hull_vertices[orig], n, inv, (int32_t)rw, (int32_t)rh, hull);
+    polygon_transform(p->baseline_vertices[orig], bn, inv, (int32_t)rw, (int32_t)rh, base);
+    /* polygon_transform reverses the ring on odd parity, so the pull-back lands on a
+     * rotation the tracer would never emit — canonicalize before triangulating. */
+    geometry_canonicalize_ring(hull, n);
+    geometry_canonicalize_ring(base, bn);
+    alias_retriangulate(hull, n, tris, idx_count);
+    alias_retriangulate(base, bn, base_tris, bidx_count);
+
+    p->hull_vertices[i] = hull;
+    p->triangle_indices[i] = tris;
+    p->baseline_vertices[i] = base;
+    p->baseline_triangle_indices[i] = base_tris;
+    pipeline_reprove_alias_geometry(p, i, orig);
+}
+
 static bool geometry_merge_disjoint_components(uint8_t *binary, uint32_t width, uint32_t height, uint32_t *out_pass_count) {
     enum { MAX_PASS_COUNT = 8U };
     const uint32_t padded_width = width + (MAX_PASS_COUNT * 2U);
@@ -2346,6 +2901,13 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     free(binary_source);
                     free(binary);
                     push_content_error(p->state, p->sprites[idx].add_seq, p->sprites[idx].name, NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, tw, th);
+                    /* An alias shares the root's pixels, so it fails identically — report
+                     * every bad sprite in one pass instead of one per rebuild. */
+                    for (uint32_t a = 0; a < p->sprite_count; a++) {
+                        if (p->dedup_map[a] == (int32_t)idx) {
+                            push_content_error(p->state, p->sprites[a].add_seq, p->sprites[a].name, NT_BUILD_ERR_KIND_ATLAS_CONTOUR_VERTEX_OVERFLOW, p->trim_w[a], p->trim_h[a]);
+                        }
+                    }
                     continue;
                 }
 
@@ -2377,21 +2939,13 @@ static void pipeline_geometry(AtlasPipeline *p) {
         }
     }
 
-    /* Copy vertex data for duplicates from their originals */
+    // #region alias geometry — every alias owns a derived copy, never a borrowed pointer
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)p->dedup_map[i];
-            p->vertex_counts[i] = p->vertex_counts[orig];
-            p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
-            p->triangle_indices[i] = p->triangle_indices[orig];
-            p->triangle_index_counts[i] = p->triangle_index_counts[orig];
-            p->baseline_vertices[i] = p->baseline_vertices[orig];
-            p->baseline_vertex_counts[i] = p->baseline_vertex_counts[orig];
-            p->baseline_triangle_indices[i] = p->baseline_triangle_indices[orig];
-            p->baseline_triangle_index_counts[i] = p->baseline_triangle_index_counts[orig];
-            p->geometry_proofs[i] = p->geometry_proofs[orig];
+            pipeline_derive_alias_geometry(p, i, (uint32_t)p->dedup_map[i]);
         }
     }
+    // #endregion
 }
 
 static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t idx) {
@@ -2413,9 +2967,8 @@ static uint8_t *pipeline_geometry_binary_mask(const AtlasPipeline *p, uint32_t i
 
 /* Match the packing footprint, including larger per-sprite overrides. */
 static void atlas_fit_hull(const AtlasPipeline *p, uint32_t oi, Point2D quad[4], const Point2D **out_hull, uint32_t *out_count) {
-    uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-    uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
-    uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
+    uint32_t extra_margin = atlas_sprite_resolved_margin(p, oi) - p->opts->margin;
+    uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, oi);
     uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
     if (extra_margin > 0 || extra_extrude > 0 || p->hull_vertices[oi] == NULL) {
         uint32_t tw = p->trim_w[oi] + ((extra_margin + extra_extrude) * 2);
@@ -2484,14 +3037,16 @@ static void pipeline_validate(AtlasPipeline *p) {
         if (!unfittable[c]) {
             continue;
         }
-        /* Report the spacing actually reserved by the packer. */
-        uint32_t sprite_margin = p->sprites[c].margin_override ? p->sprites[c].margin_override : p->opts->margin;
-        uint32_t sprite_extrude = p->sprites[c].extrude_override ? p->sprites[c].extrude_override : p->opts->extrude;
-        uint32_t effective_margin = sprite_margin > p->opts->margin ? sprite_margin : p->opts->margin;
+        /* Every field describes the NAMED sprite k, not its group root: a transposed
+         * alias would otherwise be told its root's swapped size. Margin and extrude
+         * are resolved-equal across a group, so reading them from k keeps the record
+         * self-consistent without depending on that. */
+        uint32_t effective_margin = atlas_sprite_resolved_margin(p, k);
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, k);
         uint32_t effective_extrude = sprite_extrude > p->opts->extrude ? sprite_extrude : p->opts->extrude;
         nt_build_error_t e = {.kind = NT_BUILD_ERR_KIND_ATLAS_UNFITTABLE,
-                              .w = p->trim_w[c],
-                              .h = p->trim_h[c],
+                              .w = p->trim_w[k],
+                              .h = p->trim_h[k],
                               .padding = p->opts->padding,
                               .margin = effective_margin,
                               .max_size = p->opts->max_size,
@@ -2503,7 +3058,7 @@ static void pipeline_validate(AtlasPipeline *p) {
     free(unfittable);
 
     /* Region cap and duplicate names are independent content errors. */
-    if (p->sprite_count > UINT16_MAX) {
+    if (p->sprite_count > ATLAS_MAX_REGIONS) {
         push_content_error(p->state, p->state->add_seq_counter, NULL, NT_BUILD_ERR_KIND_ATLAS_TOO_MANY_REGIONS, 0, 0);
     }
     if (p->sprite_count > 0) {
@@ -2546,7 +3101,7 @@ static void pipeline_validate(AtlasPipeline *p) {
             push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_SPRITE_TOO_LARGE, p->sprites[i].width, p->sprites[i].height);
             continue;
         }
-        int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
+        int32_t trim_offset_y_up = atlas_sprite_trim_offset_y_up(p, i);
         if (p->trim_x[i] > INT16_MAX || trim_offset_y_up < INT16_MIN || trim_offset_y_up > INT16_MAX) {
             push_content_error(p->state, p->sprites[i].add_seq, p->sprites[i].name, NT_BUILD_ERR_KIND_ATLAS_TRIM_OFFSET_OVERFLOW, p->trim_x[i], (uint32_t)trim_offset_y_up);
         }
@@ -2603,9 +3158,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
      * serialization. */
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
-        uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-        uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
-        uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
+        uint32_t extra_margin = atlas_sprite_resolved_margin(p, oi) - p->opts->margin;
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, oi);
         uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
         if (extra_margin > 0 || extra_extrude > 0) {
             u_trim_w[i] += (extra_margin + extra_extrude) * 2;
@@ -2622,16 +3176,49 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         }
     }
 
-    /* A non-zero sprite mask replaces the atlas default; identity remains mandatory. */
     uint8_t *u_eff_transforms = (uint8_t *)calloc(p->unique_count, sizeof(uint8_t));
     NT_BUILD_ASSERT(u_eff_transforms && "pipeline_tile_pack: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
-        uint32_t oi = p->unique_indices[i];
-        uint8_t sm = p->sprites[oi].transforms_override;
-        uint8_t eff = sm ? sm : p->opts->allowed_transforms;
-        eff |= NT_ATLAS_TRANSFORMS_IDENTITY;
-        u_eff_transforms[i] = eff;
+        u_eff_transforms[i] = atlas_sprite_effective_mask(p, p->unique_indices[i]);
     }
+
+    // #region group placement mask
+    /* The packer orients a whole alias group at once, so the placement must be legal
+     * for every member — one rule that covers mixed masks and slice9 with no special
+     * case, since a nine-patch resolves to identity-only. A member's region transform
+     * is d4_compose(placement, its relative), so the placement itself is only
+     * admissible when that product lands inside the member's own mask. */
+    uint32_t *unique_slot = (uint32_t *)malloc((size_t)p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(unique_slot && "pipeline_tile_pack: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        unique_slot[i] = UINT32_MAX;
+    }
+    for (uint32_t u = 0; u < p->unique_count; u++) {
+        unique_slot[p->unique_indices[u]] = u;
+    }
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0) {
+            continue;
+        }
+        const uint32_t root = (uint32_t)p->dedup_map[i];
+        NT_BUILD_ASSERT(root < p->sprite_count && "pipeline_tile_pack: alias root out of range");
+        /* A consumer may define NT_BUILD_ASSERT away, so bound the read itself — and a
+         * skipped narrowing would ship placements outside a member's mask, so die loud. */
+        if (root >= p->sprite_count) {
+            atlas_invariant_abort(p, "alias root out of range");
+        }
+        const uint32_t u = unique_slot[root];
+        NT_BUILD_ASSERT(u < p->unique_count && "pipeline_tile_pack: alias root is not a unique sprite");
+        if (u >= p->unique_count) {
+            atlas_invariant_abort(p, "alias root is not a unique sprite");
+        }
+        u_eff_transforms[u] &= atlas_alias_admissible_placements(p, i);
+        /* No-op for valid data (a recorded rel keeps identity admissible); only the
+         * corrupted-rel test hook reaches it — the proof stage, not the packer, must reject. */
+        u_eff_transforms[u] |= NT_ATLAS_TRANSFORMS_IDENTITY;
+    }
+    free(unique_slot);
+    // #endregion
 
     /* Empty-page fit is validated up front in pipeline_validate (every sprite +
      * dedup alias), so by here every sprite provably fits — vector_pack's "empty
@@ -2673,10 +3260,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
 /* Per-sprite margin above the atlas baseline. tile_pack grows the footprint by
  * 2*extra on each axis; compose/serialize must shift content by `extra` so the
  * surplus splits evenly left/top + right/bottom instead of piling on one edge. */
-static uint32_t sprite_extra_margin(const AtlasPipeline *p, uint32_t si) {
-    uint32_t sprite_margin = p->sprites[si].margin_override ? p->sprites[si].margin_override : p->opts->margin;
-    return sprite_margin > p->opts->margin ? sprite_margin - p->opts->margin : 0;
-}
+static uint32_t sprite_extra_margin(const AtlasPipeline *p, uint32_t si) { return atlas_sprite_resolved_margin(p, si) - p->opts->margin; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_compose(AtlasPipeline *p) {
@@ -2692,7 +3276,7 @@ static void pipeline_compose(AtlasPipeline *p) {
     for (uint32_t pi = 0; pi < p->placement_count; pi++) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
-        uint32_t sprite_extrude = p->sprites[idx].extrude_override ? p->sprites[idx].extrude_override : p->opts->extrude;
+        uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, idx);
         uint32_t extra_margin = sprite_extra_margin(p, idx);
         uint32_t inner_x = pl->x + sprite_extrude + extra_margin;
         uint32_t inner_y = pl->y + sprite_extrude + extra_margin;
@@ -2725,7 +3309,7 @@ static void pipeline_debug_png(AtlasPipeline *p) {
                 continue;
             }
             uint32_t si = p->placements[pi].sprite_index;
-            uint32_t sprite_extrude = p->sprites[si].extrude_override ? p->sprites[si].extrude_override : p->opts->extrude;
+            uint32_t sprite_extrude = atlas_sprite_resolved_extrude(p, si);
             uint32_t extra_margin = sprite_extra_margin(p, si);
             uint32_t ix = p->placements[pi].x + sprite_extrude + extra_margin;
             uint32_t iy = p->placements[pi].y + sprite_extrude + extra_margin;
@@ -2765,19 +3349,60 @@ static void pipeline_cache_write(AtlasPipeline *p) {
     }
 }
 
-/* QUAD_* patterns match PNG-space CCW triangulation before winding swap. */
+/* Rotate a triangle to start at its lowest index — rotation preserves winding, and it
+ * is the only freedom the triangulator's start vertex has. */
+static void quad_tri_normalize(const uint16_t *in, uint16_t *out) {
+    uint32_t s = 0;
+    if (in[1] < in[s]) {
+        s = 1;
+    }
+    if (in[2] < in[s]) {
+        s = 2;
+    }
+    out[0] = in[s];
+    out[1] = in[(s + 1U) % 3U];
+    out[2] = in[(s + 2U) % 3U];
+}
+
+static bool quad_tri_less(const uint16_t *a, const uint16_t *b) {
+    for (uint32_t i = 0; i < 3U; i++) {
+        if (a[i] != b[i]) {
+            return a[i] < b[i];
+        }
+    }
+    return false;
+}
+
+/* Which diagonal a quad was split on, from PNG-space CCW indices before the winding
+ * swap. Matched up to triangle rotation and triangle order: Clipper2 picks its own
+ * start vertex, so demanding a literal 0,1,2,... would match nothing at all. */
 static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
     if (vertex_count != 4 || index_count != 6 || indices == NULL) {
         return 0;
     }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 0 && indices[4] == 2 && indices[5] == 3) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012023;
+    uint16_t lo[3];
+    uint16_t hi[3];
+    quad_tri_normalize(indices, lo);
+    quad_tri_normalize(indices + 3, hi);
+    if (quad_tri_less(hi, lo)) {
+        uint16_t swap[3];
+        memcpy(swap, lo, sizeof(swap));
+        memcpy(lo, hi, sizeof(lo));
+        memcpy(hi, swap, sizeof(hi));
     }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 0) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012130;
-    }
-    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 2) {
-        return NT_ATLAS_REGION_FLAG_QUAD_012132;
+    /* Canonical forms of 012+023, 012+130 and 012+132 under the same normalization.
+     * The fourth split {013,123} has no flag bit — an unmatched quad legally ships
+     * flags = 0 and takes the generic path, so absence here is never wrong. */
+    static const uint16_t k_patterns[3][6] = {
+        {0, 1, 2, 0, 2, 3},
+        {0, 1, 2, 0, 1, 3},
+        {0, 1, 2, 1, 3, 2},
+    };
+    static const uint8_t k_flags[3] = {NT_ATLAS_REGION_FLAG_QUAD_012023, NT_ATLAS_REGION_FLAG_QUAD_012130, NT_ATLAS_REGION_FLAG_QUAD_012132};
+    for (uint32_t k = 0; k < 3U; k++) {
+        if (memcmp(lo, k_patterns[k], sizeof(lo)) == 0 && memcmp(hi, k_patterns[k] + 3, sizeof(hi)) == 0) {
+            return k_flags[k];
+        }
     }
     return 0;
 }
@@ -2804,6 +3429,14 @@ static char *atlas_page_normalized_path(const char *atlas_name, uint32_t page);
 
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
 
+/* One sprite's serialized geometry, emitted before the blob is sized. Hashed and
+ * compared as raw bytes, so padding would make block identity non-deterministic. */
+typedef struct {
+    NtAtlasVertex vertices[NT_POLYGON_MAX_VERTICES];
+    uint16_t indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+} SerializeBlock;
+_Static_assert(sizeof(SerializeBlock) == (NT_POLYGON_MAX_VERTICES * sizeof(NtAtlasVertex)) + (NT_POLYGON_MAX_TRIANGLE_INDICES * sizeof(uint16_t)), "SerializeBlock must have no padding");
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_serialize(AtlasPipeline *p) {
     const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
@@ -2811,26 +3444,29 @@ static void pipeline_serialize(AtlasPipeline *p) {
      * validated pre-pack in pipeline_validate, so serialize is only ever reached
      * with every sprite within uint16 bounds. */
 
-    /* Count total vertices and indices for UNIQUE sprites only.
-     * Duplicates are sprites with identical pixel data — they share placement with
-     * their original (occupying the same atlas position), so they share vertex_start
-     * and index_start in the blob. This saves space for very large atlases.
-     * Pre-triangulated sprites have an explicit triangle count;
-     * single-component polygons use (n - 2) triangles.
+    /* Bound every sprite's block, alias included — each one owns its geometry and
+     * is emitted from it. The blob is sized afterwards, from the byte-deduplicated
+     * block totals.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
-    uint32_t total_vertex_count = 0;
-    uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
-        if (p->dedup_map[i] >= 0) {
-            continue; /* Duplicate — its vertex/index storage is shared with the original */
-        }
         NT_BUILD_ASSERT(p->geometry_proofs[i].valid && "pipeline_serialize: selected geometry proof missing");
-        total_vertex_count += p->vertex_counts[i];
+        /* Hard gate — asserts-off must not serialize geometry the proof system never accepted. */
+        if (!p->geometry_proofs[i].valid) {
+            atlas_invariant_abort(p, "selected geometry proof missing");
+        }
         uint32_t tri = p->triangle_index_counts[i] / 3U;
         NT_BUILD_ASSERT(p->triangle_index_counts[i] == (p->vertex_counts[i] - 2U) * 3U && "pipeline_serialize: selected triangle span mismatch");
         NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
-        total_index_count += tri * 3;
+        /* The emit stage writes into fixed-size per-sprite storage; geometry
+         * selection bounds both counts, so this can only fire on a builder bug. */
+        const bool block_in_bounds = p->vertex_counts[i] <= NT_POLYGON_MAX_VERTICES && p->triangle_index_counts[i] <= NT_POLYGON_MAX_TRIANGLE_INDICES;
+        NT_BUILD_ASSERT(block_in_bounds && "pipeline_serialize: block exceeds per-sprite scratch bound");
+        /* Hard guard — a consumer may define NT_BUILD_ASSERT away, and this is the
+         * only bound on the emit-stage write into SerializeBlock. */
+        if (!block_in_bounds) {
+            atlas_invariant_abort(p, "block exceeds per-sprite scratch bound");
+        }
     }
 
     /* Build placement lookup: original_sprite_index -> placement index.
@@ -2850,6 +3486,198 @@ static void pipeline_serialize(AtlasPipeline *p) {
             placement_lookup[i] = placement_lookup[orig];
         }
     }
+
+    /* Vertices + indices + regions.
+     *
+     * Every sprite's block — alias included — is emitted from its own geometry, its
+     * own relative transform and its own index array. Byte-identical blocks then
+     * share one byte range in the blob; pass 2 fills one NtAtlasRegion per sprite
+     * from the assigned offsets. */
+    SerializeBlock *blocks = (SerializeBlock *)calloc(p->sprite_count, sizeof(SerializeBlock));
+    uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    uint8_t *sprite_flags = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    uint8_t *region_transform = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(blocks && sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && region_transform && "pipeline_serialize: alloc failed");
+
+    // #region serialize emit
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        uint32_t pi = placement_lookup[i];
+        NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
+        if (pi >= p->placement_count) {
+            atlas_invariant_abort(p, "sprite has no placement");
+        }
+        AtlasPlacement *pl = &p->placements[pi];
+        /* An alias borrows exactly its root's placement; UV correctness for aliases
+         * rests on this routing, which no downstream proof re-checks. */
+        NT_BUILD_ASSERT((p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i]) && "pipeline_serialize: placement does not belong to this sprite's root");
+        /* Hard gate — asserts-off must not bake an alias's UVs from a foreign placement. */
+        if (!(p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i])) {
+            atlas_invariant_abort(p, "placement does not belong to this sprite's root");
+        }
+        /* alias local -> root local -> placement local. tile_pack only offered the
+         * packer placements whose product stays inside this sprite's own mask. */
+        uint8_t rt = d4_compose(pl->transform, p->alias_rel[i]);
+        NT_BUILD_ASSERT((atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt)) && "pipeline_serialize: region transform outside the sprite's own mask");
+        /* Hard gate — asserts-off must not ship an orientation the sprite's mask forbids. */
+        if (!(atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt))) {
+            atlas_invariant_abort(p, "region transform outside the sprite's own mask");
+        }
+        region_transform[i] = rt;
+
+        uint32_t vertex_count = p->vertex_counts[i];
+        uint32_t idx_count = p->triangle_index_counts[i];
+        sprite_idx_count[i] = idx_count;
+
+        uint16_t local_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+        memcpy(local_indices, p->triangle_indices[i], (size_t)idx_count * sizeof(uint16_t));
+        /* Flag detection runs on this sprite's own PNG-CCW pattern — must precede
+         * the winding swap below or every QUAD_* match would miss. */
+        sprite_flags[i] = atlas_region_flags_from_indices(vertex_count, idx_count, local_indices);
+        swap_triangle_winding(local_indices, idx_count);
+        /* Blob indices are local (0..vertex_count-1) and world-CCW after Y-flip. */
+        memcpy(blocks[i].indices, local_indices, (size_t)idx_count * sizeof(uint16_t));
+
+        uint32_t s_extrude = atlas_sprite_resolved_extrude(p, i);
+        uint32_t extra_margin = sprite_extra_margin(p, i);
+        uint32_t inner_x = pl->x + s_extrude + extra_margin;
+        uint32_t inner_y = pl->y + s_extrude + extra_margin;
+        uint32_t atlas_w = p->page_w[pl->page];
+        uint32_t atlas_h = p->page_h[pl->page];
+
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            NtAtlasVertex *vtx = &blocks[i].vertices[v];
+            int32_t lx = p->hull_vertices[i][v].x;
+            int32_t ly = p->hull_vertices[i][v].y;
+            /* Y-flip vertex into y-up local space at the blob boundary (v5).
+             * Builder's hull/triangulator/UV math all operate in PNG y-down;
+             * only the on-disk vertex flips so runtime can read it as-is in
+             * the engine's y-up world. UV.v stays y-down on purpose — it
+             * indexes raw pixel rows, which the GL upload still receives
+             * top-row-first. transform_point gets the original PNG-space ly
+             * because it computes atlas_v, not local_y. */
+            int32_t ly_up = (int32_t)p->trim_h[i] - ly;
+            NT_BUILD_ASSERT(lx >= INT16_MIN && lx <= INT16_MAX && "pipeline_serialize: local_x overflows int16_t");
+            NT_BUILD_ASSERT(ly_up >= INT16_MIN && ly_up <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t after y-up flip");
+            vtx->local_x = (int16_t)lx;
+            vtx->local_y = (int16_t)ly_up;
+
+            int32_t tx;
+            int32_t ty;
+            /* The UV is baked through this sprite's own orientation inside the
+             * shared rectangle, against its own trim dims. */
+            transform_point(lx, ly, rt, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
+            float atlas_px = (float)inner_x + (float)tx;
+            float atlas_py = (float)inner_y + (float)ty;
+
+            float tmp_u = ((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F;
+            float tmp_v = ((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F;
+            if (tmp_u < 0.0F) {
+                tmp_u = 0.0F;
+            }
+            if (tmp_v < 0.0F) {
+                tmp_v = 0.0F;
+            }
+            if (tmp_u > 65535.0F) {
+                tmp_u = 65535.0F;
+            }
+            if (tmp_v > 65535.0F) {
+                tmp_v = 65535.0F;
+            }
+            vtx->atlas_u = (uint16_t)tmp_u;
+            vtx->atlas_v = (uint16_t)tmp_v;
+        }
+
+        /* Re-prove the emitted bytes against this sprite's own mask: the check that
+         * catches a wrong relative transform before it can ship. */
+        Point2D reconstructed[NT_POLYGON_MAX_VERTICES];
+        uint16_t reconstructed_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            const NtAtlasVertex *serialized = &blocks[i].vertices[v];
+            reconstructed[v].x = serialized->local_x;
+            reconstructed[v].y = (int32_t)p->trim_h[i] - serialized->local_y;
+        }
+        memcpy(reconstructed_indices, blocks[i].indices, (size_t)idx_count * sizeof(uint16_t));
+        swap_triangle_winding(reconstructed_indices, idx_count);
+        uint8_t *binary = pipeline_geometry_binary_mask(p, i);
+        nt_selected_geometry_proof_t serialized_proof =
+            nt_selected_geometry_validate(binary, p->trim_w[i], p->trim_h[i], p->geometry_proofs[i].opaque_area2, p->baseline_vertices[i], p->baseline_vertex_counts[i],
+                                          p->geometry_proofs[i].base_area2, p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], reconstructed, vertex_count,
+                                          p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
+        free(binary);
+        NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
+        /* Hard gate — asserts-off must not ship a blob whose emitted bytes disprove
+         * the selected geometry; mirrors the reprove gate on the alias path. */
+        if (!serialized_proof.valid || !nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i])) {
+            atlas_invariant_abort(p, "serialized geometry proof mismatch");
+        }
+    }
+    // #endregion
+
+    // #region serialize block dedup
+    /* First writer in add order wins; identity is decided by memcmp, so a hash
+     * collision can share nothing. trim_offset joins that identity though it is not in
+     * the block: the runtime bakes it into cached_pos[], indexed by vertex_start. */
+    uint32_t slot_capacity = 16;
+    while (slot_capacity < p->sprite_count * 2U) {
+        slot_capacity <<= 1U;
+    }
+    uint64_t *slot_hash = (uint64_t *)calloc(slot_capacity, sizeof(uint64_t));
+    uint32_t *slot_owner = (uint32_t *)malloc((size_t)slot_capacity * sizeof(uint32_t));
+    int32_t *block_owner = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
+    NT_BUILD_ASSERT(slot_hash && slot_owner && block_owner && "pipeline_serialize: alloc failed");
+    memset(slot_owner, 0xFF, (size_t)slot_capacity * sizeof(uint32_t));
+
+    uint32_t vertex_cursor = 0;
+    uint32_t index_cursor = 0;
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        uint64_t hash = nt_hash64(&blocks[i], (uint32_t)sizeof(SerializeBlock)).value;
+        uint32_t slot = (uint32_t)(hash & (slot_capacity - 1U));
+        block_owner[i] = -1;
+        while (slot_owner[slot] != UINT32_MAX) {
+            uint32_t candidate = slot_owner[slot];
+            if (slot_hash[slot] == hash && p->vertex_counts[candidate] == p->vertex_counts[i] && sprite_idx_count[candidate] == sprite_idx_count[i] && p->trim_x[candidate] == p->trim_x[i] &&
+                atlas_sprite_trim_offset_y_up(p, candidate) == atlas_sprite_trim_offset_y_up(p, i) && memcmp(&blocks[candidate], &blocks[i], sizeof(SerializeBlock)) == 0) {
+                block_owner[i] = (int32_t)candidate;
+                break;
+            }
+            slot = (slot + 1U) & (slot_capacity - 1U);
+        }
+        if (block_owner[i] >= 0) {
+            uint32_t owner = (uint32_t)block_owner[i];
+            sprite_vertex_start[i] = sprite_vertex_start[owner];
+            sprite_index_start[i] = sprite_index_start[owner];
+            p->vertex_blocks_shared++;
+            continue;
+        }
+        slot_hash[slot] = hash;
+        slot_owner[slot] = i;
+        sprite_vertex_start[i] = vertex_cursor;
+        sprite_index_start[i] = index_cursor;
+        vertex_cursor += p->vertex_counts[i];
+        index_cursor += sprite_idx_count[i];
+    }
+    free(slot_hash);
+    free(slot_owner);
+
+    /* An identity relative emits the same bytes as its original, so it lands on the
+     * original's range — unless their trim offsets differ, which excludes sharing
+     * above. Both directions are pinned so neither rule can drift alone. */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0 || p->alias_rel[i] != 0) {
+            continue;
+        }
+        const uint32_t orig = (uint32_t)p->dedup_map[i];
+        const bool same_trim = p->trim_x[i] == p->trim_x[orig] && atlas_sprite_trim_offset_y_up(p, i) == atlas_sprite_trim_offset_y_up(p, orig);
+        const bool shared = sprite_vertex_start[i] == sprite_vertex_start[orig] && sprite_index_start[i] == sprite_index_start[orig];
+        NT_BUILD_ASSERT(shared == same_trim && "pipeline_serialize: identity alias shares its original's block iff their trim offsets agree");
+    }
+
+    uint32_t total_vertex_count = vertex_cursor;
+    uint32_t total_index_count = index_cursor;
+    // #endregion
 
     /* Serialize blob: header + texture_resource_ids + regions + vertices + indices */
     uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
@@ -2880,143 +3708,35 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
     }
 
-    /* Regions + vertices + indices.
-     * Two-pass: pass 1 writes vertex/index data only for unique sprites and records
-     * their start offsets. Pass 2 fills NtAtlasRegion structures, with duplicates
-     * sharing vertex_start/index_start with their original.
-     *
-     * Sharing is correct because duplicates have identical pixel data and are placed
-     * at the SAME atlas position (placement_lookup propagates orig's placement to
-     * duplicates), so they have the same atlas_u/v and same local geometry. */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
-    uint32_t vertex_cursor = 0;
-    uint32_t index_cursor = 0;
 
-    /* Per-sprite recorded start offsets — populated for originals in pass 1, then
-     * propagated from original to duplicates before pass 2. */
-    uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    uint8_t *sprite_flags = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
-    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && "pipeline_serialize: alloc failed");
-
-    /* Pass 1: write vertex/index data only for unique sprites */
+    /* Copy the winning blocks into the range they were assigned. */
+    uint32_t copied_vertex_count = 0;
+    uint32_t copied_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
-            continue; /* duplicate — handled in propagation step */
+        if (block_owner[i] >= 0) {
+            continue; /* shares an earlier sprite's byte-identical block */
         }
-        uint32_t pi = placement_lookup[i];
-        NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
-        AtlasPlacement *pl = &p->placements[pi];
-        /* Pass 1 only runs on originals, and originals have pl->sprite_index == i
-         * (the packer remaps back before returning). Use i directly — cheaper and
-         * doesn't rely on the invariant holding through future refactors. */
-        NT_BUILD_ASSERT(pl->sprite_index == i && "pipeline_serialize: Pass 1 invariant broken (non-original placement)");
-
-        uint16_t local_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-        uint32_t idx_count = p->triangle_index_counts[i];
-        memcpy(local_indices, p->triangle_indices[i], (size_t)idx_count * sizeof(uint16_t));
-        NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
-        /* vertex_start/index_start are uint32_t in v3 — no practical bound until 4G entries. */
-
-        sprite_vertex_start[i] = vertex_cursor;
-        sprite_index_start[i] = index_cursor;
-        sprite_idx_count[i] = idx_count;
-        /* Flag detection runs on PNG-CCW pattern — must precede the winding
-         * swap below or every QUAD_* match would miss. */
-        sprite_flags[i] = atlas_region_flags_from_indices(p->vertex_counts[i], idx_count, local_indices);
-        swap_triangle_winding(local_indices, idx_count);
-
-        /* Write triangle indices (local: 0..vertex_count-1, world-CCW after Y-flip) */
-        memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
-        index_cursor += idx_count;
-
-        uint32_t s_extrude = p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude;
-        uint32_t extra_margin = sprite_extra_margin(p, i);
-        uint32_t inner_x = pl->x + s_extrude + extra_margin;
-        uint32_t inner_y = pl->y + s_extrude + extra_margin;
-        uint32_t atlas_w = p->page_w[pl->page];
-        uint32_t atlas_h = p->page_h[pl->page];
-
-        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
-            NtAtlasVertex *vtx = &vertices[vertex_cursor++];
-            int32_t lx = p->hull_vertices[i][v].x;
-            int32_t ly = p->hull_vertices[i][v].y;
-            /* Y-flip vertex into y-up local space at the blob boundary (v5).
-             * Builder's hull/triangulator/UV math all operate in PNG y-down;
-             * only the on-disk vertex flips so runtime can read it as-is in
-             * the engine's y-up world. UV.v stays y-down on purpose — it
-             * indexes raw pixel rows, which the GL upload still receives
-             * top-row-first. transform_point gets the original PNG-space ly
-             * because it computes atlas_v, not local_y. */
-            int32_t ly_up = (int32_t)p->trim_h[i] - ly;
-            NT_BUILD_ASSERT(lx >= INT16_MIN && lx <= INT16_MAX && "pipeline_serialize: local_x overflows int16_t");
-            NT_BUILD_ASSERT(ly_up >= INT16_MIN && ly_up <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t after y-up flip");
-            vtx->local_x = (int16_t)lx;
-            vtx->local_y = (int16_t)ly_up;
-
-            int32_t tx;
-            int32_t ty;
-            transform_point(lx, ly, pl->transform, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
-            float atlas_px = (float)inner_x + (float)tx;
-            float atlas_py = (float)inner_y + (float)ty;
-
-            float tmp_u = ((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F;
-            float tmp_v = ((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F;
-            if (tmp_u < 0.0F) {
-                tmp_u = 0.0F;
-            }
-            if (tmp_v < 0.0F) {
-                tmp_v = 0.0F;
-            }
-            if (tmp_u > 65535.0F) {
-                tmp_u = 65535.0F;
-            }
-            if (tmp_v > 65535.0F) {
-                tmp_v = 65535.0F;
-            }
-            vtx->atlas_u = (uint16_t)tmp_u;
-            vtx->atlas_v = (uint16_t)tmp_v;
-        }
-
-        Point2D reconstructed[NT_POLYGON_MAX_VERTICES];
-        uint16_t reconstructed_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
-        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
-            const NtAtlasVertex *serialized = &vertices[sprite_vertex_start[i] + v];
-            reconstructed[v].x = serialized->local_x;
-            reconstructed[v].y = (int32_t)p->trim_h[i] - serialized->local_y;
-        }
-        memcpy(reconstructed_indices, &indices[sprite_index_start[i]], (size_t)idx_count * sizeof(uint16_t));
-        swap_triangle_winding(reconstructed_indices, idx_count);
-        uint8_t *binary = pipeline_geometry_binary_mask(p, i);
-        nt_selected_geometry_proof_t serialized_proof =
-            nt_selected_geometry_validate(binary, p->trim_w[i], p->trim_h[i], p->geometry_proofs[i].opaque_area2, p->baseline_vertices[i], p->baseline_vertex_counts[i],
-                                          p->geometry_proofs[i].base_area2, p->baseline_triangle_indices[i], p->baseline_triangle_index_counts[i], reconstructed, p->vertex_counts[i],
-                                          p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
-        free(binary);
-        NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
+        NT_BUILD_ASSERT(sprite_vertex_start[i] + p->vertex_counts[i] <= total_vertex_count && sprite_index_start[i] + sprite_idx_count[i] <= total_index_count &&
+                        "pipeline_serialize: block overruns the sized blob");
+        memcpy(&vertices[sprite_vertex_start[i]], blocks[i].vertices, (size_t)p->vertex_counts[i] * sizeof(NtAtlasVertex));
+        memcpy(&indices[sprite_index_start[i]], blocks[i].indices, (size_t)sprite_idx_count[i] * sizeof(uint16_t));
+        copied_vertex_count += p->vertex_counts[i];
+        copied_index_count += sprite_idx_count[i];
     }
-
-    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
-    NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
-
-    /* Propagate offsets from originals to duplicates */
-    for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)p->dedup_map[i];
-            sprite_vertex_start[i] = sprite_vertex_start[orig];
-            sprite_index_start[i] = sprite_index_start[orig];
-            sprite_idx_count[i] = sprite_idx_count[orig];
-            sprite_flags[i] = sprite_flags[orig];
-        }
-    }
+    NT_BUILD_ASSERT(copied_vertex_count == total_vertex_count && "pipeline_serialize: vertex count mismatch");
+    NT_BUILD_ASSERT(copied_index_count == total_index_count && "pipeline_serialize: index count mismatch");
 
     /* Pass 2: fill region structures (one per sprite, including duplicates) */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        /* Hard bound — a consumer may define NT_BUILD_ASSERT away, and this indexes. */
+        if (pi >= p->placement_count) {
+            atlas_invariant_abort(p, "sprite has no placement");
+        }
         AtlasPlacement *pl = &p->placements[pi];
         NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");
 
@@ -3028,12 +3748,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * below are provably in range here. */
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
-        /* trim_offset_y_up = pixels stripped from the BOTTOM edge in y-up
-         * source space. Builder's alpha-trim records trim_y as pixels stripped
-         * from the PNG-top, so the y-up conversion is source_h - trim_y - trim_h. */
-        int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
         reg->trim_offset_x = (int16_t)p->trim_x[i];
-        reg->trim_offset_y = (int16_t)trim_offset_y_up;
+        reg->trim_offset_y = (int16_t)atlas_sprite_trim_offset_y_up(p, i);
         reg->origin_x = p->sprites[i].origin_x;
         /* origin_y in y-up: 0 = bottom edge, 1 = top edge. PNG convention is
          * 0 = top, so flip at write time. Values outside [0,1] (off-frame
@@ -3043,7 +3759,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->index_start = sprite_index_start[i];
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
-        reg->transform = pl->transform;
+        reg->transform = region_transform[i];
         reg->index_count = (uint8_t)sprite_idx_count[i];
         reg->flags = sprite_flags[i];
         /* Builder-side invariant: any QUAD_* flag implies vertex_count==4 +
@@ -3065,10 +3781,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memset(reg->_reserved2, 0, sizeof(reg->_reserved2));
     }
 
+    free(blocks);
+    free(block_owner);
     free(sprite_vertex_start);
     free(sprite_index_start);
     free(sprite_idx_count);
     free(sprite_flags);
+    free(region_transform);
 
     p->atlas_blob = blob;
     p->atlas_blob_size = blob_size;
@@ -3189,15 +3908,13 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         p->sprites[i].name = NULL;
     }
 
-    /* Free hull vertices; duplicates share pointers via dedup_map. */
-    if (p->dedup_map && p->hull_vertices) {
+    /* Every sprite owns its geometry — an alias carries a derived copy, not a borrowed pointer. */
+    if (p->hull_vertices && p->triangle_indices && p->baseline_vertices && p->baseline_triangle_indices) {
         for (uint32_t i = 0; i < p->sprite_count; i++) {
-            if (p->dedup_map[i] < 0) {
-                free(p->hull_vertices[i]);
-                free(p->triangle_indices[i]);
-                free(p->baseline_vertices[i]);
-                free(p->baseline_triangle_indices[i]);
-            }
+            free(p->hull_vertices[i]);
+            free(p->triangle_indices[i]);
+            free(p->baseline_vertices[i]);
+            free(p->baseline_triangle_indices[i]);
             p->hull_vertices[i] = NULL;
             p->triangle_indices[i] = NULL;
             p->baseline_vertices[i] = NULL;
@@ -3220,6 +3937,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->geometry_opts);
     free(p->dedup_map);
     free(p->unique_indices);
+    free(p->alias_rel);
     free(p->vertex_counts);
     free((void *)p->hull_vertices);
     free((void *)p->triangle_indices);
@@ -3297,6 +4015,22 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     pipeline_dedup(&p);
     double bench_dedup = nt_time_now() - t0;
 
+    if (p.cache_hit && !pipeline_cache_placements_consistent(&p)) {
+        NT_LOG_WARN("atlas '%s': cached placements are inconsistent — discarding the entry and repacking", state->name);
+        free(p.placements);
+        p.placements = NULL;
+        p.placement_count = 0;
+        if (p.page_pixels) {
+            for (uint32_t pg = 0; pg < p.page_count; pg++) {
+                free(p.page_pixels[pg]);
+            }
+            free((void *)p.page_pixels);
+            p.page_pixels = NULL;
+        }
+        p.page_count = 0;
+        p.cache_hit = false;
+    }
+
     NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", p.sprite_count, p.unique_count);
     t0 = nt_time_now();
     pipeline_geometry(&p);
@@ -3347,6 +4081,20 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     bench_debug_png = nt_time_now() - t0;
     pipeline_publish_outputs(&p);
 
+    /* Published, so the numbers describe a real atlas. Every sprite is either its
+     * own placement or an alias of one — a miscounted fold shows up here. */
+    NT_BUILD_ASSERT(p.folds_exact + p.folds_d4 + p.placement_count == p.sprite_count && "atlas_commit: folds and placements do not account for every sprite");
+    NT_BUILD_ASSERT(ctx->atlas_stats_count < NT_BUILD_MAX_ATLASES && "atlas_commit: more committed atlases than NT_BUILD_MAX_ATLASES -- raise the cap");
+    if (ctx->atlas_stats_count < NT_BUILD_MAX_ATLASES) {
+        ctx->atlas_stats[ctx->atlas_stats_count++] = (nt_atlas_stats_t){.sprites = p.sprite_count,
+                                                                        .placements = p.placement_count,
+                                                                        .folds_exact = p.folds_exact,
+                                                                        .folds_d4 = p.folds_d4,
+                                                                        .area_saved_px = p.area_saved_px,
+                                                                        .vertex_blocks_shared = p.vertex_blocks_shared,
+                                                                        .cache_hit = p.cache_hit};
+    }
+
     double bench_total = nt_time_now() - t_total;
     p.stats.used_area = 0;
     for (uint32_t i = 0; i < p.page_count; i++) {
@@ -3358,12 +4106,14 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
     NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u "
                 "used_area=%llu frontier_area=%llu trim_area=%llu poly_area=%llu pot_waste=%llu fill_frontier=%.4f fill_texture=%.4f "
-                "or_ops=%llu test_ops=%llu page_scans=%llu page_existing=%llu page_new=%llu cache_hits=%llu cache_misses=%llu",
+                "or_ops=%llu test_ops=%llu page_scans=%llu page_existing=%llu page_new=%llu cache_hits=%llu cache_misses=%llu "
+                "folds_exact=%u folds_d4=%u area_saved=%llu blocks_shared=%u",
                 bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
                 bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.frontier_area, (unsigned long long)p.stats.trim_area,
                 (unsigned long long)p.stats.poly_area, (unsigned long long)pot_waste_area, poly_frontier_fill, poly_texture_fill, (unsigned long long)p.stats.or_count,
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
-                (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count);
+                (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count, p.folds_exact, p.folds_d4, (unsigned long long)p.area_saved_px,
+                p.vertex_blocks_shared);
 
 cleanup:;
     nt_build_result_t result = state->failed ? atlas_merge_errors(state) : NT_BUILD_OK;

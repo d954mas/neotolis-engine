@@ -16,8 +16,10 @@
 /* clang-format off */
 #include "nt_atlas_format.h"
 #include "nt_builder.h"
+#include "nt_builder_atlas_geometry.h" /* d4_compose / d4_inverse for the fold relative */
 #include "nt_pack_format.h"
 #include "ntpack_parse.h"
+#include "test_helpers/atlas_dedup_fixture.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -48,6 +50,9 @@ typedef enum {
     SPR_TRI_LOWER, /* opaque where x >= y (lower-right triangle) */
     SPR_TRI_RAMP,  /* diagonal alpha ramp — AA-ish triangular silhouette */
     SPR_BORDERED,  /* opaque square inset in a transparent border (trim variety) */
+    SPR_LSHAPE,    /* left arm + bottom arm — trivial D4 stabiliser, so exactly one
+                    * relative transform can ever match it */
+    SPR_LSHAPE_Q,  /* the quarter-turn of SPR_LSHAPE at the transposed dims */
 } spr_kind_t;
 
 typedef struct {
@@ -72,42 +77,45 @@ static const spr_spec_t k_corpus[] = {
 /* clang-format on */
 #define CORPUS_COUNT ((int)(sizeof(k_corpus) / sizeof(k_corpus[0])))
 
+/* Left arm + bottom arm. Both arms touch every edge, so alpha-trim recovers the
+ * full w x h box and the twin below keeps the exact transposed dims. */
+static bool lshape_opaque(uint32_t x, uint32_t y, uint32_t w, uint32_t h) { return x < w / 4 || y >= h - (h / 4); }
+
+static uint8_t gen_alpha(const spr_spec_t *s, uint32_t x, uint32_t y) {
+    switch (s->kind) {
+    case SPR_SOLID:
+        return 255;
+    case SPR_TRI_LOWER:
+        return (x >= y) ? 255 : 0;
+    case SPR_TRI_RAMP: {
+        /* Opaque triangle x >= y; a 3px diagonal band ramps 64->255 for an
+         * AA-ish edge. Silhouette stays triangular (alpha >= threshold). */
+        int32_t d = (int32_t)x - (int32_t)y;
+        if (d >= 3) {
+            return 255;
+        }
+        return (d >= 0) ? (uint8_t)(64 + (d * 64)) : 0; /* 64,128,192 across the band */
+    }
+    case SPR_BORDERED:
+        return (x >= 4 && x < s->w - 4 && y >= 4 && y < s->h - 4) ? 255 : 0;
+    case SPR_LSHAPE:
+        return lshape_opaque(x, y, s->w, s->h) ? 255 : 0;
+    case SPR_LSHAPE_Q:
+        /* Source L carries the transposed dims; (sx, sy) -> (sh - 1 - sy, sx). */
+        return lshape_opaque(y, s->w - 1 - x, s->h, s->w) ? 255 : 0;
+    }
+    return 0;
+}
+
 /* Fill an RGBA buffer from a spec — pure, no globals, byte-identical each call. */
 static void gen_sprite(uint8_t *px, const spr_spec_t *s) {
     for (uint32_t y = 0; y < s->h; ++y) {
         for (uint32_t x = 0; x < s->w; ++x) {
-            uint8_t a = 0;
-            switch (s->kind) {
-            case SPR_SOLID:
-                a = 255;
-                break;
-            case SPR_TRI_LOWER:
-                a = (x >= y) ? 255 : 0;
-                break;
-            case SPR_TRI_RAMP: {
-                /* Opaque triangle x >= y; a 3px diagonal band ramps 64->255 for an
-                 * AA-ish edge. Silhouette stays triangular (alpha >= threshold). */
-                int32_t d = (int32_t)x - (int32_t)y;
-                if (d >= 3) {
-                    a = 255;
-                } else if (d >= 0) {
-                    a = (uint8_t)(64 + (d * 64)); /* 64,128,192 across the band */
-                } else {
-                    a = 0;
-                }
-                break;
-            }
-            case SPR_BORDERED: {
-                bool inside = (x >= 4 && x < s->w - 4 && y >= 4 && y < s->h - 4);
-                a = inside ? 255 : 0;
-                break;
-            }
-            }
             uint8_t *p = px + ((size_t)((y * s->w) + x) * 4);
             p[0] = s->r;
             p[1] = s->g;
             p[2] = s->b;
-            p[3] = a;
+            p[3] = gen_alpha(s, x, y);
         }
     }
 }
@@ -699,6 +707,183 @@ void test_sprite_transforms_override_changes_cache_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, count_atlas_cache_files(cache), "per-sprite transforms override must change the atlas cache key");
 }
 
+/* --- repack stability and alias-root stability --- */
+
+/* k_corpus holds no duplicate pair, so it cannot say anything about dedup. This
+ * corpus adds a quarter-turned twin. The L shape is deliberate: a solid rectangle
+ * matches under all four diagonal relatives, and a transpose is self-inverse, so
+ * neither could tell a correct search direction from an inverted one. */
+/* clang-format off */
+static const spr_spec_t k_dup_corpus[] = {
+    {"dup_tall",  16, 24, SPR_LSHAPE,    120, 180,  60},
+    {"solo_ramp", 28, 20, SPR_TRI_RAMP,   20, 200, 220},
+    {"dup_wide",  24, 16, SPR_LSHAPE_Q,  120, 180,  60}, /* quarter-turn of dup_tall */
+    {"solo_tri",  32, 32, SPR_TRI_LOWER, 240, 180,  20},
+    {"solo_box",  18, 18, SPR_BORDERED,  180,  20, 180},
+};
+/* clang-format on */
+#define DUP_CORPUS_COUNT ((int)(sizeof(k_dup_corpus) / sizeof(k_dup_corpus[0])))
+#define DUP_ROOT 0
+#define DUP_ALIAS 2
+
+/* clang-format off */
+static const int k_dup_order_declared[] = {0, 1, 2, 3, 4};
+/* Unrelated sprites permuted; the duplicate pair keeps its relative add order. */
+static const int k_dup_order_shuffled[] = {4, 0, 3, 2, 1};
+/* The group's OWN add order swapped — the control for the root assertion. */
+static const int k_dup_order_swapped[]  = {2, 1, 0, 3, 4};
+/* clang-format on */
+
+static bool pack_dup_corpus_threads(const char *path, const int *order, uint32_t threads) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    if (!ctx) {
+        return false;
+    }
+    nt_builder_set_threads(ctx, threads);
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "det_dup", &opts);
+    for (int i = 0; i < DUP_CORPUS_COUNT; ++i) {
+        const spr_spec_t *s = &k_dup_corpus[order[i]];
+        uint8_t *px = (uint8_t *)malloc((size_t)s->w * s->h * 4);
+        TEST_ASSERT_NOT_NULL(px);
+        gen_sprite(px, s);
+        nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
+        sprite_opts.name = s->name;
+        nt_atlas_add_raw(atlas, px, (uint16_t)s->w, (uint16_t)s->h, &sprite_opts);
+        free(px);
+    }
+    (void)nt_atlas_commit(atlas);
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    return result == NT_BUILD_OK;
+}
+
+static bool pack_dup_corpus(const char *path, const int *order) { return pack_dup_corpus_threads(path, order, 1); }
+
+static uint8_t *read_pack_bytes(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz < 0) {
+        (void)fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
+    if (!buf) {
+        (void)fclose(f);
+        return NULL;
+    }
+    *out_len = fread(buf, 1, (size_t)sz, f);
+    (void)fclose(f);
+    return buf;
+}
+
+static void collect_dup_regions(const char *path, nt_atlas_dedup_region_t *out) {
+    size_t len = 0;
+    uint8_t *bytes = read_pack_bytes(path, &len);
+    TEST_ASSERT_NOT_NULL_MESSAGE(bytes, "read produced pack");
+    uint32_t got = 0;
+    const bool ok = atlas_dedup_collect_regions(bytes, len, out, (uint32_t)DUP_CORPUS_COUNT, &got);
+    free(bytes);
+    TEST_ASSERT_TRUE_MESSAGE(ok, "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)DUP_CORPUS_COUNT, got, "one region per sprite");
+}
+
+/* Region order is add order, so a corpus entry's region index is its position. */
+static int region_of(const int *order, int corpus_index) {
+    for (int i = 0; i < DUP_CORPUS_COUNT; ++i) {
+        if (order[i] == corpus_index) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* The pair shares one placement, and the relative from root to alias is the fold's
+ * own relative transform. The packer may orient the shared rectangle, so neither
+ * region's transform is identity on its own — only their quotient is stable. */
+static uint8_t dup_pair_relative(const char *path, const int *order, int root_entry, int alias_entry) {
+    nt_atlas_dedup_region_t regions[8] = {0};
+    collect_dup_regions(path, regions);
+    const int ri = region_of(order, root_entry);
+    const int ai = region_of(order, alias_entry);
+    TEST_ASSERT_TRUE_MESSAGE(ri >= 0 && ai >= 0, "corpus entry missing from the add order");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(regions[ri].page_index, regions[ai].page_index, "the twin must share the root's page");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[ri].u_min, regions[ai].u_min, "the twin must share the root's placement U");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(regions[ri].v_min, regions[ai].v_min, "the twin must share the root's placement V");
+    return d4_compose(d4_inverse(regions[ri].transform), regions[ai].transform);
+}
+
+/* A quarter-turn is not self-inverse, so this reads the search DIRECTION, not just
+ * that some fold happened — swapping the pair's add order must invert it. */
+static uint8_t assert_dup_root_is(const char *path, const int *order, int root_entry, int alias_entry, const char *what) {
+    const uint8_t rel = dup_pair_relative(path, order, root_entry, alias_entry);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_ATLAS_XFORM_IDENTITY, rel, what);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(rel, d4_inverse(rel), "the twin's relative must be a quarter-turn, or direction is unobservable");
+    return rel;
+}
+
+void test_repeat_build_is_byte_identical_with_dedup(void) {
+    const char *a_path = TMP_DIR "/det_dup_a.ntpack";
+    const char *b_path = TMP_DIR "/det_dup_b.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(a_path, k_dup_order_declared), "dedup corpus pack A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(b_path, k_dup_order_declared), "dedup corpus pack B failed");
+    /* The corpus must actually fold, or byte-identity says nothing about dedup. */
+    assert_dup_root_is(a_path, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the first-added member of the pair is the root");
+    char sha_a[65];
+    char sha_b[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(a_path, sha_a), "hash dedup pack A");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(b_path, sha_b), "hash dedup pack B");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two dedup builds of one corpus must be byte-identical");
+}
+
+/* The dedup search itself runs pre-pack on one thread, but the packer and the
+ * stats replay do not. The oracle is the 1-thread pack: two 4-thread runs could
+ * agree on stable-but-thread-count-dependent bytes and still poison a cache
+ * shared across thread counts. */
+void test_dedup_threads_are_byte_deterministic(void) {
+    const char *st_path = TMP_DIR "/det_dup_mt_st.ntpack";
+    const char *a_path = TMP_DIR "/det_dup_mt_a.ntpack";
+    const char *b_path = TMP_DIR "/det_dup_mt_b.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(st_path, k_dup_order_declared, 1), "single-thread dedup pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(a_path, k_dup_order_declared, 4), "threaded dedup pack A failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus_threads(b_path, k_dup_order_declared, 4), "threaded dedup pack B failed");
+    assert_dup_root_is(a_path, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the threaded build must still fold the pair");
+    char sha_st[65];
+    char sha_a[65];
+    char sha_b[65];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(st_path, sha_st), "hash single-thread dedup pack");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(a_path, sha_a), "hash threaded dedup pack A");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, nt_bench_file_sha256_hex(b_path, sha_b), "hash threaded dedup pack B");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_a, sha_b, "two threaded dedup builds must be byte-identical");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(sha_st, sha_a, "threaded dedup bytes must match the single-threaded pack");
+}
+
+void test_alias_root_survives_unrelated_reordering(void) {
+    const char *declared = TMP_DIR "/det_dup_declared.ntpack";
+    const char *shuffled = TMP_DIR "/det_dup_shuffled.ntpack";
+    const char *swapped = TMP_DIR "/det_dup_swapped.ntpack";
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(declared, k_dup_order_declared), "declared-order pack failed");
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(shuffled, k_dup_order_shuffled), "shuffled-order pack failed");
+    /* Placement coordinates may legitimately move when the packer sees a different
+     * input order, so the claim is about the root's identity, not the pack bytes. */
+    const uint8_t rel = assert_dup_root_is(declared, k_dup_order_declared, DUP_ROOT, DUP_ALIAS, "the first-added member of the pair is the root");
+    const uint8_t rel_shuffled = assert_dup_root_is(shuffled, k_dup_order_shuffled, DUP_ROOT, DUP_ALIAS, "reordering unrelated sprites must not move the alias root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(rel, rel_shuffled, "an unrelated permutation must not change the fold relative");
+    /* Control: swapping the pair's OWN add order does move the root, which inverts
+     * the relative — the assertion above would be blind to a self-inverse one. */
+    TEST_ASSERT_TRUE_MESSAGE(pack_dup_corpus(swapped, k_dup_order_swapped), "swapped-order pack failed");
+    const uint8_t rel_swapped = assert_dup_root_is(swapped, k_dup_order_swapped, DUP_ALIAS, DUP_ROOT, "swapping the pair's own add order must move the root");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(d4_inverse(rel), rel_swapped, "swapping the add order must invert the fold relative");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_metrics_stable_across_two_packs);
@@ -709,5 +894,8 @@ int main(void) {
     RUN_TEST(test_margin_override_content_centered);
     RUN_TEST(test_allowed_transforms_changes_cache_key);
     RUN_TEST(test_sprite_transforms_override_changes_cache_key);
+    RUN_TEST(test_repeat_build_is_byte_identical_with_dedup);
+    RUN_TEST(test_dedup_threads_are_byte_deterministic);
+    RUN_TEST(test_alias_root_survives_unrelated_reordering);
     return UNITY_END();
 }

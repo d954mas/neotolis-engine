@@ -196,6 +196,15 @@ void transform_point_texel(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, in
  * odd parity (odd number of reflections). */
 void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw, int32_t th, Point2D *out);
 
+/* Group product: apply b first, then a. D4 is non-abelian — order matters. */
+uint8_t d4_compose(uint8_t a, uint8_t b);
+
+/* The v with d4_compose(v, d4_inverse(v)) == NT_ATLAS_XFORM_IDENTITY. */
+uint8_t d4_inverse(uint8_t v);
+
+/* Dims of a (w, h) box after transform v — same rule transform_point uses. */
+void d4_dims_after(uint8_t v, uint32_t w, uint32_t h, uint32_t *out_w, uint32_t *out_h);
+
 /* --- Binary morphology ----------------------------------------------- */
 
 /* 4-connected dilation by one pixel. in and out must be distinct. */

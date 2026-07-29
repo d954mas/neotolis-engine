@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "meta": {
     "tool_version": "2.0.0",
     "builder_version": 1,
@@ -23,10 +23,14 @@
     {
       "name": "slice9",
       "sprites": 12,
-      "unique": 0,
+      "unique": 12,
+      "folds_exact": 0,
+      "folds_d4": 0,
+      "area_saved_px": 0,
+      "vertex_blocks_shared": 0,
       "pages": 1,
       "region_count": 12,
-      "pack_ms": 3248.2437,
+      "pack_ms": 1180.5132,
       "density_fill_frontier": 0.8248,
       "density_fill_texture": 0.7564,
       "hull_verts": {

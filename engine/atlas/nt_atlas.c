@@ -201,13 +201,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 // #endregion
 
 // #region activator callbacks
-/* Trivial no-op activator. The real work happens in on_resolve;
- * activate only materializes a stable runtime winner handle for stacking. */
-static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
-    (void)data;
-    (void)size;
-    return 1; /* non-zero fake handle marks slot READY */
-}
+static uint32_t atlas_activate(const uint8_t *data, uint32_t size);
 
 /* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
@@ -300,7 +294,12 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
         if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
             return false;
         }
-        if (hdr->page_count > 0 && region->page_index >= hdr->page_count) {
+        /* Strict: the builder never emits a region without a backing page, so a
+         * pageless-but-regioned blob is corruption — reject before the registry
+         * publishes a winner whose every emit would resolve NT_RESOURCE_INVALID.
+         * page_count <= NT_ATLAS_MAX_PAGES (checked above) also bounds the slot
+         * array read in nt_atlas_get_region_handles. */
+        if (region->page_index >= hdr->page_count) {
             return false;
         }
         if (region->vertex_start > hdr->total_vertex_count || region->vertex_count > hdr->total_vertex_count - region->vertex_start) {
@@ -320,6 +319,15 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     out->vertex_bytes = vertex_bytes;
     out->index_bytes = index_bytes;
     return true;
+}
+
+/* AUX_BACKED slots become READY after activate, so malformed blobs must fail
+ * before the resource registry publishes a winner. on_resolve re-validates the
+ * same bytes: both entry points stay independently safe (tests drive resolve
+ * directly), and the duplicate scan runs once per blob change, not per frame. */
+static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
+    nt_atlas_blob_view_t view;
+    return atlas_try_validate_and_carve_blob(data, size, &view) ? 1U : 0U;
 }
 
 /* Grow one cached float[2] array to new_cap.
@@ -380,12 +388,10 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
         const float trim_off_y = (float)r->trim_offset_y;
         for (uint32_t v = 0; v < r->vertex_count; v++) {
             const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
-            /* Source-space position (NO origin baked). Builder dedups regions
-             * by pixel hash — duplicates share vertex_start/index_start with
-             * possibly different origin_x/y. Baking origin into cached_pos
-             * would let the last-baked region overwrite earlier ones, so the
-             * sprite renderer applies origin per-emit via the translation
-             * vector instead. */
+            /* Source-space position, NO origin baked: byte-identical blocks share one
+             * vertex_start across regions whose origin_x/y may differ, so baking it
+             * would let the last region win. The sprite renderer applies origin
+             * per-emit via the translation vector instead. */
             ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x) * ipu;
             ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y) * ipu;
         }
@@ -395,7 +401,7 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
+    (void)runtime_handle; /* always 1 — atlas_activate publishes it only for blobs that passed validation */
 
     /* Blob eviction edge case (R2 / §Q2): if the winning blob is no longer
      * resident, keep existing user_data as-is. */
@@ -404,7 +410,13 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
 
     nt_atlas_blob_view_t view;
-    NT_ASSERT(atlas_try_validate_and_carve_blob(data, size, &view));
+    /* Hard gate — NT_ASSERT is ((void)0) in the OFF shipping config, and this call is
+     * both the only validation of the untrusted blob and what carves the view. */
+    const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
+    NT_ASSERT(blob_ok && "atlas blob: validation failed");
+    if (!blob_ok) {
+        return;
+    }
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 
@@ -451,7 +463,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-        /* cached_pos/cached_uv bake is deferred to atlas_on_post_resolve where
+        /* The cached_pos bake is deferred to atlas_on_post_resolve where
          * ipu is finalized from pixels_per_unit metadata. The resource module
          * fires resolve and post_resolve in pairs within a single nt_resource_step,
          * so no caller can observe the unbaked state. */
@@ -532,6 +544,9 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
             r->index_start = 0;
             r->vertex_count = 0;
             r->index_count = 0;
+            /* A page-shrinking merge would otherwise leave a stale page_index the
+             * validated invariant page_index < page_count no longer covers. */
+            r->page_index = 0;
         }
     }
     // #endregion
@@ -542,11 +557,11 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-    /* cached_pos/cached_uv bake deferred to atlas_on_post_resolve once ipu
-     * is finalized from the (possibly updated) pixels_per_unit metadata.
-     * replace_payload_buffers may have realloc'd cached_pos/cached_uv and
-     * even unchanged common regions may now sit at different vertex_start
-     * offsets — post_resolve handles all of that in one pass. */
+    /* The cached_pos bake is deferred to atlas_on_post_resolve once ipu is
+     * finalized from the (possibly updated) pixels_per_unit metadata.
+     * replace_payload_buffers may have realloc'd cached_pos and even unchanged
+     * common regions may now sit at different vertex_start offsets —
+     * post_resolve handles all of that in one pass. */
     // #endregion
 }
 
@@ -605,9 +620,9 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
     } else {
         ad->ipu = 1.0F;
     }
-    /* Re-bake cached_pos with the correct ipu.
-     * cached_uv is unaffected by ipu but the loop is shared — cheap on
-     * small atlases and runs at resolve time, not in the hot path. */
+    /* Re-bake cached_pos with the correct ipu — cheap on small atlases, and
+     * it runs at resolve time, not in the hot path. UVs need no bake: they are
+     * read straight off the serialized vertices. */
     atlas_precompute_all(ad);
     // #endregion
 }
@@ -779,8 +794,8 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
      * so any non-zero value is fine. Tests pass 1 to mirror the real flow. */
     atlas_on_resolve(data, size, 1, user_data);
     /* Production fires on_post_resolve immediately after on_resolve in the
-     * same nt_resource_step. Mimic it here so cached_pos/cached_uv are
-     * baked before tests query them. We can't call atlas_on_post_resolve
+     * same nt_resource_step. Mimic it here so cached_pos is baked
+     * before tests query it. We can't call atlas_on_post_resolve
      * directly (it requires resource module + a real nt_resource_t to
      * fetch page textures and metadata) — but the only state it touches
      * besides those is the cached array bake. */
@@ -790,6 +805,8 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
 }
 
 void nt_atlas_test_drive_cleanup(void *user_data) { atlas_on_cleanup(user_data); }
+
+uint32_t nt_atlas_test_activate(const uint8_t *data, uint32_t size) { return atlas_activate(data, size); }
 
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index) {
     NT_ASSERT(ad != NULL);

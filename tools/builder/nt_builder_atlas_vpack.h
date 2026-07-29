@@ -20,13 +20,15 @@
 extern "C" {
 #endif
 
-/* Maximum number of atlas pages (each page = one texture). */
-#ifndef ATLAS_MAX_PAGES
-#define ATLAS_MAX_PAGES 64
-#endif
+/* Maximum number of atlas pages (each page = one texture). Unconditional alias
+ * of the format cap: packing more pages than the runtime can mount is a dead
+ * atlas, so the ONLY override point is NT_ATLAS_MAX_PAGES — and overriding that
+ * must be applied to the builder and runtime builds together. */
+#define ATLAS_MAX_PAGES NT_ATLAS_MAX_PAGES
 
 /* Sprite placement result after packing.
- * transform is a 3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal.
+ * transform is a D4 element VALUE 0..7 (bit0=flipH, bit1=flipV, bit2=diagonal),
+ * not a mask — the mask domain is allowed_transforms.
  * Apply order: diagonal → flipH → flipV. 0 = identity.
  *
  * NOTE: this struct is serialized directly to the atlas cache file via fwrite.

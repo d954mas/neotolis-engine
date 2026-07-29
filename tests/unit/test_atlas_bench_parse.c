@@ -136,6 +136,134 @@ static uint32_t build_quad_blob(uint8_t *buf, uint32_t cap) {
     return build_mock_atlas_blob(buf, cap, &spec);
 }
 
+/* Three quads on one page. `middle` selects what region 1 is:
+ *   ALIAS     — region 0's UV footprint in its OWN vertex block (a D4 alias)
+ *   DISTINCT  — the same quad shifted, so its footprint differs
+ *   ABSENT    — omitted entirely
+ * Region 1's corner order is rotated in the ALIAS case so the vertex bytes
+ * differ from region 0 while the footprint stays equal. */
+typedef enum { MIDDLE_ALIAS, MIDDLE_DISTINCT, MIDDLE_ABSENT } middle_kind_t;
+
+static void write_quad(NtAtlasVertex *dst, uint16_t u0, uint16_t u1, uint16_t v0, uint16_t v1, uint16_t rotate) {
+    const uint16_t us[4] = {u0, u1, u1, u0};
+    const uint16_t vs[4] = {v0, v0, v1, v1};
+    for (uint16_t i = 0; i < 4; i++) {
+        const uint16_t src = (uint16_t)((i + rotate) % 4);
+        dst[i].local_x = (int16_t)(i * 3);
+        dst[i].local_y = (int16_t)(i * 3);
+        dst[i].atlas_u = us[src];
+        dst[i].atlas_v = vs[src];
+    }
+}
+
+static uint32_t build_placement_blob(uint8_t *buf, uint32_t cap, middle_kind_t middle) {
+    NtAtlasVertex verts[12];
+    NtAtlasRegion regions[3];
+    memset(regions, 0, sizeof(regions));
+
+    write_quad(&verts[0], 1000, 5000, 2000, 6000, 0);
+    if (middle == MIDDLE_ALIAS) {
+        write_quad(&verts[4], 1000, 5000, 2000, 6000, 2);
+    } else {
+        write_quad(&verts[4], 9000, 13000, 2000, 6000, 0);
+    }
+    write_quad(&verts[8], 20000, 24000, 20000, 25000, 0);
+
+    const uint16_t region_count = (middle == MIDDLE_ABSENT) ? 2 : 3;
+    const uint32_t starts[3] = {0, 4, 8};
+    for (uint16_t r = 0; r < region_count; r++) {
+        /* ABSENT keeps region 0 and the third quad, skipping the middle block. */
+        const uint16_t src = (middle == MIDDLE_ABSENT && r == 1) ? 2 : r;
+        regions[r].vertex_start = starts[src];
+        regions[r].vertex_count = 4;
+        regions[r].page_index = 0;
+    }
+
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = region_count,
+        .vertices = verts,
+        .total_vertex_count = 12,
+        .indices = NULL,
+        .total_index_count = 0,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+    return build_mock_atlas_blob(buf, cap, &spec);
+}
+
+/* Two triangles that split one UV box. COMPLEMENTARY halves are disjoint but
+ * share the box, so a bbox key would fold them; DUPLICATE is the same ring from
+ * a rotated start vertex, which must still fold. */
+typedef enum { TRI_COMPLEMENTARY, TRI_DUPLICATE, TRI_REVERSED, TRI_SINGLE } tri_kind_t;
+
+static void write_tri(NtAtlasVertex *dst, const uint16_t *us, const uint16_t *vs, uint16_t rotate) {
+    for (uint16_t i = 0; i < 3; i++) {
+        const uint16_t src = (uint16_t)((i + rotate) % 3);
+        dst[i].local_x = (int16_t)(i * 3);
+        dst[i].local_y = (int16_t)(i * 3);
+        dst[i].atlas_u = us[src];
+        dst[i].atlas_v = vs[src];
+    }
+}
+
+static uint32_t build_triangle_blob(uint8_t *buf, uint32_t cap, tri_kind_t kind) {
+    static const uint16_t lower_u[3] = {1000, 5000, 5000};
+    static const uint16_t lower_v[3] = {2000, 2000, 6000};
+    static const uint16_t upper_u[3] = {1000, 5000, 1000};
+    static const uint16_t upper_v[3] = {2000, 6000, 6000};
+    NtAtlasVertex verts[6];
+    NtAtlasRegion regions[2];
+    memset(regions, 0, sizeof(regions));
+
+    write_tri(&verts[0], lower_u, lower_v, 0);
+    if (kind == TRI_COMPLEMENTARY) {
+        write_tri(&verts[3], upper_u, upper_v, 0);
+    } else {
+        write_tri(&verts[3], lower_u, lower_v, 1);
+        if (kind == TRI_REVERSED) {
+            const NtAtlasVertex tmp = verts[4];
+            verts[4] = verts[5];
+            verts[5] = tmp;
+        }
+    }
+
+    const uint16_t region_count = (kind == TRI_SINGLE) ? 1 : 2;
+    for (uint16_t r = 0; r < region_count; r++) {
+        regions[r].vertex_start = (uint32_t)r * 3U;
+        regions[r].vertex_count = 3;
+        regions[r].page_index = 0;
+    }
+
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = region_count,
+        .vertices = verts,
+        .total_vertex_count = 6,
+        .indices = NULL,
+        .total_index_count = 0,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+    return build_mock_atlas_blob(buf, cap, &spec);
+}
+
+static double parse_tri_area(tri_kind_t kind) {
+    uint8_t buf[1024];
+    uint32_t size = build_triangle_blob(buf, sizeof(buf), kind);
+    nt_bench_atlas_metrics_t m;
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_atlas_blob(buf, size, &m));
+    return m.poly_area_uv;
+}
+
+static double parse_poly_area(middle_kind_t middle) {
+    uint8_t buf[1024];
+    uint32_t size = build_placement_blob(buf, sizeof(buf), middle);
+    nt_bench_atlas_metrics_t m;
+    TEST_ASSERT_EQUAL_INT(0, nt_bench_parse_atlas_blob(buf, size, &m));
+    return m.poly_area_uv;
+}
+
 /* ---- Tests ---- */
 
 static void region_and_vertex_counts(void) {
@@ -160,6 +288,53 @@ static void polygon_area_positive(void) {
     int rc = nt_bench_parse_atlas_blob(buf, size, &m);
     TEST_ASSERT_EQUAL_INT(0, rc);
     TEST_ASSERT_TRUE(m.poly_area_uv > 0.0);
+}
+
+/* A footprint-sharing alias must not add area, even though it owns its own
+ * vertex block — the pre-dedup span key counted it and pushed anim_trim's
+ * reported fill above 1.0. Doubles compared bit-exactly: the parser and the
+ * ABSENT case accumulate the same two areas in the same order, and Unity is
+ * built with UNITY_EXCLUDE_FLOAT. */
+static void alias_sharing_a_placement_counts_once(void) {
+    const double aliased = parse_poly_area(MIDDLE_ALIAS);
+    const double without = parse_poly_area(MIDDLE_ABSENT);
+    uint64_t a_bits = 0;
+    uint64_t w_bits = 0;
+    memcpy(&a_bits, &aliased, sizeof(a_bits));
+    memcpy(&w_bits, &without, sizeof(w_bits));
+    TEST_ASSERT_EQUAL_HEX64(w_bits, a_bits);
+}
+
+static void distinct_placement_adds_area(void) { TEST_ASSERT_TRUE(parse_poly_area(MIDDLE_DISTINCT) > parse_poly_area(MIDDLE_ALIAS)); }
+
+/* The two halves of one box have the same UV bbox and no shared pixel, so the
+ * placement key has to be the ring: on a bbox key the second half vanishes. */
+static void complementary_triangles_each_count(void) {
+    const double both = parse_tri_area(TRI_COMPLEMENTARY);
+    const double one = parse_tri_area(TRI_SINGLE);
+    TEST_ASSERT_TRUE(one > 0.0);
+    TEST_ASSERT_TRUE(both > one * 1.9);
+}
+
+/* And the fold still happens for a genuinely repeated ring. */
+static void repeated_ring_counts_once(void) {
+    const double repeated = parse_tri_area(TRI_DUPLICATE);
+    const double one = parse_tri_area(TRI_SINGLE);
+    uint64_t r_bits = 0;
+    uint64_t o_bits = 0;
+    memcpy(&r_bits, &repeated, sizeof(r_bits));
+    memcpy(&o_bits, &one, sizeof(o_bits));
+    TEST_ASSERT_EQUAL_HEX64(o_bits, r_bits);
+}
+
+static void reversed_ring_counts_once(void) {
+    const double reversed = parse_tri_area(TRI_REVERSED);
+    const double one = parse_tri_area(TRI_SINGLE);
+    uint64_t r_bits = 0;
+    uint64_t o_bits = 0;
+    memcpy(&r_bits, &reversed, sizeof(r_bits));
+    memcpy(&o_bits, &one, sizeof(o_bits));
+    TEST_ASSERT_EQUAL_HEX64(o_bits, r_bits);
 }
 
 static void reject_bad_magic(void) {
@@ -195,6 +370,17 @@ static void reject_oob_vertex_offset(void) {
     TEST_ASSERT_TRUE(rc < 0);
 }
 
+static void reject_vertex_offset_inside_metadata(void) {
+    uint8_t buf[512];
+    uint32_t size = build_quad_blob(buf, sizeof(buf));
+    NtAtlasHeader *hdr = (NtAtlasHeader *)buf;
+    hdr->vertex_offset = (uint32_t)sizeof(NtAtlasHeader); /* overlaps the region array */
+
+    nt_bench_atlas_metrics_t m;
+    int rc = nt_bench_parse_atlas_blob(buf, size, &m);
+    TEST_ASSERT_TRUE(rc < 0);
+}
+
 static void reject_missing_page_texture(void) {
     const char *path = "test_atlas_bench_missing_texture.ntpack";
     uint8_t atlas_blob[sizeof(NtAtlasHeader) + sizeof(uint64_t)] = {0};
@@ -202,6 +388,9 @@ static void reject_missing_page_texture(void) {
     atlas->magic = NT_ATLAS_MAGIC;
     atlas->version = NT_ATLAS_VERSION;
     atlas->page_count = 1;
+    /* Past the page-id array, so the blob parser passes and the page lookup is
+     * what this case actually exercises. */
+    atlas->vertex_offset = (uint32_t)(sizeof(NtAtlasHeader) + sizeof(uint64_t));
 
     const uint64_t page_id = 0x12345678ULL;
     memcpy(atlas_blob + sizeof(NtAtlasHeader), &page_id, sizeof(page_id));
@@ -348,9 +537,15 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(region_and_vertex_counts);
     RUN_TEST(polygon_area_positive);
+    RUN_TEST(alias_sharing_a_placement_counts_once);
+    RUN_TEST(distinct_placement_adds_area);
+    RUN_TEST(complementary_triangles_each_count);
+    RUN_TEST(repeated_ring_counts_once);
+    RUN_TEST(reversed_ring_counts_once);
     RUN_TEST(reject_bad_magic);
     RUN_TEST(reject_bad_version);
     RUN_TEST(reject_oob_vertex_offset);
+    RUN_TEST(reject_vertex_offset_inside_metadata);
     RUN_TEST(reject_missing_page_texture);
     RUN_TEST(selected_geometry_is_owned_and_y_down);
     RUN_TEST(selected_geometry_rejects_corrupt_index_window);

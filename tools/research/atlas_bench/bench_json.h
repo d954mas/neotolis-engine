@@ -8,15 +8,19 @@
 
 #define NT_BENCH_MAX_ATLASES 16
 #define NT_BENCH_STR_MAX 256
-#define NT_BENCH_JSON_SCHEMA_VERSION 2
+#define NT_BENCH_JSON_SCHEMA_VERSION 3
 
 typedef struct {
     char name[NT_BENCH_STR_MAX];
-    uint32_t sprites;      /* input sprite count (region_count) */
-    uint32_t unique;       /* deduped unique-sprite count */
-    uint32_t pages;        /* atlas page count */
-    uint32_t region_count; /* NtAtlasHeader.region_count (== sprites) */
-    double pack_ms;        /* atlas pipeline wall time, machine-bound */
+    uint32_t sprites;              /* input sprite count (region_count) */
+    uint32_t unique;               /* deduped unique-sprite count (distinct placements) */
+    uint32_t folds_exact;          /* aliases folded at relative transform identity */
+    uint32_t folds_d4;             /* aliases folded through a non-identity D4 transform */
+    uint64_t area_saved_px;        /* summed post-trim area of every alias */
+    uint32_t vertex_blocks_shared; /* vertex+index blocks folded by byte equality */
+    uint32_t pages;                /* atlas page count */
+    uint32_t region_count;         /* NtAtlasHeader.region_count (== sprites) */
+    double pack_ms;                /* atlas pipeline wall time, machine-bound */
     double density_fill_frontier;
     double density_fill_texture;
     uint32_t hull_total; /* summed hull vertex count across regions */

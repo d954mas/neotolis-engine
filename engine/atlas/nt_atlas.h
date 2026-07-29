@@ -16,9 +16,7 @@
 #define NT_ATLAS_INVALID_REGION ((uint32_t)0xFFFFFFFFU)
 #define NT_ATLAS_TOMBSTONE_HASH ((uint64_t)0xFFFFFFFFFFFFFFFFULL)
 
-#ifndef NT_ATLAS_MAX_PAGES
-#define NT_ATLAS_MAX_PAGES 8
-#endif
+/* NT_ATLAS_MAX_PAGES comes from nt_atlas_format.h — one cap shared with the builder. */
 
 /* ---- Public types ---- */
 
@@ -50,7 +48,7 @@ typedef struct {
     uint16_t atlas_v;
 } nt_atlas_vertex_t;
 
-/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v6).
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v7).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
@@ -73,7 +71,10 @@ typedef struct {
     uint8_t vertex_count;    /* 32: 0 = dead marker (removed by merge or degenerate) */
     uint8_t index_count;     /* 33 */
     uint8_t page_index;      /* 34 */
-    uint8_t transform;       /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t transform;       /* 35: D4 element VALUE 0..7 (bit0=flipH, bit1=flipV, bit2=diagonal).
+                              *     Exporter metadata only — UVs are baked. v7: stores
+                              *     compose(placement, relative), so two regions sharing one
+                              *     placement may carry different values. */
     uint8_t flags;           /* 36: builder-authored render hints */
     uint8_t _pad0;           /* 37: alignment padding for uint16 */
     uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
@@ -197,6 +198,9 @@ uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t 
  * full resource system. data/size/user_data forward 1:1 to the callback. */
 void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data);
 void nt_atlas_test_drive_cleanup(void *user_data);
+
+/* Drive the production activator without a resource registry. */
+uint32_t nt_atlas_test_activate(const uint8_t *data, uint32_t size);
 
 /* Return the cached page_resources[page_index] slot handle's .id field.
  * 0 means NT_RESOURCE_INVALID (not yet post-resolve primed). */

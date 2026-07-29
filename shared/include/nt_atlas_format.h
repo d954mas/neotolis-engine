@@ -5,8 +5,20 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-/* V6: slice9_lrtb added to NtAtlasRegion (40->48 bytes). */
-#define NT_ATLAS_VERSION 6
+/* V6: slice9_lrtb added to NtAtlasRegion (40->48 bytes).
+ * V7: same layout, new region semantics — transform became compose(placement,
+ *     relative) and a shared vertex_start gained the trim_offset precondition. */
+#define NT_ATLAS_VERSION 7
+
+/* Effective format-wide page cap. The runtime preallocates this many resource
+ * slots per atlas (no heap), so a blob above it can never load — the builder
+ * packer therefore stops at the same bound and errors gracefully. */
+#ifndef NT_ATLAS_MAX_PAGES
+#define NT_ATLAS_MAX_PAGES 8
+#endif
+/* The runtime page counter, page_index and the public API are all uint8-wide;
+ * an override past 255 would truncate page_count on the (uint8_t) cast. */
+_Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MAX_PAGES must fit uint8_t");
 
 /* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
@@ -63,12 +75,18 @@ typedef struct {
                               *     Source-space (not trim-space) gives stable pivots across
                               *     animation frames where trim bounds vary. */
     float origin_y;          /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
-    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
+    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2).
+                              *     Builder-enforced, runtime-trusted (v7): regions share a span
+                              *     only when trim_offset_x/y match — the runtime bakes cached_pos
+                              *     per span and never re-checks. */
     uint32_t index_start;    /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;    /* 32: number of vertices for this region (max 16 per builder limit) */
     uint8_t page_index;      /* 33: which texture page this region belongs to */
     uint8_t transform;       /* 34: orientation flags — bit0=flipH, bit1=flipV, bit2=diagonal.
-                              *     Apply order: diagonal → flipH → flipV. 0 = identity. */
+                              *     Apply order: diagonal → flipH → flipV. 0 = identity.
+                              *     Exporter metadata only: UVs are already baked. A dedup alias
+                              *     stores placement∘relative, so two regions sharing a placement
+                              *     may carry different values. */
     uint8_t index_count;     /* 35: triangle indices for this region. uint8_t caps at 255 =
                               *     85 triangles; with max_vertices=16 the ear-clip/fan output
                               *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
@@ -76,7 +94,7 @@ typedef struct {
     uint8_t _pad0;           /* 37: alignment padding for uint16 slice9_lrtb */
     uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
     uint8_t _reserved2[2];   /* 46: must be zero */
-} NtAtlasRegion;             /* 48 bytes (v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
+} NtAtlasRegion;             /* 48 bytes (layout unchanged since v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 48, "NtAtlasRegion must be 48 bytes");
 

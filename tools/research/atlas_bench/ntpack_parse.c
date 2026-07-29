@@ -21,6 +21,48 @@
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 
+/* Same closed ring, ignoring which vertex it starts at and which way it turns —
+ * an alias emits its own vertex block, so neither is fixed. */
+static bool uv_rings_equal(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+    for (uint32_t s = 0; s < n; s++) {
+        bool fwd = true;
+        bool rev = true;
+        for (uint32_t i = 0; i < n && (fwd || rev); i++) {
+            const NtAtlasVertex *f = &b[(s + i) % n];
+            const NtAtlasVertex *r = &b[(s + n - i) % n];
+            fwd = fwd && a[i].atlas_u == f->atlas_u && a[i].atlas_v == f->atlas_v;
+            rev = rev && a[i].atlas_u == r->atlas_u && a[i].atlas_v == r->atlas_v;
+        }
+        if (fwd || rev) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Caller must have validated the region's vertex window against total_vertex_count. */
+static void region_uv_bbox(const NtAtlasVertex *verts, const NtAtlasRegion *r, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
+    *umin = UINT16_MAX;
+    *umax = 0;
+    *vmin = UINT16_MAX;
+    *vmax = 0;
+    for (uint32_t j = 0; j < r->vertex_count; j++) {
+        const NtAtlasVertex *p = &verts[r->vertex_start + j];
+        if (p->atlas_u < *umin) {
+            *umin = p->atlas_u;
+        }
+        if (p->atlas_u > *umax) {
+            *umax = p->atlas_u;
+        }
+        if (p->atlas_v < *vmin) {
+            *vmin = p->atlas_v;
+        }
+        if (p->atlas_v > *vmax) {
+            *vmax = p->atlas_v;
+        }
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard chain; splitting would separate bounds checks from the reads they protect
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out) {
     if (blob == NULL || out == NULL) {
@@ -49,7 +91,9 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     }
 
     const uint64_t verts_end = (uint64_t)h->vertex_offset + ((uint64_t)h->total_vertex_count * sizeof(NtAtlasVertex));
-    if (verts_end > blob_size) {
+    /* A vertex array overlapping the header/pages/regions would read metadata as
+     * vertices — the same guard nt_bench_parse_selected_geometry applies. */
+    if (verts_end > blob_size || h->vertex_offset < regions_end) {
         return -6;
     }
 
@@ -90,19 +134,6 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
             hull_max = nv;
         }
 
-        /* Dedup: identical sprites alias the same deduplicated vertex span, so
-         * they occupy the SAME atlas pixels. Count each unique span's polygon
-         * area ONCE — matching the packer's poly_area (unique-set fill). Hull
-         * counts above stay per-region (region_count == input-sprite count).
-         * O(n^2) scan keeps the blob parser allocation-free. */
-        bool is_unique_span = true;
-        for (uint16_t j = 0; j < i; j++) {
-            if (regions[j].vertex_start == vstart) {
-                is_unique_span = false;
-                break;
-            }
-        }
-
         if (nv >= 3) {
             double shoelace = 0.0;
             uint16_t umin = UINT16_MAX;
@@ -126,15 +157,42 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
                     vmax = p->atlas_v;
                 }
             }
+            const uint8_t page = regions[i].page_index;
+
+            /* Dedup: regions sharing a placement occupy the SAME atlas pixels, so
+             * their polygon area counts ONCE — matching the packer's poly_area
+             * (unique-set fill). The key is the whole UV ring, not the vertex span
+             * (a D4 alias owns its own block) and not the bbox (two disjoint
+             * concave sprites can share one). Hull counts above stay per-region
+             * (region_count == sprite count). The bbox is the cheap reject before
+             * the ring compare; the O(n^2) scan keeps the parser allocation-free. */
+            bool is_unique_placement = true;
+            for (uint16_t j = 0; j < i; j++) {
+                if (regions[j].vertex_count != nv || regions[j].page_index != page) {
+                    continue;
+                }
+                uint16_t jumin = 0;
+                uint16_t jumax = 0;
+                uint16_t jvmin = 0;
+                uint16_t jvmax = 0;
+                region_uv_bbox(verts, &regions[j], &jumin, &jumax, &jvmin, &jvmax);
+                if (jumin != umin || jumax != umax || jvmin != vmin || jvmax != vmax) {
+                    continue;
+                }
+                if (uv_rings_equal(&verts[vstart], &verts[regions[j].vertex_start], nv)) {
+                    is_unique_placement = false;
+                    break;
+                }
+            }
+
             const double region_area = fabs(shoelace) * 0.5 * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
             bbox_area += (double)(umax - umin) * (double)(vmax - vmin) * NT_BENCH_UV_INV * NT_BENCH_UV_INV;
-            if (is_unique_span) {
+            if (is_unique_placement) {
                 poly_area += region_area;
             }
 
-            const uint8_t page = regions[i].page_index;
             if (page < h->page_count && page < NT_BENCH_MAX_PAGES) {
-                if (is_unique_span) {
+                if (is_unique_placement) {
                     out->page_poly_area_uv[page] += region_area;
                 }
                 if (umin < pumin[page]) {

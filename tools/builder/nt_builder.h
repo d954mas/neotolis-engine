@@ -34,6 +34,11 @@ extern nt_build_assert_handler_t nt_build_assert_handler;
 #ifndef NT_BUILD_MAX_ASSETS
 #define NT_BUILD_MAX_ASSETS 1024
 #endif
+/* Committed atlases per context — sized for the stats array. Tracks the asset
+ * ceiling so raising NT_BUILD_MAX_ASSETS can never make stats the lower limit. */
+#ifndef NT_BUILD_MAX_ATLASES
+#define NT_BUILD_MAX_ATLASES NT_BUILD_MAX_ASSETS
+#endif
 #ifndef NT_BUILD_MAX_VERTICES
 #define NT_BUILD_MAX_VERTICES 65536
 #endif
@@ -202,6 +207,29 @@ bool nt_builder_errors_truncated(const NtBuilderContext *ctx);
 /* err and buf must be non-NULL; len == 0 writes nothing. */
 void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len);
 
+/* --- Per-atlas dedup statistics ---
+ * A counter exists because the exact/D4 stage split and the saved area cannot be
+ * recovered from the packed atlas; only the placement count can. */
+typedef struct {
+    uint32_t sprites;              /* sprites in the transaction */
+    uint32_t placements;           /* distinct packed rectangles */
+    uint32_t folds_exact;          /* aliases folded at relative transform identity */
+    uint32_t folds_d4;             /* aliases folded through a non-identity D4 transform */
+    uint64_t area_saved_px;        /* summed post-trim area of every alias */
+    uint32_t vertex_blocks_shared; /* vertex+index blocks folded by byte equality */
+    bool cache_hit;                /* placements came from the atlas cache, not the packer */
+} nt_atlas_stats_t;
+
+/* One entry per successfully committed atlas, in commit order (a failed commit
+ * publishes none). The returned pointer is a BORROWED, READ-ONLY view into the
+ * context — the caller must NOT free it, and it is valid only until
+ * nt_builder_free_pack() (dangles afterward); never read it off the NtAtlasBuild
+ * handle, which commit frees. ctx must be non-NULL; the returned data is valid
+ * when *out_count > 0; out_count may be NULL. Commits past NT_BUILD_MAX_ATLASES
+ * fail the always-on NT_BUILD_ASSERT; only a consumer that overrides the assert
+ * macro away gets the record silently dropped instead. */
+const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, uint32_t *out_count);
+
 /* --- Texture options (game controls format and resize per-texture) --- */
 
 typedef struct nt_tex_compress_opts_t nt_tex_compress_opts_t;
@@ -364,6 +392,8 @@ typedef struct {
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
     bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
+    bool dedup;                             /* fold sprites with identical content onto one placement (default: true).
+                                             * A 0x00 zero-init therefore means dedup OFF — same trade-off as allowed_transforms. */
 } nt_atlas_opts_t;
 
 /* Default atlas options */
@@ -389,6 +419,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .gen_mipmaps = true,
+        .dedup = true,
     };
 }
 
@@ -398,6 +429,10 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
+
+/* Per-sprite dedup override (0 = use atlas dedup). */
+#define NT_ATLAS_SPRITE_DEDUP_ON 1
+#define NT_ATLAS_SPRITE_DEDUP_OFF 2
 
 /* Per-sprite opts struct for nt_atlas_add / nt_atlas_add_raw / nt_atlas_add_glob.
  *
@@ -409,7 +444,10 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
  *
  * Slice9: non-zero borders auto-force shape=RECT and an identity-only transform
  * mask at geometry/pack time. allowed_transforms must be 0 or IDENTITY on a
- * slice9 sprite — any other mask asserts (caller bug). */
+ * slice9 sprite — any other mask asserts (caller bug).
+ *
+ * Dedup: the tri-state dedup override decides this sprite's placement sharing
+ * on its own; OFF guarantees a private placement even when the atlas dedups. */
 typedef struct {
     /* Optional region name.
      *   nt_atlas_add:      NULL = derive from file path (basename with extension)
@@ -450,6 +488,10 @@ typedef struct {
     uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
     bool has_max_added_area_percent; /* false = inherit atlas value; true preserves an explicit 0% */
     bool has_alpha_threshold;        /* false = inherit atlas value; true preserves an explicit 0 */
+    /* 0 = inherit atlas dedup, NT_ATLAS_SPRITE_DEDUP_ON = share a placement with
+     * matching content, NT_ATLAS_SPRITE_DEDUP_OFF = guaranteed private placement
+     * (never aliases onto another sprite and never becomes an alias target). */
+    uint8_t dedup;
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

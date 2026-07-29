@@ -233,12 +233,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v6**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v7**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (6)
+  version:             u16  (7)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -251,7 +251,7 @@ texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
   page texture's resource_id in the same pack.
 
-NtAtlasRegion[region_count] (48 bytes each, v6)
+NtAtlasRegion[region_count] (48 bytes each, v6+)
   name_hash:      u64   (xxh64 of region name)
   source_w:       u16   (original image width in pixels, pre-trim)
   source_h:       u16   (original image height in pixels, pre-trim)
@@ -265,14 +265,24 @@ NtAtlasRegion[region_count] (48 bytes each, v6)
   origin_y:       f32   (pivot Y, normalized over source_h, in y-up source space.
                          v5 — 0.0 = bottom edge, 1.0 = top edge. Builder converts at write
                          time: origin_y = 1 - origin_y_png.)
-  vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
+  vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2.
+                         Regions may share a span only when their trim_offset_x/y also
+                         match — v7, because the runtime bakes cached_pos per span.)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
   page_index:     u8    (which texture page)
-  transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
+  transform:      u8    (D4 element VALUE 0..7, encoded flipH=bit0, flipV=bit1,
+                         diagonal=bit2 — not a mask; the mask domain is
+                         allowed_transforms, where mask bit i permits stored VALUE i.
+                         Exporter metadata only — UVs are already baked. v7 stores
+                         compose(placement, relative), so two regions sharing one
+                         placement may carry different values; v6 stored the
+                         placement orientation alone.)
   index_count:    u8    (triangle indices for this region; ≤ 255)
   flags:          u8    (builder-authored render hints, e.g. NT_ATLAS_REGION_FLAG_QUAD_*;
-                         bit 3 reserved)
+                         bit 3 reserved. The ring is stored rotated to its
+                         lexicographically smallest vertex, so the same image yields
+                         the same hint however it was produced.)
   _pad0:          u8    (alignment padding for uint16 slice9_lrtb)
   slice9_lrtb[4]: u16   (slice9 borders [left, right, top, bottom] in pixels;
                          all zero = no slice9. Non-zero values signal 9-cell
@@ -303,7 +313,7 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets indices by vertex_start when building GPU buffers.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation is integer bounds checking only (magic, version, canonical section offsets, per-region vertex/index spans, and every region's `page_index` referencing a declared page — a region-bearing blob with no pages is rejected before publication); it runs once per blob change at activate and resolve, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
 Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
 - common regions update metadata in place and rewrite their copied vertex/index payload

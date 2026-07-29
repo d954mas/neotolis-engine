@@ -2405,7 +2405,7 @@ void test_early_dedup_different_opts_not_deduped(void) {
     /* Since the 2x2 image is smaller than max_size=256, both will encode
      * identically and late dedup WILL merge them. So we just check both
      * entries exist and have valid sizes. The key validation is that the
-     * build succeeds (DEDUP-02 says different opts must not be early-deduped). */
+     * build succeeds (different opts must not be early-deduped). */
     TEST_ASSERT_TRUE(entries[0].size > 0);
     TEST_ASSERT_TRUE(entries[1].size > 0);
     (void)fclose(f);
@@ -5367,6 +5367,18 @@ void test_atlas_add_raw_max_vertices_override_too_low_asserts(void) {
     free(s);
 }
 
+void test_atlas_add_raw_invalid_dedup_override_asserts(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_bad_dedup_override.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "bad_dedup_override", NULL);
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 0, 255);
+    nt_atlas_sprite_opts_t opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "bad.png";
+    opts.dedup = 3;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_atlas_add_raw(atlas, s, 16, 16, &opts), "dedup override");
+    free(s);
+}
+
 /* Basis compression has no RG8/R8 equivalent. */
 void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -7372,7 +7384,7 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* Tiny max_size + sprite that fills each page → one sprite per page. Need
-     * > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. RECT shape; 57×57
+     * more sprites than the page cap to trigger the overflow. RECT shape; 57×57
      * fills a 64 page (footprint == max_size), so no second sprite fits. */
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = 64;
@@ -7409,6 +7421,56 @@ void test_atlas_max_pages_exhaustion_graceful(void) {
     nt_builder_free_pack(ctx);
     for (uint32_t i = 0; i < N_SPRITES; i++) {
         free(sprites[i]);
+    }
+}
+
+/* The cap itself is the contract: NT_ATLAS_MAX_PAGES one-per-page sprites are
+ * legal, one more is a graceful PAGES_EXHAUSTED — a cap regression (8 -> 64)
+ * moves this exact boundary, which the 70-sprite exhaustion test cannot see. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_page_cap_boundary(void) {
+    (void)MKDIR(TMP_DIR);
+    for (uint32_t n = NT_ATLAS_MAX_PAGES; n <= NT_ATLAS_MAX_PAGES + 1U; n++) {
+        char path[256];
+        (void)snprintf(path, sizeof(path), "%s/atlas_pagecap_%u.ntpack", TMP_DIR, n);
+        (void)remove(path);
+        NtBuilderContext *ctx = nt_builder_start_pack(path);
+        TEST_ASSERT_NOT_NULL(ctx);
+
+        nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+        opts.max_size = 64;
+        opts.margin = 2;
+        opts.padding = 2;
+        opts.shape = NT_ATLAS_SHAPE_RECT;
+        NtAtlasBuild *atlas = nt_atlas_begin(ctx, "page_cap", &opts);
+
+        uint8_t *sprites[NT_ATLAS_MAX_PAGES + 1U];
+        for (uint32_t i = 0; i < n; i++) {
+            /* Distinct red channels keep decoded_hash unique so dedup cannot collapse. */
+            sprites[i] = make_test_sprite(57, 57, (uint8_t)(i + 1), 50, 100, 255);
+            char name[32];
+            (void)snprintf(name, sizeof(name), "cap_%u.png", i);
+            nt_atlas_add_raw(atlas, sprites[i], 57, 57, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        }
+
+        const nt_build_result_t commit = nt_atlas_commit(atlas);
+        uint32_t err_count = 0;
+        const nt_build_error_t *errs = nt_builder_get_errors(ctx, &err_count);
+        if (n == NT_ATLAS_MAX_PAGES) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, commit, "exactly the page cap must still commit");
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, err_count, "exactly the page cap must produce no error");
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "exactly the page cap must produce a pack");
+        } else {
+            TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_BUILD_OK, commit, "a pages-exhausted commit must fail, not queue the error silently");
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, err_count, "one sprite past the cap must produce exactly one error");
+            TEST_ASSERT_EQUAL_INT_MESSAGE(NT_BUILD_ERR_KIND_ATLAS_PAGES_EXHAUSTED, errs[0].kind, "the error past the cap must be PAGES_EXHAUSTED");
+            TEST_ASSERT_NOT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_finish_pack(ctx), "a pages-exhausted build must not finish");
+        }
+
+        nt_builder_free_pack(ctx);
+        for (uint32_t i = 0; i < n; i++) {
+            free(sprites[i]);
+        }
     }
 }
 
@@ -8303,6 +8365,7 @@ int main(void) {
     RUN_TEST(test_atlas_begin_bad_shape_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_max_vertices_too_low_asserts);
     RUN_TEST(test_atlas_add_raw_max_vertices_override_too_low_asserts);
+    RUN_TEST(test_atlas_add_raw_invalid_dedup_override_asserts);
     RUN_TEST(test_atlas_begin_compress_bad_format_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_bad_compress_mode_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_bad_compress_quality_asserts_after_failed_pack);
@@ -8355,6 +8418,7 @@ int main(void) {
     RUN_TEST(test_atlas_cache_identity_includes_source_dimensions);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_graceful);
+    RUN_TEST(test_atlas_page_cap_boundary);
 
     /* Slice9 builder pipeline */
     RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);
