@@ -146,8 +146,10 @@ If build or test infrastructure is missing, state it explicitly in the response 
 ## Developer Profile
 
 ### Response Style
-- Detailed responses with tables, options, and explanations.
-  New concepts — explain thoroughly.
+- Concise by default: the result in the first 1-2 lines, then only the delta —
+  no context recap, no repeated summaries, routine ops (commit/gate/push) = one line.
+- Expand only for: new concepts, decisions with trade-offs, or when asked ("подробно").
+  Tables only when comparing ≥3 options.
 
 ### Decisions & Libraries
 - Present multiple options with trade-offs, don't choose for the developer.
