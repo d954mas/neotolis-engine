@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Unified pre-commit check. Modes:
+# Unified pre-commit check (read-only — the mutating formatter is scripts/fmt.sh,
+# combined entry: scripts/format_and_check.sh). Modes:
+#   scripts/check.sh --fast   inner loop: build + ctest + format/tidy on changed .c
+#                             only (NO cheap gates, NO full-tidy fallback on headers)
 #   scripts/check.sh          gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full   default + whole-tree format + full tidy
 #   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
@@ -18,10 +21,11 @@ cd "$ROOT_DIR"
 MODE="default"
 case "${1:-}" in
     "") ;;
+    --fast) MODE="fast" ;;
     --full) MODE="full" ;;
     --push) MODE="push" ;;
     *)
-        echo "usage: scripts/check.sh [--full|--push]"
+        echo "usage: scripts/check.sh [--fast|--full|--push]"
         exit 2
         ;;
 esac
@@ -58,24 +62,8 @@ print_summary() {
 trap print_summary EXIT
 
 # #region changed files
-# Union of: commits ahead of origin/master, staged+unstaged edits, untracked files.
-compute_changed_files() {
-    local base_ref=""
-    if git rev-parse --verify --quiet origin/master > /dev/null; then
-        base_ref="origin/master"
-    elif git rev-parse --verify --quiet master > /dev/null; then
-        base_ref="master"
-    fi
-    {
-        if [ -n "$base_ref" ]; then
-            git diff --name-only "$base_ref...HEAD"
-        fi
-        git diff --name-only HEAD
-        git ls-files --others --exclude-standard
-    } | sort -u | while IFS= read -r f; do
-        [ -f "$f" ] && printf '%s\n' "$f" || true
-    done
-}
+# shellcheck source=lib/changed_files.sh
+source "$SCRIPT_DIR/lib/changed_files.sh"
 CHANGED_FILES="$(compute_changed_files)"
 
 # Format set: changed .c/.h outside vendored deps/.
@@ -107,9 +95,16 @@ ensure_tidy_ci() {
 }
 
 # Runs tidy on changed .c files, or the full tree when headers changed.
+# --fast skips the full-tree fallback: the default pre-commit run still catches it.
 run_tidy_gate() {
     local build_dir="$1"
-    if [ -n "$CHANGED_HEADERS" ]; then
+    if [ -n "$CHANGED_HEADERS" ] && [ "$MODE" = "fast" ]; then
+        echo "fast mode: headers changed ($(printf '%s' "$CHANGED_HEADERS" | grep -c .)) — full tidy DEFERRED to the default pre-commit run"
+        if [ -n "$TIDY_FILES" ]; then
+            # shellcheck disable=SC2086
+            bash scripts/tidy.sh "$build_dir" $TIDY_FILES
+        fi
+    elif [ -n "$CHANGED_HEADERS" ]; then
         echo "Changed headers detected — they affect unchanged .c files, running FULL clang-tidy:"
         printf '  %s\n' $CHANGED_HEADERS
         bash scripts/tidy.sh "$build_dir"
@@ -123,13 +118,15 @@ run_tidy_gate() {
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
-bash scripts/check_no_real_impl_links.sh
-bash scripts/check_link_failure_loud.sh
-bash scripts/check_emjs_deps.sh
-bash scripts/check_doc_links.sh
-bash scripts/check_crt_pins.sh
-ok
+if [ "$MODE" != "fast" ]; then
+    step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
+    bash scripts/check_no_real_impl_links.sh
+    bash scripts/check_link_failure_loud.sh
+    bash scripts/check_emjs_deps.sh
+    bash scripts/check_doc_links.sh
+    bash scripts/check_crt_pins.sh
+    ok
+fi
 
 step "build (native-debug)"
 if [ ! -f "$NATIVE_BUILD_DIR/CMakeCache.txt" ]; then
@@ -141,7 +138,8 @@ cmake --build "$NATIVE_BUILD_DIR"
 ok
 
 step "ctest (native-debug)"
-ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
+# Parallel halves the suite wall time; RUN_SERIAL tests still isolate themselves.
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure
 ok
 
 if [ "$MODE" = "full" ]; then
