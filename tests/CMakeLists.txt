@@ -765,7 +765,8 @@ if(NOT EMSCRIPTEN)
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench
     )
     target_compile_definitions(test_atlas_hull_visual_report PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Renders the full visual-acceptance sheet; >120 s on slow CI runners.
+    nt_setup_test_target(test_atlas_hull_visual_report WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 600)
 
     # Proves the graceful transparent-after-trim error path is leak-free:
     # runs under live LSan, no detect_leaks=0 masking.
@@ -904,6 +905,9 @@ if(NOT EMSCRIPTEN)
         set_tests_properties(test_atlas_bench_transforms_e2e PROPERTIES
             ENVIRONMENT "NT_ATLAS_BENCH_EXE=${CMAKE_SOURCE_DIR}/build/tools/research/${NT_PRESET_NAME}/atlas_bench${CMAKE_EXECUTABLE_SUFFIX}"
         )
+        # Bench-driven shell guards; generous ceiling still catches an infinite hang.
+        set_tests_properties(test_bench_hull_tolerance_guard test_atlas_transform_sweep_guard
+            test_atlas_bench_transforms_e2e PROPERTIES TIMEOUT 600)
     else()
         message(WARNING "Git Bash not found; native shell guards are NOT registered")
     endif()

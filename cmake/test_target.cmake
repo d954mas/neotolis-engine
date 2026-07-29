@@ -13,7 +13,7 @@
 #   nt_setup_test_target(test_foo WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 function(nt_setup_test_target target_name)
-    cmake_parse_arguments(ARG "" "WORKING_DIRECTORY" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "WORKING_DIRECTORY;TIMEOUT" "" ${ARGN})
 
     nt_set_static_crt(${target_name})
     nt_set_warning_flags(${target_name})
@@ -32,5 +32,8 @@ function(nt_setup_test_target target_name)
         add_test(NAME ${target_name} COMMAND ${target_name})
     endif()
     # An aborted builder assert otherwise hangs ctest indefinitely and keeps the exe locked.
-    set_tests_properties(${target_name} PROPERTIES TIMEOUT 120)
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 120)
+    endif()
+    set_tests_properties(${target_name} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
 endfunction()
