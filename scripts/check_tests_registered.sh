@@ -33,9 +33,11 @@ for e in json.load(open(build_dir + "/compile_commands.json")):
     if m:
         src_targets.setdefault(f, set()).add(m.group(1))
 
-# Executable stems referenced by any add_test in the generated CTest files.
+# Executable stems referenced by any add_test COMMAND in the generated CTest
+# files. The FIRST argument is the test NAME, not a command — counting it would
+# let `add_test([=[test_foo]=] "python" ...)` falsely confirm target test_foo.
 tested = set()
-add_test_re = re.compile(r"add_test\((.*)$")
+add_test_re = re.compile(r'add_test\(\s*(?:\[=+\[.*?\]=+\]|"[^"]*")\s*(.*)$')
 for path in glob.glob(build_dir + "/**/CTestTestfile.cmake", recursive=True):
     for line in open(path, encoding="utf-8", errors="replace"):
         m = add_test_re.search(line)
@@ -45,10 +47,13 @@ for path in glob.glob(build_dir + "/**/CTestTestfile.cmake", recursive=True):
                     if t:
                         tested.add(os.path.splitext(os.path.basename(t))[0])
 
-# Config-gated tests (e.g. sanitizer_proof off on Windows+Clang) are absent
-# from this config's DB — accept those on the weaker textual evidence of a
-# source-path reference; configs where they build still get the strong check.
-cml = open("tests/CMakeLists.txt", encoding="utf-8").read()
+# Explicit allowlist of config-gated tests: legitimately absent from THIS
+# config's build graph; a config that does build them (CI Linux) still applies
+# the strong check. A textual-mention fallback was rejected — comments and dead
+# CMake branches would false-green it.
+CONFIG_GATED = {
+    "tests/unit/test_sanitizer_proof.c",  # off on WIN32+Clang (sanitizers disabled)
+}
 
 failed = []
 gated = 0
@@ -56,7 +61,7 @@ for f in sorted(glob.glob("tests/unit/test_*.c")):
     rel = f.replace("\\", "/")
     targets = src_targets.get(rel.lower())
     if not targets:
-        if "unit/" + os.path.basename(rel) in cml:
+        if rel in CONFIG_GATED:
             gated += 1
         else:
             failed.append(f"{rel}: not compiled by any target (missing add_executable?)")
@@ -70,6 +75,6 @@ if failed:
     print("check_tests_registered: FAILED")
     sys.exit(1)
 total = len(glob.glob("tests/unit/test_*.c"))
-suffix = f", {gated} config-gated accepted textually" if gated else ""
+suffix = f", {gated} config-gated allowlisted" if gated else ""
 print(f"check_tests_registered: passed ({total} test sources built and registered{suffix})")
 PY

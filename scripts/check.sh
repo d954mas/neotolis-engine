@@ -162,17 +162,19 @@ run_tidy_gate() {
             bash scripts/tidy.sh "$build_dir"
             return
         fi
-        # The dep log comes from native-debug, which lacks the TUs present only
-        # in the tidy-ci DB (devapi-gated). A direct-include grep misses
-        # TRANSITIVE consumers, so on any header change lint ALL ci-only TUs
-        # (fail-closed; the set is small and batches into one tidy round).
+        # The dep log comes from native-debug, which cannot see (a) TUs present
+        # only in the tidy-ci DB (devapi-gated) and (b) common TUs whose compile
+        # COMMAND differs there — different defines can activate extra includes
+        # invisible to the native dep log. Lint both sets on any header change
+        # (fail-closed; downstream grep drops non-lintable paths like deps/).
         local root_win="$ROOT_DIR" ci_only
         command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
         ci_only="$(python -c "
 import json, sys
-def files(p):
-    return {e['file'].replace(chr(92), '/') for e in json.load(open(p))}
-extra = files(sys.argv[1]) - files(sys.argv[2])
+def db(p):
+    return {e['file'].replace(chr(92), '/'): e['command'] for e in json.load(open(p))}
+ci, native = db(sys.argv[1]), db(sys.argv[2])
+extra = {f for f in ci if f not in native or ci[f] != native[f]}
 root = sys.argv[3].rstrip('/') + '/'
 print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
 " "$build_dir/compile_commands.json" "$NATIVE_BUILD_DIR/compile_commands.json" "$root_win" 2> /dev/null || true)"

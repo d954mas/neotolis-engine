@@ -163,8 +163,14 @@ print('\n'.join(seen))
     PERSISTENT_ERRORS=""
     while IFS= read -r f; do
         [ -z "$f" ] && continue
-        RETRY_OUT=$(clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" "$f" 2>&1) || true
+        RETRY_RC=0
+        RETRY_OUT=$(clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" "$f" 2>&1) || RETRY_RC=$?
         ERRS=$(printf '%s\n' "$RETRY_OUT" | grep "error:" | grep -v "deps/" || true)
+        # A retry that fails WITHOUT parseable errors is a crash, not a
+        # resolved transient — never let it read as green.
+        if [ "$RETRY_RC" -ne 0 ] && [ -z "$ERRS" ]; then
+            ERRS="$f: clang-tidy retry exited $RETRY_RC with no diagnostics (crash)"$'\n'"$(printf '%s\n' "$RETRY_OUT" | tail -n 5)"
+        fi
         [ -n "$ERRS" ] && PERSISTENT_ERRORS="$PERSISTENT_ERRORS$ERRS"$'\n'
     done <<< "$RETRY_FILES"
     if [ -n "$PERSISTENT_ERRORS" ]; then

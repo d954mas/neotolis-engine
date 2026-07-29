@@ -11,8 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .transport import Transport
 
-# Mirrors NT_DEVAPI_STEP_MAX (engine/devapi/nt_devapi_time_internal.h): a larger
-# count is rejected engine-side, orphaning any capture already sent with it.
+# Default for NT_DEVAPI_STEP_MAX (engine/devapi/nt_devapi_time_internal.h): a
+# larger count is rejected engine-side, orphaning any capture already sent with
+# it. Builds overriding the limit via -D pass theirs to DevApiClient(step_max=).
 _STEP_MAX = 1 << 20
 
 
@@ -32,8 +33,11 @@ class DevApiClient:
     # must fail fast, not grow memory without bound.
     _MAX_PENDING = 256
 
-    def __init__(self, transport: Transport) -> None:
+    def __init__(self, transport: Transport, step_max: int = _STEP_MAX) -> None:
+        # step_max mirrors the engine's NT_DEVAPI_STEP_MAX; pass the engine's
+        # value here when the build overrides it with -DNT_DEVAPI_STEP_MAX.
         self._transport = transport
+        self._step_max = step_max
         self._next_id = 1
         # request_id -> already-received response object waiting to be claimed.
         self._pending: Dict[Any, Dict[str, Any]] = {}
@@ -481,8 +485,8 @@ class DevApiClient:
         """
         if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
             raise ValueError("count must be a positive integer")
-        if count > _STEP_MAX:
-            raise ValueError(f"count {count} exceeds NT_DEVAPI_STEP_MAX ({_STEP_MAX})")
+        if count > self._step_max:
+            raise ValueError(f"count {count} exceeds NT_DEVAPI_STEP_MAX ({self._step_max})")
         cap_params: Dict[str, Any] = {}
         if scale is not None:
             cap_params["scale"] = scale
