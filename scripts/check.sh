@@ -210,12 +210,13 @@ print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins, test registration)"
 bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
+bash scripts/check_tests_registered.sh
 ok
 
 step "build (native-debug)"

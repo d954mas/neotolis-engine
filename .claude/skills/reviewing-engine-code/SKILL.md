@@ -27,6 +27,11 @@ principle check is never optional.
    Menu below. ALWAYS include lens 1 (Architecture & spec & principles) regardless of what
    changed. Pick the remaining lenses by where the diff lands (e.g. `engine/*/web/` or
    EM_JS → lens 3; `CMakeLists.txt` → lens 4; renderer/frame-loop code → lens 5).
+   **Budget by risk:** docs/comments/mechanical-only diff → lens 1 alone (plus your own
+   pass); normal logic → 2-4 lenses as above; concurrency / lifecycle / binary-format /
+   cache-identity changes → 4 lenses AND adversarial re-verification of every P1+.
+   When unsure which bucket, take the bigger one. Reviewers never see each other's
+   reports before Stage 2.
 3. Spawn **one subagent per lens**, all in parallel, each with a fresh context (no fork,
    no shared conversation — independence is the point). Every subagent is READ-ONLY: it
    must not edit files, must not commit, must not run builds that modify the tree.
@@ -129,7 +134,9 @@ normalized.
    `(file, line, mechanism)` — the same line flagged for two different mechanisms is
    two findings; two lenses flagging the same mechanism is one.
 2. Judge each candidate **adversarially**, reading the actual code at the cited
-   location plus its callers where the trigger depends on them:
+   location plus its callers where the trigger depends on them. Hold findings and
+   fixes to the AGENTS.md Evidence standard: a claim needs the narrowest check that
+   exercises it; build success and generic green commands prove nothing:
    - **CONFIRMED** — you can name concrete inputs or state that trigger it and the
      resulting wrong output or crash. Quote the guilty line in the finding.
    - **PLAUSIBLE** — the mechanism is real but the trigger is uncertain (timing,

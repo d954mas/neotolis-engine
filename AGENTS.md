@@ -144,6 +144,17 @@ Environment differences a local Windows host cannot reproduce:
 - wasm links failing with `node.exe ... returned 3221225794` (0xC0000142) on random emscripten tools = transient Windows process-spawn exhaustion under parallel links — retry once before investigating.
 - New EM_JS that allocates into the wasm heap: use `wasmExports['malloc']` — `Module['_malloc']` fails at runtime under emmalloc, bare `_malloc` fails Closure (pattern: `engine/http/web/nt_http_web.c`).
 
+## Evidence standard
+
+State the changed claim in one sentence; prove it with the NARROWEST check that
+exercises that claim; the result must match expected behavior, not exit 0.
+**Not enough:** build success as runtime proof; a generic green command; "could
+not test" treated as pass (report `unverified` + the next concrete command);
+errors in logs ignored because the exit code was 0. An existing binary is never
+freshness evidence — before running an example/bench by hand, `cmake --build`
+first (a no-op build costs sub-second). Record rejected/superseded approaches in
+the issue so the next session does not re-propose them.
+
 ## Reviewing a branch
 
 For a full pre-merge review against engine principles, spec, correctness, and tests, use the `reviewing-engine-code` skill in `.claude/skills/` — say "review this branch". It spawns parallel focus-lens reviewers (including a mandatory engine-principle lens driven by its `references/principle-catalog.md`), adversarially verifies findings, and reports P0-P2. Claude Code auto-discovers it; in Codex, read `.claude/skills/reviewing-engine-code/SKILL.md` directly (it is a self-contained, runtime-agnostic playbook) or install it into `~/.codex/skills/`.
