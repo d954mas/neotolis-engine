@@ -64,12 +64,9 @@ cmake --build build/_cmake/native-debug-capture --target <example>
 
 - `pixel_health.py` liveness thresholds false-positive on visually quiet valid
   states — use it opt-in, not as a default gate.
-- Our `tools/devapi/client.py` predates two studio fixes: (1) NO chunked recv —
-  multi-MB base64 capture lines can silently hit the send timeout at portrait /
-  supersample sizes (keep window sizes modest, e.g. ≤ 844×390, or port
-  `ChunkedSocketFile`); (2) NO atomic capture+step — under manual time mode,
-  `capture.frame` then `time.step` as separate writes DEADLOCKS (capture defers
-  to presentation); send both in one flush and correlate by request_id.
+- Under MANUAL time mode use `capture_frame_and_step()` — a bare
+  `capture_frame()` deadlocks (capture defers to presentation, which never
+  comes without a `time.step`).
 - The app renders every frame regardless of focus — a black capture means the
   GDI path was used, not that rendering stalled.
 - Non-ASCII test strings must be hardcoded UTF-8 in C — Git Bash→Windows env

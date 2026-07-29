@@ -7,7 +7,7 @@ Replies are correlated by request_id via a pending-map, never by arrival order
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .transport import Transport
 
@@ -463,6 +463,36 @@ class DevApiClient:
         if scale is not None:
             params["scale"] = scale
         return self.result("capture.region", params)
+
+    def capture_frame_and_step(
+        self, count: int = 1, scale: Optional[int] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Capture + advance MANUAL time in one flush; returns (capture_result, step_result).
+
+        capture.frame defers until a frame is presented — under manual time mode sending it
+        alone deadlocks (no frame will ever present until time.step, which was never sent).
+        Both requests go out before any read; responses may arrive in either order and
+        _recv_until's stash absorbs that.
+        """
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            raise ValueError("count must be a positive integer")
+        cap_params: Dict[str, Any] = {}
+        if scale is not None:
+            cap_params["scale"] = scale
+        cap_id = self._alloc_id()
+        step_id = self._alloc_id()
+        self._transport.send(json.dumps({"method": "capture.frame", "request_id": cap_id, "params": cap_params}))
+        self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": count}}))
+        results = []
+        for rid, method in ((cap_id, "capture.frame"), (step_id, "time.step")):
+            resp = self._recv_until(rid)
+            if resp.get("ok") is not True:
+                err = resp.get("error") or {}
+                raise DevApiResultError(
+                    f"{method} failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
+                )
+            results.append(resp.get("result", {}))
+        return results[0], results[1]
 
     # #endregion
 
