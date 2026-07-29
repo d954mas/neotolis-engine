@@ -170,11 +170,9 @@ run_tidy_gate() {
         local root_win="$ROOT_DIR" ci_only
         command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
         ci_only="$(python -c "
-import json, sys
-def db(p):
-    return {e['file'].replace(chr(92), '/'): e['command'] for e in json.load(open(p))}
-ci, native = db(sys.argv[1]), db(sys.argv[2])
-extra = {f for f in ci if f not in native or ci[f] != native[f]}
+import sys
+from scripts.check_logic import ci_variant_files
+extra = ci_variant_files(sys.argv[1], sys.argv[2])
 root = sys.argv[3].rstrip('/') + '/'
 print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
 " "$build_dir/compile_commands.json" "$NATIVE_BUILD_DIR/compile_commands.json" "$root_win" 2> /dev/null || true)"
@@ -210,6 +208,8 @@ bash scripts/check_crt_pins.sh
 # so devapi-gated tests are visible) — keep the DB fresh first.
 ensure_tidy_ci
 bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
+python -m unittest discover -s scripts/tests -p 'test_*.py'
+bash scripts/tests/test_tidy.sh
 ok
 
 step "build (native-debug)"

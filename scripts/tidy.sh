@@ -106,8 +106,9 @@ PARALLEL_JOBS="${TIDY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 # clang-tidy fleet. Diagnostics keep per-file paths, so the retry parse is unaffected.
 echo "$SOURCES" | tr ' ' '\n' | xargs -n 4 -P "$PARALLEL_JOBS" clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 
-# Filter: show only errors from project files, not vendored deps
-PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
+# Keep all diagnostics to distinguish deps-only failures from silent crashes.
+ALL_ERRORS=$(grep "error:" "$TIDY_OUTPUT" || true)
+PROJECT_ERRORS=$(printf '%s\n' "$ALL_ERRORS" | grep -v "deps/" || true)
 
 # A clang-tidy CRASH mid-batch (-n 4) can lose its chunk-mates with rc 1-125
 # and no "error:" diagnostics — never let that read as green. Checked
@@ -165,10 +166,10 @@ print('\n'.join(seen))
         [ -z "$f" ] && continue
         RETRY_RC=0
         RETRY_OUT=$(clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" "$f" 2>&1) || RETRY_RC=$?
-        ERRS=$(printf '%s\n' "$RETRY_OUT" | grep "error:" | grep -v "deps/" || true)
-        # A retry that fails WITHOUT parseable errors is a crash, not a
-        # resolved transient — never let it read as green.
-        if [ "$RETRY_RC" -ne 0 ] && [ -z "$ERRS" ]; then
+        RETRY_ALL_ERRORS=$(printf '%s\n' "$RETRY_OUT" | grep "error:" || true)
+        ERRS=$(printf '%s\n' "$RETRY_ALL_ERRORS" | grep -v "deps/" || true)
+        # A nonzero retry with no diagnostic at all is a crash.
+        if [ "$RETRY_RC" -ne 0 ] && [ -z "$RETRY_ALL_ERRORS" ]; then
             ERRS="$f: clang-tidy retry exited $RETRY_RC with no diagnostics (crash)"$'\n'"$(printf '%s\n' "$RETRY_OUT" | tail -n 5)"
         fi
         [ -n "$ERRS" ] && PERSISTENT_ERRORS="$PERSISTENT_ERRORS$ERRS"$'\n'
@@ -183,11 +184,14 @@ print('\n'.join(seen))
     echo "clang-tidy: transient parallel-run errors resolved on serial retry ($(printf '%s\n' "$RETRY_FILES" | grep -c . ) file(s))"
 fi
 
-# xargs returns 123 when a subcommand exited 1-125: clang-tidy did run
-# but treated deps warnings-as-errors (HeaderFilterRegex can't catch every
-# deps path that goes through engine/.. relative includes). PROJECT_ERRORS
-# above already covers real project issues. Other codes (127 = not found,
-# 124 = killed, etc.) mean tidy itself failed -- surface them.
+# xargs returns 123 when a child exits 1-125. It is only explainable here when
+# clang-tidy emitted a diagnostic; a silent child failure may have skipped TUs.
+if [ "$TIDY_RC" -eq 123 ] && [ -z "$ALL_ERRORS" ]; then
+    echo "clang-tidy: invocation failed silently (xargs exit 123)"
+    rm -f "$TIDY_OUTPUT"
+    exit 1
+fi
+# Other codes (127 = not found, 124 = killed, etc.) mean tidy itself failed.
 if [ "$TIDY_RC" -ne 0 ] && [ "$TIDY_RC" -ne 123 ]; then
     echo "clang-tidy: invocation failed with exit $TIDY_RC"
     echo "--- full output ---"
