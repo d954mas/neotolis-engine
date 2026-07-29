@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Unified pre-commit check (read-only — the mutating formatter is scripts/fmt.sh,
 # combined entry: scripts/format_and_check.sh). Modes:
-#   scripts/check.sh --fast   inner loop: build + ctest + format/tidy on changed .c
-#                             only (NO cheap gates, NO full-tidy fallback on headers)
 #   scripts/check.sh          gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full   default + whole-tree format + full tidy
 #   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
@@ -21,11 +19,10 @@ cd "$ROOT_DIR"
 MODE="default"
 case "${1:-}" in
     "") ;;
-    --fast) MODE="fast" ;;
     --full) MODE="full" ;;
     --push) MODE="push" ;;
     *)
-        echo "usage: scripts/check.sh [--fast|--full|--push]"
+        echo "usage: scripts/check.sh [--full|--push]"
         exit 2
         ;;
 esac
@@ -149,27 +146,22 @@ resolve_header_scoped_tus() {
 }
 
 # Runs tidy on changed .c files; changed headers add their exact including-TU
-# set (fail-closed to the full tree). --fast never full-scans: the default
-# pre-commit run still catches whatever fast skipped.
+# set (fail-closed to the full tree).
 run_tidy_gate() {
     local build_dir="$1"
     local scoped=""
     if [ -n "$CHANGED_HEADERS" ]; then
-        if [ "$MODE" = "fast" ]; then
-            echo "fast mode: headers changed — tidy on changed .c only; exact header scope runs in the default gate"
-        else
-            scoped="$(resolve_header_scoped_tus)" || scoped=""
-            if [ -z "$scoped" ]; then
-                echo "Changed headers, deps resolution incomplete — running FULL clang-tidy (fail-closed):"
-                printf '  %s\n' $CHANGED_HEADERS
-                bash scripts/tidy.sh "$build_dir"
-                return
-            fi
-            # Keep only TUs tidy would ever lint, then union with changed .c.
-            scoped="$(printf '%s\n' "$scoped" \
-                | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
-                | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
+        scoped="$(resolve_header_scoped_tus)" || scoped=""
+        if [ -z "$scoped" ]; then
+            echo "Changed headers, deps resolution incomplete — running FULL clang-tidy (fail-closed):"
+            printf '  %s\n' $CHANGED_HEADERS
+            bash scripts/tidy.sh "$build_dir"
+            return
         fi
+        # Keep only TUs tidy would ever lint, then union with changed .c.
+        scoped="$(printf '%s\n' "$scoped" \
+            | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
+            | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
     fi
     local files
     files="$(printf '%s\n%s\n' "$TIDY_FILES" "$scoped" | grep -v '^$' | sort -u || true)"
@@ -187,15 +179,13 @@ run_tidy_gate() {
     fi
 }
 
-if [ "$MODE" != "fast" ]; then
-    step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
-    bash scripts/check_no_real_impl_links.sh
-    bash scripts/check_link_failure_loud.sh
-    bash scripts/check_emjs_deps.sh
-    bash scripts/check_doc_links.sh
-    bash scripts/check_crt_pins.sh
-    ok
-fi
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
+bash scripts/check_no_real_impl_links.sh
+bash scripts/check_link_failure_loud.sh
+bash scripts/check_emjs_deps.sh
+bash scripts/check_doc_links.sh
+bash scripts/check_crt_pins.sh
+ok
 
 step "build (native-debug)"
 if [ ! -f "$NATIVE_BUILD_DIR/CMakeCache.txt" ]; then
@@ -209,16 +199,9 @@ ok
 # ctest runs in the BACKGROUND while format+tidy use the idle cores — its
 # critical path is one single-threaded test. The wait + report happens after
 # the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
-# --fast skips the three research-bench guard tests (~29 s of the suite; they
-# exercise the atlas_bench provenance tooling, not engine code) — the default
-# pre-commit run still covers them.
 step "ctest (native-debug, parallel with format+tidy)"
-CTEST_FAST_ARGS=()
-if [ "$MODE" = "fast" ]; then
-    CTEST_FAST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
-fi
 CTEST_LOG="$(mktemp)"
-ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_FAST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure > "$CTEST_LOG" 2>&1 &
 CTEST_PID=$!
 echo "(backgrounded, pid $CTEST_PID)"
 

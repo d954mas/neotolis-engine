@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The agent inner-loop entry: auto-format changed files, then run the read-only
-# check. All check.sh modes pass through: --fast | (default) | --push | --full.
+# The agent entry point: auto-format changed files, then run the read-only
+# check. check.sh modes pass through: (default) | --push | --full.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/fmt.sh"

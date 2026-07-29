@@ -98,15 +98,15 @@ Packs depend only on the builder exe — after editing shader/asset sources, del
 
 ## Pre-commit checks
 
-**Inner loop** (after each edit burst): `bash scripts/format_and_check.sh --fast` —
-auto-formats changed files (`fmt.sh`), then build + ctest + tidy on changed `.c`
-only. `check.sh` itself never mutates files; the formatter lives in `fmt.sh`.
-
-**Before every commit and task completion:** run
+**After each edit burst and before every commit:** run
 
 ```
 bash scripts/format_and_check.sh
 ```
+
+It auto-formats changed files (`fmt.sh`) and then runs the full read-only check
+(~25 s warm: gates, build, parallel ctest + scoped tidy). `check.sh` itself
+never mutates files; the formatter lives in `fmt.sh`.
 
 It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage, CRT-pin centralization), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded; review patches to them separately.
 
