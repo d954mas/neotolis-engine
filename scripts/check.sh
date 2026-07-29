@@ -199,9 +199,20 @@ ok
 # ctest runs in the BACKGROUND while format+tidy use the idle cores — its
 # critical path is one single-threaded test. The wait + report happens after
 # the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
+#
+# The three atlas-bench guard tests (~29 s CPU, the 18 s wall critical path)
+# exercise builder geometry + research-bench provenance only. In default mode
+# they run ONLY when the change set touches those areas; --push/--full (and CI)
+# always run them, so nothing ships unchecked.
 step "ctest (native-debug, parallel with format+tidy)"
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|shared/include/nt_atlas|scripts/(bench_|atlas/|test_atlas_|test_bench_|lib/hull_)|tests/unit/test_atlas_|tests/unit/test_helpers/atlas_)'
+CTEST_ARGS=()
+if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_FILES" | grep -qE "$GUARD_RELEVANT"; then
+    echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"
+    CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
+fi
 CTEST_LOG="$(mktemp)"
-ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure > "$CTEST_LOG" 2>&1 &
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
 CTEST_PID=$!
 echo "(backgrounded, pid $CTEST_PID)"
 
