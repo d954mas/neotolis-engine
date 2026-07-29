@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 178e4f9
+# Commit: 95945a2
 
 ## WASM Section Sizes
 
@@ -7,17 +7,17 @@ Section                Size
 ---------------- ----------
 Type                 609 B
 Import               661 B
-Function             391 B
+Function             392 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 190 B
-Code              647368 B
+Code              647395 B
 Data              234473 B
-Custom             37362 B
+Custom             37398 B
 ---------------- ----------
-TOTAL             921158 B
+TOTAL             921222 B
 
 ## Top 30 Functions by Size
 
@@ -54,8 +54,8 @@ TOTAL             921158 B
  6037 B   basist::bc7f::fast_pack_bc7_rgb_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  5675 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
 
-Total functions: 389
-Total code size: 646689 B
+Total functions: 390
+Total code size: 646714 B
 
 ## Built Engine Archives
 
@@ -65,7 +65,7 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 2666 B
 libnt_app_stub.a            2620 B
-libnt_atlas.a               6728 B
+libnt_atlas.a               6850 B
 libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
@@ -113,7 +113,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5892360 B
+TOTAL (archives)         5892482 B
 
 ## Data Segments Summary
 

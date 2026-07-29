@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 178e4f9
+# Commit: 95945a2
 
 ## WASM Section Sizes
 
@@ -7,17 +7,17 @@ Section                Size
 ---------------- ----------
 Type                 712 B
 Import               661 B
-Function             447 B
+Function             448 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 170 B
-Code              909926 B
+Code              909953 B
 Data              243711 B
-Custom             39188 B
+Custom             39224 B
 ---------------- ----------
-TOTAL            1194919 B
+TOTAL            1194983 B
 
 ## Top 30 Functions by Size
 
@@ -54,8 +54,8 @@ TOTAL            1194919 B
  7339 B   basist::bc7f::fast_pack_bc7_rgba_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  6837 B   basist::bc7f::pack_mode4_or_5(unsigned char*, basist::color_rgba const*, unsigned int, float, unsigned int, float*, unsigned int*)
 
-Total functions: 445
-Total code size: 909135 B
+Total functions: 446
+Total code size: 909160 B
 
 ## Built Engine Archives
 
@@ -65,7 +65,7 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 2666 B
 libnt_app_stub.a            2620 B
-libnt_atlas.a               6728 B
+libnt_atlas.a               6850 B
 libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
@@ -113,7 +113,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5892360 B
+TOTAL (archives)         5892482 B
 
 ## Data Segments Summary
 
