@@ -21,9 +21,9 @@ cannot overwrite what the artifacts say:
 - **Cost hotspots** — where wall-time/tokens went: repeated commands, re-runs,
   dead ends, CI round-trips.
 - **Decisions made** — accepted AND rejected (rejected ones stop re-proposals).
-- **Durable changes** — the load-bearing section: every lesson must land in a
-  file (AGENTS.md, a gotcha, a script, a skill, an issue) or it did not happen.
-  A retro that lives only in the transcript is a failed retro.
+- **Durable changes** — recommend a concrete destination for lessons worth
+  preserving (AGENTS.md, a gotcha, a script, a skill, an issue). Keep a
+  report-only retrospective read-only; apply changes only when the user asks.
 
 ## Non-negotiables
 

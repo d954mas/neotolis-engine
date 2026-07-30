@@ -112,87 +112,18 @@ ensure_tidy_ci() {
     fi
 }
 
-# Exact TU set including the changed headers, from ninja's dep log (the build
-# step ran just before, so the log is fresh). Prints repo-relative .c paths;
-# prints NOTHING when resolution is incomplete — a changed header unseen in ANY
-# dep block (devapi-only TU, deleted, or graph gap) fails closed to full tidy.
-resolve_header_scoped_tus() {
-    local root_win="$ROOT_DIR"
-    command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
-    ninja -C "$NATIVE_BUILD_DIR" -t deps 2> /dev/null | awk -v root="$root_win/" -v headers="$CHANGED_HEADERS" '
-        BEGIN {
-            nh = split(headers, harr, "\n")
-            for (i = 1; i <= nh; i++) if (harr[i] != "") want[harr[i]] = 1
-        }
-        function flush_block() {
-            if (hit && src != "") tus[src] = 1
-            src = ""; hit = 0
-        }
-        /^[^ \t]/ { flush_block(); next }
-        /^[ \t]/ {
-            p = $0
-            gsub(/^[ \t]+|[ \t\r]+$/, "", p)
-            gsub(/\\/, "/", p)
-            if (index(p, root) == 1) {
-                rel = substr(p, length(root) + 1)
-                if (src == "" && rel ~ /\.c$/) src = rel
-                if (rel in want) { seen[rel] = 1; hit = 1 }
-            }
-            next
-        }
-        { flush_block() }
-        END {
-            flush_block()
-            for (h in want) if (!(h in seen)) exit 1
-            for (t in tus) print t
-        }
-    '
-}
-
-# Runs tidy on changed .c files; changed headers add their exact including-TU
-# set (fail-closed to the full tree).
+# A changed header can affect any configured variant, so lint the full tree.
 run_tidy_gate() {
     local build_dir="$1"
-    local scoped=""
     if [ -n "$CHANGED_HEADERS" ]; then
-        scoped="$(resolve_header_scoped_tus)" || scoped=""
-        if [ -z "$scoped" ]; then
-            echo "Changed headers, deps resolution incomplete — running FULL clang-tidy (fail-closed):"
-            printf '  %s\n' $CHANGED_HEADERS
-            bash scripts/tidy.sh "$build_dir"
-            return
-        fi
-        # The dep log comes from native-debug, which cannot see (a) TUs present
-        # only in the tidy-ci DB (devapi-gated) and (b) common TUs whose compile
-        # COMMAND differs there — different defines can activate extra includes
-        # invisible to the native dep log. Lint both sets on any header change
-        # (fail-closed; downstream grep drops non-lintable paths like deps/).
-        local root_win="$ROOT_DIR" ci_only
-        command -v cygpath > /dev/null 2>&1 && root_win="$(cygpath -m "$ROOT_DIR")"
-        ci_only="$(python -c "
-import sys
-from scripts.check_logic import ci_variant_files
-extra = ci_variant_files(sys.argv[1], sys.argv[2])
-root = sys.argv[3].rstrip('/') + '/'
-print('\n'.join(sorted(f[len(root):] for f in extra if f.startswith(root))))
-" "$build_dir/compile_commands.json" "$NATIVE_BUILD_DIR/compile_commands.json" "$root_win" 2> /dev/null || true)"
-        scoped="$(printf '%s\n%s\n' "$scoped" "$ci_only")"
-        # Keep only TUs tidy would ever lint, then union with changed .c.
-        scoped="$(printf '%s\n' "$scoped" \
-            | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
-            | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
-    fi
-    local files
-    files="$(printf '%s\n%s\n' "$TIDY_FILES" "$scoped" | grep -v '^$' | sort -u || true)"
-    if [ -n "$files" ]; then
-        if [ -n "$scoped" ]; then
-            echo "Changed .c + TUs including the changed headers ($(printf '%s\n' "$files" | grep -c .) files):"
-        else
-            echo "Changed .c files:"
-        fi
-        printf '  %s\n' $files
+        echo "Changed headers detected — running FULL clang-tidy:"
+        printf '  %s\n' $CHANGED_HEADERS
+        bash scripts/tidy.sh "$build_dir"
+    elif [ -n "$TIDY_FILES" ]; then
+        echo "Changed .c files:"
+        printf '  %s\n' $TIDY_FILES
         # shellcheck disable=SC2086 — newline-split into file args; repo paths have no spaces
-        bash scripts/tidy.sh "$build_dir" $files
+        bash scripts/tidy.sh "$build_dir" $TIDY_FILES
     else
         echo "tidy: nothing to check"
     fi

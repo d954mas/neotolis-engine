@@ -203,11 +203,10 @@ localization content, never an assert). **Convention: a field
   tagset is **not** guaranteed present — the resolved effect is captured at
   build/solve into the solved state: the composed style carries a `uint8_t`
   `effect_id`, and an id `>= NT_UI_RICH_FX_CUSTOM_BASE` indexes a per-block
-  fixed-cap `(fn, user_data)` table (no heap, no 48 B style ABI growth); a smaller
+  fixed-cap `(fn, user_data)` table (no heap; the table lives outside the style); a smaller
   id is a stock catalogue index resolved via `nt_ui_rich_fx_stock`. An unknown
-  stock id falls back to identity. The 48 B `nt_ui_rich_style_t` ABI is
-  unchanged; the per-block custom table is in-memory-only frame scratch, never
-  serialized.
+  stock id falls back to identity. The 72 B `nt_ui_rich_style_t` and the
+  per-block custom table are in-memory-only, never serialized.
 - **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
   the pointer (offset by the block's prev-frame bbox origin) and reports
   `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
@@ -250,8 +249,7 @@ emit order. To give the game explicit control of overlap z, each atom carries a
 - **Default by kind** (no `<layer>`): `TEXT = 0`, `IMAGE = 1`, `OBJECT = 2`
   (ascending = further back → further front). So by default text draws *behind*
   images, which draw *behind* objects. The `nt_ui_rich_style_t.layer` field
-  (offset 42, one byte stolen from the old `_pad[2]`; the struct stays 48 B) holds
-  the sentinel **`255` (AUTO)** until an explicit layer is pushed; the per-kind
+  (offset 42) holds the sentinel **`255` (AUTO)** until an explicit layer is pushed; the per-kind
   default is resolved at atom build.
 - **`<layer=N>` / `nt_ui_rich_push_layer(N)`** (N = 0..254): every enclosed atom of
   **any** kind takes layer N, overriding the per-kind default. `</layer>` /

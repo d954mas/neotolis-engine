@@ -152,11 +152,12 @@ get-or-create cell (zeroed on create; zero is a valid initial state). The 4-char
 `tag` (built with `NT_UI_STATE_TAG`) identifies the owning widget so two widgets
 that hash to the same id+size trap on re-acquire instead of aliasing silently,
 `nt_ui_state_find` returns NULL if absent, and `nt_ui_state_clear` /
-`nt_ui_state_clear_all` drop one or all cells (e.g. a screen transition). It is
-BSS in the context (`NT_UI_STATE_SLOTS` × `NT_UI_STATE_PAYLOAD_MAX`, defaults
-256 × 64 B ≈ 19 KB/ctx, `NT_UI_STATE_PROBE_MAX` probe window), no heap — direct-mapped +
-linear-probe like the anim cache, but with **no LRU eviction**: a cell dies only
-via clear or context destroy. This no-eviction property is the contract that
+`nt_ui_state_clear_all` drop one or all cells (e.g. a screen transition). The
+pool is carved from the caller-provided context arena; the engine allocates no
+heap. Its size comes from `nt_ui_create_desc_t.state_slots` (default
+`NT_UI_STATE_SLOTS` = 256, about 19 KB) and uses the configured probe window.
+It is direct-mapped + linear-probe like the anim cache, but with **no LRU
+eviction**: a cell dies only via clear or context destroy. This no-eviction property is the contract that
 makes the game-owned-pointer escape hatch leak-safe — for an oversize payload the
 game allocates, stores the pointer in the cell, and frees it before clear, knowing
 the engine will never silently reclaim it. Overflow, a size mismatch, or a tag
@@ -375,7 +376,7 @@ not in the record lookup.
 
 ## Atlas region identity
 
-`nt_atlas_region_ref_t { nt_resource_t atlas;
+`nt_atlas_region_ref_t { uint64_t name_hash; nt_resource_t atlas;
 uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
 is the unset handle; consumers assign their own meaning). The widget APIs
 that take atlas art — `nt_ui_image`, `nt_ui_panel_begin`, and the

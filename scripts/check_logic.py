@@ -1,32 +1,10 @@
-import json
 import os
 import re
-from collections import defaultdict
 from pathlib import Path
 
 
 _CMAKE_TOKEN_RE = re.compile(r'"([^"]*)"|\[(=*)\[(.*?)\]\2\]')
 _SANITIZER_PROOF = "tests/unit/test_sanitizer_proof.c"
-
-
-def _compile_command(entry):
-    if "command" in entry:
-        return entry["command"]
-    return "\0".join(entry.get("arguments", []))
-
-
-def read_compile_variants(path):
-    variants = defaultdict(set)
-    for entry in json.loads(Path(path).read_text(encoding="utf-8")):
-        source = entry["file"].replace("\\", "/")
-        variants[source].add(_compile_command(entry))
-    return dict(variants)
-
-
-def ci_variant_files(ci_path, native_path):
-    ci = read_compile_variants(ci_path)
-    native = read_compile_variants(native_path)
-    return {source for source, commands in ci.items() if not commands <= native.get(source, set())}
 
 
 def _cmake_tokens(line):

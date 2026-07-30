@@ -95,7 +95,7 @@ const void *nt_resource_peek_user_data(handle);
 
 Behavior flags:
 - `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
-- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning-phase-72-addition)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
+- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
 
 **on_resolve** fires in Phase D for the published winner when:
 - published asset identity changes

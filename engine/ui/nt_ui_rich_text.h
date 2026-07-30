@@ -111,8 +111,7 @@ typedef enum {
 } nt_rich_align_t;
 
 /* ---- The dedup'd composed style (the run_style[] target) ---- */
-/* default_atlas (nt_atlas_region_ref_t) leads with a uint64 -> 8-byte alignment,
- * so the struct rounds up to 56 (the two 4-byte material handles pad the tail out). */
+/* default_atlas forces 8-byte alignment; the full decorated style occupies 72 B. */
 typedef struct {
     nt_atlas_region_ref_t default_atlas; /*  0: base-style default image atlas */
     nt_font_t font_id[4];                /* 16: R/B/I/BI variants */
