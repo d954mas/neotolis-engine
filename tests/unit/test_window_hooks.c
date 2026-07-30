@@ -1,6 +1,5 @@
-/* nt_window_add_pre_swap_hook's bool return is what lets nt_devapi_capture_install_seam arm ONLY when
- * the seam actually registered — a full table returns false (assert-off) instead of leaving a no-seam
- * host "capture-capable". Links nt_window_stub for the shared registry, no GL/GLFW. */
+/* nt_window_add_pre_swap_hook's bool return lets nt_devapi_capture_install_seam
+ * arm only after registration. Links the shared stub registry, no GL/GLFW. */
 
 #include "test_helpers/nt_assert_trap.h"
 #include "window/nt_window.h"
@@ -27,8 +26,7 @@ void test_pre_swap_hook_registration(void) {
     TEST_ASSERT_TRUE(nt_window_add_pre_swap_hook(hook1));
     TEST_ASSERT_TRUE(nt_window_add_pre_swap_hook(hook2));
     TEST_ASSERT_TRUE(nt_window_add_pre_swap_hook(hook3)); /* table now full (default cap 4: hook0..3). */
-    /* Overflow: a debug build asserts here; the assert-off build returns false instead, so install_seam
-       skips arming a host with no seam. */
+    /* Overflow is a programmer invariant and must assert in supported modes. */
     NT_TEST_EXPECT_ASSERT(nt_window_add_pre_swap_hook(hook4));
 }
 

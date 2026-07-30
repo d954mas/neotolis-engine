@@ -85,7 +85,7 @@ if(NOT NT_DEVAPI_ENABLED)
     endforeach()
 endif()
 
-set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
+set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off (unsupported), 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()

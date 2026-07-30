@@ -1,6 +1,5 @@
-/* Recompile nt_atlas.c with asserts forced OFF regardless of the build's global
- * NT_ASSERT_MODE (CI release passes -DNT_ASSERT_MODE=2; a per-target -D would
- * collide). #undef beats the command line, so this pin works in every config. */
+/* Recompile nt_atlas.c with asserts forced OFF for the parser-contract test.
+ * #undef avoids colliding with CI's global NT_ASSERT_MODE definition. */
 #undef NT_ASSERT_MODE
 #define NT_ASSERT_MODE 0
 // NOLINTNEXTLINE(bugprone-suspicious-include)

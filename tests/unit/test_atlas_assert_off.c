@@ -1,7 +1,6 @@
-/* Drives nt_atlas.c compiled with NT_ASSERT_MODE=0 (see nt_atlas_assert_off_tu.c)
- * — the shipping config. Every rejection below must come from the hard guards
- * alone: NT_ASSERT is ((void)0) there, so a deleted `return false` in the
- * validator goes unnoticed by the normal test binaries, whose asserts fire first. */
+/* Drives nt_atlas.c with NT_ASSERT_MODE=0 to prove the runtime-pack validator's
+ * documented hard guards do not depend on asserts. This parser contract does
+ * not make OFF a supported runtime mode. */
 #undef NT_ASSERT_MODE
 #define NT_ASSERT_MODE 0
 

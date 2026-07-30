@@ -21,10 +21,12 @@ Related: [Module Layout](../core/module-layout.md), [Input](../io/input.md), [Re
 Asserts are contracts, not error handling. A failed assert means the program is broken beyond recovery — continuing would mask bugs.
 
 - **NT_ASSERT** — single macro, three compile-time modes via `NT_ASSERT_MODE`:
-  - `0 (OFF)` — `((void)0)`, zero overhead. Available via CMake override (`-DNT_ASSERT_MODE=0`) for final production builds where binary size is critical.
+  - `0 (OFF)` — `((void)0)`, zero overhead. Available via CMake override (`-DNT_ASSERT_MODE=0`) as an **unsupported**, size-oriented escape hatch. Once an asserted precondition is violated, runtime behavior is undefined.
   - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. **Release default.**
   - `2 (FULL)` — hookable handler with `expr/file/line` strings. **Debug default.** Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
 - Release ships with TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
+- Assert expressions are side-effect-free because OFF does not evaluate them. No fallback path is required solely to keep an OFF build running after an invariant breach.
+- Hard guards are required at untrusted/runtime-input boundaries and wherever a public API promises recoverable rejection; those guards implement the API contract, not support for OFF.
 - Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling (see below).
 
 ## Error policy

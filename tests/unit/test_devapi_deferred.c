@@ -193,8 +193,8 @@ static void test_multi_slot_distinct_frames(void) {
 }
 
 /* A deferred command inside a batch is rejected with an error entry — never dropped from the
-   array and never leaked as the DEFERRED_SENTINEL pointer (the assert-off UB hole). The response
-   array stays 1:1 (length 2 here), each entry is ok:false bad_params, and NO slot is enqueued. */
+   array or leaked as the DEFERRED_SENTINEL pointer. The response stays 1:1 (length 2 here),
+   each entry is ok:false bad_params, and no slot is enqueued. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_deferred_in_batch_rejected(void) {
     const char *resp = nt_devapi_submit("[{\"method\":\"test.defer\",\"request_id\":1},{\"method\":\"test.defer\",\"request_id\":2}]");

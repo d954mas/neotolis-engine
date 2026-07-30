@@ -215,8 +215,8 @@ static inline const uint8_t *atlas_dedup_find_asset(const void *pack_bytes, size
     return NULL;
 }
 
-/* The single pack-introspection point the dedup assertions build on. Every
- * offset is guarded with a hard if — NT_ASSERT_MODE=OFF is a shipping config. */
+/* The single pack-introspection point the dedup assertions build on. Pack bytes
+ * are runtime input, so every offset has a hard guard independent of asserts. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat guard-per-read pack walk; splitting detaches guards from reads
 static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pack_len, nt_atlas_dedup_region_t *out, uint32_t cap, uint32_t *out_count) {
     if (out == NULL || out_count == NULL) {

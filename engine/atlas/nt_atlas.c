@@ -410,8 +410,8 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
 
     nt_atlas_blob_view_t view;
-    /* Hard gate — NT_ASSERT is ((void)0) in the OFF shipping config, and this call is
-     * both the only validation of the untrusted blob and what carves the view. */
+    /* Runtime pack bytes are untrusted: validation is both a hard gate and what
+     * carves the view used below. */
     const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
     NT_ASSERT(blob_ok && "atlas blob: validation failed");
     if (!blob_ok) {
