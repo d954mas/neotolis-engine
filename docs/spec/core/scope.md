@@ -29,7 +29,7 @@ Related: [Core Principles](principles.md), [Module Layout](module-layout.md), [R
 - render items + sorting + batching policy
 - mesh instancing planned
 - sprite CPU batching planned
-- audio system (platform-agnostic, handle-based)
+- audio system (platform-agnostic, handle-based) — **planned, no `engine/audio` yet**
 
 ## Explicitly not in scope
 
@@ -155,7 +155,7 @@ Related: [Core Principles](principles.md), [Module Layout](module-layout.md), [R
 
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
-  default 64); 4-probe chain; full-chain collision evicts the STALEST
+  default 512, power-of-2); 4-probe chain; full-chain collision evicts the STALEST
   slot in the probe window — the one with the oldest `last_touch`
   generation tick (snap-reseed, easing lost for one id). Evicting by
   staleness rather than blindly the tail avoids bleeding a slot that

@@ -119,7 +119,7 @@ Zero copy. Data is already in WASM heap.
 
 ## Debugging
 
-Builder includes `pack_dump(filename)` utility command that prints pack contents to console. No external tool needed.
+Builder includes the `nt_builder_dump_pack(pack_path)` utility that prints pack contents to console. No external tool needed.
 
 ## Future: partial loading
 

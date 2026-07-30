@@ -20,7 +20,7 @@ subsystems explicitly — the engine gives building blocks, not a pipeline.
 
 The engine runs the frame lifecycle, stores entities/components/resources, updates
 transforms, loads runtime assets from NTPACK packs asynchronously, and provides the
-WebGL 2 render backend, input and platform services, and audio playback. Data flows
+WebGL 2 render backend and input/platform services (audio is planned). Data flows
 through a small set of composable modules: entities own hierarchy, per-kind
 components hold render state, thin render items are sorted and batched by
 game-chosen policy, and generational handles resolve resources published from
@@ -99,7 +99,27 @@ lifetime, and naming vocabulary.
 | `engine/memory`, `engine/pool` | [runtime/memory.md](runtime/memory.md) |
 | `engine/core` | [core/principles.md](core/principles.md), [core/api-contracts.md](core/api-contracts.md); assert policy: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | `engine/clipboard` | [core/module-layout.md](core/module-layout.md) (stub semantics example) |
-| `engine/systems` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) (explicit system calls) |
+| `engine/postfx` | [core/module-layout.md](core/module-layout.md) (composition); contract in `nt_postfx_blur.h` |
+| *(`engine/systems` — placeholder dir, no code)* | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) (the game calls systems explicitly) |
 | `engine/basisu`, `engine/fpng` | [builder/builder.md](builder/builder.md) (texture encode), [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (frame capture) |
 | `engine/math`, `engine/color`, `engine/utf8`, `engine/base64` | small utility modules — no dedicated chapter |
+| `shared/include` | binary formats shared by builder + runtime (`nt_*_format.h`) → [assets/ntpack.md](assets/ntpack.md), [assets/runtime-formats.md](assets/runtime-formats.md), [assets/resource.md](assets/resource.md) |
 | `tools/builder` | [builder/builder.md](builder/builder.md) |
+
+Dir names that do not predict their prefix: `engine/graphics` → `nt_gfx_*`,
+`engine/memory` → `nt_mem_scratch`, `engine/postfx` → `nt_postfx_blur`.
+`engine/platform` has no public top-level header (web API in `web/nt_platform_web.h`).
+
+## Task → entry point
+
+Where a change starts, for flows that span modules (the chapter map answers the
+reverse direction, file → chapter):
+
+| Task | Entry points |
+|---|---|
+| Add/change a render item field | `engine/render/nt_render_defs.h` (16 B item, `_Static_assert`) → `nt_sort_by_key` → `nt_*_renderer_draw_list`. **The game builds items**, not the engine: reference `examples/bunnymark/main.c` |
+| Change UI text wrapping | Wrapping itself lives in vendored Clay (`deps/clay`, `CLAY_TEXT_WRAP_*`); the engine owns only the measure callback (`engine/ui/nt_ui.c` → `nt_font_measure_n`) and the wrap mode it passes. Rich text has its own solver: `engine/ui/nt_ui_rich_text.c` |
+| Touch the `.ntpack` format | Layout: `shared/include/nt_pack_format.h` (magic `NPAK`) → writer `nt_builder_finish_pack` (`tools/builder/nt_builder.c`) → reader `engine/resource/nt_resource.c` (header/version check) |
+| Add builder validation | Programmer/IO errors assert (`NT_BUILD_ASSERT`, e.g. `tools/builder/nt_builder_texture.c`); content errors of atlas sprites go to the graceful channel `nt_builder_get_errors` (`tools/builder/nt_builder_atlas.c`) |
+| Add a web platform entry | Convention `engine/<mod>/{interface,native,web,stub}`: the web bridge is `engine/<mod>/web/nt_<mod>_web.c` (EM_JS), e.g. `engine/input/web/nt_input_web.c` |
+| Add a UI widget demo | New tab in `examples/ui_showcase` (never a new example dir) |

@@ -13,15 +13,15 @@ Related: [Pack Format](../assets/ntpack.md), [Runtime Formats](../assets/runtime
 Builder is a standalone native binary (C17, with vendored C++ for Basis Universal encoder behind extern "C"). Rules are written in code.
 
 ```c
-start_pack("base");
-add_shaders("assets/shaders/*.shader");
-add_textures("assets/textures/ui/*.png");
-add_materials("assets/materials/ui/*.mat");
-add_meshes("assets/meshes/common/*.glb");
-add_audio("assets/sfx/*.wav");
-add_audio("assets/music/*.ogg");
-finish_pack();
+NtBuilderContext *ctx = nt_builder_start_pack("build/base.ntpack");
+nt_builder_add_shaders(ctx, "assets/shaders/*.vert", NT_BUILD_SHADER_VERTEX);
+nt_builder_add_textures(ctx, "assets/textures/ui/*.png", &tex_opts);
+nt_builder_add_meshes(ctx, "assets/meshes/common/*.glb", &mesh_opts);
+nt_build_result_t r = nt_builder_finish_pack(ctx);
+nt_builder_free_pack(ctx);
 ```
+
+Working references: `examples/*/build_packs.c`.
 
 ## Why code-based builder
 
@@ -30,37 +30,35 @@ Explicit control, no DSL needed, powerful grouping logic, easy custom per-projec
 ## Builder module layers
 
 ```text
-builder/
-    main_builder.c
-    builder_pack.c
-    builder_manifest.c
-    builder_import_mesh.c
-    builder_import_texture.c
-    builder_import_shader.c
-    builder_import_material.c
-    builder_import_audio.c
-    builder_project.c
+tools/builder/
+    main.c                     CLI entry
+    nt_builder.c               context, pack write, error channel
+    nt_builder_texture.c       nt_builder_mesh.c        nt_builder_shader.c
+    nt_builder_font.c          nt_builder_blob.c        nt_builder_scene.c
+    nt_builder_atlas.c         nt_builder_atlas_geometry.c  nt_builder_atlas_vpack.c
+    nt_builder_cache.c         nt_builder_codegen.c     nt_builder_dump.c
+    nt_builder_glob.c          nt_builder_hash.c        nt_builder_include.c
+    nt_builder_tangent.c
 ```
 
 ## Core builder API
 
+Signatures are canonical in `tools/builder/nt_builder.h`; this list names the
+surface an asset pipeline uses (no material or audio adds exist — those formats
+are not built yet).
+
 ```c
-start_pack(const char *name);
-finish_pack(void);
+NtBuilderContext *nt_builder_start_pack(const char *output_path);
+nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
+void nt_builder_free_pack(NtBuilderContext *ctx);
 
-add_mesh(const char *path);
-add_texture(const char *path);
-add_shader(const char *path);
-add_material(const char *path);
-add_audio(const char *path);
-add_font(const char *path, const nt_font_opts_t *opts);   /* opts: charset (required), name override, target_units_per_em */
-
-add_meshes(const char *pattern);
-add_textures(const char *pattern);
-add_shaders(const char *pattern);
-add_materials(const char *pattern);
-add_audios(const char *pattern);
-add_fonts(const char *pattern, const nt_font_opts_t *opts);
+nt_builder_add_mesh / add_texture / add_shader / add_font   /* one source file */
+nt_builder_add_meshes / add_textures / add_shaders / add_fonts   /* glob pattern */
+nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
+nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
+nt_builder_add_blob         /* opaque bytes under a resource id */
+nt_builder_add_asset_root   /* convention-based tree import */
+/* Font opts: charset (required), name override, target_units_per_em. */
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
  * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */

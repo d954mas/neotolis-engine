@@ -22,7 +22,7 @@ Engine
     ├─ loads runtime assets from NTPACK packs (async)
     ├─ provides render backend (WebGL 2)
     ├─ provides input + platform services
-    └─ provides audio playback
+    └─ provides audio playback (planned)
 
 Builder
     ├─ imports source assets
