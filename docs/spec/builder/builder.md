@@ -13,15 +13,15 @@ Related: [Pack Format](../assets/ntpack.md), [Runtime Formats](../assets/runtime
 Builder is a standalone native binary (C17, with vendored C++ for Basis Universal encoder behind extern "C"). Rules are written in code.
 
 ```c
-start_pack("base");
-add_shaders("assets/shaders/*.shader");
-add_textures("assets/textures/ui/*.png");
-add_materials("assets/materials/ui/*.mat");
-add_meshes("assets/meshes/common/*.glb");
-add_audio("assets/sfx/*.wav");
-add_audio("assets/music/*.ogg");
-finish_pack();
+NtBuilderContext *ctx = nt_builder_start_pack("build/base.ntpack");
+nt_builder_add_shaders(ctx, "assets/shaders/*.vert", NT_BUILD_SHADER_VERTEX);
+nt_builder_add_textures(ctx, "assets/textures/ui/*.png", &tex_opts);
+nt_builder_add_meshes(ctx, "assets/meshes/common/*.glb", &mesh_opts);
+nt_build_result_t r = nt_builder_finish_pack(ctx);
+nt_builder_free_pack(ctx);
 ```
+
+Working references: `examples/*/build_packs.c`.
 
 ## Why code-based builder
 
@@ -30,37 +30,35 @@ Explicit control, no DSL needed, powerful grouping logic, easy custom per-projec
 ## Builder module layers
 
 ```text
-builder/
-    main_builder.c
-    builder_pack.c
-    builder_manifest.c
-    builder_import_mesh.c
-    builder_import_texture.c
-    builder_import_shader.c
-    builder_import_material.c
-    builder_import_audio.c
-    builder_project.c
+tools/builder/
+    main.c                     CLI entry
+    nt_builder.c               context, pack write, error channel
+    nt_builder_texture.c       nt_builder_mesh.c        nt_builder_shader.c
+    nt_builder_font.c          nt_builder_blob.c        nt_builder_scene.c
+    nt_builder_atlas.c         nt_builder_atlas_geometry.c  nt_builder_atlas_vpack.c
+    nt_builder_cache.c         nt_builder_codegen.c     nt_builder_dump.c
+    nt_builder_glob.c          nt_builder_hash.c        nt_builder_include.c
+    nt_builder_tangent.c
 ```
 
 ## Core builder API
 
+Signatures are canonical in `tools/builder/nt_builder.h`; this list names the
+surface an asset pipeline uses (no material or audio adds exist — those formats
+are not built yet).
+
 ```c
-start_pack(const char *name);
-finish_pack(void);
+NtBuilderContext *nt_builder_start_pack(const char *output_path);
+nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
+void nt_builder_free_pack(NtBuilderContext *ctx);
 
-add_mesh(const char *path);
-add_texture(const char *path);
-add_shader(const char *path);
-add_material(const char *path);
-add_audio(const char *path);
-add_font(const char *path, const nt_font_opts_t *opts);   /* opts: charset (required), name override, target_units_per_em */
-
-add_meshes(const char *pattern);
-add_textures(const char *pattern);
-add_shaders(const char *pattern);
-add_materials(const char *pattern);
-add_audios(const char *pattern);
-add_fonts(const char *pattern, const nt_font_opts_t *opts);
+nt_builder_add_mesh / add_texture / add_shader / add_font   /* one source file */
+nt_builder_add_meshes / add_textures / add_shaders / add_fonts   /* glob pattern */
+nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
+nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
+nt_builder_add_blob         /* opaque bytes under a resource id */
+nt_builder_add_asset_root   /* convention-based tree import */
+/* Font opts: charset (required), name override, target_units_per_em. */
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
  * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */
@@ -224,12 +222,57 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
 
 1. **alpha_trim** — resolve the per-sprite `alpha_threshold` (inherit unless `has_alpha_threshold`), extract the alpha plane, and find the tight retained-pixel bbox (rejects fully transparent inputs unless the effective threshold is 0).
 2. **cache_check** — compute atlas-level cache key (per-sprite pixel hash, source dimensions, origins, raw overrides, pack-affecting opts, and version), then try loading cached placement and pages. The key is add-order-sensitive because cached placements reference sprite indices. Post-pack fields are excluded because the texture encode stage has its own cache.
-3. **dedup** — sprites are bucketed by the D4-invariant post-trim dimension pair `(min(w,h), max(w,h))`, keyed inside each bucket by a canonical **post-trim** content hash (the minimum of the eight orientation hashes), and confirmed by an exact post-trim byte compare **through a relative transform**; duplicates share the original's placement rectangle. Canvas size and art position therefore no longer keep identical art apart, and neither does orientation: a sprite joins a group with relative transform `rel` when `rel` is in that sprite's own effective `allowed_transforms` mask and its pixels match the root's under `rel` — the lowest such `rel` wins, and `rel = identity` is simply the exact case, so there is one search and no separate exact stage. `rel` means `root_bitmap == rel(alias_bitmap)`; the alias's region `transform` stores `compose(placement, rel)` — equal to `rel` alone only when the group packs at an identity placement. A sprite whose resolved `dedup` is off is excluded from the search entirely, so it is neither an alias nor an alias target. Each group's root is its lowest-add-index **eligible** member — a `DEDUP_OFF` sprite keeps hash `0`, so it sorts into a separate run and never enters an enabled group at all (the fold search additionally skips it as member and as target) — so repacks are byte-identical. One equal-content run may hold **more than one group**: a member whose own mask forbids the relative it would need to reach the earlier root stays unfolded and becomes a second root, because only roots are fold targets. Placement count is therefore sensitive to add order for such mixed-mask runs, and deliberately so — widening the search to accept a relative outside the member's mask (legal whenever some group placement makes the product land back inside it) is a density trade the packer does not currently take. The canonical hash itself is only computed for dimension buckets holding two or more sprites, and only for members that could actually fold: a singleton keeps hash `0`, so does a `DEDUP_OFF` sprite, and a bucket whose members all resolve to identity-only masks hashes the identity orientation alone. That last narrowing is per **bucket** and never per sprite, because minimum-over-orbit is only orientation-invariant when the orientation set is a subgroup, and a mask such as `{identity, rot90}` is not closed — a bucket is the widest set whose keys are ever compared to each other, since a run never crosses a dimension bucket, so one orientation set per bucket is exactly as strict as one per atlas. What is shared here is the placement rectangle and nothing else: every sprite still owns its own vertex/index block, and whether two of those blocks end up sharing one byte range in the blob is decided separately, by byte equality, in `serialize`.
+3. **dedup** — fold identical art onto one placement rectangle. Canvas size, art
+   position and orientation do not keep identical art apart.
+   - **Search.** Bucket by the D4-invariant post-trim dimension pair
+     `(min(w,h), max(w,h))`; key inside a bucket by a canonical **post-trim**
+     content hash (the minimum of the eight orientation hashes); confirm by an
+     exact post-trim byte compare **through a relative transform**.
+   - **Joining a group.** A sprite joins under relative transform `rel` when `rel`
+     is in that sprite's own effective `allowed_transforms` mask and its pixels
+     match the root's under `rel` (`rel` means `root_bitmap == rel(alias_bitmap)`);
+     the lowest such `rel` wins. `rel = identity` is simply the exact case, so
+     there is one search and no separate exact stage. The alias's region
+     `transform` stores `compose(placement, rel)` — equal to `rel` alone only when
+     the group packs at an identity placement.
+   - **Roots and exclusion.** A group's root is its lowest-add-index **eligible**
+     member, so repacks are byte-identical. A sprite whose resolved `dedup` is off
+     keeps hash `0`, sorts into a separate run, and is skipped as both member and
+     target — never an alias, never an alias target.
+   - **Multiple groups per run.** Only roots are fold targets, so a member whose
+     own mask forbids the relative it would need to reach the earlier root stays
+     unfolded and becomes a second root. Placement count is therefore add-order
+     sensitive for such mixed-mask runs, deliberately: widening the search to a
+     relative outside the member's mask (legal whenever some group placement makes
+     the product land back inside it) is a density trade the packer does not take.
+   - **When the hash is computed.** Only for buckets holding two or more sprites,
+     and only for members that could actually fold — a singleton keeps hash `0`,
+     so does a `DEDUP_OFF` sprite. A bucket whose members all resolve to
+     identity-only masks hashes the identity orientation alone. That narrowing is
+     per **bucket**, never per sprite: minimum-over-orbit is orientation-invariant
+     only when the orientation set is a subgroup, and a mask such as
+     `{identity, rot90}` is not closed. A bucket is the widest set whose keys are
+     ever compared (a run never crosses a dimension bucket), so one orientation
+     set per bucket is exactly as strict as one per atlas.
+   - **What is shared.** The placement rectangle and nothing else: every sprite
+     still owns its vertex/index block, and whether two blocks share one byte
+     range in the blob is decided separately, by byte equality, in `serialize`.
 4. **geometry** — for each unique sprite, build the binary mask from the same effective alpha threshold and select the shape-specific geometry path. `RECT` emits the trim AABB. `CONVEX_HULL` starts from the opaque-pixel convex hull. `CONCAVE_CONTOUR` performs morphological closing when needed, traces the boundary, and evaluates concave simplifiers. Polygon candidates share full retained-cell coverage, topology, triangulation, area-budget, vertex-budget, and deterministic-selection checks described below.
 5. **pipeline_validate** — non-mutating pre-pack checks that report every bad sprite in one pass: empty-page fit, duplicate region names, region-count cap, and per-sprite trim-dimension limits. It still runs on surviving sprites after earlier content errors.
 6. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
 7. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
-8. **serialize** — build the atlas blob in transaction-owned storage. Every sprite's vertex/index block is emitted from its own geometry and its own region transform; byte-identical blocks then share one range, first writer in add order wins. Sprites on different pages can therefore share a block — the page comes from `NtAtlasRegion.page_index`, not from the vertex data. Block identity additionally requires equal `trim_offset_x/y` even though neither is part of the block: the runtime bakes the trim offset into `cached_pos[]`, which it indexes by `vertex_start`, so two regions on one byte range would overwrite each other's precomputed positions and the later region would win. Post-trim dedup is what made differing trim offsets reachable inside one group, so the two rules ship together.
+8. **serialize** — build the atlas blob in transaction-owned storage.
+   - Every sprite's vertex/index block is emitted from its own geometry and its own
+     region transform; byte-identical blocks then share one range, first writer in
+     add order wins.
+   - Sprites on different pages can share a block — the page comes from
+     `NtAtlasRegion.page_index`, not from the vertex data.
+   - Block identity additionally requires equal `trim_offset_x/y`, neither of which
+     is part of the block: the runtime bakes the trim offset into `cached_pos[]`,
+     indexed by `vertex_start`, so two regions on one byte range would overwrite
+     each other's precomputed positions and the later region would win. Post-trim
+     dedup is what made differing trim offsets reachable inside one group, so the
+     two rules ship together.
 9. **cache_write/debug_png** — persist optional successful-build artifacts after all recoverable work has succeeded.
 10. **publish** — register the atlas blob, page textures, metadata, and region codegen in the pack. Capacity, allocation, and resource-ID failures assert and terminate the build; they are not recoverable rollback paths.
 
@@ -239,7 +282,24 @@ Any content error collected during trim, geometry, or validation prevents packin
 
 The fixed stats storage holds `NT_BUILD_MAX_ATLASES` records (defaults to `NT_BUILD_MAX_ASSETS`, so observability never imposes a lower atlas limit even when a consumer raises the asset ceiling).
 
-`const nt_atlas_stats_t *nt_builder_get_atlas_stats(ctx, &count)` returns one record per successfully committed atlas, in commit order: `sprites`, `placements`, `folds_exact`, `folds_d4`, `area_saved_px`, `vertex_blocks_shared`, `cache_hit`. `folds_exact + folds_d4 + placements == sprites` holds for every record, cache hits included — dedup, geometry and serialize run on every commit, only pack and compose are skipped, which is why `cache_hit` is the one observable that distinguishes a replay from a rebuild. Like the content-error channel this is a borrowed, read-only view owned by the context and valid only until `nt_builder_free_pack`; it is deliberately **not** reachable through the `NtAtlasBuild` handle, which commit frees. Only `placements` is recoverable from the packed atlas, and only by counting distinct per-page UV **rings** (rotation- and reversal-insensitive) — not by `vertex_start`, which a D4 alias no longer shares, and not by the UV bbox, which two disjoint concave sprites can share. The exact/D4 stage split, the saved area and the shared-block count exist nowhere else. The same numbers are appended to the `BENCH` log line as `folds_exact`, `folds_d4`, `area_saved` and `blocks_shared`.
+`const nt_atlas_stats_t *nt_builder_get_atlas_stats(ctx, &count)` returns one
+record per successfully committed atlas, in commit order: `sprites`, `placements`,
+`folds_exact`, `folds_d4`, `area_saved_px`, `vertex_blocks_shared`, `cache_hit`.
+
+- **Invariant:** `folds_exact + folds_d4 + placements == sprites` holds for every
+  record, cache hits included — dedup, geometry and serialize run on every commit,
+  only pack and compose are skipped. That is why `cache_hit` is the one observable
+  distinguishing a replay from a rebuild.
+- **Lifetime:** like the content-error channel, a borrowed read-only view owned by
+  the context and valid only until `nt_builder_free_pack`. Deliberately **not**
+  reachable through the `NtAtlasBuild` handle, which commit frees.
+- **Why it must be observed here:** only `placements` is recoverable from the
+  packed atlas, and only by counting distinct per-page UV **rings** (rotation- and
+  reversal-insensitive) — not by `vertex_start`, which a D4 alias no longer shares,
+  and not by the UV bbox, which two disjoint concave sprites can share. The
+  exact/D4 split, the saved area and the shared-block count exist nowhere else.
+- The same numbers are appended to the `BENCH` log line as `folds_exact`,
+  `folds_d4`, `area_saved` and `blocks_shared`.
 
 ### Vector packer
 
@@ -247,45 +307,37 @@ The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each can
 
 - **Sub-pixel exact** — no quantization to a tile grid.
 - **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
-- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the effective `allowed_transforms` mask. A zero per-sprite mask inherits the atlas mask; a non-zero mask replaces it, so a sprite may narrow or widen the atlas default. Identity is always permitted. Transform-identical sprites fold onto one placement when each member's own mask permits the relative transform it needs. A shared placement is oriented once for the whole dedup group, and a member's region transform is then `d4_compose(placement, its relative)` — the alias's local space maps onto the root's, and the root's onto the page. So the mask handed to the packer is the **intersection**, over every member, of the placements whose product with that member's relative still lands inside the member's own mask, floored at identity. An allowed-transform mask need not be closed under D4 composition (D4 itself is a group; an arbitrary mask subset is not), which is exactly why this is evaluated per placement candidate instead of assumed; the identity placement always survives, because a member's own relative is by construction already in its mask. A nine-patch anywhere in a group resolves to identity-only and therefore pins that placement to identity, with no special case. Groups whose relatives are all identity reduce to the plain intersection of member masks. (Full packer spec rewrite tracked in Phase 83.)
+- **D4 orientations** — flipH, flipV, diagonal flip and combinations, gated by the
+  effective `allowed_transforms` mask. A zero per-sprite mask inherits the atlas
+  mask; a non-zero mask replaces it, so a sprite may narrow or widen the atlas
+  default. Identity is always permitted.
+  - A shared placement is oriented once for the whole dedup group, and a member's
+    region transform is `d4_compose(placement, its relative)` — the alias's local
+    space maps onto the root's, the root's onto the page.
+  - So the mask handed to the packer is the **intersection**, over every member, of
+    the placements whose product with that member's relative still lands inside
+    that member's own mask, floored at identity.
+  - It is evaluated per placement candidate rather than assumed, because an
+    allowed-transform mask need not be closed under D4 composition (D4 is a group;
+    an arbitrary subset of it is not). The identity placement always survives — a
+    member's own relative is by construction already in its mask.
+  - A nine-patch anywhere in a group resolves to identity-only and therefore pins
+    that placement to identity, with no special case. Groups whose relatives are
+    all identity reduce to the plain intersection of member masks.
 - **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
 - **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
 - **Page growth** — sprites that don't fit allocate a new page (up to `NT_ATLAS_MAX_PAGES = 8`, the shared format cap — the runtime preallocates that many page slots per atlas, so packing more would produce an unloadable atlas); new pages start with the same dimensions as the first.
 
 ### Atlas options
 
-```c
-/* Silhouette mode for atlas packing. Ordered by cost and density. */
-typedef enum {
-    NT_ATLAS_SHAPE_RECT = 0,            /* AABB trim rect — fastest, worst pack density */
-    NT_ATLAS_SHAPE_CONVEX_HULL = 1,     /* convex hull of opaque pixels — no contour trace */
-    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2, /* concave contour + multi-strategy — densest, slowest */
-} nt_atlas_shape_t;
+Fields and defaults are in `nt_atlas_opts_t` / `nt_atlas_shape_t`
+(`tools/builder/nt_builder.h`). Contracts that the struct cannot state:
 
-typedef struct {
-    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
-    nt_texture_pixel_format_t format;       /* 0 = RGBA8 default */
-    uint32_t max_size;                      /* max atlas page dimension (default 2048) */
-    uint32_t padding;                       /* extra spacing between sprites after extrude (default 2) */
-    uint32_t margin;                        /* atlas edge margin (default 0) */
-    uint32_t extrude;                       /* AABB edge duplication (default 0; <= max_size; RECT only when non-zero) */
-    uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
-    uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
-    float max_added_area_percent;           /* simplification-added area budget (default 10%) */
-    nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    uint8_t allowed_transforms;             /* D4 transform mask (NT_ATLAS_TRANSFORM_* bits); 0xFF = all (default), 0x01 = identity only. Identity is the implicit floor. */
-    bool power_of_two;                      /* round atlas dims to POT (default true) */
-    bool debug_png;                         /* write debug atlas page PNGs (default false) */
-    bool premultiplied;                     /* premultiply RGB by alpha during texture encode (default true) */
-    float pixels_per_unit;                  /* source pixels per world unit (default 1.0F) */
-    nt_texture_default_filter_t filter_min; /* default LINEAR_MIPMAP_LINEAR */
-    nt_texture_default_filter_t filter_mag; /* default LINEAR */
-    nt_texture_default_wrap_t wrap_u;       /* default REPEAT */
-    nt_texture_default_wrap_t wrap_v;       /* default REPEAT */
-    bool gen_mipmaps;                       /* RAW only; default true */
-    bool dedup;                             /* fold identical content onto one placement (default true; a zero-init struct means OFF) */
-} nt_atlas_opts_t;
-```
+- A zero-initialized struct means `dedup` OFF and `shape` RECT — both differ from
+  the documented "default" of a filled struct. Fill the struct explicitly.
+- `extrude > 0` is legal only with `shape == NT_ATLAS_SHAPE_RECT`.
+- `allowed_transforms` has identity as an implicit floor: a mask of 0 inherits the
+  atlas mask, never "nothing allowed".
 
 Named mask presets are exact bit sets: `NT_ATLAS_TRANSFORMS_IDENTITY`,
 `NT_ATLAS_TRANSFORMS_IDENTITY_ROT90`, `NT_ATLAS_TRANSFORMS_ROTATIONS`,
@@ -325,39 +377,19 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 
 Each `nt_atlas_add` / `nt_atlas_add_raw` / `nt_atlas_add_glob` call accepts an optional `nt_atlas_sprite_opts_t*`. `NULL` picks the defaults (centre pivot, name derived from path).
 
-```c
-typedef struct {
-    const char *name;     /* NULL = derive from path (add/glob); required for add_raw */
-    float origin_x;       /* pivot X, normalized over source_w (default 0.5) */
-    float origin_y;       /* pivot Y, normalized over source_h (default 0.5) */
-    uint16_t slice9_left; /* slice9 borders in source pixels (0 = no slice9) */
-    uint16_t slice9_right;
-    uint16_t slice9_top;
-    uint16_t slice9_bottom;
-    uint8_t shape;              /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
-    uint8_t allowed_transforms; /* 0 = inherit atlas mask; non-zero replaces it (identity floor applies) */
-    uint8_t max_vertices;       /* 0 = atlas default, else 4..16 */
-    uint8_t margin;       /* 0 = atlas default; raise-only (a below-atlas value clamps up) */
-    uint8_t extrude;      /* 0 = inherit atlas default; non-zero sets this sprite's edge bleed (RECT only), smaller or larger than atlas extrude */
-    float max_added_area_percent;    /* finite and non-negative; used only when presence is true */
-    uint8_t alpha_threshold;         /* used only when presence is true; 0 retains every pixel */
-    bool has_max_added_area_percent; /* false = inherit atlas value; true preserves explicit 0% */
-    bool has_alpha_threshold;        /* false = inherit atlas value; true preserves an explicit 0 */
-    uint8_t dedup;        /* 0 = inherit atlas dedup, NT_ATLAS_SPRITE_DEDUP_ON = 1, NT_ATLAS_SPRITE_DEDUP_OFF = 2 */
-} nt_atlas_sprite_opts_t;
-```
+Fields are in `nt_atlas_sprite_opts_t` (`tools/builder/nt_builder.h`). Two
+inherit conventions run through it: `0` means "inherit the atlas value" for
+`shape` / `allowed_transforms` / `max_vertices` / `margin` / `extrude` / `dedup`,
+while `max_added_area_percent` and `alpha_threshold` carry an explicit
+`has_*` presence flag — without it an intentional 0 would be indistinguishable
+from inherit.
 
-For per-sprite options the controls are **appended** after the complete legacy
-field list, so legal positional initializers of `nt_atlas_sprite_opts_t` retain
-their field mapping when recompiled (source-recompile compatibility, not a
-binary-ABI promise for stale object files), and zero-initialized appended
-controls preserve inherit semantics. The `dedup` override follows that rule: it
-sits last, after `has_alpha_threshold`. Atlas-level `nt_atlas_opts_t` dropped
-positional compatibility in Phase 81 (the transform-mask change reordered its
-fields) — use designated initializers or `nt_atlas_opts_defaults()`. When
-defaults matter, start from the defaults helper: a zero-initialized atlas
-options struct means `max_added_area_percent = 0%` and `dedup = false`, not the
-public 10% and dedup-on defaults it returns.
+New per-sprite controls are **appended** after the existing field list, so legal
+positional initializers keep their field mapping on recompile (a
+source-recompile promise, not a binary-ABI one for stale objects), and
+zero-initialized appended controls preserve inherit semantics. Atlas-level
+`nt_atlas_opts_t` makes no such promise — use designated initializers or
+`nt_atlas_opts_defaults()`.
 
 **Slice9 transform semantics:** non-zero slice9 borders auto-force `shape = RECT` and an identity-only effective transform mask. `allowed_transforms` of `0` (inherit) or `IDENTITY` are accepted and canonicalized to the stored `IDENTITY` override before cache-key generation; explicitly requesting any non-identity mask bit on a slice9 sprite is a caller bug and asserts. Dedup's *content* comparison never reads the mask — grouping is by pixels alone — but *admission* does: a nine-patch's identity-only effective mask both restricts the relative transforms it may join with and reaches the packer through the group intersection.
 
@@ -371,14 +403,10 @@ The current deterministic frontier evidence uses six public area-budget values. 
 
 Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-count evidence was chosen by the public production selector, serialized into a real pack, reconstructed, and re-proved. Internal frontier slots cannot be forced into acceptance output. `visual_input_sha256` hashes the actual decoded RGBA plus resolved row controls used by the builder.
 
-| Added area budget | Hull vertices total | Mean | Frontier fill | Representative total overdraw | Sweep SHA-256 |
-| ---: | ---: | ---: | ---: | ---: | --- |
-| 0% | 896 | 7.0000 | 0.5465 | 0.15990160% | `cdcc56c66377ed8428ad9b743e9a204344bc98f0ee4ccc6718dbc9716b27967f` |
-| 2% | 752 | 5.8750 | 0.5857 | 0.76260763% | `39339f1b0dccb65d2c7ca9a4c43f017464e3bf2b9a79837770799791a1e4e471` |
-| 5% | 716 | 5.5938 | 0.5766 | 0.76260763% | `8e27e8bf34027deed6587898121a83b6ac9f84ef8b9dd77a1abf6b3dd1537165` |
-| 10% | 666 | 5.2031 | 0.5547 | 0.76260763% | `ae40d10f58d65ddcd4448d7e14e69cc506307689e3746525d22990715c8dce0c` |
-| 15% | 642 | 5.0156 | 0.5814 | 0.76260763% | `84e4ef521f145c7c44216be2687c2f2b9124f78aff19df6a304949e810aa0ff1` |
-| 25% | 598 | 4.6719 | 0.5565 | 0.76260763% | `d93d867da5b8d40344e2cd75172b12f6d90fd7738cdcb922f644f99e51000d77` |
+The measured numbers themselves (per-budget vertex counts, frontier fill,
+overdraw, and the sweep/pack SHA-256s) live in the published artifact
+`tools/research/atlas_bench/hull_area_frontier.json` — that file is the
+authority; never hand-copy rows out of it.
 
 **Pivot semantics:**
 - Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
@@ -387,7 +415,26 @@ Visual acceptance is black-box: every polygon displayed in its 6/7/8 selected-co
 
 **Glob rule:** `nt_atlas_add_glob` asserts `opts->name == NULL` — a single name cannot apply to N matched files without hash collisions. Each matched file derives its own name from its path, and the `origin_x/y` fields propagate to all of them. For per-file name overrides within a glob, call `nt_builder_glob_iterate` with a custom callback that calls `nt_atlas_add` per match.
 
-**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that share one placement, and — because their blocks come out byte-identical — one `vertex_start` / `index_start` range in the blob. The dedup pass matches on the canonical post-trim content hash, a trim-local byte compare, and the **resolved** packing controls: effective shape, max vertices, alpha threshold, max-added-area percent, margin and extrude — so two spellings of the same resolved value (e.g. an inherited margin and an explicit one equal to the atlas margin) dedup together. Origin is not considered, so each logical region stores its own pivot while sharing geometry/pixels. Neither the slice9 borders nor the transform mask take part: borders are per-region metadata that never reaches the packed pixels (RECT, untrimmed, identity), so two nine-patches with the same art and different borders share one placement and each keeps its own borders; and the mask is admission policy rather than content identity, so a sprite allowing all eight orientations may alias onto one restricted to identity. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
+**Dedup + different pivots:** adding the same pixel-identical sprite twice with
+different `origin_x/y` produces **two separate regions** sharing one placement and
+— because their blocks come out byte-identical — one `vertex_start` /
+`index_start` range in the blob. The cheap path for "same sprite, different
+anchor" (an icon centre-pivoted in a menu, bottom-centre in a HUD).
+
+What the match considers:
+
+- **Yes:** the canonical post-trim content hash, a trim-local byte compare, and the
+  **resolved** packing controls — effective shape, max vertices, alpha threshold,
+  max-added-area percent, margin, extrude. Two spellings of the same resolved value
+  (an inherited margin and an explicit one equal to the atlas margin) dedup
+  together.
+- **No — origin:** each logical region stores its own pivot while sharing
+  geometry/pixels.
+- **No — slice9 borders:** per-region metadata that never reaches the packed pixels
+  (RECT, untrimmed, identity), so two nine-patches with the same art and different
+  borders share one placement and each keeps its own borders.
+- **No — the transform mask:** it is admission policy, not content identity, so a
+  sprite allowing all eight orientations may alias onto one restricted to identity.
 
 An alias whose relative transform is **not** identity does not come out byte-identical: its local↔UV pairing differs, so it gets its own vertex/index block and its own `region.transform` holding `d4_compose(placement, relative)`. Its geometry is the exact integer D4 pre-image of the root's hull, canonicalized and re-triangulated through the same path a standalone pack uses, so `NtAtlasRegion.flags` (the `QUAD_*` render hint) does not depend on which orientation an alias happens to carry.
 

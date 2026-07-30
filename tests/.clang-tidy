@@ -1,0 +1,6 @@
+# Tests only: Unity assert macros expand to branches, so any substantive test
+# trips the default cognitive-complexity threshold (25) without being complex.
+InheritParentConfig: true
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '40'

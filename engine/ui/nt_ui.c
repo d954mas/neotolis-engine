@@ -561,7 +561,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
      * Clay caps that pool (CLAY__MAX_SCROLL_CONTAINERS in clay.h, raised from upstream 10) and never
      * reclaims entries on its own -- without this call any CLIP element (e.g. each input field's content
-     * clip) leaks a slot until the pool overflows. */
+     * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
     Clay_BeginLayout();

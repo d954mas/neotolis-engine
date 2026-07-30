@@ -673,6 +673,16 @@ jobs:
       - name: Configure
         run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
 
+      # CRT-pin centralization + every test source built AND ctest-registered.
+      # The registration gate reads this job's compile DB / CTestTestfiles
+      # (devapi ON above, so devapi-gated tests are visible).
+      - name: Run CRT-pin and test-registration gates
+        run: |
+          bash scripts/check_crt_pins.sh
+          bash scripts/check_tests_registered.sh build/_cmake/native-debug
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          bash scripts/tests/test_tidy.sh
+
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
 

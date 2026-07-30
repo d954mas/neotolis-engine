@@ -41,68 +41,32 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 
 ## AssetMeta stability
 
-**Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** (Phase 25) clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
+**Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
 
 `NT_BLOB_AUTO` eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
-## NtAssetMeta
+## Registry state split
 
-```c
-typedef struct {
-    uint64_t resource_id;    /* nt_hash64 value */
-    uint32_t offset;         /* byte offset in pack blob */
-    uint32_t size;           /* asset data size */
-    uint32_t runtime_handle; /* resolved handle, 0 = none */
-    uint16_t format_version; /* per-type binary format version */
-    uint16_t pack_index;     /* index into packs[] */
-    uint8_t asset_type;      /* nt_asset_type_t */
-    uint8_t state;           /* nt_asset_state_t */
-    uint8_t is_dedup;        /* 1 = shares data with another asset in same pack */
-    uint8_t _pad;
-    uint32_t meta_offset; /* byte offset into pack's resident meta_data buffer (NT_NO_METADATA = no meta) */
-} NtAssetMeta;
-```
+Layouts live in `engine/resource/nt_resource_internal.h` (not public API — do not
+mirror them here). The contract is the SPLIT, not the fields:
 
-## NtResourceSlot
-
-Persistent per-slot state — survives across frames:
-
-```c
-typedef struct {
-    uint64_t resource_id;            /* nt_hash64 value */
-    uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
-    uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
-    int16_t resolve_prio;            /* priority of currently published winner */
-    uint32_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
-    uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
-    uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
-    uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
-    uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
-    uint8_t asset_type;              /* nt_asset_type_t */
-    uint8_t state;                   /* nt_asset_state_t visible to game code */
-    void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
-} NtResourceSlot;
-```
-
-Transient per-pass state — allocated at the start of each resolve pass, freed at the end. Lives in a separate array to keep NtResourceSlot small for the common case (resolve runs only when `needs_resolve` is true):
-
-```c
-typedef struct {
-    uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
-    uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
-    int16_t target_prio;               /* priority of target winner */
-    int16_t candidate_prio;            /* priority of publishable candidate */
-    uint32_t target_seq;               /* mount_seq of target winner */
-    uint32_t candidate_seq;            /* mount_seq of publishable candidate */
-    uint16_t target_asset_idx;         /* assets[] index of target winner */
-    uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
-    uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */
-    uint8_t resolve_pending;           /* on_resolve fired for the published winner */
-    uint8_t post_resolve_pending;      /* on_post_resolve should fire after the pass */
-} NtResolveTemp;
-```
+- **`NtAssetMeta`** — one record per asset per mounted pack: identity
+  (`resource_id`), where the bytes are (`pack_index`, `offset`, `size`,
+  `meta_offset`), the per-type `format_version` the runtime checks, and the
+  asset's own load `state`. `is_dedup` marks assets sharing one byte range
+  inside a pack, so activation must not free it twice.
+- **`NtResourceSlot`** — one persistent record per unique resource_id the game
+  asked for. Holds what the game currently sees (`runtime_handle`, `state`,
+  `generation` for stale-handle detection), the published winner's identity and
+  rank (`resolve_prio`/`resolve_seq`/`resolve_asset_idx`), the previous winner
+  for change detection, and the `user_data` built by `on_resolve`.
+- **`NtResolveTemp`** — per-slot scratch valid only inside one resolve pass, in
+  a separate array so the persistent slot stays small (resolve runs only when
+  `needs_resolve` is set). It carries the TARGET winner (best READY asset even
+  if its blob is evicted) alongside the publishable CANDIDATE, plus the
+  callback-pending flags the pass consumes.
 
 The resolve pass computes both the target winner and the published winner for each slot:
 - the target winner is purely priority/sequence-based over READY assets
@@ -131,7 +95,7 @@ const void *nt_resource_peek_user_data(handle);
 
 Behavior flags:
 - `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
-- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning-phase-72-addition)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
+- `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
 
 **on_resolve** fires in Phase D for the published winner when:
 - published asset identity changes
@@ -148,7 +112,7 @@ Publication change detection uses three pieces of state: published asset identit
 
 `resource_step()` may run more than one resolve pass in the same frame when `on_post_resolve` work creates new slots that need resolution. The pass count is bounded.
 
-### Blob pinning (Phase 72 addition)
+### Blob pinning
 
 Two consumption models exist for asset types that derive state from pack bytes:
 
@@ -162,9 +126,18 @@ Two consumption models exist for asset types that derive state from pack bytes:
 - **AUTO-as-KEEP (D-07):** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 - **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
 
-**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider and degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out (`AUX_BACKED`) consumers are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
+
+## Pack lifetime (mount / unmount)
+
+Asset lifetime is **explicit pack-level mount/unmount, owned by the developer** —
+there is **no refcounting by design** (declined: it hides lifetime instead of
+expressing it; see api-contracts "Do not introduce refcounting"). Group assets by
+lifetime: level assets go in level packs, mounted on enter and unmounted on
+leave. `blob_pins` above is a *pin* (a derived residency requirement), not a
+refcount — nothing counts consumers, and unmount always wins.
 
 ## Virtual packs
 
@@ -340,32 +313,9 @@ The function automatically requests a slot for the placeholder resource_id if on
 
 `nt_hash` provides xxHash (XXH32/XXH64) hashing in 32-bit and 64-bit widths. Used for resource identity (64-bit) and attribute/pack naming (32-bit). Both builder and runtime link this module -- single source of truth for hash computation. xxHash chosen over FNV-1a for superior avalanche properties (critical for open-addressing hash maps) and higher throughput on WASM.
 
-Type-safe wrappers prevent accidental mixing of raw integers with hash values:
-
-```c
-typedef struct {
-    uint32_t value;
-} nt_hash32_t;
-typedef struct {
-    uint64_t value;
-} nt_hash64_t;
-```
-
-API:
-
-```c
-nt_hash32_t nt_hash32(const void *data, uint32_t size);
-nt_hash64_t nt_hash64(const void *data, uint32_t size);
-
-static inline nt_hash32_t nt_hash32_str(const char *s);
-static inline nt_hash64_t nt_hash64_str(const char *s);
-```
-
-Debug label system for hash-to-string reverse lookup (compile-time toggle `NT_HASH_LABELS`):
-
-```c
-void nt_hash_register_label64(nt_hash64_t hash, const char *label);
-const char *nt_hash64_label(nt_hash64_t hash);
-```
+Hash values are single-field structs (`nt_hash32_t` / `nt_hash64_t`), not raw
+integers, so a raw int cannot be passed where an identity is expected. A
+compile-time label registry (`NT_HASH_LABELS`) gives hash-to-string reverse
+lookup for debugging. Signatures: `engine/hash/nt_hash.h`.
 
 CRC32 remains in `shared/` for pack data checksum -- different purpose (error detection vs identity hashing).

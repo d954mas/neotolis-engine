@@ -111,8 +111,7 @@ typedef enum {
 } nt_rich_align_t;
 
 /* ---- The dedup'd composed style (the run_style[] target) ---- */
-/* default_atlas (nt_atlas_region_ref_t) leads with a uint64 -> 8-byte alignment,
- * so the struct rounds up to 56 (the two 4-byte material handles pad the tail out). */
+/* default_atlas forces 8-byte alignment; the full decorated style occupies 72 B. */
 typedef struct {
     nt_atlas_region_ref_t default_atlas; /*  0: base-style default image atlas */
     nt_font_t font_id[4];                /* 16: R/B/I/BI variants */
@@ -189,6 +188,7 @@ void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
 void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
+/* Set/clear, NOT push/pop: link_id starts a pending link, 0 ends it. Links never nest. */
 void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id);
 void nt_ui_rich_pop(nt_ui_context_t *ctx);
 void nt_ui_rich_end(nt_ui_context_t *ctx);

@@ -5,7 +5,7 @@ builder each do, and the properties this split buys — explicit control, minima
 runtime complexity, a strong builder/runtime split, web-first practicality, and
 room for WebGPU and desktop platforms without redesigning the core.
 
-Related: [Core Principles](../core/principles.md), [Implementation Order](implementation-order.md)
+Related: [Core Principles](../core/principles.md), [Scope](../core/scope.md)
 
 ```text
 Game code
@@ -22,7 +22,7 @@ Engine
     ├─ loads runtime assets from NTPACK packs (async)
     ├─ provides render backend (WebGL 2)
     ├─ provides input + platform services
-    └─ provides audio playback
+    └─ provides audio playback (planned)
 
 Builder
     ├─ imports source assets

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Unified pre-commit check. Modes:
+# Unified pre-commit check (read-only — the mutating formatter is scripts/fmt.sh,
+# combined entry: scripts/format_and_check.sh). Modes:
 #   scripts/check.sh          gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full   default + whole-tree format + full tidy
 #   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
@@ -42,6 +43,14 @@ ok() {
 
 print_summary() {
     local status=$?
+    # A format/tidy failure exits while ctest still runs — reap the TREE (plain
+    # kill leaves Windows grandchild test exes alive, holding their file locks).
+    if [ -n "${CTEST_PID:-}" ]; then
+        WINPID="$(ps -p "$CTEST_PID" 2> /dev/null | awk 'NR == 2 { print $4 }' || true)"
+        { [ -n "$WINPID" ] && taskkill //PID "$WINPID" //T //F > /dev/null 2>&1; } || kill "$CTEST_PID" 2> /dev/null || true
+        wait "$CTEST_PID" 2> /dev/null || true
+        rm -f "${CTEST_LOG:-}"
+    fi
     echo ""
     echo "=================================================="
     echo "check.sh summary (mode: $MODE)"
@@ -58,28 +67,14 @@ print_summary() {
 trap print_summary EXIT
 
 # #region changed files
-# Union of: commits ahead of origin/master, staged+unstaged edits, untracked files.
-compute_changed_files() {
-    local base_ref=""
-    if git rev-parse --verify --quiet origin/master > /dev/null; then
-        base_ref="origin/master"
-    elif git rev-parse --verify --quiet master > /dev/null; then
-        base_ref="master"
-    fi
-    {
-        if [ -n "$base_ref" ]; then
-            git diff --name-only "$base_ref...HEAD"
-        fi
-        git diff --name-only HEAD
-        git ls-files --others --exclude-standard
-    } | sort -u | while IFS= read -r f; do
-        [ -f "$f" ] && printf '%s\n' "$f" || true
-    done
-}
+# shellcheck source=lib/changed_files.sh
+source "$SCRIPT_DIR/lib/changed_files.sh"
 CHANGED_FILES="$(compute_changed_files)"
+CHANGED_NAMES_ALL="$(compute_changed_names_all)"
 
-# Format set: changed .c/.h outside vendored deps/.
-FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'deps/' || true)"
+# Format set: changed .c/.h outside vendored deps/ and generated/ (fmt.sh skips
+# generated too — they are generator outputs, "revert don't commit" per AGENTS).
+FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'deps/\|/generated/' || true)"
 # Tidy set: changed .c under tidy.sh's find roots, minus its exclusions.
 TIDY_FILES="$(printf '%s\n' "$CHANGED_FILES" \
     | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
@@ -100,17 +95,28 @@ TIDY_CI_FLAGS=(
     -DNT_DEVAPI_GROUP_CAPTURE=ON
 )
 ensure_tidy_ci() {
-    if [ ! -f "$TIDY_CI_DIR/compile_commands.json" ]; then
+    local db="$TIDY_CI_DIR/compile_commands.json"
+    if [ ! -f "$db" ]; then
         echo "Configuring $TIDY_CI_DIR (one-time; devapi groups ON to match CI lint)..."
         cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
+        return
+    fi
+    # Stale DB silently SKIPS new TUs in tidy (fail-open) — reconfigure when any
+    # build file is newer than the DB. Warm reconfigure costs ~1 s.
+    local stale
+    stale="$(find CMakeLists.txt CMakePresets.json cmake engine shared tools examples tests deps \
+        \( -name CMakeLists.txt -o -name '*.cmake' -o -name CMakePresets.json \) -newer "$db" -print -quit 2>/dev/null || true)"
+    if [ -n "$stale" ]; then
+        echo "tidy-ci DB stale (newer: $stale) — reconfiguring..."
+        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}" > /dev/null
     fi
 }
 
-# Runs tidy on changed .c files, or the full tree when headers changed.
+# A changed header can affect any configured variant, so lint the full tree.
 run_tidy_gate() {
     local build_dir="$1"
     if [ -n "$CHANGED_HEADERS" ]; then
-        echo "Changed headers detected — they affect unchanged .c files, running FULL clang-tidy:"
+        echo "Changed headers detected — running FULL clang-tidy:"
         printf '  %s\n' $CHANGED_HEADERS
         bash scripts/tidy.sh "$build_dir"
     elif [ -n "$TIDY_FILES" ]; then
@@ -123,12 +129,18 @@ run_tidy_gate() {
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links, CRT pins)"
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins, test registration)"
 bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
+# Registration gate reads the tidy-ci compile DB + CTestTestfiles (devapi ON,
+# so devapi-gated tests are visible) — keep the DB fresh first.
+ensure_tidy_ci
+bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
+python -m unittest discover -s scripts/tests -p 'test_*.py'
+bash scripts/tests/test_tidy.sh
 ok
 
 step "build (native-debug)"
@@ -140,9 +152,43 @@ fi
 cmake --build "$NATIVE_BUILD_DIR"
 ok
 
-step "ctest (native-debug)"
-ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
-ok
+# ctest runs in the BACKGROUND while format+tidy use the idle cores — its
+# critical path is one single-threaded test. The wait + report happens after
+# the tidy step; a format/tidy failure kills the orphan so no exe stays locked.
+#
+# The three atlas-bench guard tests (~29 s CPU, the 18 s wall critical path)
+# exercise builder geometry + research-bench provenance only. In default mode
+# they run ONLY when the change set touches those areas; --push/--full (and CI)
+# always run them, so nothing ships unchecked.
+step "ctest (native-debug, parallel with format+tidy)"
+# Everything the guards depend on: builder+bench sources, their deps libraries,
+# fixtures/goldens, the scripts they source, and the test-registration infra.
+# Matched against the UNFILTERED name union so deletions also trigger them.
+GUARD_RELEVANT='^(tools/builder/|tools/research/|engine/atlas/|engine/hash/|shared/include/|deps/(clipper2|stb|miniz|cjson)/|scripts/(bench_|atlas/|test_atlas_|test_bench_|generate_hull_visual_|lib/hull_)|tests/fixtures/hull_visual_acceptance/|tests/unit/test_atlas_|tests/unit/test_helpers/|tests/CMakeLists|cmake/|CMakeLists\.txt$|CMakePresets\.json$)'
+CTEST_ARGS=()
+if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$GUARD_RELEVANT"; then
+    echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"
+    CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
+fi
+CTEST_LOG="$(mktemp)"
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
+CTEST_PID=$!
+echo "(backgrounded, pid $CTEST_PID)"
+
+collect_ctest() {
+    CURRENT_STEP="ctest (native-debug)"
+    local rc=0
+    wait "$CTEST_PID" || rc=$?
+    CTEST_PID=""
+    if [ "$rc" -ne 0 ]; then
+        cat "$CTEST_LOG"
+        rm -f "$CTEST_LOG"
+        return "$rc"
+    fi
+    tail -n 3 "$CTEST_LOG"
+    rm -f "$CTEST_LOG"
+    RESULTS+=("PASS  ctest (native-debug)")
+}
 
 if [ "$MODE" = "full" ]; then
     step "clang-format (whole tree)"
@@ -172,6 +218,8 @@ else
     run_tidy_gate "$TIDY_CI_DIR"
     ok
 fi
+
+collect_ctest
 
 if [ "$MODE" = "push" ]; then
     step "build (wasm-debug)"

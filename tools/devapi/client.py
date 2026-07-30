@@ -7,7 +7,7 @@ Replies are correlated by request_id via a pending-map, never by arrival order
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .transport import Transport
 
@@ -463,6 +463,46 @@ class DevApiClient:
         if scale is not None:
             params["scale"] = scale
         return self.result("capture.region", params)
+
+    def capture_frame_and_step(self, scale: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Capture + advance MANUAL time by one frame; returns (capture_result, step_result).
+
+        capture.frame defers until a frame is presented — under manual time mode sending it
+        alone deadlocks (no frame will ever present until time.step, which was never sent).
+        Both requests go out before any read. The step reply is read FIRST: a rejected step
+        means no frame ever presents and the capture reply never arrives — waiting on the
+        capture first would turn that clear error into a read timeout.
+        """
+        if scale is not None and (type(scale) is not int or scale not in (1, 2, 4)):
+            raise ValueError("scale must be 1, 2, or 4")
+        if self.render_info().get("enabled") is not True:
+            raise DevApiResultError("capture.frame_and_step failed: rendering is disabled")
+        cap_params: Dict[str, Any] = {}
+        if scale is not None:
+            cap_params["scale"] = scale
+        cap_id = self._alloc_id()
+        step_id = self._alloc_id()
+        self._transport.send(json.dumps({"method": "capture.frame", "request_id": cap_id, "params": cap_params}))
+        self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": 1}}))
+        step_resp = self._recv_until(step_id)
+        if step_resp.get("ok") is not True:
+            self._pending.clear()
+            self._transport.close()
+            err = step_resp.get("error") or {}
+            raise DevApiResultError(
+                f"time.step failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
+            )
+        # Step succeeded, so a frame presented and the capture reply is on the wire
+        # (an immediate bad_params reply is stashed by _recv_until either way).
+        cap_resp = self._recv_until(cap_id)
+        if cap_resp.get("ok") is not True:
+            self._pending.clear()
+            self._transport.close()
+            err = cap_resp.get("error") or {}
+            raise DevApiResultError(
+                f"capture.frame failed: {err.get('code', 'unknown')}: {err.get('message', '(no message)')}"
+            )
+        return cap_resp.get("result", {}), step_resp.get("result", {})
 
     # #endregion
 

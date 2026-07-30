@@ -425,7 +425,8 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 
 /* --- Atlas sprite options (per-sprite, passed to nt_atlas_add*) --- */
 
-/* Per-sprite shape overrides (0 = use atlas default). */
+/* Per-sprite shape overrides (0 = use atlas default). NOTE: 1-based — a different
+ * enum domain than the 0-based atlas-level nt_atlas_shape_t; never compare across. */
 #define NT_ATLAS_SPRITE_SHAPE_RECT 1
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3

@@ -62,7 +62,9 @@ class SocketTransport(Transport):
         self._sock.settimeout(read_timeout)
         # Binary makefile handles partial-recv reassembly; readline frames on b'\n' and caps the read in
         # BYTES (a text-mode makefile would cap MAX_LINE_BYTES in CHARACTERS, diverging from the contract).
-        self._f = self._sock.makefile("rb")
+        # 256 KB buffer: multi-MB base64 capture lines through the default 8 KB reader recv so slowly
+        # they can trip the ENGINE's send timeout mid-line.
+        self._f = self._sock.makefile("rb", buffering=256 * 1024)
 
     def __enter__(self) -> "SocketTransport":
         return self
@@ -124,6 +126,7 @@ class PlaywrightTransport(Transport):
     def __init__(self, page, read_timeout: float = DEFAULT_READ_TIMEOUT) -> None:
         self._page = page
         self._timeout = read_timeout
+        self._closed = False
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
         # Outbound bookkeeping for the MANUAL frame pump: the last method sent and whether the host is in
@@ -148,6 +151,8 @@ class PlaywrightTransport(Transport):
                 self._manual = mode == "manual"
 
     def send(self, line: str) -> None:
+        if self._closed:
+            raise ConnectionError("transport is closed")
         if len(line.encode("utf-8")) > MAX_LINE_BYTES:
             raise ValueError("outbound line exceeds MAX_LINE_BYTES")
         self._note_outbound(line)
@@ -157,6 +162,8 @@ class PlaywrightTransport(Transport):
             self._inbox.append(resp)
 
     def recv_line(self) -> str:
+        if self._closed:
+            raise ConnectionError("transport is closed")
         if self._inbox:
             return self._inbox.pop(0)
         # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast.
@@ -185,5 +192,8 @@ class PlaywrightTransport(Transport):
         raise TimeoutError("no web devapi line within read_timeout")
 
     def close(self) -> None:
-        # The page lifecycle is owned by the scenario / Playwright fixture, not the transport.
-        pass
+        if self._closed:
+            return
+        self._closed = True
+        self._inbox.clear()
+        self._page.evaluate("() => window.__devapi.reset()")

@@ -17,8 +17,9 @@ set -euo pipefail
 HELPERS='UTF8ToString|stringToNewUTF8|stringToUTF8|lengthBytesUTF8|allocateUTF8|intArrayFromString'
 
 fail=0
-while IFS= read -r -d '' f; do
-    grep -Eq 'EM_JS\(|EM_ASM' "$f" 2>/dev/null || continue   # only TUs with an EM_JS/EM_ASM body
+# One recursive grep pre-filters the EM_JS/EM_ASM TUs; a per-file spawn loop over
+# every .c cost seconds in Windows process spawns for a handful of real hits.
+while IFS= read -r f; do
     stripped=$(perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$f")
     required=$( { grep -oE "\b($HELPERS)\b" <<<"$stripped" || true;
                   grep -oE "wasmExports\['[A-Za-z0-9_]+'\]" <<<"$stripped" | sed -E "s/wasmExports\['([A-Za-z0-9_]+)'\]/\1/" || true; } | sort -u)
@@ -33,7 +34,10 @@ while IFS= read -r -d '' f; do
         echo "  Declare each one: JS-library helpers with '\$' (\$UTF8ToString), wasmExports['x'] bare (x)."
         fail=1
     fi
-done < <(find engine examples -name '*.c' -not -path '*/deps/*' -print0)
+done < <( { git ls-files -- 'engine/*.c' 'engine/**/*.c' 'examples/*.c' 'examples/**/*.c';
+            git ls-files --others --exclude-standard -- 'engine/*.c' 'engine/**/*.c' 'examples/*.c' 'examples/**/*.c'; } |
+    grep -v 'deps/' | sort -u |
+    xargs -r grep -lE 'EM_JS\(|EM_ASM' 2>/dev/null || true)
 
 if [ "$fail" -ne 0 ]; then
     echo "EM_JS_DEPS GUARD: FAILED (see above)."

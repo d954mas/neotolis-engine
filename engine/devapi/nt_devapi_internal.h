@@ -85,6 +85,9 @@ typedef struct nt_devapi_deferred_slot {
    normally (the bool ABI is unchanged). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current(int frames);
 
+/* Preflight for handlers that mutate state before deferring. */
+bool nt_devapi_can_defer_current(void);
+
 /* Like nt_devapi_defer_current but on a GAME-TIME deadline: yields once g_nt_app.time has advanced
    `seconds` past submit. For time.wait (RUN, where dt is variable so a frame count can't be
    precomputed). Must be called from inside a handler dispatch. */

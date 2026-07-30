@@ -69,20 +69,25 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         }
         count = (int)steps; /* >= 1 (ceil of a positive) and <= STEP_MAX, so the cast is safe. */
     } else if (c != NULL) {
-        if (!cJSON_IsNumber(c)) {
-            set_bad_params(err, "time.step: count must be a number");
+        uint32_t parsed = 0;
+        const char *bad_count = "time.step: count must be an integer in [1, NT_DEVAPI_STEP_MAX]";
+        if (!nt_devapi_parse_u32_param_exact(c, NT_DEVAPI_STEP_MAX, err, set_bad_params, bad_count, &parsed)) {
             return false;
         }
-        count = c->valueint;
-        if (count < 1 || count > NT_DEVAPI_STEP_MAX) {
-            set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
+        if (parsed == 0U) {
+            set_bad_params(err, bad_count);
             return false;
         }
+        count = (int)parsed;
     }
     /* Only MANUAL drains pending_steps; queued into RUN they never drain, and under RUN+pause the
        deferred reply could never resolve → the caller would block until its socket timeout. */
     if (g_nt_app.mode != NT_APP_MODE_MANUAL) {
         set_bad_params(err, "time.step: only valid in 'manual' mode");
+        return false;
+    }
+    if (!nt_devapi_can_defer_current()) {
+        set_bad_params(err, "time.step: deferred response unavailable");
         return false;
     }
     nt_app_step(count);

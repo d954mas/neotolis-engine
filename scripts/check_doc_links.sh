@@ -12,7 +12,7 @@ cd "$SCRIPT_DIR/.."
 python3 - <<'PY'
 import os, re, sys
 
-DOC_DIRS = ["docs"]
+DOC_DIRS = ["docs", ".claude/skills"]
 EXTRA_FILES = ["AGENTS.md", "README.md"]  # root docs that link into docs/
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 

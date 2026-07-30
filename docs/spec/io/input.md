@@ -11,6 +11,25 @@ Related: [Platform Architecture](../runtime/platform.md), [Frame Lifecycle](../r
 
 Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
 
+## Typed characters
+
+Text input is separate from key state: characters arrive as UTF-32 codepoints in a
+small FIFO ring (`NT_INPUT_CHAR_RING`, 32, power-of-2), drained by the focused
+widget via:
+
+```c
+bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
+void nt_input_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint; no-op on native/stub
+```
+
+- Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
+  navigation/editing. Web has no GLFW char callback, so the web backend
+  synthesizes chars from `e.key` incl. `e.repeat` to match native behavior.
+- Frame-local like key edges: `nt_input_poll` drops unconsumed chars, then the
+  platform poll refills this frame's typing — a focused widget always sees the
+  current frame's characters.
+- Overflow is drop-newest: a full ring never clobbers unread characters.
+
 ## Pointer state
 
 ```c

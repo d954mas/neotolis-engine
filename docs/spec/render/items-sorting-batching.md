@@ -56,7 +56,7 @@ typedef struct nt_render_item_t {
 
 **batch_key vs sort_key:** sort_key controls draw order (can be anything: material, depth, layer). batch_key controls instancing compatibility (same material+mesh). These are independent — depth-sorted items still batch by material+mesh.
 
-**Why no inline world_matrix:** Instance packing reads world_matrix + color from component arrays via entity lookup (scattered access). Inlining them in the render item (96B) would make packing sequential, but qsort on 96B elements is ~6× slower than on 16B. At typical scales (<5K entities), sort dominates over packing. If CPU-bound at 10K+: switch to radix sort or indirect sort, then fat items become free.
+**Why no inline world_matrix:** Instance packing reads world_matrix + color from component arrays via entity lookup (scattered access). Inlining them in the render item (96B) would make packing sequential, and a wider element costs proportionally more per sort pass. `nt_sort_by_key` is already the typed radix sort (`engine/render/nt_render_items.h`), so the remaining lever at 10K+ is an indirect sort over indices.
 
 
 ### Sort key meaning
@@ -125,3 +125,24 @@ Rect and polygon sprites use the same generic dynamic IBO path. The renderer
 does not keep a separate static-quad fast path unless measurements show a clear
 win on the target workload; this keeps the sprite batching code small and makes
 draw splitting depend only on capacity and state changes.
+
+## UI draw ordering (nt_ui walker)
+
+The UI walker has **three independent ordering axes** — do not conflate them:
+
+1. **zIndex** — the stacking axis. Draw order is zIndex ascending, then layer
+   ascending, then declaration order.
+2. **Scissor / custom commands** — hard flush barriers. A segment is a run of
+   same-zIndex segmentable commands; SCISSOR and CUSTOM cut it, forcing a batch
+   flush on each side.
+3. **layer** — batch order *within* a segment (256 layers, `uint8_t`; 240-255
+   are engine-reserved for debug overlays; bitmask multipass). Layer comes from
+   the **widget call** (`data->layer`, `label_layer`), never from a style — so
+   a game can batch e.g. all sprites before all text.
+
+Rich text's [per-atom z-layers](../ui/rich-text.md#per-atom-z-layers-explicit-draw-order)
+are a *different*, block-internal mechanism (band flushes inside one CUSTOM
+command) — they do not interact with the walker's layer axis.
+
+Floating subtrees that must stay inside a scroll clip declare
+`clipTo = ATTACHED_PARENT`; a raw floating leaks past the scroll's scissor.

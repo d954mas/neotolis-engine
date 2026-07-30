@@ -46,6 +46,10 @@ Thumbs.db
 node_modules/
 package-lock.json
 
+# Python
+__pycache__/
+*.py[cod]
+
 # GSD planning
 .planning/
 

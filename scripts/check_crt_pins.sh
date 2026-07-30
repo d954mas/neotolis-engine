@@ -17,22 +17,30 @@ FAIL=0
 
 # Upstream-vendored deps keep their own build files (see AGENTS.md); our thin
 # wrapper CMakeLists under deps/ (cjson, stb, ...) ARE checked.
-UPSTREAM_DEPS='^\./deps/(clay|cglm|unity|basisu|glfw)/'
-GREP_SCOPE=(-RnI --include=CMakeLists.txt --include='*.cmake'
-    --exclude-dir=build --exclude-dir=.claude --exclude-dir=emsdk)
+UPSTREAM_DEPS='^(\./)?deps/(clay|cglm|unity|basisu|glfw)/'
+# git ls-files (tracked + untracked-unignored) replaces a tree walk that
+# sniffed .git packfiles and node_modules: same file set the repo can build from.
+CMAKE_FILES="$( { git ls-files -- 'CMakeLists.txt' '**/CMakeLists.txt' '*.cmake' '**/*.cmake';
+                  git ls-files --others --exclude-standard -- 'CMakeLists.txt' '**/CMakeLists.txt' '*.cmake' '**/*.cmake'; } |
+    sort -u | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f" || true; done)"
 
-CRT_HITS="$(grep "${GREP_SCOPE[@]}" -e '-U_DLL|MSVC_RUNTIME_LIBRARY|_ITERATOR_DEBUG_LEVEL' -E . 2>/dev/null |
+grep_cmake_files() {
+    # shellcheck disable=SC2086 — newline-split into file args; repo paths have no spaces
+    printf '%s\n' "$CMAKE_FILES" | xargs -r grep -nIH "$@" 2>/dev/null
+}
+
+CRT_HITS="$(grep_cmake_files -E -e '-U_DLL|MSVC_RUNTIME_LIBRARY|_ITERATOR_DEBUG_LEVEL' |
     grep -vE "$UPSTREAM_DEPS" |
-    grep -v '^\./cmake/warnings\.cmake:' || true)"
+    grep -v '^\(\./\)\?cmake/warnings\.cmake:' || true)"
 if [ -n "$CRT_HITS" ]; then
     echo "ERROR: raw CRT pin outside cmake/warnings.cmake — use nt_set_static_crt(_cxx):"
     printf '%s\n' "$CRT_HITS"
     FAIL=1
 fi
 
-TU_HITS="$(grep "${GREP_SCOPE[@]}" -e 'basisu_transcoder\.cpp' . 2>/dev/null |
+TU_HITS="$(grep_cmake_files -e 'basisu_transcoder\.cpp' |
     grep -vE "$UPSTREAM_DEPS" |
-    grep -v '^\./engine/basisu/CMakeLists\.txt:' || true)"
+    grep -v '^\(\./\)\?engine/basisu/CMakeLists\.txt:' || true)"
 if [ -n "$TU_HITS" ]; then
     echo "ERROR: basisu_transcoder.cpp compiled outside engine/basisu (duplicate-TU class):"
     printf '%s\n' "$TU_HITS"

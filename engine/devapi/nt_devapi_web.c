@@ -5,6 +5,7 @@
 #include <emscripten.h>
 
 #include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_web.h"
 
 /* clang-format off */
@@ -28,6 +29,9 @@ EM_JS(void, nt_devapi_web_install_shim, (void), {
             var p = _nt_devapi_web_poll();
             return p ? UTF8ToString(p) : "";
         },
+        reset: function() {
+            _nt_devapi_web_reset();
+        },
         /* Internal MANUAL-step pump. time.step DEFERS (its reply arrives later via poll), so use a
            distinct DECREASING request_id that never collides with a caller's positive id; a caller that
            does not await it ignores it by id (the Python pump drops these negative-id replies). */
@@ -47,3 +51,8 @@ EMSCRIPTEN_KEEPALIVE const char *nt_devapi_web_submit(const char *line) {
 }
 
 EMSCRIPTEN_KEEPALIVE const char *nt_devapi_web_poll(void) { return nt_devapi_poll_response(); }
+
+EMSCRIPTEN_KEEPALIVE void nt_devapi_web_reset(void) {
+    nt_devapi_deferred_reset();
+    nt_devapi_run_reset_hooks();
+}
