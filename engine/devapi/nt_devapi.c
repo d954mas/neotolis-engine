@@ -470,7 +470,7 @@ static cJSON *dispatch_batch(const cJSON *root) {
     const cJSON *req = NULL;
     cJSON_ArrayForEach(req, root) {
         cJSON *entry = dispatch_one(req, false); /* deferral disallowed in a batch (see dispatch_one). */
-        /* allow_defer=false guarantees a real entry (never the sentinel) — safe even in assert-off. */
+        /* allow_defer=false guarantees a real entry, never the sentinel. */
         NT_ASSERT(entry != DEFERRED_SENTINEL);
         cJSON_bool added = cJSON_AddItemToArray(response, entry);
         NT_ASSERT(added);

@@ -125,9 +125,8 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
      * points at the cause, not at the silently-shrunk window the clamp below leaves. */
     const uint64_t want = (r.first <= r.last) ? ((uint64_t)r.last - r.first + 1U) : 0U;
     NT_ASSERT((st.id_ring <= 1U || want < (uint64_t)st.id_ring) && "vlist_begin: visible window (viewport/item_extent + 2*overscan) must stay below style.id_ring — raise id_ring");
-    /* Release/OFF fallback: NT_ASSERT vanishes in NT_ASSERT_MODE=OFF, so a REAL clamp must still keep
-     * two visible rows off the same slot. Only shrinks `last` (stays <= count-1 and >= first); the
-     * trailing spacer (vlist_end) recomputes from this clamped last, keeping content == count*extent. */
+    /* Best-effort containment after the invariant; supported modes trap above.
+     * Only shrinks `last`; the trailing spacer keeps content == count*extent. */
     if (st.id_ring > 1U && want > (uint64_t)(st.id_ring - 1U)) {
         r.last = r.first + (st.id_ring - 2U); /* window size = ring-1 (<= ring-1, > 0 since ring>1) */
     }

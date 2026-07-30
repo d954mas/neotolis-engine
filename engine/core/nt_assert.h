@@ -6,7 +6,9 @@
 /* Asserts are contracts, not error handling.
    A failed assert means the program is broken — continuing would mask bugs.
    Release default is TRAP (immediate crash, no strings, minimal overhead).
-   OFF mode available via -DNT_ASSERT_MODE=0 for final production builds.
+   OFF is an unsupported size-oriented escape hatch: violating an asserted
+   precondition there has undefined behavior and requires no fallback path.
+   Assert expressions must be side-effect-free because OFF does not evaluate them.
    Never use asserts for conditions that can legitimately occur at runtime
    (missing files, user input, etc) — those are error handling. */
 
@@ -32,7 +34,7 @@ typedef void (*nt_assert_handler_t)(const char *expr, const char *file, int line
 extern nt_assert_handler_t nt_assert_handler;
 
 /* NT_ASSERT_MODE levels:
-   0 (OFF)  — ((void)0), no checks, minimal binary.
+   0 (OFF)  — ((void)0), unsupported runtime semantics, minimal binary.
    1 (TRAP) — __builtin_trap() on failure, no strings.
    2 (FULL) — hookable handler with expr/file/line strings (tests). */
 
