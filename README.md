@@ -6,12 +6,11 @@ Minimalist C17 game engine for Web/WASM (WebGL 2).
 
 ## Philosophy
 
-1. **Code-first** — game controls the main loop. The engine gives building blocks, not a pipeline.
-2. **Explicit over implicit** — you see everything. No hidden behavior, no magic behind the scenes.
-3. **Keep it simple** — less code is better. Simplify further when possible.
-4. **Tiny size** — every byte counts. Binary size tracked on every PR.
-5. **Set of modules** — use only what you need.
-6. **Prebuilt assets** — source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.
+Code-first (the game owns the main loop), explicit over implicit, keep it simple,
+tiny size, a set of modules you opt into, and prebuilt assets — source formats are
+packed offline so the runtime carries no parsers. The full statement with its
+engine/game ownership boundary is
+[docs/spec/core/principles.md](docs/spec/core/principles.md).
 
 ## Prerequisites
 
@@ -31,7 +30,7 @@ source emsdk/emsdk_env.sh
 
 ## Build
 
-Eleven primary CMake presets are available: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release`.
+Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release` (the full list, including the `*-test` variants, is `CMakePresets.json`).
 
 ### WASM (requires emsdk activated)
 
@@ -131,30 +130,19 @@ emrun build/_cmake/wasm-debug/examples/hello/index.html
 
 ```
 neotolis-engine/
-  engine/
-    app/              -- application lifecycle (+ native/ web/ backends)
-    core/             -- nt_core, nt_types, nt_platform (init, shutdown, types)
-    input/            -- input system (+ native/ web/ stub/ backends)
-    log/              -- logging (+ default/ stub/ backends)
-    platform/web/     -- Emscripten glue (shell.html, pre.js, library.js)
-    time/             -- frame timing
-    window/           -- window management (+ native/ web/ backends)
-  shared/
-    include/          -- nt_formats.h (shared between runtime and builder)
-  tools/
-    builder/          -- native offline asset builder
-  examples/
-    hello/            -- minimal WASM example
-  tests/
-    unit/             -- unit tests (core, app, input, log, time, window)
-    wasm/             -- WASM smoke tests
-  deps/
-    cglm/             -- vendored cglm (header-only math library)
-    unity/            -- vendored Unity test framework
-  cmake/              -- CMake helper modules (warnings, nt_module, nt_shell)
-  scripts/            -- build & CI scripts (setup, tidy, size reports)
-  docs/               -- specifications and architecture documents
+  engine/             -- one dir per module (nt_<mod>.h + optional native/ web/ stub/ backends)
+  shared/include/     -- binary formats shared by runtime and builder (nt_*_format.h)
+  tools/builder/      -- native offline asset builder
+  examples/           -- runnable examples, each with its own build_packs
+  tests/              -- unit/ (native), wasm/ (smoke), browser/ (Playwright), submodule/
+  deps/               -- vendored dependencies (cglm, clay, unity, basisu, glfw, ...)
+  cmake/              -- CMake helper modules (warnings, module/test targets, shell)
+  scripts/            -- build, check and CI scripts
+  docs/spec/          -- the specification; start at docs/spec/index.md
 ```
+
+The module → chapter map and a task → entry-point table live in
+[docs/spec/index.md](docs/spec/index.md).
 
 ## License
 

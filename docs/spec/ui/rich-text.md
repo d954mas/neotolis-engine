@@ -287,83 +287,19 @@ emit order. To give the game explicit control of overlap z, each atom carries a
 
 ## Spec ↔ #184-proposal divergences (per AGENTS.md)
 
-The shipped feature deliberately diverges from the original #184 proposal on eight
-points; flagged here so code and spec do not silently drift:
+The shipped behaviour is the sections above; this table only records where it
+deliberately differs from the original #184 proposal, so a reader of that
+proposal is not misled.
 
-- **D-67-13 — name-based image resolve replaces `register_image_tag`.** #184
-  proposed a per-image-tag registration call. Shipped: `<img=region/>` resolves by
-  atlas + region NAME (`nt_atlas_ref` → `nt_atlas_resolve_ref`); the atlas IS the
-  registry, no per-image registration. The tagset only carries an atlas **alias**
-  (`<img=alias:region/>`), a font family, a named color, an effect id, and an
-  object tag.
-- **D-67-17 — effects are per-ATOM, not #184's per-glyph/TEXT-only.** An effect
-  attaches to ANY run kind via `effect_id` and applies to TEXT (per-glyph),
-  IMAGE (offset/scale the quad + the composed u8 tint), AND OBJECT (draw box) —
-  the "text + gold icon wave together" case. The per-glyph explode is preserved
-  for TEXT as a quality path, but the effect model is per-atom across kinds.
-- **D-67-21 — alignment is per-block,** not per-run: one `nt_rich_align_t`
-  (L/C/R) offsets each solved line; there is no per-run horizontal alignment.
-- **D-67-22 — image vertical alignment is a `valign` enum**
-  (`baseline / middle / top / bottom`) on the image atom, not a free pixel
-  offset only.
-- **D-67-23 — the FIXED block reuses `nt_ui_get_bbox`** for its prev-frame origin
-  (the link hit-test + the `container_w <= 0` width fallback) rather than adding a
-  new block-origin getter; the block therefore carries `decl.id`.
-- **D-67-26 — custom effect fns are captured into the solved state, not the
-  tagset.** #184 promised a game-supplied effect callback + an extensible catalog.
-  Shipped: `nt_ui_rich_push_effect_fn` (builder) and
-  `nt_ui_rich_tagset_register_effect_fn` (`<fx=name>`) register a custom
-  `nt_ui_rich_fx_fn`; custom resolves before stock. The (fn, user_data) is interned
-  at build/solve into a per-block fixed-cap table and addressed by a custom
-  `effect_id >= NT_UI_RICH_FX_CUSTOM_BASE` carried in the (unchanged 48 B) style —
-  NOT looked up in the tagset at emit, since the tagset is game-owned and not
-  guaranteed present during the walk. The previously-dead `nt_ui_rich_fx_fn`
-  typedef is now live on both authoring fronts. At emit the stored `user_data` is
-  delivered to the custom fn (its last argument); stock fns get `NULL` — so one fn
-  can be parameterized per registration.
-- **D-67-27 — stock effects are runtime-tunable (revises "tuning is compile-time
-  constants").** The original #184/D-67 design said per-effect tuning was
-  compile-time constants and explicitly NOT tag params; a game needing a different
-  amplitude had to register its own fn. Shipped instead: the catalogue constants are
-  **defaults**, and stock effects accept an `nt_ui_rich_fx_params_t { amp, speed }`
-  via `nt_ui_rich_push_effect_ex` (builder, params copied by value into per-block
-  storage) and `<fx=name amp=.. speed=..>` (markup, `key=value` float pairs after the
-  name). A field `<= 0` keeps that effect's default; `params == NULL` is
-  byte-identical to the original behaviour (the existing stock-effect tests stay
-  green). Markup `k=v` applies to stock effects only — a custom-fn name carries its
-  own `user_data`, so `k=v` on a custom name fails-early. The 8 B params struct is
-  in-memory only (never serialized); tuned stock effects route through the same
-  per-block custom-fx table as custom fns (`effect_id >= NT_UI_RICH_FX_CUSTOM_BASE`),
-  so the 48 B style ABI is still unchanged.
-- **D-67-28 — OBJECT `draw_fn` receives the frame `world_mat4`.** The shipped
-  contract is `draw_fn(user_data, x, y, w, h, color, world_mat4)`: `x, y, w, h` are the
-  solved LAYOUT box px, `color` the resolved RGBA, and `world_mat4` is the frame's
-  LAYOUT→world matrix (the same per-element matrix `nt_ui_custom_frame_t` carries, with
-  the screen Y-flip baked in for the default 2D ctx). The game emits through
-  `world_mat4` so a game-drawn object lands under the **same** transform as the TEXT and
-  IMAGE paths — without it a game emitting at the raw LAYOUT coords with identity would
-  render Y-mirrored and a 3D object would have to hand-roll a fragile `glViewport` map.
-  The signature is finalized within Phase 67 (the `color` arg then `world_mat4` were
-  added on this unmerged branch before merge — no external consumer, no ABI break). No
-  layout change; it only adds emit-time arguments the engine already had on hand.
-- **D-67-29 — per-atom z-layers buy overlap order via a flush boundary, not a DC saving.**
-  Because UI is painter-order and cross-renderer z is **flush order** (every barrier
-  flushes sprite then text), within a batch text is fixed *over* images and the two are
-  not reorderable. A `layer` ([Per-atom z-layers](#per-atom-z-layers-explicit-draw-order)) is therefore an explicit flush boundary: the
-  self-emit walks distinct layers ascending and **drains** (sprite+text flush) between
-  bands so band N lands before N+1. Defaults are per-kind `TEXT<IMAGE<OBJECT`; `<layer=N>`
-  (0..254, `255`=AUTO sentinel) overrides any kind. The `layer` byte was stolen from the
-  style's `_pad[2]` so the **48 B ABI is unchanged**. Layers cost one flush per band (the
-  font-group + image-coalesce DC wins stay *within* a band); they are spent only where
-  explicit overlap z is wanted. Out-of-range/malformed `<layer>` asserts in DEBUG and hard-
-  skips to AUTO under `NT_ASSERT` OFF (untrusted-markup hard-guard rule).
-- **D-67-30 — block base font size is a STYLE FIELD (label consistency).** `font_size`
-  is a field on `nt_ui_rich_style_t` (px, > 0, asserted in `nt_ui_rich_style_defaults()`),
-  mirroring `nt_ui_label_style_t.font_size` — the label keeps its base size IN its style,
-  and rich text now matches. The two public entries (`nt_ui_rich_text`,
-  `nt_ui_rich_text_markup`) take NO `font_size` param; the base size travels in the `style`
-  arg and the solver reads `style.font_size` per run. `<scale>` *multiplies* it (relative
-  model unchanged); per-run **absolute** `<size=N>` stays deferred. The field grows the
-  in-memory style struct to **56 B** (was 48) — it is never serialized (in-memory only), so
-  the `_Static_assert` tracks the new sizeof. `NT_UI_RICH_DEFAULT_FONT_SIZE` (16) is the
-  seeded default for the field (moved to the header so callers can reference it).
+| # | Proposal said | Shipped instead |
+|---|---|---|
+| D-67-13 | per-image-tag `register_image_tag` call | `<img=region/>` resolves by atlas + region NAME — the atlas IS the registry; the tagset carries only an atlas alias, font family, named color, effect id, object tag |
+| D-67-17 | effects per-glyph, TEXT only | effects per-ATOM via `effect_id`, applying to TEXT, IMAGE and OBJECT (per-glyph explode kept for TEXT as a quality path) |
+| D-67-21 | per-run alignment | one per-block `nt_rich_align_t` (L/C/R) offsetting each solved line |
+| D-67-22 | free pixel offset for image vertical placement | a `valign` enum (`baseline/middle/top/bottom`) on the image atom |
+| D-67-23 | a new block-origin getter | the FIXED block reuses `nt_ui_get_bbox` for its prev-frame origin, so the block carries `decl.id` |
+| D-67-26 | game effect callback looked up in an extensible tagset catalog | custom `nt_ui_rich_fx_fn` interned into a per-block table at build/solve and addressed by `effect_id >= NT_UI_RICH_FX_CUSTOM_BASE` — the tagset is game-owned and may be absent during the walk |
+| D-67-27 | per-effect tuning is compile-time constants, never tag params | catalogue constants are defaults; stock effects take `nt_ui_rich_fx_params_t` via `push_effect_ex` or `<fx=name amp=.. speed=..>` |
+| D-67-28 | `draw_fn(user_data, x, y, w, h)` | `draw_fn(..., color, world_mat4)` so a game-drawn object lands under the same transform as TEXT/IMAGE |
+| D-67-29 | per-atom z-layers as a draw-call saving | layers are an explicit flush boundary for overlap order (one flush per band); DC wins stay within a band |
+| D-67-30 | `font_size` as a call parameter | `font_size` is a `nt_ui_rich_style_t` field, mirroring `nt_ui_label_style_t` |

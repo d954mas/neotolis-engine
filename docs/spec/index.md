@@ -62,7 +62,6 @@ no source-format parsers. The full picture is in
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
-| [meta/implementation-order.md](meta/implementation-order.md) | Suggested subsystem implementation order |
 | [meta/open-questions.md](meta/open-questions.md) | Open, non-blocking future questions |
 | [meta/architecture-snapshot.md](meta/architecture-snapshot.md) | Final architecture snapshot: game / engine / builder |
 
