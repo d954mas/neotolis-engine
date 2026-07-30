@@ -34,7 +34,7 @@ if(EMSCRIPTEN)
     # so the WASM build never reaches the SSE intrinsics.
     target_compile_definitions(nt_fpng PRIVATE FPNG_NO_SSE=1)
 
-    # Emit index.html via the shared shell; export the two KEEPALIVE transport wrappers + main, and the
+    # Emit index.html via the shared shell; export the KEEPALIVE transport wrappers + main, and the
     # ccall/UTF8ToString runtime methods the window.__devapi bridge needs. WebGL2 for the GL
     # context the capture seam reads, mirroring tests/browser/app browser_smoke.
     set_target_properties(devapi_host PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
@@ -43,7 +43,7 @@ if(EMSCRIPTEN)
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
-        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll']"
+        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll','_nt_devapi_web_reset']"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
     )
 endif()

@@ -11,18 +11,6 @@ include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 
-# Rebuild latency dominates the edit-check loop; no-op where ccache is absent (e.g. CI).
-if(PROJECT_IS_TOP_LEVEL AND NOT EMSCRIPTEN AND NOT CMAKE_C_COMPILER_LAUNCHER)
-    find_program(NT_CCACHE_PROGRAM ccache NO_CACHE)
-    if(NT_CCACHE_PROGRAM)
-        set(CMAKE_C_COMPILER_LAUNCHER "${NT_CCACHE_PROGRAM}")
-        # CXX covers the basisu transcoder — the largest single TU in the tree.
-        if(NOT CMAKE_CXX_COMPILER_LAUNCHER)
-            set(CMAKE_CXX_COMPILER_LAUNCHER "${NT_CCACHE_PROGRAM}")
-        endif()
-    endif()
-endif()
-
 if(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
     set(_nt_default_em_cache "${NT_ENGINE_ROOT}/build/emscripten-cache")
     if(DEFINED ENV{EM_CACHE} AND NOT "$ENV{EM_CACHE}" STREQUAL "")

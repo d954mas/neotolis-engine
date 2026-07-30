@@ -10,6 +10,7 @@ declare global {
       ready: boolean;
       submit(line: string): string;
       poll(): string;
+      reset(): void;
       tick(n?: number): string;
     };
   }
@@ -140,4 +141,10 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     return seen.size;
   }, b64);
   expect(distinctColors).toBeGreaterThan(1);
+
+  const afterReset = await page.evaluate((rid) => {
+    window.__devapi!.reset();
+    return JSON.parse(window.__devapi!.submit(JSON.stringify({ method: 'ping', request_id: rid })));
+  }, nextId++);
+  expect(afterReset.ok).toBe(true);
 });

@@ -129,7 +129,7 @@ Environment differences a local Windows host cannot reproduce:
 - **Browser Smoke runs under LeakSanitizer, headless** — skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is set.
 - **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the two GL tests hold `RESOURCE_LOCK gl_display`.
 - **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
-- **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/tidy-ci <file>` directly (the devapi-enabled DB check.sh creates; plain native-debug lacks devapi TUs); that reproduces CI. A bogus `'X.h' file not found` attributed to a header in CI tidy output is a tidy.sh retry artifact — fix the header's real diagnostic and it disappears.
+- **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/tidy-ci <file>` directly (the devapi-enabled DB check.sh creates; plain native-debug lacks devapi TUs); that reproduces CI.
 
 ## Test-infra & debugging gotchas
 

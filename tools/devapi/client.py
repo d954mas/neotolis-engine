@@ -11,11 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .transport import Transport
 
-# Default for NT_DEVAPI_STEP_MAX (engine/devapi/nt_devapi_time_internal.h): a
-# larger count is rejected engine-side, orphaning any capture already sent with
-# it. Builds overriding the limit via -D pass theirs to DevApiClient(step_max=).
-_STEP_MAX = 1 << 20
-
 
 class DevApiResultError(RuntimeError):
     """Raised by result() when the server returns {ok:false}, surfacing error.code/message."""
@@ -33,11 +28,8 @@ class DevApiClient:
     # must fail fast, not grow memory without bound.
     _MAX_PENDING = 256
 
-    def __init__(self, transport: Transport, step_max: int = _STEP_MAX) -> None:
-        # step_max mirrors the engine's NT_DEVAPI_STEP_MAX; pass the engine's
-        # value here when the build overrides it with -DNT_DEVAPI_STEP_MAX.
+    def __init__(self, transport: Transport) -> None:
         self._transport = transport
-        self._step_max = step_max
         self._next_id = 1
         # request_id -> already-received response object waiting to be claimed.
         self._pending: Dict[Any, Dict[str, Any]] = {}
@@ -472,10 +464,8 @@ class DevApiClient:
             params["scale"] = scale
         return self.result("capture.region", params)
 
-    def capture_frame_and_step(
-        self, count: int = 1, scale: Optional[int] = None
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Capture + advance MANUAL time in one flush; returns (capture_result, step_result).
+    def capture_frame_and_step(self, scale: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Capture + advance MANUAL time by one frame; returns (capture_result, step_result).
 
         capture.frame defers until a frame is presented — under manual time mode sending it
         alone deadlocks (no frame will ever present until time.step, which was never sent).
@@ -483,17 +473,17 @@ class DevApiClient:
         means no frame ever presents and the capture reply never arrives — waiting on the
         capture first would turn that clear error into a read timeout.
         """
-        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
-            raise ValueError("count must be a positive integer")
-        if count > self._step_max:
-            raise ValueError(f"count {count} exceeds NT_DEVAPI_STEP_MAX ({self._step_max})")
+        if scale is not None and (type(scale) is not int or scale not in (1, 2, 4)):
+            raise ValueError("scale must be 1, 2, or 4")
+        if self.render_info().get("enabled") is not True:
+            raise DevApiResultError("capture.frame_and_step failed: rendering is disabled")
         cap_params: Dict[str, Any] = {}
         if scale is not None:
             cap_params["scale"] = scale
         cap_id = self._alloc_id()
         step_id = self._alloc_id()
         self._transport.send(json.dumps({"method": "capture.frame", "request_id": cap_id, "params": cap_params}))
-        self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": count}}))
+        self._transport.send(json.dumps({"method": "time.step", "request_id": step_id, "params": {"count": 1}}))
         step_resp = self._recv_until(step_id)
         if step_resp.get("ok") is not True:
             self._pending.clear()

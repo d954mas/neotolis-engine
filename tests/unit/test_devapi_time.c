@@ -456,6 +456,12 @@ static void test_time_step_count_seconds_exclusive_and_ceil(void) {
     TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps); /* ceil(0.001 / (1/60)) == 1 */
 }
 
+static void test_time_step_fractional_count_has_no_side_effect(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":1.9}}"));
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
+}
+
 static void test_step_queue_full_has_no_side_effect(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL;
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
@@ -491,6 +497,7 @@ int main(void) {
     RUN_TEST(test_time_wait_over_cap_bad_params);
     RUN_TEST(test_time_step_seconds_converts_to_frames);
     RUN_TEST(test_time_step_count_seconds_exclusive_and_ceil);
+    RUN_TEST(test_time_step_fractional_count_has_no_side_effect);
     RUN_TEST(test_step_queue_full_has_no_side_effect);
     return UNITY_END();
 }
