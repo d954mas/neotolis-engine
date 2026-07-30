@@ -37,7 +37,7 @@ no source-format parsers. The full picture is in
 | File | Contents |
 |---|---|
 | [core/principles.md](core/principles.md) | Design philosophy and the strict engine/game ownership boundary |
-| [core/scope.md](core/scope.md) | Baseline scope, explicit non-goals, and the `nt_ui` module note |
+| [core/scope.md](core/scope.md) | Baseline scope and explicit non-goals |
 | [core/module-layout.md](core/module-layout.md) | Module directory layout and interface/impl/stub composition |
 | [core/api-contracts.md](core/api-contracts.md) | Public API ownership, lifetime, and naming contract vocabulary |
 | [runtime/platform.md](runtime/platform.md) | Platform layer: Web/WASM target, responsibilities, canvas/DPR handling |
@@ -59,6 +59,7 @@ no source-format parsers. The full picture is in
 | [io/input.md](io/input.md) | Polling input model, pointer state, capture |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
+| [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
 | [meta/implementation-order.md](meta/implementation-order.md) | Suggested subsystem implementation order |
@@ -88,7 +89,7 @@ lifetime, and naming vocabulary.
 | `engine/atlas` | [assets/resource.md](assets/resource.md) (format), [builder/builder.md](builder/builder.md) (atlas builder) |
 | `engine/font` | [assets/resource.md](assets/resource.md) (NT_ASSET_FONT), [ui/rich-text.md](ui/rich-text.md) (decoration) |
 | `engine/hash` | [assets/resource.md](assets/resource.md) (identity hashing) |
-| `engine/ui` | [core/scope.md](core/scope.md) (`nt_ui` note), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) |
+| `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) |
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
