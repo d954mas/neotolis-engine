@@ -1179,11 +1179,9 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 
 /* ---- Sampler (deduplicated cache) ---- */
 
-/* Single clamp site for the whole sampler path: the dedupe key, the GL object
- * and the recorded desc all derive from the result, so they cannot describe
- * different samplers. Out of range maps to the zero value every backend mapper
- * already falls back to; pack headers cast straight into these enums, so the
- * input is not always a caller. */
+/* One clamp for the whole sampler path: key, GL object and recorded desc derive
+ * from the result, so they cannot disagree. Pack headers cast raw bytes into
+ * these enums, so out of range takes the zero value the backend maps it to. */
 static inline nt_sampler_desc_t sampler_normalize(const nt_sampler_desc_t *desc) {
     nt_sampler_desc_t out = *desc;
     if ((uint32_t)out.min_filter > (uint32_t)NT_FILTER_LINEAR_MIPMAP_LINEAR) {

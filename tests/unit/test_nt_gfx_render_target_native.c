@@ -193,10 +193,9 @@ static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, 
     return pip;
 }
 
-/* Hardware comparison filters the 0/1 comparison results, so the shadow edge
-   lands between them. Both specs leave the blend implementation-dependent and
-   only promise a value proportional to the passing comparisons — hence the
-   bounds check rather than an exact midpoint. */
+/* Hardware comparison filters the 0/1 results, so the shadow edge lands between
+   them. The blend weights are implementation-dependent, hence a bounds check
+   rather than an exact midpoint. */
 static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_render_target_t shadow_map = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 2,

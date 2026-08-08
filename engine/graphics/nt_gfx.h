@@ -54,15 +54,10 @@ typedef struct {
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
 
-/* Sampler cache size — samplers are deduplicated by their (filter/wrap/compare)
- * descriptor so repeated nt_gfx_make_sampler calls with the same desc
- * return the same handle. Most apps use 3-10 unique configs. */
-/* 128 is headroom, not coverage: the descriptor space is larger
- * (min×mag×wrap_u×wrap_v×compare = 324) and creation never inspects a texture,
- * so every combination is constructible. Cost: ~4 KB BSS (not binary —
- * zero-init in WASM linear memory / native .bss). Linear scan in
- * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
- * for the hot path. */
+/* Samplers are deduplicated by their (filter/wrap/compare) descriptor; most apps
+ * use 3-10 unique configs. 128 is headroom, not coverage — all 324 combinations
+ * are constructible. Costs ~4 KB of BSS, not binary size; the linear scan
+ * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {

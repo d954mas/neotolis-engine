@@ -426,8 +426,8 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
-    /* NEAREST, so the pre-existing integer filter rule cannot be what rejects
-     * this — only the comparison guard can. */
+    /* NEAREST, so the integer filter rule cannot be what rejects this — only
+     * the comparison guard can. */
     nt_sampler_t comparison = nt_gfx_make_sampler(&(nt_sampler_desc_t){
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
