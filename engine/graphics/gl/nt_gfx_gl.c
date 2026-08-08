@@ -381,11 +381,13 @@ static GLenum map_texture_filter(nt_texture_filter_t f) {
 
 static GLenum map_compare_func(nt_compare_func_t f) {
     switch (f) {
-    case NT_COMPARE_LEQUAL:
-        return GL_LEQUAL;
     case NT_COMPARE_LESS:
         return GL_LESS;
+    case NT_COMPARE_NONE:
+    case NT_COMPARE_LEQUAL:
     default:
+        /* GL keeps a comparison function even with the mode off; LEQUAL is its
+         * own default, so an unused slot reads back as untouched state. */
         return GL_LEQUAL;
     }
 }
@@ -1820,7 +1822,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     glSamplerParameteri(s, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
     /* Set unconditionally rather than relying on the object's default NONE —
      * sampler state stays fully described by the descriptor. */
-    glSamplerParameteri(s, GL_TEXTURE_COMPARE_MODE, desc->depth_compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
+    glSamplerParameteri(s, GL_TEXTURE_COMPARE_MODE, desc->compare_func != NT_COMPARE_NONE ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
     glSamplerParameteri(s, GL_TEXTURE_COMPARE_FUNC, (GLint)map_compare_func(desc->compare_func));
     return (uint32_t)s;
 }

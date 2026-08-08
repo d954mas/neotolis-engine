@@ -253,7 +253,6 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
         .mag_filter = NT_FILTER_LINEAR,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_compare = true,
         .compare_func = NT_COMPARE_LEQUAL,
     });
     nt_sampler_t raw = nt_gfx_make_sampler(&(nt_sampler_desc_t){

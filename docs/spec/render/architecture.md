@@ -94,14 +94,16 @@ magnification: WebGL 2 texture completeness rejects filtered depth unless
 comparison is enabled, and comparison is not texture state. Wrap state remains
 explicit and may use clamp, repeat, or mirrored repeat.
 
-Depth comparison lives on the sampler object (`nt_sampler_desc_t.depth_compare`
-plus `compare_func`), not on the texture, because one depth target is read two
-ways: through a comparison sampler for the shadow lookup, and through a plain
-sampler for a raw-depth debug view. Sampler state supersedes texture state, so a
+Depth comparison lives on the sampler object (`nt_sampler_desc_t.compare_func`),
+not on the texture, because one depth target is read two ways: through a
+comparison sampler for the shadow lookup, and through a plain sampler for a
+raw-depth debug view. The field is a single tri-state — `NONE`, `LEQUAL`,
+`LESS` — so a zero-filled descriptor is a plain sampler and there is exactly one
+spelling of "no comparison". Sampler state supersedes texture state, so a
 comparison sampler makes `LINEAR` legal on that binding while the attachment
-description is untouched. A sampler with comparison enabled is rejected on
-non-depth storage, where the comparison would make every lookup undefined; a
-sampler without it still cannot filter depth.
+description is untouched. A comparison sampler is rejected on non-depth storage,
+where the comparison would make every lookup undefined; a sampler without one
+still cannot filter depth.
 
 Sampler binds follow the texture bind for a unit, because
 `nt_gfx_bind_texture` installs the texture's own default sampler and discards

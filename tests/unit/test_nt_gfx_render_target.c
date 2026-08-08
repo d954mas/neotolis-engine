@@ -387,7 +387,6 @@ static nt_sampler_t make_comparison_sampler(void) {
         .mag_filter = NT_FILTER_LINEAR,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_compare = true,
         .compare_func = NT_COMPARE_LEQUAL,
     });
 }
@@ -434,7 +433,7 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_compare = true,
+        .compare_func = NT_COMPARE_LEQUAL,
     });
 
     nt_gfx_bind_texture(integer, 0);
@@ -453,8 +452,8 @@ static void test_comparison_state_participates_in_sampler_dedupe(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     };
     nt_sampler_desc_t leq = plain;
-    leq.depth_compare = true;
-    nt_sampler_desc_t less = leq;
+    leq.compare_func = NT_COMPARE_LEQUAL;
+    nt_sampler_desc_t less = plain;
     less.compare_func = NT_COMPARE_LESS;
 
     nt_sampler_t a = nt_gfx_make_sampler(&plain);
@@ -465,12 +464,6 @@ static void test_comparison_state_participates_in_sampler_dedupe(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(b.id, c.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, c.id);
     TEST_ASSERT_EQUAL_UINT32(b.id, nt_gfx_make_sampler(&leq).id);
-
-    /* compare_func is inert while comparison is off; both spellings of "no
-     * comparison" must land on the same cache slot. */
-    nt_sampler_desc_t plain_other_func = plain;
-    plain_other_func.compare_func = NT_COMPARE_LESS;
-    TEST_ASSERT_EQUAL_UINT32(a.id, nt_gfx_make_sampler(&plain_other_func).id);
 }
 
 static nt_sampler_t make_mipmap_sampler(void) {

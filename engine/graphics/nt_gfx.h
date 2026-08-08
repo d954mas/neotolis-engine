@@ -158,11 +158,12 @@ typedef enum {
     NT_WRAP_MIRRORED_REPEAT,
 } nt_texture_wrap_t;
 
-/* Depth-compare function for sampler objects. LEQUAL is zero so a zero-filled
- * descriptor matches the GL default and the shadow-map convention: a receiver
- * at exactly the stored depth stays lit instead of shadowing itself. */
+/* Depth comparison on sampler objects. NONE is zero so a zero-filled descriptor
+ * is a plain sampler; enabling comparison names its function, since LEQUAL and
+ * LESS differ exactly on a receiver at its own stored depth. */
 typedef enum {
-    NT_COMPARE_LEQUAL = 0,
+    NT_COMPARE_NONE = 0,
+    NT_COMPARE_LEQUAL,
     NT_COMPARE_LESS,
 } nt_compare_func_t;
 
@@ -258,10 +259,9 @@ typedef struct {
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     /* Comparison lives on the sampler, not the texture: one depth target reads
      * through a comparison sampler for the shadow lookup and through a plain
-     * sampler for a raw-depth view. DEPTH* textures only. */
-    bool depth_compare;
-    nt_compare_func_t compare_func; /* ignored unless depth_compare; default LEQUAL */
-    const char *label;              /* debug name; static storage */
+     * sampler for a raw-depth view. Non-NONE requires DEPTH* storage. */
+    nt_compare_func_t compare_func;
+    const char *label; /* debug name; static storage */
 } nt_sampler_desc_t;
 
 typedef struct {
@@ -400,9 +400,9 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
  * bind_texture installs the texture's own default sampler and discards this one.
  * Pass NT_SAMPLER_INVALID to fall back to texture state. RG16UI requires NEAREST
- * min/mag, and so does DEPTH* unless depth_compare is set; depth_compare requires
- * a bound DEPTH* texture. Mipmap min filters require a complete chain; a 1x1 base
- * level is already complete. */
+ * min/mag, and so does DEPTH* unless compare_func is set; a set compare_func
+ * requires a bound DEPTH* texture. Mipmap min filters require a complete chain;
+ * a 1x1 base level is already complete. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----
