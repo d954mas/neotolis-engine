@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: aab0fd3
+# Commit: 12841a7
 
 ## WASM Section Sizes
 
@@ -13,10 +13,10 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  33 B
-Code               91999 B
+Code               92205 B
 Data                8635 B
 ---------------- ----------
-TOTAL             101696 B
+TOTAL             101902 B
 
 ## Top 30 Functions by Size
 

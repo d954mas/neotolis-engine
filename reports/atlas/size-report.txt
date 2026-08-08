@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: aab0fd3
+# Commit: 12841a7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                 170 B
-Code              582106 B
+Code              582311 B
 Data              233053 B
 Custom             36340 B
 ---------------- ----------
-TOTAL             853303 B
+TOTAL             853508 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             853303 B
  4825 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
 
 Total functions: 344
-Total code size: 581508 B
+Total code size: 581713 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                66822 B
-libnt_gfx_stub.a           39204 B
+libnt_gfx.a                67644 B
+libnt_gfx_stub.a           39958 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,7 +113,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5892564 B
+TOTAL (archives)         5894140 B
 
 ## Data Segments Summary
 
