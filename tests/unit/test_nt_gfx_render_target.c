@@ -466,6 +466,28 @@ static void test_comparison_state_participates_in_sampler_dedupe(void) {
     TEST_ASSERT_EQUAL_UINT32(b.id, nt_gfx_make_sampler(&leq).id);
 }
 
+/* Pack headers cast raw bytes into these enums, so an out-of-range value has to
+ * key the sampler the backend actually builds — otherwise it takes over the
+ * cache slot of a valid, different one. */
+static void test_out_of_range_sampler_state_keys_what_the_backend_builds(void) {
+    nt_sampler_desc_t clamped = {
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    };
+    nt_sampler_desc_t garbage = clamped;
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) — the out-of-range value is the subject of the test
+    garbage.wrap_u = (nt_texture_wrap_t)9;
+    nt_sampler_desc_t repeat = clamped;
+    repeat.wrap_u = NT_WRAP_REPEAT;
+
+    nt_sampler_t from_garbage = nt_gfx_make_sampler(&garbage);
+
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_make_sampler(&clamped).id, from_garbage.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_make_sampler(&repeat).id, from_garbage.id);
+}
+
 static nt_sampler_t make_mipmap_sampler(void) {
     return nt_gfx_make_sampler(&(nt_sampler_desc_t){
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
@@ -783,6 +805,7 @@ int main(void) {
     RUN_TEST(test_color_texture_rejects_comparison_sampler);
     RUN_TEST(test_integer_texture_rejects_comparison_sampler);
     RUN_TEST(test_comparison_state_participates_in_sampler_dedupe);
+    RUN_TEST(test_out_of_range_sampler_state_keys_what_the_backend_builds);
     RUN_TEST(test_render_target_color_rejects_mipmap_sampler_override);
     RUN_TEST(test_one_pixel_texture_accepts_mipmap_sampler_override);
     RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);

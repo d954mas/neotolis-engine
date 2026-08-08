@@ -59,7 +59,7 @@ typedef struct {
  * return the same handle. Most apps use 3-10 unique configs. */
 /* 128 is headroom, not coverage: the descriptor space is larger
  * (min×mag×wrap_u×wrap_v×compare = 324) and creation never inspects a texture,
- * so every combination is constructible. Cost: ~4.5 KB BSS (not binary —
+ * so every combination is constructible. Cost: ~4 KB BSS (not binary —
  * zero-init in WASM linear memory / native .bss). Linear scan in
  * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
  * for the hot path. */

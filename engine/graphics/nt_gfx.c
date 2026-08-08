@@ -1179,27 +1179,48 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 
 /* ---- Sampler (deduplicated cache) ---- */
 
-static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
-    /* Explicit clamp on mag_filter — only NEAREST/LINEAR are legal there.
-     * If asserts get compiled out (NT_ASSERT OFF mode for production), a
-     * bad input would otherwise silently collide with another sampler. */
-    uint32_t mag = (desc->mag_filter == NT_FILTER_LINEAR) ? 1U : 0U;
-    uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
-    uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
-    uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
-    /* compare_func is normalized the way the backend clamps it, not masked: a
-     * masked out-of-range value would key one function and build another. */
-    uint32_t cmp = (desc->compare_func <= NT_COMPARE_LESS) ? (uint32_t)desc->compare_func : (uint32_t)NT_COMPARE_NONE;
-    return mn | (mag << 3) | (wu << 4) | (wv << 6) | (cmp << 8);
+/* Single clamp site for the whole sampler path: the dedupe key, the GL object
+ * and the recorded desc all derive from the result, so they cannot describe
+ * different samplers. Out of range maps to the zero value every backend mapper
+ * already falls back to; pack headers cast straight into these enums, so the
+ * input is not always a caller. */
+static inline nt_sampler_desc_t sampler_normalize(const nt_sampler_desc_t *desc) {
+    nt_sampler_desc_t out = *desc;
+    if ((uint32_t)out.min_filter > (uint32_t)NT_FILTER_LINEAR_MIPMAP_LINEAR) {
+        out.min_filter = NT_FILTER_NEAREST;
+    }
+    if ((uint32_t)out.mag_filter > (uint32_t)NT_FILTER_LINEAR) {
+        out.mag_filter = NT_FILTER_NEAREST;
+    }
+    if ((uint32_t)out.wrap_u > (uint32_t)NT_WRAP_MIRRORED_REPEAT) {
+        out.wrap_u = NT_WRAP_CLAMP_TO_EDGE;
+    }
+    if ((uint32_t)out.wrap_v > (uint32_t)NT_WRAP_MIRRORED_REPEAT) {
+        out.wrap_v = NT_WRAP_CLAMP_TO_EDGE;
+    }
+    if ((uint32_t)out.compare_func > (uint32_t)NT_COMPARE_LESS) {
+        out.compare_func = NT_COMPARE_NONE;
+    }
+    return out;
 }
+
+/* Normalized descs only: equal key must mean an identical GL sampler. */
+static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
+    return (uint32_t)desc->min_filter | ((uint32_t)desc->mag_filter << 3) | ((uint32_t)desc->wrap_u << 4) | ((uint32_t)desc->wrap_v << 6) | ((uint32_t)desc->compare_func << 8);
+}
+_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR < 8 && NT_FILTER_LINEAR < 2 && NT_WRAP_MIRRORED_REPEAT < 4 && NT_COMPARE_LESS < 4,
+               "sampler_pack_key field widths — a new enum value would overlap the next field");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
-    NT_ASSERT(desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
+    /* Unsigned: nt_compare_func_t and nt_texture_filter_t are signed under the
+     * MSVC ABI, where a negative cast would pass an upper-bound-only check. */
+    NT_ASSERT((uint32_t)desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+    NT_ASSERT((uint32_t)desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
 
-    uint32_t key = sampler_pack_key(desc);
+    nt_sampler_desc_t normalized = sampler_normalize(desc);
+    uint32_t key = sampler_pack_key(&normalized);
 
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].key == key) {
@@ -1212,7 +1233,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     }
 
     NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
-    uint32_t backend = nt_gfx_backend_create_sampler(desc);
+    uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
         NT_LOG_ERROR("make_sampler: backend failed");
         return NT_SAMPLER_INVALID;
@@ -1220,7 +1241,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     uint32_t slot = s_gfx.sampler_count++;
     s_gfx.sampler_cache[slot].key = key;
     s_gfx.sampler_cache[slot].backend = backend;
-    s_gfx.sampler_cache[slot].desc = *desc;
+    s_gfx.sampler_cache[slot].desc = normalized;
     return (nt_sampler_t){.id = slot + 1};
 }
 

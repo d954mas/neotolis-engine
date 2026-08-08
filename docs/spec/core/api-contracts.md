@@ -184,10 +184,10 @@ choose attachment formats or sampler defaults.
 Invalid render-target descriptors include mismatched color/depth format classes,
 a missing or extraneous depth format for the selected storage, invalid sampler
 values, and non-`NEAREST` depth filtering — comparison is sampler state and
-never reaches this descriptor. These cases,
-exhausted configured target capacity, stale handles, direct mutation of owned
-attachments, and render-target lifecycle calls inside an active pass are
-developer errors and assert. Backend allocation, framebuffer completeness,
+never reaches this descriptor. These cases, exhausted configured target
+capacity, stale handles, direct mutation of owned attachments, and
+render-target lifecycle calls inside an active pass are developer errors and
+assert. Backend allocation, framebuffer completeness,
 resize, and context-restore failures remain runtime failures reported through
 invalid handles, `false`, or readiness queries.
 
