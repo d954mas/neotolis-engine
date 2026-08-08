@@ -381,6 +381,89 @@ static void test_integer_texture_rejects_linear_sampler_override(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0));
 }
 
+static nt_sampler_t make_comparison_sampler(void) {
+    return nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_compare = true,
+        .compare_func = NT_COMPARE_LEQUAL,
+    });
+}
+
+static void test_depth_texture_accepts_linear_comparison_sampler(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_sampler_t comparison = make_comparison_sampler();
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, comparison.id);
+
+    nt_gfx_bind_texture(nt_gfx_render_target_depth(rt), 0);
+    nt_gfx_bind_sampler(comparison, 0);
+
+    nt_gfx_destroy_render_target(rt);
+}
+
+/* Comparison against non-depth storage is undefined in GL, so the same sampler
+ * that is legal on the depth attachment must be rejected on the colour one. */
+static void test_color_texture_rejects_comparison_sampler(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    nt_sampler_t comparison = make_comparison_sampler();
+
+    nt_gfx_bind_texture(nt_gfx_render_target_color(rt), 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(comparison, 0));
+
+    nt_gfx_destroy_render_target(rt);
+}
+
+static void test_integer_texture_rejects_comparison_sampler(void) {
+    nt_texture_t integer = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 1,
+        .height = 1,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    });
+    nt_sampler_t comparison = make_comparison_sampler();
+
+    nt_gfx_bind_texture(integer, 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(comparison, 0));
+
+    nt_gfx_destroy_texture(integer);
+}
+
+/* The dedupe key must separate comparison state, or the shadow lookup and the
+ * raw-depth debug view would collapse onto one GL sampler object. */
+static void test_comparison_state_participates_in_sampler_dedupe(void) {
+    nt_sampler_desc_t plain = {
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+    };
+    nt_sampler_desc_t leq = plain;
+    leq.depth_compare = true;
+    nt_sampler_desc_t less = leq;
+    less.compare_func = NT_COMPARE_LESS;
+
+    nt_sampler_t a = nt_gfx_make_sampler(&plain);
+    nt_sampler_t b = nt_gfx_make_sampler(&leq);
+    nt_sampler_t c = nt_gfx_make_sampler(&less);
+
+    TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(b.id, c.id);
+    TEST_ASSERT_EQUAL_UINT32(b.id, nt_gfx_make_sampler(&leq).id);
+
+    /* compare_func is inert while comparison is off; both spellings of "no
+     * comparison" must land on the same cache slot. */
+    nt_sampler_desc_t plain_other_func = plain;
+    plain_other_func.compare_func = NT_COMPARE_LESS;
+    TEST_ASSERT_EQUAL_UINT32(a.id, nt_gfx_make_sampler(&plain_other_func).id);
+}
+
 static nt_sampler_t make_mipmap_sampler(void) {
     return nt_gfx_make_sampler(&(nt_sampler_desc_t){
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
@@ -694,6 +777,10 @@ int main(void) {
     RUN_TEST(test_make_render_target_rejects_invalid_sampler_modes);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);
     RUN_TEST(test_integer_texture_rejects_linear_sampler_override);
+    RUN_TEST(test_depth_texture_accepts_linear_comparison_sampler);
+    RUN_TEST(test_color_texture_rejects_comparison_sampler);
+    RUN_TEST(test_integer_texture_rejects_comparison_sampler);
+    RUN_TEST(test_comparison_state_participates_in_sampler_dedupe);
     RUN_TEST(test_render_target_color_rejects_mipmap_sampler_override);
     RUN_TEST(test_one_pixel_texture_accepts_mipmap_sampler_override);
     RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);

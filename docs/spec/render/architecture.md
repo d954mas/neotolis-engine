@@ -88,11 +88,28 @@ returns invalid — the fallback path a caller needs regardless. The capability
 bit exists so a caller can choose its format without paying for a failed
 attempt.
 
-The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. The current
-sampler contract has no depth-comparison mode, so WebGL 2 texture completeness
-requires `NEAREST` minification and magnification for depth textures. Wrap state
-remains explicit and may use clamp, repeat, or mirrored repeat. Binding a
-separate sampler does not relax the depth filtering restriction.
+The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. A depth
+attachment's own texture state stays `NEAREST` for minification and
+magnification: WebGL 2 texture completeness rejects filtered depth unless
+comparison is enabled, and comparison is not texture state. Wrap state remains
+explicit and may use clamp, repeat, or mirrored repeat.
+
+Depth comparison lives on the sampler object (`nt_sampler_desc_t.depth_compare`
+plus `compare_func`), not on the texture, because one depth target is read two
+ways: through a comparison sampler for the shadow lookup, and through a plain
+sampler for a raw-depth debug view. Sampler state supersedes texture state, so a
+comparison sampler makes `LINEAR` legal on that binding while the attachment
+description is untouched. A sampler with comparison enabled is rejected on
+non-depth storage, where the comparison would make every lookup undefined; a
+sampler without it still cannot filter depth.
+
+With comparison on, `LINEAR` filters the 0/1 comparison results instead of the
+raw depths — the ordering a shadow edge needs, since averaging depths first
+compares against a depth that exists in no texel. Both the desktop GL and the
+GLES specifications leave the blend implementation-dependent and promise only a
+value proportional to the passing comparisons, so consumers may rely on the
+proportionality but not on specific weights. Comparison itself is core in
+GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Sampler overrides with a mipmap minification filter require complete mip
 storage for the bound texture. A 1x1 base level is already a complete chain.

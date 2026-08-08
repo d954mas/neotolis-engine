@@ -65,7 +65,7 @@ static uint32_t s_global_block_count;
  * Lifetime = engine. desc is preserved across context loss so backend can be
  * lazily recreated without invalidating material-side sampler.id handles. */
 typedef struct {
-    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v, compare) */
     uint32_t backend;       /* GL sampler object handle; 0 after context loss */
     nt_sampler_desc_t desc; /* recorded for context-loss recreate */
 } nt_gfx_sampler_entry_t;
@@ -1187,13 +1187,18 @@ static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
     uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
     uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
     uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
-    return mn | (mag << 3) | (wu << 4) | (wv << 6);
+    /* compare_func has no effect with comparison off; drop it from the key so
+     * both spellings of "no comparison" share one cache slot. */
+    uint32_t cmp = desc->depth_compare ? 1U : 0U;
+    uint32_t fn = cmp * (((uint32_t)desc->compare_func) & 0x1U);
+    return mn | (mag << 3) | (wu << 4) | (wv << 6) | (cmp << 8) | (fn << 9);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+    NT_ASSERT(desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
 
     uint32_t key = sampler_pack_key(desc);
 
@@ -1238,7 +1243,16 @@ static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_des
     uint32_t texture_slot = nt_pool_slot_index(texture_id);
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
     uint8_t format = meta->format;
-    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    /* Comparison against a non-depth texture makes every lookup undefined in
+     * GL, whichever sampler type the shader declares. */
+    if (desc->depth_compare && !depth) {
+        return false;
+    }
+    /* Filtering raw depth averages texels into a depth that exists in none of
+     * them; with comparison on, LINEAR blends the 0/1 comparison results
+     * instead. Integer storage has no such escape and stays NEAREST. */
+    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || (depth && !desc->depth_compare);
     if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
         return false;
     }
