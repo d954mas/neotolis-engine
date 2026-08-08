@@ -103,6 +103,11 @@ description is untouched. A sampler with comparison enabled is rejected on
 non-depth storage, where the comparison would make every lookup undefined; a
 sampler without it still cannot filter depth.
 
+Sampler binds follow the texture bind for a unit, because
+`nt_gfx_bind_texture` installs the texture's own default sampler and discards
+whatever the unit held. A comparison sampler bound to a unit with no live
+texture is therefore rejected rather than silently replaced.
+
 With comparison on, `LINEAR` filters the 0/1 comparison results instead of the
 raw depths — the ordering a shadow edge needs, since averaging depths first
 compares against a depth that exists in no texel. Both the desktop GL and the

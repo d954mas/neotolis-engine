@@ -57,12 +57,12 @@ typedef struct {
 /* Sampler cache size — samplers are deduplicated by their (filter/wrap/compare)
  * descriptor so repeated nt_gfx_make_sampler calls with the same desc
  * return the same handle. Most apps use 3-10 unique configs. */
-/* 128 no longer covers every theoretical combination (min×mag×wrap_u×wrap_v ×
- * compare = 108×3 = 324) — comparison is only legal on DEPTH* textures, so the
- * reachable set stays far below this. Overflow asserts rather than corrupting.
- * Cost: ~4.5 KB BSS (not binary — zero-init in WASM linear memory / native
- * .bss). Linear scan in nt_gfx_make_sampler iterates sampler_count, not
- * capacity, so size is free for the hot path. */
+/* 128 is headroom, not coverage: the descriptor space is larger
+ * (min×mag×wrap_u×wrap_v×compare = 324) and creation never inspects a texture,
+ * so every combination is constructible. Cost: ~4.5 KB BSS (not binary —
+ * zero-init in WASM linear memory / native .bss). Linear scan in
+ * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
+ * for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
@@ -397,10 +397,12 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
-/* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
- * to texture state. RG16UI requires NEAREST min/mag, and so does DEPTH* unless
- * depth_compare is set; depth_compare requires a DEPTH* texture. Mipmap min
- * filters require a complete chain; a 1x1 base level is already complete. */
+/* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
+ * bind_texture installs the texture's own default sampler and discards this one.
+ * Pass NT_SAMPLER_INVALID to fall back to texture state. RG16UI requires NEAREST
+ * min/mag, and so does DEPTH* unless depth_compare is set; depth_compare requires
+ * a bound DEPTH* texture. Mipmap min filters require a complete chain; a 1x1 base
+ * level is already complete. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----

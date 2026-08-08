@@ -216,6 +216,8 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, shadow_map.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(shadow_map));
+    /* Reading outside the drawable is undefined, so refuse to guess its width. */
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_window.fb_width >= RAMP_WIDTH, "drawable narrower than the sampled ramp");
 
     /* z_ndc 0.6 maps to window depth 0.8; the pass clear leaves 0.2 on the left. */
     static const float right_half_quad[18] = {
@@ -298,7 +300,8 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     /* u < 0.25 samples only the near texel, u > 0.75 only the far one. */
     TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_NEAR));
     TEST_ASSERT_EQUAL_UINT8(255, ramp_at(row, RAMP_FAR));
-    TEST_ASSERT_TRUE_MESSAGE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255, "shadow edge did not blend comparison results");
+    TEST_ASSERT_TRUE_MESSAGE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255,
+                             "shadow edge did not blend comparison results — both specs allow a driver to compare a single texel, so suspect driver latitude before the sampler path");
 
     /* Same texture, plain sampler: raw depth for a debug view. */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});

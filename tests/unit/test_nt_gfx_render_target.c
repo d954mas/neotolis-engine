@@ -427,7 +427,15 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
-    nt_sampler_t comparison = make_comparison_sampler();
+    /* NEAREST, so the pre-existing integer filter rule cannot be what rejects
+     * this — only the comparison guard can. */
+    nt_sampler_t comparison = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_compare = true,
+    });
 
     nt_gfx_bind_texture(integer, 0);
     NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(comparison, 0));
@@ -455,6 +463,7 @@ static void test_comparison_state_participates_in_sampler_dedupe(void) {
 
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(b.id, c.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(a.id, c.id);
     TEST_ASSERT_EQUAL_UINT32(b.id, nt_gfx_make_sampler(&leq).id);
 
     /* compare_func is inert while comparison is off; both spellings of "no

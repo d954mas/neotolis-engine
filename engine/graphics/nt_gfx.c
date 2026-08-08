@@ -1187,10 +1187,12 @@ static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
     uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
     uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
     uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
-    /* compare_func has no effect with comparison off; drop it from the key so
-     * both spellings of "no comparison" share one cache slot. */
+    /* compare_func is normalized the same way the backend clamps it, not
+     * masked: a masked out-of-range value would key one function and build
+     * another. It also drops out with comparison off, so both spellings of
+     * "no comparison" share one cache slot. */
     uint32_t cmp = desc->depth_compare ? 1U : 0U;
-    uint32_t fn = cmp * (((uint32_t)desc->compare_func) & 0x1U);
+    uint32_t fn = (cmp != 0U && desc->compare_func == NT_COMPARE_LESS) ? 1U : 0U;
     return mn | (mag << 3) | (wu << 4) | (wv << 6) | (cmp << 8) | (fn << 9);
 }
 
@@ -1238,7 +1240,10 @@ static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
 static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_desc_t *desc) {
     uint32_t texture_id = s_gfx.bound_texture_ids[slot];
     if (!nt_pool_valid(&s_gfx.texture_pool, texture_id)) {
-        return true;
+        /* Comparison needs depth storage to check against, and nt_gfx_bind_texture
+         * reinstalls the texture's own sampler — so a comparison sampler on an
+         * empty slot can only be a bind-order mistake. */
+        return !desc->depth_compare;
     }
     uint32_t texture_slot = nt_pool_slot_index(texture_id);
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
