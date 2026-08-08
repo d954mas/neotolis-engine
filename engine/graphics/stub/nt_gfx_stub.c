@@ -441,5 +441,5 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
 #ifdef NT_TEST_ACCESS
     s_stub_gpu_caps_probe_count++;
 #endif
-    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096};
+    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true};
 }

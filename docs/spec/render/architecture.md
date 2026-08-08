@@ -67,7 +67,14 @@ private to the concrete graphics implementation.
 
 `nt_render_target_desc_t` explicitly selects the color format and default sampler
 state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
-current render-target color format is `RGBA8`. `NONE`
+supported render-target color formats are `RGBA8` and `RGBA16F`. Half-float is
+the HDR path: it holds values above 1.0 so a tone-mapping or bright-pass stage
+has headroom to work with, and it stays filterable in WebGL 2 core, so `LINEAR`
+sampling of the attachment remains valid. Creation does not consult
+`gpu_caps.has_float_render_target` — a device that cannot render to half-float
+fails the backend completeness check and creation returns invalid. The cap bit
+is there so a caller can choose its format without paying for a failed attempt.
+`NONE`
 requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
 renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
 texture in the requested depth format with its own filter and wrap state. The

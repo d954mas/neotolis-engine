@@ -288,9 +288,13 @@ typedef struct {
 /* ---- GPU compressed texture format capabilities ---- */
 
 typedef struct {
-    bool has_astc;             /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;              /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;             /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_astc; /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2; /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    /* RGBA16F usable as a colour attachment (EXT_color_buffer_float / core GL 3.0+).
+       Half-float is filterable in ES 3.0 core, so LINEAR sampling stays valid; RGBA32F
+       is not covered by this bit and remains rejected for render targets. */
+    bool has_float_render_target;
     uint32_t max_texture_size; /* GL_MAX_TEXTURE_SIZE, queried at init */
 } nt_gfx_gpu_caps_t;
 

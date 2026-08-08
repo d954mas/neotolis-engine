@@ -296,6 +296,28 @@ static void test_make_render_target_rejects_invalid_formats(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
 }
 
+static void test_make_render_target_accepts_half_float_color(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    desc.color_format = NT_TEXTURE_FORMAT_RGBA16F;
+
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+
+    /* The attachment carries the requested format, not a silently substituted one. */
+    nt_texture_t color = nt_gfx_render_target_color(rt);
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA16F, nt_gfx_texture_format(color));
+
+    nt_gfx_destroy_render_target(rt);
+}
+
+static void test_make_render_target_still_rejects_full_float_color(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    desc.color_format = NT_TEXTURE_FORMAT_RGBA32F;
+
+    NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
+}
+
 static void test_make_render_target_rejects_invalid_sampler_modes(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
 
@@ -667,6 +689,8 @@ int main(void) {
     RUN_TEST(test_update_rejects_render_target_owned_texture);
     RUN_TEST(test_make_render_target_rejects_null_and_zero_dimensions);
     RUN_TEST(test_make_render_target_rejects_invalid_formats);
+    RUN_TEST(test_make_render_target_accepts_half_float_color);
+    RUN_TEST(test_make_render_target_still_rejects_full_float_color);
     RUN_TEST(test_make_render_target_rejects_invalid_sampler_modes);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);
     RUN_TEST(test_integer_texture_rejects_linear_sampler_override);
