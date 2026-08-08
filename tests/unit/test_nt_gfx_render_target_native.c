@@ -130,6 +130,44 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     nt_gfx_destroy_render_target(target);
 }
 
+/* An over-range clear must survive the round trip — clamping to white would
+   mean the target has no headroom and only the format name changed. */
+static void test_half_float_target_is_complete_and_keeps_values_above_one(void) {
+    TEST_ASSERT_TRUE(g_nt_gfx.gpu_caps.has_float_render_target);
+
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA16F,
+        .color_min_filter = NT_FILTER_LINEAR,
+        .color_mag_filter = NT_FILTER_LINEAR,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_NONE,
+        .depth_format = NT_TEXTURE_FORMAT_INVALID,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
+
+    nt_gfx_bind_texture(nt_gfx_render_target_color(target), 0);
+    GLint internal_format = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+    TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {3.5F, 0.25F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    float pixels[4 * 4 * 4] = {0};
+    glReadPixels(0, 0, 4, 4, GL_RGBA, GL_FLOAT, pixels);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* Unity float asserts are disabled in this build; compare in millis. */
+    TEST_ASSERT_INT_WITHIN(10, 3500, (int)(pixels[0] * 1000.0F));
+    TEST_ASSERT_INT_WITHIN(10, 250, (int)(pixels[1] * 1000.0F));
+
+    nt_gfx_destroy_render_target(target);
+}
+
 static void test_depth_buffer_uses_explicit_format(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
@@ -219,6 +257,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
+    RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     return UNITY_END();

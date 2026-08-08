@@ -842,8 +842,11 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
         NT_LOG_ERROR("make_render_target: zero dimension");
         return result;
     }
-    NT_ASSERT(desc->color_format == NT_TEXTURE_FORMAT_RGBA8 && "make_render_target: unsupported color format");
-    if (desc->color_format != NT_TEXTURE_FORMAT_RGBA8) {
+    /* Deliberately not gated on gpu_caps.has_float_render_target: the backend
+       completeness check is the real gate, and it already returns invalid. */
+    bool color_format_valid = desc->color_format == NT_TEXTURE_FORMAT_RGBA8 || desc->color_format == NT_TEXTURE_FORMAT_RGBA16F;
+    NT_ASSERT(color_format_valid && "make_render_target: unsupported color format");
+    if (!color_format_valid) {
         NT_LOG_ERROR("make_render_target: unsupported color format");
         return result;
     }
