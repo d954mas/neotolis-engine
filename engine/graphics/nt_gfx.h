@@ -54,14 +54,10 @@ typedef struct {
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
 
-/* Sampler cache size — samplers are deduplicated by their (filter/wrap)
- * descriptor so repeated nt_gfx_make_sampler calls with the same desc
- * return the same handle. Most apps use 3-10 unique configs. */
-/* 128 covers all theoretically possible combinations of (min×mag×wrap_u×wrap_v)
- * = 6×2×3×3 = 108, with a small safety margin. Cost: ~3.5 KB BSS (not binary
- * — zero-init in WASM linear memory / native .bss). Linear scan in
- * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
- * for the hot path. */
+/* Samplers are deduplicated by their (filter/wrap/compare) descriptor; most apps
+ * use 3-10 unique configs. 128 is headroom, not coverage — all 324 combinations
+ * are constructible. Costs ~4 KB of BSS, not binary size; the linear scan
+ * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
@@ -157,6 +153,15 @@ typedef enum {
     NT_WRAP_MIRRORED_REPEAT,
 } nt_texture_wrap_t;
 
+/* Depth comparison on sampler objects. NONE is zero so a zero-filled descriptor
+ * is a plain sampler; enabling comparison names its function, since LEQUAL and
+ * LESS differ exactly on a receiver at its own stored depth. */
+typedef enum {
+    NT_COMPARE_NONE = 0,
+    NT_COMPARE_LEQUAL,
+    NT_COMPARE_LESS,
+} nt_compare_func_t;
+
 typedef enum {
     NT_RT_DEPTH_NONE = 0,
     NT_RT_DEPTH_BUFFER,
@@ -247,7 +252,11 @@ typedef struct {
     nt_texture_filter_t mag_filter; /* default: NT_FILTER_LINEAR (NEAREST or LINEAR only) */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
-    const char *label;              /* debug name; static storage */
+    /* Comparison lives on the sampler, not the texture: one depth target reads
+     * through a comparison sampler for the shadow lookup and through a plain
+     * sampler for a raw-depth view. Non-NONE requires DEPTH* storage. */
+    nt_compare_func_t compare_func;
+    const char *label; /* debug name; static storage */
 } nt_sampler_desc_t;
 
 typedef struct {
@@ -260,8 +269,8 @@ typedef struct {
     nt_texture_wrap_t color_wrap_v;
     nt_render_target_depth_t depth_storage;
     nt_texture_format_t depth_format;             /* INVALID for NONE; DEPTH* otherwise */
-    nt_texture_filter_t depth_texture_min_filter; /* TEXTURE only; NEAREST without compare mode */
-    nt_texture_filter_t depth_texture_mag_filter; /* TEXTURE only; NEAREST without compare mode */
+    nt_texture_filter_t depth_texture_min_filter; /* TEXTURE only; NEAREST — comparison is sampler state */
+    nt_texture_filter_t depth_texture_mag_filter; /* TEXTURE only; NEAREST — comparison is sampler state */
     nt_texture_wrap_t depth_texture_wrap_u;       /* TEXTURE only */
     nt_texture_wrap_t depth_texture_wrap_v;       /* TEXTURE only */
     const char *label;                            /* debug name; static storage */
@@ -383,9 +392,12 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
-/* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
- * to texture state. RG16UI/DEPTH* require NEAREST min/mag. Mipmap min filters
- * require a complete chain; a 1x1 base level is already complete. */
+/* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
+ * bind_texture installs the texture's own default sampler and discards this one.
+ * Pass NT_SAMPLER_INVALID to fall back to texture state. RG16UI requires NEAREST
+ * min/mag, and so does DEPTH* unless compare_func is set; a set compare_func
+ * requires a bound DEPTH* texture. Mipmap min filters require a complete chain;
+ * a 1x1 base level is already complete. */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Scissor and viewport ----

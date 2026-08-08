@@ -65,7 +65,7 @@ static uint32_t s_global_block_count;
  * Lifetime = engine. desc is preserved across context loss so backend can be
  * lazily recreated without invalidating material-side sampler.id handles. */
 typedef struct {
-    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v, compare) */
     uint32_t backend;       /* GL sampler object handle; 0 after context loss */
     nt_sampler_desc_t desc; /* recorded for context-loss recreate */
 } nt_gfx_sampler_entry_t;
@@ -1179,23 +1179,46 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 
 /* ---- Sampler (deduplicated cache) ---- */
 
-static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
-    /* Explicit clamp on mag_filter — only NEAREST/LINEAR are legal there.
-     * If asserts get compiled out (NT_ASSERT OFF mode for production), a
-     * bad input would otherwise silently collide with another sampler. */
-    uint32_t mag = (desc->mag_filter == NT_FILTER_LINEAR) ? 1U : 0U;
-    uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
-    uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
-    uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
-    return mn | (mag << 3) | (wu << 4) | (wv << 6);
+/* One clamp for the whole sampler path: key, GL object and recorded desc derive
+ * from the result, so they cannot disagree. Pack headers cast raw bytes into
+ * these enums, so out of range takes the zero value the backend maps it to. */
+static inline nt_sampler_desc_t sampler_normalize(const nt_sampler_desc_t *desc) {
+    nt_sampler_desc_t out = *desc;
+    if ((uint32_t)out.min_filter > (uint32_t)NT_FILTER_LINEAR_MIPMAP_LINEAR) {
+        out.min_filter = NT_FILTER_NEAREST;
+    }
+    if ((uint32_t)out.mag_filter > (uint32_t)NT_FILTER_LINEAR) {
+        out.mag_filter = NT_FILTER_NEAREST;
+    }
+    if ((uint32_t)out.wrap_u > (uint32_t)NT_WRAP_MIRRORED_REPEAT) {
+        out.wrap_u = NT_WRAP_CLAMP_TO_EDGE;
+    }
+    if ((uint32_t)out.wrap_v > (uint32_t)NT_WRAP_MIRRORED_REPEAT) {
+        out.wrap_v = NT_WRAP_CLAMP_TO_EDGE;
+    }
+    if ((uint32_t)out.compare_func > (uint32_t)NT_COMPARE_LESS) {
+        out.compare_func = NT_COMPARE_NONE;
+    }
+    return out;
 }
+
+/* Normalized descs only: equal key must mean an identical GL sampler. */
+static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
+    return (uint32_t)desc->min_filter | ((uint32_t)desc->mag_filter << 3) | ((uint32_t)desc->wrap_u << 4) | ((uint32_t)desc->wrap_v << 6) | ((uint32_t)desc->compare_func << 8);
+}
+_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR < 8 && NT_FILTER_LINEAR < 2 && NT_WRAP_MIRRORED_REPEAT < 4 && NT_COMPARE_LESS < 4,
+               "sampler_pack_key field widths — a new enum value would overlap the next field");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+    /* Unsigned: nt_compare_func_t and nt_texture_filter_t are signed under the
+     * MSVC ABI, where a negative cast would pass an upper-bound-only check. */
+    NT_ASSERT((uint32_t)desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+    NT_ASSERT((uint32_t)desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
 
-    uint32_t key = sampler_pack_key(desc);
+    nt_sampler_desc_t normalized = sampler_normalize(desc);
+    uint32_t key = sampler_pack_key(&normalized);
 
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].key == key) {
@@ -1208,7 +1231,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     }
 
     NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
-    uint32_t backend = nt_gfx_backend_create_sampler(desc);
+    uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
         NT_LOG_ERROR("make_sampler: backend failed");
         return NT_SAMPLER_INVALID;
@@ -1216,7 +1239,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     uint32_t slot = s_gfx.sampler_count++;
     s_gfx.sampler_cache[slot].key = key;
     s_gfx.sampler_cache[slot].backend = backend;
-    s_gfx.sampler_cache[slot].desc = *desc;
+    s_gfx.sampler_cache[slot].desc = normalized;
     return (nt_sampler_t){.id = slot + 1};
 }
 
@@ -1231,14 +1254,27 @@ static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
 }
 
 static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_desc_t *desc) {
+    bool compares = desc->compare_func != NT_COMPARE_NONE;
     uint32_t texture_id = s_gfx.bound_texture_ids[slot];
     if (!nt_pool_valid(&s_gfx.texture_pool, texture_id)) {
-        return true;
+        /* Comparison needs depth storage to check against, and nt_gfx_bind_texture
+         * reinstalls the texture's own sampler — so a comparison sampler on an
+         * empty slot can only be a bind-order mistake. */
+        return !compares;
     }
     uint32_t texture_slot = nt_pool_slot_index(texture_id);
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
     uint8_t format = meta->format;
-    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    /* Comparison against a non-depth texture makes every lookup undefined in
+     * GL, whichever sampler type the shader declares. */
+    if (compares && !depth) {
+        return false;
+    }
+    /* Filtering raw depth averages texels into a depth that exists in none of
+     * them; with comparison on, LINEAR blends the 0/1 comparison results
+     * instead. Integer storage has no such escape and stays NEAREST. */
+    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || (depth && !compares);
     if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
         return false;
     }

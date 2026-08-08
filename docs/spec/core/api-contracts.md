@@ -130,10 +130,15 @@ runtime object represented by that handle.
 
 `nt_texture_desc_t.format` is required and names the real storage format.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
-and `DEPTH32F` additionally require `data == NULL` and no mipmaps until comparison
-sampling exists. A separately bound sampler must obey the same format
-restrictions; it cannot replace the explicit texture state with an incompatible
-filter.
+and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
+
+A separately bound sampler must obey the same format restrictions; it cannot
+replace the explicit texture state with an incompatible filter. Depth comparison
+is the one documented exception, and it is sampler state only: `DEPTH*` accepts
+`LINEAR` from a sampler whose `compare_func` is not `NONE`, because the filtering
+then applies to comparison results rather than to raw depth. The texture keeps
+`NEAREST` either way, and the same descriptor field is rejected on non-depth
+storage.
 
 ### Render-target handles
 
@@ -178,10 +183,11 @@ choose attachment formats or sampler defaults.
 
 Invalid render-target descriptors include mismatched color/depth format classes,
 a missing or extraneous depth format for the selected storage, invalid sampler
-values, and non-`NEAREST` depth filtering without comparison mode. These cases,
-exhausted configured target capacity, stale handles, direct mutation of owned
-attachments, and render-target lifecycle calls inside an active pass are
-developer errors and assert. Backend allocation, framebuffer completeness,
+values, and non-`NEAREST` depth filtering — comparison is sampler state and
+never reaches this descriptor. These cases, exhausted configured target
+capacity, stale handles, direct mutation of owned attachments, and
+render-target lifecycle calls inside an active pass are developer errors and
+assert. Backend allocation, framebuffer completeness,
 resize, and context-restore failures remain runtime failures reported through
 invalid handles, `false`, or readiness queries.
 
