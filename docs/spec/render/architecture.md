@@ -67,20 +67,26 @@ private to the concrete graphics implementation.
 
 `nt_render_target_desc_t` explicitly selects the color format and default sampler
 state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
-supported render-target color formats are `RGBA8` and `RGBA16F`. Half-float is
-the HDR path: it holds values above 1.0 so a tone-mapping or bright-pass stage
-has headroom to work with, and it stays filterable in WebGL 2 core, so `LINEAR`
-sampling of the attachment remains valid. Creation does not consult
-`gpu_caps.has_float_render_target` — a device that cannot render to half-float
-fails the backend completeness check and creation returns invalid. The cap bit
-is there so a caller can choose its format without paying for a failed attempt.
-`NONE`
+supported render-target color formats are `RGBA8` and `RGBA16F`. `NONE`
 requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
 renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
 texture in the requested depth format with its own filter and wrap state. The
 descriptor is retained as the single source for creation, resize, and context
 restore. A backend must not substitute its own attachment format or default
 sampler state.
+
+`RGBA16F` is the HDR color path: it carries values above 1.0, so a tone-mapping
+or bright-pass stage has headroom instead of a buffer already clamped at write
+time. It stays filterable in WebGL 2 core, so `LINEAR` on the color attachment
+remains valid. `RGBA32F` is not supported for render targets — it additionally
+needs `OES_texture_float_linear` to be filtered and `EXT_float_blend` to be
+blended into, and both are absent on roughly half of iOS devices.
+
+Creation does not consult `gpu_caps.has_float_render_target`. A device that
+cannot render to half-float fails the backend completeness check, and creation
+returns invalid — the fallback path a caller needs regardless. The capability
+bit exists so a caller can choose its format without paying for a failed
+attempt.
 
 The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. The current
 sampler contract has no depth-comparison mode, so WebGL 2 texture completeness

@@ -44,7 +44,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     if (gl_ver >= 43) {
         caps.has_etc2 = true;
     }
-    /* Float colour attachments are core in GL 3.0+; the engine already requires 3.3. */
+    /* Float colour attachments are core in GL 3.0+ — no extension needed */
     caps.has_float_render_target = gl_ver >= 30;
 
     GLint max_tex_size = 0;

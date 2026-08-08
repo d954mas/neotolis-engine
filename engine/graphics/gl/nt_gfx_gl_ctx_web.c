@@ -42,9 +42,7 @@ bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_web
 
 /* Detect GPU capability extensions via JavaScript.
  * gl.getExtension() both checks AND enables the extension.
- * Bit 0 = ASTC, Bit 1 = BC7/BPTC, Bit 2 = ETC2, Bit 3 = float colour attachments.
- * EXT_color_buffer_float is what makes RGBA16F renderable in WebGL2; without it
- * a half-float target only fails later, at the framebuffer completeness check. */
+ * Bit 0 = ASTC, Bit 1 = BC7/BPTC, Bit 2 = ETC2, Bit 3 = float colour attachments. */
 // clang-format off
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"

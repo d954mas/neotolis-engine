@@ -285,17 +285,14 @@ typedef struct {
     uint32_t instances; /* total objects drawn via instanced calls */
 } nt_gfx_frame_stats_t;
 
-/* ---- GPU compressed texture format capabilities ---- */
+/* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc; /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2; /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    /* RGBA16F usable as a colour attachment (EXT_color_buffer_float / core GL 3.0+).
-       Half-float is filterable in ES 3.0 core, so LINEAR sampling stays valid; RGBA32F
-       is not covered by this bit and remains rejected for render targets. */
-    bool has_float_render_target;
-    uint32_t max_texture_size; /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                 /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target; /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    uint32_t max_texture_size;    /* GL_MAX_TEXTURE_SIZE, queried at init */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -335,7 +332,7 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 void nt_gfx_init(const nt_gfx_desc_t *desc);
 void nt_gfx_shutdown(void);
 
-/* GPU compressed format capabilities (valid after nt_gfx_init) */
+/* GPU format capabilities (valid after nt_gfx_init) */
 const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */

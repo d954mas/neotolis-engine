@@ -130,8 +130,8 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     nt_gfx_destroy_render_target(target);
 }
 
-/* The value of a half-float target is headroom above 1.0, so the proof is that
-   an over-range clear survives the round trip instead of clamping to white. */
+/* An over-range clear must survive the round trip — clamping to white would
+   mean the target has no headroom and only the format name changed. */
 static void test_half_float_target_is_complete_and_keeps_values_above_one(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.gpu_caps.has_float_render_target);
 
