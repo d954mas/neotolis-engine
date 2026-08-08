@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 8fedfe7
+# Commit: aab0fd3
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  40 B
-Code               67878 B
+Code               67882 B
 Data                9018 B
 Custom              4033 B
 ---------------- ----------
-TOTAL              81908 B
+TOTAL              81912 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL              81908 B
   340 B   emmalloc_free
 
 Total functions: 100
-Total code size: 67714 B
+Total code size: 67718 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                66750 B
-libnt_gfx_stub.a           39194 B
+libnt_gfx.a                66822 B
+libnt_gfx_stub.a           39204 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,7 +113,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5892482 B
+TOTAL (archives)         5892564 B
 
 ## Data Segments Summary
 
