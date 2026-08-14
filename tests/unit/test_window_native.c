@@ -102,8 +102,38 @@ void test_native_set_vsync(void) {
     nt_window_shutdown();
 }
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+/* stdnoreturn.h (pulled in above) defines noreturn -> _Noreturn, which breaks
+   winnt.h's __declspec(noreturn). */
+#undef noreturn
+#include <stdint.h>
+#include <windows.h>
+
+/* NT_HYBRID_HPG contract: the exe's export table carries the GPU hint symbols with
+   value 1 (prefer dGPU). A glfw DLL or a dropped define silently loses them. */
+void test_native_hybrid_hpg_exports(void) {
+    HMODULE self = GetModuleHandleW(NULL);
+    FARPROC nv = GetProcAddress(self, "NvOptimusEnablement");
+    FARPROC amd = GetProcAddress(self, "AmdPowerXpressRequestHighPerformance");
+#if NT_TEST_HYBRID_HPG
+    TEST_ASSERT_NOT_NULL(nv);
+    TEST_ASSERT_NOT_NULL(amd);
+    /* uintptr_t hop: a direct FARPROC->object-pointer cast trips -Wpedantic */
+    TEST_ASSERT_EQUAL_UINT32(1U, *(const DWORD *)(uintptr_t)nv); // NOLINT(performance-no-int-to-ptr)
+    TEST_ASSERT_EQUAL_INT(1, *(const int *)(uintptr_t)amd);      // NOLINT(performance-no-int-to-ptr)
+#else
+    TEST_ASSERT_NULL(nv);
+    TEST_ASSERT_NULL(amd);
+#endif
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
+#if defined(_WIN32)
+    RUN_TEST(test_native_hybrid_hpg_exports);
+#endif
     RUN_TEST(test_native_window_creates);
     RUN_TEST(test_native_window_shutdown_cleans_up);
     RUN_TEST(test_native_should_close_initially_false);

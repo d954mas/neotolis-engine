@@ -31,6 +31,11 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # OFF lets an exe that embeds both builder and runtime pick its own CRT (see nt_set_static_crt).
 option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the embedding project's CRT." ON)
 
+# ON exports NvOptimusEnablement/AmdPowerXpressRequestHighPerformance from the exe so hybrid-GPU
+# Windows laptops pick the discrete GPU; OFF for battery-friendly games/tools. Build-time only,
+# no runtime engine code — the user's per-app Windows graphics preference still overrides it.
+option(NT_HYBRID_HPG "Prefer the discrete GPU on hybrid-GPU Windows systems." ON)
+
 # Web counterpart to the native KHR_debug callback. ONE flag enables Emscripten GL_ASSERTIONS (validate
 # GL call params) + GL_DEBUG (log every GL call). OFF by default EVEN in debug: GL_DEBUG logs every GL
 # call, so it is opt-in for active GL bug-hunts only. Inert on native builds (warned below).
@@ -149,6 +154,16 @@ if(NOT EMSCRIPTEN)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    set(GLFW_USE_HYBRID_HPG ${NT_HYBRID_HPG} CACHE BOOL "" FORCE)
+    # The GPU hint symbols must live in the exe's export table — in a glfw DLL Windows
+    # ignores them. Directory-scoped set (no CACHE FORCE): outside the hint's contract
+    # the consumer's BUILD_SHARED_LIBS / GLFW_LIBRARY_TYPE choice stays untouched.
+    # Pre-create the cache entry so glfw's own set(CACHE) never persists our STATIC
+    # override — otherwise an ON configure would stick after switching to OFF.
+    set(GLFW_LIBRARY_TYPE "${GLFW_LIBRARY_TYPE}" CACHE STRING "GLFW library type override")
+    if(WIN32 AND NT_HYBRID_HPG)
+        set(GLFW_LIBRARY_TYPE "STATIC")
+    endif()
     add_subdirectory(deps/glfw EXCLUDE_FROM_ALL)
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
     add_subdirectory(deps/cgltf EXCLUDE_FROM_ALL)

@@ -210,6 +210,7 @@ if(NOT EMSCRIPTEN)
     # --- Native window smoke test (real GLFW, hidden window) ---
     add_executable(test_window_native unit/test_window_native.c)
     target_link_libraries(test_window_native PRIVATE nt_window nt_input_stub nt_log unity)
+    target_compile_definitions(test_window_native PRIVATE NT_TEST_HYBRID_HPG=$<BOOL:${NT_HYBRID_HPG}>)
     nt_setup_test_target(test_window_native)
     set_tests_properties(test_window_native PROPERTIES LABELS "native")
 
