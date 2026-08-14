@@ -497,6 +497,9 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
+    /* Backend resets its pipeline cache per frame; mirror it so the
+     * bound-pipeline asserts stay truthful across frame boundaries. */
+    s_gfx.bound_pipeline = 0;
     nt_gfx_backend_begin_frame();
 }
 
