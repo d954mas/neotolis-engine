@@ -440,8 +440,9 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 /* ---- Instance buffer ---- */
 
-/* Applies the bound pipeline's instance attrib pointers at byte_offset —
- * a pipeline must be bound first (asserted). Re-bind per draw to re-point. */
+/* Applies the bound pipeline's instance attrib pointers at byte_offset — a
+ * pipeline must be bound first and the offset 4-byte aligned (WebGL2 rejects
+ * unaligned attrib offsets); both asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 

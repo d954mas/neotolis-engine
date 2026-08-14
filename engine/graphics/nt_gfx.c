@@ -1475,6 +1475,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 /* ---- Instance buffer ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     if (g_nt_gfx.context_lost) {
         return;
@@ -1490,6 +1491,7 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
         return;
     }
     NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
+    NT_ASSERT((byte_offset & 3U) == 0 && "bind_instance_buffer: offset must be 4-byte aligned (WebGL2 attrib rule)");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "bind_instance_buffer: requires a bound pipeline");
     if (s_gfx.bound_pipeline == 0) {
         NT_LOG_ERROR("bind_instance_buffer: no pipeline bound");
