@@ -118,6 +118,7 @@ enum {
 };
 
 uint32_t nt_shape_renderer_test_instance_count(int type);
+uint32_t nt_shape_renderer_test_instance_capacity(void);
 uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
 uint32_t nt_shape_renderer_test_line_count(void);

@@ -782,7 +782,7 @@ void nt_shape_renderer_flush(void) {
         uint32_t inst_bytes = cnt * (uint32_t)sizeof(nt_shape_instance_t);
         uint32_t inst_capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
         if (s_shape.inst_ring_cursor + inst_bytes > inst_capacity) {
-            s_shape.inst_ring_cursor = 0; /* wrap: may overlap in-flight data once, driver copies */
+            s_shape.inst_ring_cursor = 0; /* wrap overlaps in-flight data (every alloc once a frame fills capacity); driver copies */
         }
         uint32_t inst_base = s_shape.inst_ring_cursor;
         s_shape.inst_ring_cursor = inst_base + inst_bytes;
@@ -790,15 +790,16 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_pipeline(t == NT_SHAPE_CAPSULE ? s_shape.cap_inst_pip_active : s_shape.inst_pip_active);
         nt_gfx_bind_vertex_buffer(s_shape.templates[t].vbo);
         nt_gfx_bind_index_buffer(s_shape.templates[t].ibo);
-        nt_gfx_bind_instance_buffer(s_shape.inst_buf);
-        nt_gfx_set_instance_offset(inst_base);
+        nt_gfx_bind_instance_buffer(s_shape.inst_buf, inst_base);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
         nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, s_shape.templates[t].num_vertices, cnt);
         s_shape.inst_counts[t] = 0;
     }
 
-    /* Flush CPU-batched shapes (triangle, mesh) */
+    /* Flush CPU-batched shapes (triangle, mesh). Batch vbo/ibo stay at offset 0:
+     * the non-instanced draw path has no read-side offset plumbing, so the
+     * in-flight rewrite (driver copy) is accepted here. */
     if (s_shape.index_count > 0) {
         nt_gfx_update_buffer(s_shape.batch_vbo, 0, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
         nt_gfx_update_buffer(s_shape.batch_ibo, 0, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
@@ -819,7 +820,7 @@ void nt_shape_renderer_flush(void) {
         uint32_t line_bytes = s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t);
         uint32_t line_capacity = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t);
         if (s_shape.line_ring_cursor + line_bytes > line_capacity) {
-            s_shape.line_ring_cursor = 0; /* wrap: may overlap in-flight data once, driver copies */
+            s_shape.line_ring_cursor = 0; /* wrap overlaps in-flight data (every alloc once a frame fills capacity); driver copies */
         }
         uint32_t line_base = s_shape.line_ring_cursor;
         s_shape.line_ring_cursor = line_base + line_bytes;
@@ -828,8 +829,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_pipeline(s_shape.line_pip_active);
         nt_gfx_bind_vertex_buffer(s_shape.line_template_vbo);
         nt_gfx_bind_index_buffer(s_shape.line_template_ibo);
-        nt_gfx_bind_instance_buffer(s_shape.line_instance_buf);
-        nt_gfx_set_instance_offset(line_base);
+        nt_gfx_bind_instance_buffer(s_shape.line_instance_buf, line_base);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
         float cp4[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0.0F};
         nt_gfx_set_uniform_vec4("u_cam_pos", cp4);
@@ -1437,6 +1437,8 @@ void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, 
 /* ---- Test accessors (always compiled; header guards visibility) ---- */
 
 uint32_t nt_shape_renderer_test_instance_count(int type) { return s_shape.inst_counts[type]; }
+
+uint32_t nt_shape_renderer_test_instance_capacity(void) { return NT_SHAPE_RENDERER_MAX_INSTANCES; }
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
 uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
 uint32_t nt_shape_renderer_test_line_count(void) { return s_shape.line_count; }

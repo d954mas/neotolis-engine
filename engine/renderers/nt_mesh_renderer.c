@@ -420,12 +420,12 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         /* ---- Single GPU upload for packed byte data, ring-allocated ---- */
         uint32_t capacity = (uint32_t)s_mesh_renderer.max_instances * (uint32_t)NT_INSTANCE_STRIDE_MAX;
         if (s_mesh_renderer.ring_cursor + packed_size > capacity) {
-            s_mesh_renderer.ring_cursor = 0; /* wrap: may overlap in-flight data once, driver copies */
+            s_mesh_renderer.ring_cursor = 0; /* wrap overlaps in-flight data (every alloc once a frame fills capacity); driver copies */
         }
         uint32_t ring_base = s_mesh_renderer.ring_cursor;
         s_mesh_renderer.ring_cursor = ring_base + packed_size;
         nt_gfx_update_buffer(s_mesh_renderer.instance_buf, ring_base, s_mesh_renderer.instance_data, packed_size);
-        nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
+        nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, ring_base);
 
         /* ---- Draw runs within this chunk ---- */
         uint32_t run_start = chunk_start;

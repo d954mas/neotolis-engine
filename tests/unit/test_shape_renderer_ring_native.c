@@ -115,9 +115,10 @@ static void test_ring_wrap_still_renders(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
-    /* Each flush advances the ring; enough iterations to force >= 1 wrap
-     * regardless of NT_SHAPE_RENDERER_MAX_INSTANCES sizing. */
-    for (int i = 0; i < 64; i++) {
+    /* Each flush advances the ring by 256 instances; flush count is derived
+     * from the actual capacity so >= 2 wraps happen at any configured size. */
+    uint32_t flushes = ((nt_shape_renderer_test_instance_capacity() / 256U) * 2U) + 1U;
+    for (uint32_t i = 0; i < flushes; i++) {
         for (int j = 0; j < 256; j++) {
             nt_shape_renderer_rect((float[3]){-0.5F, 0.0F, 0.0F}, (float[2]){1.0F, 2.0F}, red);
         }

@@ -1475,7 +1475,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 /* ---- Instance buffer ---- */
 
-void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
+void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -1489,7 +1489,8 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
         NT_LOG_ERROR("bind_instance_buffer: buffer is not vertex type");
         return;
     }
-    nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
+    NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
+    nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot], byte_offset);
 }
 
 void nt_gfx_set_instance_offset(uint32_t byte_offset) {

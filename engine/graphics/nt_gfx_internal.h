@@ -53,7 +53,7 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle);
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle);
+void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset);
 void nt_gfx_backend_set_instance_offset(uint32_t byte_offset);
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
@@ -135,6 +135,8 @@ void nt_gfx_stub_test_fail_next_backend_restore(void);
 void nt_gfx_stub_test_fail_next_render_target_create(void);
 void nt_gfx_stub_test_fail_next_render_target_resize(void);
 void nt_gfx_stub_test_set_context_lost(bool lost);
+uint32_t nt_gfx_stub_test_last_update_buffer_offset(void);
+uint32_t nt_gfx_stub_test_last_instance_offset(void);
 void nt_gfx_stub_test_reset(void);
 #endif
 

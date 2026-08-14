@@ -440,7 +440,10 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 /* ---- Instance buffer ---- */
 
-void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
+/* Bind applies instance attrib pointers at byte_offset in one pass (requires a
+ * bound pipeline). set_instance_offset re-points them for later draws from the
+ * same buffer without re-binding. */
+void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_instance_offset(uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 

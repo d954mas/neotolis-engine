@@ -707,6 +707,34 @@ void test_update_buffer_at_offset(void) {
     nt_gfx_destroy_buffer(buf);
 }
 
+void test_update_buffer_rejects_out_of_range(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_STREAM,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    uint8_t data[64];
+    memset(data, 0xEF, sizeof(data));
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 257, data, 0));          /* offset past capacity */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 224, data, 64));         /* offset + size past capacity */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0xFFFFFFFFU, data, 64)); /* overflow-prone pair */
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_update_buffer_rejects_immutable(void) {
+    uint8_t initial[64] = {0};
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .size = 64,
+        .data = initial,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, initial, 64));
+    nt_gfx_destroy_buffer(buf);
+}
+
 void test_destroy_uniform_buffer(void) {
     nt_buffer_t buf1 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_UNIFORM,
@@ -1002,6 +1030,8 @@ int main(void) {
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
+    RUN_TEST(test_update_buffer_rejects_out_of_range);
+    RUN_TEST(test_update_buffer_rejects_immutable);
     RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);

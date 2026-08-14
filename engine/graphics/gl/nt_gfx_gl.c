@@ -1179,7 +1179,7 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf);
 }
 
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
+void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
@@ -1197,7 +1197,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
             GLboolean normalized;
             get_format_params(attr->format, &size, &type, &normalized);
             glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
-                                  (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+                                  (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
         }
     }
 }
