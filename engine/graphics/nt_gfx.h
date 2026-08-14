@@ -450,11 +450,9 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
-/* update_buffer = glBufferSubData at byte offset (offset + size must fit the
- * buffer; data must point to size bytes, NULL only with size 0). Disjoint
- * offsets let several writes per frame share one buffer without the driver
- * copying in-flight data. orphan_buffer = glBufferData with DYNAMIC_DRAW
- * hint, for streaming geometry replaced every frame. */
+/* update_buffer = glBufferSubData at byte offset; offset + size must fit the
+ * buffer, data must point to size bytes (NULL only with size 0). Disjoint
+ * offsets keep in-flight data untouched. orphan_buffer = glBufferData. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 

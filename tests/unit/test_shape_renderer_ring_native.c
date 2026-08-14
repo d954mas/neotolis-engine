@@ -1,8 +1,6 @@
-/* Real-GL proof that ring-allocated instance uploads land where the draws read:
- * several shape flushes in one frame write disjoint buffer ranges (nonzero
- * offsets after the first), and every shape still renders at its position.
- * Renders into a fixed-size offscreen target — the window framebuffer scales
- * with the host DPI and would shift every sample point. */
+/* Real-GL proof that ring-allocated instance uploads land where the draws
+ * read: multi-flush frames write disjoint ranges yet render pixel-correct.
+ * Fixed-size offscreen target — the window framebuffer scales with host DPI. */
 
 #include "graphics/nt_gfx.h"
 #include "renderers/nt_shape_renderer.h"
