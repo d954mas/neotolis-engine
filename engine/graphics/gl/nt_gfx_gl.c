@@ -114,7 +114,6 @@ static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 static GLuint *s_texture_gl;              /* GL texture names, indexed by slot */
 static nt_gfx_gl_render_target_t *s_render_targets;
-static GLuint s_instance_gl_buf; /* GL name of last bound instance buffer */
 static GLuint s_bound_framebuffer;
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
@@ -224,7 +223,6 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.po_units = 0.0F;
     s_gl_cache.active_texture = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
-    s_instance_gl_buf = 0;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -1184,7 +1182,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
-    s_instance_gl_buf = buf;
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
     /* Re-apply instance attribute pointers from the currently bound pipeline. */
@@ -1199,25 +1196,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
             glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
         }
-    }
-}
-
-void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) {
-    NT_ASSERT(s_instance_gl_buf != 0); /* must call bind_instance_buffer first */
-    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
-        return;
-    }
-    /* Re-bind instance buffer so glVertexAttribPointer captures the right source */
-    glBindBuffer(GL_ARRAY_BUFFER, s_instance_gl_buf);
-    const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
-    for (uint8_t i = 0; i < layout->attr_count; i++) {
-        const nt_vertex_attr_t *attr = &layout->attrs[i];
-        GLint size;
-        GLenum type;
-        GLboolean normalized;
-        get_format_params(attr->format, &size, &type, &normalized);
-        glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
-                              (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
     }
 }
 

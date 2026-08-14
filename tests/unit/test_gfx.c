@@ -719,6 +719,7 @@ void test_update_buffer_rejects_out_of_range(void) {
     EXPECT_ASSERT(nt_gfx_update_buffer(buf, 257, data, 0));          /* offset past capacity */
     EXPECT_ASSERT(nt_gfx_update_buffer(buf, 224, data, 64));         /* offset + size past capacity */
     EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0xFFFFFFFFU, data, 64)); /* overflow-prone pair */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, NULL, 64));           /* NULL data, nonzero size */
     nt_gfx_destroy_buffer(buf);
 }
 

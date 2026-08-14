@@ -54,7 +54,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset);
-void nt_gfx_backend_set_instance_offset(uint32_t byte_offset);
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* Scissor and viewport (see nt_gfx.h for convention).

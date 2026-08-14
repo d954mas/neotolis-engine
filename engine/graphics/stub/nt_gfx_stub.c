@@ -377,14 +377,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
 #endif
 }
 
-void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) {
-#ifdef NT_TEST_ACCESS
-    s_stub_last_instance_offset = byte_offset;
-#else
-    (void)byte_offset;
-#endif
-}
-
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
     (void)location;
     (void)x;

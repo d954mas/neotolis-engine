@@ -425,7 +425,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         uint32_t ring_base = s_mesh_renderer.ring_cursor;
         s_mesh_renderer.ring_cursor = ring_base + packed_size;
         nt_gfx_update_buffer(s_mesh_renderer.instance_buf, ring_base, s_mesh_renderer.instance_data, packed_size);
-        nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, ring_base);
 
         /* ---- Draw runs within this chunk ---- */
         uint32_t run_start = chunk_start;
@@ -488,7 +487,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 prev_mesh = run_mesh;
             }
 
-            nt_gfx_set_instance_offset(draw_byte_offset);
+            nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, draw_byte_offset);
 
             if (mesh_info->index_count > 0) {
                 nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, instance_count);
