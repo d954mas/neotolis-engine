@@ -883,7 +883,7 @@ static void frame(void) {
     const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
 
     if (ui_can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
@@ -926,7 +926,7 @@ static void frame(void) {
 
     /* HUD: ortho VP. */
     if (text_info && text_info->ready) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         draw_hud(fb_w, fb_h);
         nt_text_renderer_flush();
@@ -934,7 +934,7 @@ static void frame(void) {
 
     if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho). */
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_debug_inspector_walk(s_ctx, &target);
         nt_sprite_renderer_flush();
@@ -942,7 +942,7 @@ static void frame(void) {
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         nt_sprite_renderer_flush();

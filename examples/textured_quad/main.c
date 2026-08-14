@@ -306,7 +306,7 @@ static void frame(void) {
 
     if (can_render) {
         /* Upload frame uniforms and bind to slot 0 */
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         uint32_t mesh_id = nt_resource_get(s_mesh_handle);

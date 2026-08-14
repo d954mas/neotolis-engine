@@ -1122,14 +1122,14 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
     s_buffer_targets[backend_handle] = 0;
 }
 
-void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
+void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
     glBindBuffer(target, buf);
-    glBufferSubData(target, 0, (GLsizeiptr)size, data);
+    glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
 }
 
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {

@@ -30,6 +30,7 @@ static struct {
 
     uint8_t *instance_data; /* CPU staging byte buffer [max_instances * NT_INSTANCE_STRIDE_MAX] */
     uint16_t max_instances;
+    uint32_t ring_cursor; /* next free byte in instance_buf; disjoint writes avoid driver copies of in-flight data */
 
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
@@ -379,7 +380,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
         /* ---- Pack all instances in this chunk into byte buffer ---- */
         /* First pass: pack at variable stride per draw group */
-        uint32_t byte_offset = 0;
+        uint32_t packed_size = 0;
         uint32_t scan = chunk_start;
         while (scan < chunk_end) {
             uint32_t run_end = scan + 1;
@@ -397,7 +398,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
             for (uint32_t i = scan; i < run_end; i++) {
                 nt_entity_t e = {.id = items[i].entity};
-                uint8_t *dst = s_mesh_renderer.instance_data + byte_offset;
+                uint8_t *dst = s_mesh_renderer.instance_data + packed_size;
 
                 const float *world = nt_transform_comp_world_matrix(e);
                 pack_mat4x3((float *)dst, world);
@@ -411,18 +412,24 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 }
                 /* NONE: nothing after the 48 bytes */
 
-                byte_offset += stride;
+                packed_size += stride;
             }
             scan = run_end;
         }
 
-        /* ---- Single GPU upload for packed byte data ---- */
-        nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, byte_offset);
+        /* ---- Single GPU upload for packed byte data, ring-allocated ---- */
+        uint32_t capacity = (uint32_t)s_mesh_renderer.max_instances * (uint32_t)NT_INSTANCE_STRIDE_MAX;
+        if (s_mesh_renderer.ring_cursor + packed_size > capacity) {
+            s_mesh_renderer.ring_cursor = 0; /* wrap: may overlap in-flight data once, driver copies */
+        }
+        uint32_t ring_base = s_mesh_renderer.ring_cursor;
+        s_mesh_renderer.ring_cursor = ring_base + packed_size;
+        nt_gfx_update_buffer(s_mesh_renderer.instance_buf, ring_base, s_mesh_renderer.instance_data, packed_size);
         nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
 
         /* ---- Draw runs within this chunk ---- */
         uint32_t run_start = chunk_start;
-        uint32_t draw_byte_offset = 0;
+        uint32_t draw_byte_offset = ring_base;
 
         while (run_start < chunk_end) {
             nt_entity_t entity = {.id = items[run_start].entity};
@@ -507,3 +514,5 @@ uint32_t nt_mesh_renderer_test_pipeline_cache_count(void) { return s_mesh_render
 uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.frame_draw_calls; }
 
 uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.frame_instance_total; }
+
+uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }

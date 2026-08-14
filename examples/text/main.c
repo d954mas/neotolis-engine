@@ -310,7 +310,7 @@ static void frame(void) {
     });
 
     /* Upload and bind frame UBO (slot 0) */
-    nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
     /* Step font system -- resolves pending resources, uploads GPU data */

@@ -1539,7 +1539,7 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
 
 /* ---- Buffer update ---- */
 
-void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -1549,8 +1549,9 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
-    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "update_buffer: size exceeds buffer capacity");
-    nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
+    NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
+    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size - offset && "update_buffer: offset + size exceeds buffer capacity");
+    nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], offset, data, size);
 }
 
 void nt_gfx_begin_segment(const char *name) {

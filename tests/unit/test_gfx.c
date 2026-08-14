@@ -689,7 +689,21 @@ void test_update_uniform_buffer(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
     uint8_t data[256];
     memset(data, 0xAB, sizeof(data));
-    nt_gfx_update_buffer(buf, data, 256);
+    nt_gfx_update_buffer(buf, 0, data, 256);
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_update_buffer_at_offset(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_STREAM,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    uint8_t data[128];
+    memset(data, 0xCD, sizeof(data));
+    /* offset + size == capacity: must pass the range assert */
+    nt_gfx_update_buffer(buf, 128, data, 128);
     nt_gfx_destroy_buffer(buf);
 }
 
@@ -987,6 +1001,7 @@ int main(void) {
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
+    RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);

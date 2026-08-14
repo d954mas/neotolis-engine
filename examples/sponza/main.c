@@ -573,7 +573,7 @@ static void frame(void) {
 
     if (item_count > 0) {
         /* Upload and bind frame UBO (slot 0) */
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         /* Upload and bind lighting UBO (slot 1) */
@@ -582,7 +582,7 @@ static void frame(void) {
             .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
             .ambient = {0.6F, 0.65F, 0.8F, 0.3F},     /* cool ambient, intensity 0.3 */
         };
-        nt_gfx_update_buffer(s_light_ubo, &lighting, sizeof(lighting));
+        nt_gfx_update_buffer(s_light_ubo, 0, &lighting, sizeof(lighting));
         nt_gfx_bind_uniform_buffer(s_light_ubo, 1);
 
         /* Draw all render items */

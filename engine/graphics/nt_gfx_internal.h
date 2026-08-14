@@ -32,7 +32,7 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
-void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size);
+void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);

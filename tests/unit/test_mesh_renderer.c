@@ -560,6 +560,44 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* ---- Ring allocation: cursor advances per draw_list call, wraps at capacity ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_ring_cursor_advances_and_wraps(void) {
+    /* Re-init with a tiny buffer so wrap is reachable: capacity = 4 * 64 = 256 bytes */
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t small = {.max_instances = 4, .max_pipelines = 8};
+    TEST_ASSERT_EQUAL_INT(0, (int)nt_mesh_renderer_init(&small));
+
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 1);
+    uint32_t delta = nt_mesh_renderer_test_ring_cursor();
+    TEST_ASSERT_TRUE(delta > 0); /* first call starts at 0, advances by packed size */
+
+    uint32_t capacity = 4 * 64; /* max_instances * NT_INSTANCE_STRIDE_MAX */
+    uint32_t fit = capacity / delta;
+    for (uint32_t i = 1; i < fit; i++) {
+        nt_mesh_renderer_draw_list(items, 1);
+        TEST_ASSERT_EQUAL_UINT32((i + 1) * delta, nt_mesh_renderer_test_ring_cursor());
+    }
+    /* Buffer full: next call wraps to 0 and writes there */
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(delta, nt_mesh_renderer_test_ring_cursor());
+
+    /* Restore defaults for tearDown */
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t desc = nt_mesh_renderer_desc_defaults();
+    nt_mesh_renderer_init(&desc);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -580,6 +618,7 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
+    RUN_TEST(test_ring_cursor_advances_and_wraps);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_format_float32);
     RUN_TEST(test_stream_to_format_float16);

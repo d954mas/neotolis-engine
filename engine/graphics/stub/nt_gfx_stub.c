@@ -291,8 +291,9 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
 #endif
 }
 
-void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
+void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     (void)backend_handle;
+    (void)offset;
     (void)data;
     (void)size;
 }

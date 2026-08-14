@@ -386,7 +386,7 @@ static void draw_ui_overlay(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-    nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
     char zoom_text[32];
@@ -460,7 +460,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     rtt_quad_vertex_t verts[6] = {
         {{x0, y0}, {0.0F, 0.0F}}, {{x1, y0}, {1.0F, 0.0F}}, {{x1, y1}, {1.0F, 1.0F}}, {{x0, y0}, {0.0F, 0.0F}}, {{x1, y1}, {1.0F, 1.0F}}, {{x0, y1}, {0.0F, 1.0F}},
     };
-    nt_gfx_update_buffer(s_demo.quad_vbo, verts, sizeof(verts));
+    nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_buffer(s_demo.quad_vbo);
     nt_gfx_bind_texture(texture, 0);
