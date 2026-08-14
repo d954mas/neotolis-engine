@@ -128,7 +128,7 @@ Environment differences a local Windows host cannot reproduce:
 - **emsdk pin skew** — CI installs `.emsdk-version`; if local `emcc --version` differs, wasm-release/Closure can false-green locally. Compare versions before trusting it.
 - **clang-tidy skips `#if defined(__linux__)` blocks off-Linux** — reason about platform-`#if` code as Linux code or add `NOLINT` defensively.
 - **Browser Smoke runs under LeakSanitizer, headless** — skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is set.
-- **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the two GL tests hold `RESOURCE_LOCK gl_display`.
+- **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the real-GL tests hold `RESOURCE_LOCK gl_display` (list in `cmake/test_target.cmake`).
 - **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
 - **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/tidy-ci <file>` directly (the devapi-enabled DB check.sh creates; plain native-debug lacks devapi TUs); that reproduces CI.
 

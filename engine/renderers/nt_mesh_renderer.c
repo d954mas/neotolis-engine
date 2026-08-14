@@ -286,7 +286,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Create instance buffer (STREAM: rewritten every frame) */
+    /* Create instance buffer (STREAM: ring-suballocated, refilled every frame) */
     s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_STREAM,

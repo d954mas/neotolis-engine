@@ -731,10 +731,12 @@ void test_bind_instance_buffer_rejects_unaligned_offset(void) {
         .fragment_shader = fs,
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
     });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_bind_pipeline(pip);
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
-    nt_gfx_bind_instance_buffer(buf, 4);                /* aligned: passes */
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 1)); /* WebGL2 rejects unaligned attrib offsets */
+    nt_gfx_bind_instance_buffer(buf, 4);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
+    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 1));                   /* WebGL2 rejects unaligned attrib offsets */
     nt_gfx_destroy_buffer(buf);
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);

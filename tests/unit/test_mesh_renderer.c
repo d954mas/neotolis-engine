@@ -560,6 +560,8 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
     TEST_ASSERT_EQUAL_UINT32(9, nt_mesh_renderer_test_instance_total());
     /* 3 different color modes = 3 pipelines */
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
+    /* Last run's bind offset = upload base + preceding runs (3x NONE + 3x RGBA8) */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + (3 * NT_INSTANCE_STRIDE_NONE) + (3 * NT_INSTANCE_STRIDE_RGBA8), nt_gfx_stub_test_last_instance_offset());
 }
 
 /* ---- Ring allocation: cursor advances per draw_list call, wraps at capacity ---- */
