@@ -28,6 +28,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
+uint32_t nt_mesh_renderer_test_ring_cursor(void);
 #endif
 // #endregion
 

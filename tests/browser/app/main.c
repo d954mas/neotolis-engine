@@ -287,7 +287,7 @@ static void frame(void) {
     const bool can_render = s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);

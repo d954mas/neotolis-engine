@@ -129,7 +129,7 @@ or a shadow-map system.
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
 
-**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one draw call per item. Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
+**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one or more instanced draws per batch_key run — split at max_instances chunk boundaries (see items-sorting-batching.md). Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
 
 **Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
 

@@ -419,7 +419,7 @@ static void frame(void) {
     const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */

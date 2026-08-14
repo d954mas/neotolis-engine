@@ -418,7 +418,7 @@ static void frame(void) {
     nt_font_step();
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         // #region build draw list

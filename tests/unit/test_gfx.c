@@ -689,7 +689,98 @@ void test_update_uniform_buffer(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
     uint8_t data[256];
     memset(data, 0xAB, sizeof(data));
-    nt_gfx_update_buffer(buf, data, 256);
+    nt_gfx_update_buffer(buf, 0, data, 256);
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_update_buffer_at_offset(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_STREAM,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    uint8_t data[128];
+    memset(data, 0xCD, sizeof(data));
+    /* offset + size == capacity: must pass the range assert */
+    nt_gfx_update_buffer(buf, 128, data, 128);
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_update_buffer_rejects_out_of_range(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_STREAM,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    uint8_t data[64];
+    memset(data, 0xEF, sizeof(data));
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 257, data, 0));          /* offset past capacity */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 224, data, 64));         /* offset + size past capacity */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0xFFFFFFFFU, data, 64)); /* overflow-prone pair */
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, NULL, 64));           /* NULL data, nonzero size */
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_bind_instance_buffer_rejects_unaligned_offset(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    nt_gfx_bind_pipeline(pip);
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
+    nt_gfx_bind_instance_buffer(buf, 4);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
+    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 1));                   /* WebGL2 rejects unaligned attrib offsets */
+    nt_gfx_destroy_buffer(buf);
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_bind_instance_buffer_requires_pipeline_each_frame(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
+
+    nt_gfx_begin_frame();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_instance_buffer(buf, 0); /* bound this frame: passes */
+    nt_gfx_end_frame();
+
+    /* Backend drops its pipeline cache per frame — a bind without re-binding
+     * the pipeline must trap, not silently skip attrib setup. */
+    nt_gfx_begin_frame();
+    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 0));
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_buffer(buf);
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_update_buffer_rejects_immutable(void) {
+    uint8_t initial[64] = {0};
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .size = 64,
+        .data = initial,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, initial, 64));
     nt_gfx_destroy_buffer(buf);
 }
 
@@ -987,6 +1078,11 @@ int main(void) {
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
+    RUN_TEST(test_update_buffer_at_offset);
+    RUN_TEST(test_update_buffer_rejects_out_of_range);
+    RUN_TEST(test_update_buffer_rejects_immutable);
+    RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
+    RUN_TEST(test_bind_instance_buffer_requires_pipeline_each_frame);
     RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);

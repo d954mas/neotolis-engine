@@ -440,8 +440,10 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 /* ---- Instance buffer ---- */
 
-void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
-void nt_gfx_set_instance_offset(uint32_t byte_offset);
+/* Applies the bound pipeline's instance attrib pointers at byte_offset — a
+ * pipeline must be bound first and the offset 4-byte aligned (WebGL2 rejects
+ * unaligned attrib offsets); both asserted. Re-bind per draw to re-point. */
+void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
@@ -449,9 +451,10 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
-/* update_buffer = glBufferSubData (partial). orphan_buffer = glBufferData
- * with DYNAMIC_DRAW hint, for streaming geometry replaced every frame. */
-void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+/* update_buffer = glBufferSubData at byte offset; offset + size must fit the
+ * buffer, data must point to size bytes (NULL only with size 0). Disjoint
+ * offsets keep in-flight data untouched. orphan_buffer = glBufferData. */
+void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —

@@ -15,6 +15,8 @@
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
 #include "render/nt_render_items.h"
+#include "render/nt_render_defs.h"
+#include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -558,6 +560,73 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
     TEST_ASSERT_EQUAL_UINT32(9, nt_mesh_renderer_test_instance_total());
     /* 3 different color modes = 3 pipelines */
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
+    /* Last run's bind offset = upload base + preceding runs (3x NONE + 3x RGBA8) */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + (3 * NT_INSTANCE_STRIDE_NONE) + (3 * NT_INSTANCE_STRIDE_RGBA8), nt_gfx_stub_test_last_instance_offset());
+}
+
+/* ---- Ring allocation: cursor advances per draw_list call, wraps at capacity ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_ring_cursor_advances_and_wraps(void) {
+    /* Tiny buffer so wrap is reachable. FLOAT4 material -> stride equals
+     * NT_INSTANCE_STRIDE_MAX, so per-call delta divides capacity exactly and
+     * the exact-fit boundary (cursor == capacity must NOT wrap early) is hit. */
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t small = {.max_instances = 4, .max_pipelines = 8};
+    TEST_ASSERT_EQUAL_INT(0, (int)nt_mesh_renderer_init(&small));
+
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 1);
+    uint32_t delta = nt_mesh_renderer_test_ring_cursor();
+    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_MAX, delta); /* FLOAT4 packs at max stride */
+
+    uint32_t capacity = 4U * NT_INSTANCE_STRIDE_MAX;
+    uint32_t fit = capacity / delta;
+    for (uint32_t i = 1; i < fit; i++) {
+        nt_mesh_renderer_draw_list(items, 1);
+        TEST_ASSERT_EQUAL_UINT32((i + 1) * delta, nt_mesh_renderer_test_ring_cursor());
+    }
+    /* Exact fit: cursor sits AT capacity without having wrapped */
+    TEST_ASSERT_EQUAL_UINT32(capacity, nt_mesh_renderer_test_ring_cursor());
+    /* Buffer full: next call wraps to 0 and writes there */
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(delta, nt_mesh_renderer_test_ring_cursor());
+
+    /* Restore defaults for tearDown */
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t desc = nt_mesh_renderer_desc_defaults();
+    nt_mesh_renderer_init(&desc);
+}
+
+/* ---- Ring upload base and draw base must agree (stub records both) ---- */
+
+void test_ring_upload_and_draw_base_agree(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 1);
+    uint32_t upload1 = nt_gfx_stub_test_last_update_buffer_offset();
+    TEST_ASSERT_EQUAL_UINT32(upload1, nt_gfx_stub_test_last_instance_offset());
+
+    /* Second call must advance BOTH bases together, not just the upload */
+    nt_mesh_renderer_draw_list(items, 1);
+    uint32_t upload2 = nt_gfx_stub_test_last_update_buffer_offset();
+    TEST_ASSERT_TRUE(upload2 > upload1);
+    TEST_ASSERT_EQUAL_UINT32(upload2, nt_gfx_stub_test_last_instance_offset());
 }
 
 /* ---- main ---- */
@@ -580,6 +649,8 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
+    RUN_TEST(test_ring_cursor_advances_and_wraps);
+    RUN_TEST(test_ring_upload_and_draw_base_agree);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_format_float32);
     RUN_TEST(test_stream_to_format_float16);

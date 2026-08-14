@@ -33,6 +33,8 @@ static bool s_stub_fail_next_texture_create;
 static bool s_stub_fail_next_backend_restore;
 static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
+static uint32_t s_stub_last_update_buffer_offset;
+static uint32_t s_stub_last_instance_offset;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_STUB_MAX_SLOTS) {
@@ -64,6 +66,8 @@ void nt_gfx_stub_test_fail_next_render_target_resize(void) { s_stub_fail_next_re
 void nt_gfx_stub_test_fail_next_texture_create(void) { s_stub_fail_next_texture_create = true; }
 void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend_restore = true; }
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
+uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
+uint32_t nt_gfx_stub_test_last_instance_offset(void) { return s_stub_last_instance_offset; }
 
 void nt_gfx_stub_test_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_STUB_MAX_SLOTS; i++) {
@@ -86,6 +90,8 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_last_texture_desc = (nt_texture_desc_t){0};
     s_stub_last_depth_texture_backend = 0;
     s_stub_next_texture_backend = 0;
+    s_stub_last_update_buffer_offset = 0;
+    s_stub_last_instance_offset = 0;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_next_texture_create = false;
@@ -291,10 +297,15 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
 #endif
 }
 
-void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
+void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     (void)backend_handle;
     (void)data;
     (void)size;
+#ifdef NT_TEST_ACCESS
+    s_stub_last_update_buffer_offset = offset;
+#else
+    (void)offset;
+#endif
 }
 
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
@@ -357,9 +368,14 @@ void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) { (void)backend_
 
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) { (void)backend_handle; }
 
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) { (void)backend_handle; }
-
-void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) { (void)byte_offset; }
+void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
+    (void)backend_handle;
+#ifdef NT_TEST_ACCESS
+    s_stub_last_instance_offset = byte_offset;
+#else
+    (void)byte_offset;
+#endif
+}
 
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
     (void)location;
