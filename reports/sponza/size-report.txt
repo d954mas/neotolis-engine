@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: a87da43
+# Commit: d0eab00
 
 ## WASM Section Sizes
 
@@ -7,16 +7,16 @@ Section                Size
 ---------------- ----------
 Type                 542 B
 Import               633 B
-Function             348 B
+Function             347 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                 170 B
-Code              588841 B
+Code              588718 B
 Data              233427 B
 ---------------- ----------
-TOTAL             824064 B
+TOTAL             823940 B
 
 ## Top 30 Functions by Size
 
