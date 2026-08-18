@@ -68,8 +68,8 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      # Restores build/examples/<name>/<pack>.ntpack — upload rooted the
-      # artifact at build/examples (least common ancestor of the glob).
+      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
+      # archive at the pre-wildcard prefix of its glob (build/examples).
       - name: Download example packs
         uses: actions/download-artifact@v4
         with:
@@ -334,8 +334,10 @@ jobs:
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
+      # 180 min: cold ccache compile + cold sponza encode share this step, and a
+      # timed-out job saves no caches — the retry would be equally cold.
       - name: Build native release (all targets)
-        timeout-minutes: 150
+        timeout-minutes: 180
         run: cmake --build --preset native-release
 
       - name: Verify native release output
@@ -348,6 +350,42 @@ jobs:
 
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
+
+      # Guard + upload run HERE, before any debug preset builds, so the artifact
+      # carries release-builder bytes. The all-targets release build produced the
+      # packs (cmake/nt_example_packs.cmake), and each example's .expected_packs
+      # manifest names the exact declared set — a builder that emits a subset,
+      # or an example whose pack wiring was never called, fails loudly instead
+      # of 404ing on the CDN after deploy.
+      - name: Verify example packs complete
+        run: |
+          missing=0
+          for src in examples/*/build_packs.c; do
+            name=$(basename "$(dirname "$src")")
+            manifest="build/examples/$name/.expected_packs"
+            if [ ! -f "$manifest" ]; then
+              echo "::error::no pack manifest for '$name' (examples/$name/build_packs.c exists but nt_example_packs was not wired)"
+              missing=1
+              continue
+            fi
+            while IFS= read -r pack; do
+              pack=${pack%$'\r'}
+              [ -n "$pack" ] || continue
+              if [ ! -f "build/examples/$name/$pack" ]; then
+                echo "::error::'$name' declares '$pack' but the build did not produce it"
+                missing=1
+              fi
+            done < "$manifest"
+          done
+          exit $missing
+
+      - name: Upload example packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-packs
+          path: build/examples/*/*.ntpack
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Configure native release tests (FULL asserts)
         run: cmake --preset native-release-test
@@ -398,29 +436,6 @@ jobs:
 
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
-
-      # Every example with a pack builder (examples/*/build_packs.c) must have
-      # produced its packs by now — the explicit builder runs above cover six
-      # examples, the rest wire pack builds into the all-targets release build.
-      # A miss here means the site example would 404 on the CDN after deploy.
-      - name: Verify example packs complete
-        run: |
-          missing=0
-          for src in examples/*/build_packs.c; do
-            name=$(basename "$(dirname "$src")")
-            if ! ls "build/examples/$name/"*.ntpack >/dev/null 2>&1; then
-              echo "::error::no .ntpack built for '$name' (examples/$name/build_packs.c exists)"
-              missing=1
-            fi
-          done
-          exit $missing
-
-      - name: Upload example packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: example-packs
-          path: build/examples/*/*.ntpack
-          retention-days: 1
 
       - name: Submodule consumption test
         run: |
@@ -700,8 +715,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Restores build/examples/<name>/<pack>.ntpack — upload rooted the
-      # artifact at build/examples (least common ancestor of the glob).
+      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
+      # archive at the pre-wildcard prefix of its glob (build/examples).
       - name: Download example packs
         uses: actions/download-artifact@v4
         with:

@@ -44,10 +44,13 @@ bash scripts/check.sh                 # sanity check that the environment is ali
 
 Native example builds produce their asset packs automatically (pack builders are
 wired into the build graph — `cmake/nt_example_packs.cmake`); wasm presets copy
-packs a prior native build produced, so build a native preset first. Cold sponza
-pack encode is long; `build/examples/*/_cache` makes reruns seconds.
-`NT_SKIP_EXAMPLE_PACKS=<name;...>` skips pack generation per example (exe still
-builds). Packs depend only on the builder exe — after editing shader/asset
+packs a prior native build produced — build a native preset first (a wasm build
+attempted before that fails loudly, and succeeds once the packs exist).
+The FIRST native build cold-encodes the sponza pack — hours, not the usual
+"warm ~12 s" gate; `build/examples/*/_cache` makes every rerun seconds. To
+defer that cost, configure once with `-DNT_SKIP_EXAMPLE_PACKS=sponza` (a
+persistent cache var — reset it with `-DNT_SKIP_EXAMPLE_PACKS=` when you need
+sponza). Packs depend only on the builder exe — after editing shader/asset
 sources, delete the `.ntpack` before visual QA to force a repack.
 
 ## Philosophy
