@@ -68,59 +68,13 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      - name: Download textured_quad packs
+      # Restores build/examples/<name>/<pack>.ntpack — upload rooted the
+      # artifact at build/examples (least common ancestor of the glob).
+      - name: Download example packs
         uses: actions/download-artifact@v4
         with:
-          name: tq-packs
-          path: build/examples/textured_quad
-
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
-
-      - name: Download text packs
-        uses: actions/download-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text
-
-      - name: Download atlas packs
-        uses: actions/download-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas
-
-      - name: Download bunnymark packs
-        uses: actions/download-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark
-
-      - name: Download rtt_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase
-
-      - name: Download slice9_demo packs
-        uses: actions/download-artifact@v4
-        with:
-          name: slice9-demo-packs
-          path: build/examples/slice9_demo
-
-      - name: Download ui_3d_demo packs
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-3d-demo-packs
-          path: build/examples/ui_3d_demo
-
-      - name: Download ui_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-showcase-packs
-          path: build/examples/ui_showcase
+          name: example-packs
+          path: build/examples
 
       - name: Build baseline WASM debug artifacts
         run: |
@@ -479,70 +433,27 @@ jobs:
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
 
-      - name: Upload textured_quad packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: tq-packs
-          path: build/examples/textured_quad/*.ntpack
-          retention-days: 1
+      # Every example with a pack builder (examples/*/build_packs.c) must have
+      # produced its packs by now — the explicit builder runs above cover six
+      # examples, the rest wire pack builds into the all-targets release build.
+      # A miss here means the site example would 404 on the CDN after deploy.
+      - name: Verify example packs complete
+        run: |
+          missing=0
+          for src in examples/*/build_packs.c; do
+            name=$(basename "$(dirname "$src")")
+            if ! ls "build/examples/$name/"*.ntpack >/dev/null 2>&1; then
+              echo "::error::no .ntpack built for '$name' (examples/$name/build_packs.c exists)"
+              missing=1
+            fi
+          done
+          exit $missing
 
-      - name: Upload sponza packs
+      - name: Upload example packs
         uses: actions/upload-artifact@v4
         with:
-          name: sponza-packs
-          path: build/examples/sponza/*.ntpack
-          retention-days: 1
-
-      - name: Upload text packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text/*.ntpack
-          retention-days: 1
-
-      - name: Upload atlas packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas/*.ntpack
-          retention-days: 1
-
-      - name: Upload bunnymark packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark/*.ntpack
-          retention-days: 1
-
-      - name: Upload rtt_showcase packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase/*.ntpack
-          retention-days: 1
-
-      # slice9_demo/ui_3d_demo/ui_showcase packs come from the all-targets release
-      # build (their exe targets depend on the pack custom targets) — no explicit
-      # builder-run step above.
-      - name: Upload slice9_demo packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: slice9-demo-packs
-          path: build/examples/slice9_demo/*.ntpack
-          retention-days: 1
-
-      - name: Upload ui_3d_demo packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-3d-demo-packs
-          path: build/examples/ui_3d_demo/*.ntpack
-          retention-days: 1
-
-      - name: Upload ui_showcase packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-showcase-packs
-          path: build/examples/ui_showcase/*.ntpack
+          name: example-packs
+          path: build/examples/*/*.ntpack
           retention-days: 1
 
       - name: Submodule consumption test
@@ -823,59 +734,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download textured_quad packs
+      # Restores build/examples/<name>/<pack>.ntpack — upload rooted the
+      # artifact at build/examples (least common ancestor of the glob).
+      - name: Download example packs
         uses: actions/download-artifact@v4
         with:
-          name: tq-packs
-          path: build/examples/textured_quad
-
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
-
-      - name: Download text packs
-        uses: actions/download-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text
-
-      - name: Download atlas packs
-        uses: actions/download-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas
-
-      - name: Download bunnymark packs
-        uses: actions/download-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark
-
-      - name: Download rtt_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase
-
-      - name: Download slice9_demo packs
-        uses: actions/download-artifact@v4
-        with:
-          name: slice9-demo-packs
-          path: build/examples/slice9_demo
-
-      - name: Download ui_3d_demo packs
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-3d-demo-packs
-          path: build/examples/ui_3d_demo
-
-      - name: Download ui_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-showcase-packs
-          path: build/examples/ui_showcase
+          name: example-packs
+          path: build/examples
 
       - uses: actions/setup-node@v4
         with:
