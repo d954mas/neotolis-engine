@@ -1066,10 +1066,16 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     double t_write_start = nt_time_now();
 
-    /* Write to .tmp, publish by atomic rename — the shared pack path can be
-     * observed by concurrent preset builds; a torn pack must never be visible. */
-    char tmp_path[sizeof(ctx->output_path) + 8];
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", ctx->output_path);
+    /* Write to a per-process .tmp, publish by atomic rename — the shared pack
+     * path can be observed (and rewritten) by concurrent preset builds; a torn
+     * pack must never be visible, and two builders must never share one tmp. */
+    char tmp_path[sizeof(ctx->output_path) + 24];
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", ctx->output_path, pid);
     FILE *file = fopen(tmp_path, "wb");
     NT_BUILD_ASSERT(file && "finish_pack: cannot open tmp output file");
 
@@ -1087,7 +1093,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         write_ok = write_ok && (fwrite(ctx->data_buf, ctx->data_size, 1, file) == 1);
     }
 
-    (void)fclose(file);
+    /* A buffered fwrite can succeed while the flush at fclose hits disk-full —
+     * a failed close means the tmp is not a valid pack. */
+    write_ok = (fclose(file) == 0) && write_ok;
 
     double write_secs = nt_time_now() - t_write_start;
 

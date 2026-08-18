@@ -1,26 +1,10 @@
-# Wires an example's asset packs into the build graph.
-#
-# Native builds (unless NAME is listed in NT_SKIP_EXAMPLE_PACKS): BUILDER runs
-# at build time producing PACKS in PACK_DIR, then each pack copies into
-# ASSETS_DIR; TARGET depends on the chain, so a plain build yields runnable
-# assets with no manual builder step and no reconfigure. A pack manifest
-# (.expected_packs in PACK_DIR) records the declared set for the CI guard.
-#
-# WASM builds: the builder can't run here, so packs come from a prior native
-# build. Copies are wired unconditionally — a missing pack fails the build
-# loudly (fail early), and the same wiring picks the pack up without a
-# reconfigure once a native build produces it.
-#
-# Skipped examples (NT_SKIP_EXAMPLE_PACKS) are the only soft path: packs that
-# exist still copy, missing ones just warn — the exe builds without assets.
-#
-# OPTIONAL_PACKS may legitimately be absent (content-dependent builder output,
-# e.g. text_cjk when the local font lacks CJK). The generate step cannot
-# declare them as OUTPUT, so they wire as copies only when present at configure
-# time — an optional pack that appears later needs one reconfigure to be copied.
-#
-# PACK_DIR is shared by every preset; do not build two presets concurrently —
-# their builder runs would race on the same pack files.
+# Wires an example's asset packs into the build graph; writes the .expected_packs
+# manifest the CI guard verifies. Native: BUILDER runs at build time, packs copy
+# into ASSETS_DIR — no manual step, no reconfigure. WASM: copies from a prior
+# native build's PACK_DIR; a missing pack fails the build loudly (fail early).
+# NT_SKIP_EXAMPLE_PACKS is the only soft path (exe builds without assets).
+# OPTIONAL_PACKS may legitimately be absent (content-dependent builder output).
+# PACK_DIR is shared by every preset — never build two presets concurrently.
 function(nt_example_packs)
     cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
@@ -28,6 +12,8 @@ function(nt_example_packs)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
             " (unparsed: '${PACKS_UNPARSED_ARGUMENTS}')")
     endif()
+    # Registry lets the root CMakeLists reject unknown NT_SKIP_EXAMPLE_PACKS entries.
+    set_property(GLOBAL APPEND PROPERTY NT_EXAMPLE_PACK_NAMES "${PACKS_NAME}")
 
     set(_skipped FALSE)
     if("${PACKS_NAME}" IN_LIST NT_SKIP_EXAMPLE_PACKS)
@@ -41,21 +27,35 @@ function(nt_example_packs)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
+        # Optional packs copy right after the builder run (same command, so the
+        # first clean build already lands them in assets/); tolerant of absence.
+        set(_optional_cmds "")
+        foreach(PACK ${PACKS_OPTIONAL_PACKS})
+            list(APPEND _optional_cmds COMMAND ${CMAKE_COMMAND}
+                -D "SRC=${PACKS_PACK_DIR}/${PACK}" -D "DST=${PACKS_ASSETS_DIR}/${PACK}"
+                -P "${NT_ENGINE_ROOT}/cmake/nt_copy_if_exists.cmake")
+        endforeach()
         add_custom_command(
             OUTPUT ${_pack_files}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
+            ${_optional_cmds}
             DEPENDS ${PACKS_BUILDER}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )
         set(_copy_list ${PACKS_PACKS})
         # The builder rewrites optional packs without declaring them as OUTPUT;
-        # ordering optional copies after the required outputs prevents copying
-        # a pack mid-rewrite.
+        # ordering their declared copies after the required outputs prevents
+        # copying a pack mid-rewrite.
         set(_ordering_deps ${_pack_files})
-        # Manifest for the CI completeness guard: the declared set, one per line.
-        string(REPLACE ";" "\n" _manifest_body "${PACKS_PACKS}")
+        # Manifest: required packs plain, optional prefixed '?' (may be absent,
+        # but nothing outside this union may appear).
+        set(_manifest ${PACKS_PACKS})
+        foreach(PACK ${PACKS_OPTIONAL_PACKS})
+            list(APPEND _manifest "?${PACK}")
+        endforeach()
+        string(REPLACE ";" "\n" _manifest_body "${_manifest}")
         file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "${_manifest_body}\n")
     elseif(_skipped)
         foreach(PACK ${PACKS_PACKS})
