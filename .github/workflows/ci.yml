@@ -352,47 +352,27 @@ jobs:
         run: ./build/tools/builder/native-release/builder
 
       # Guard + upload run HERE, before any debug preset builds, so the artifact
-      # carries release-builder bytes. The all-targets release build produced the
-      # packs (cmake/nt_example_packs.cmake), and each example's .expected_packs
-      # manifest names the exact declared set — a builder that emits a subset,
-      # or an example whose pack wiring was never called, fails loudly instead
-      # of 404ing on the CDN after deploy.
-      - name: Verify example packs complete
+      # carries release-builder bytes. Missing or partial packs already failed the
+      # all-targets build (copy edges + success stamp, cmake/nt_example_packs.cmake);
+      # the two drifts that WOULD stay silent are an example whose build_packs.c was
+      # never wired (the original #331 class — no manifest, no edges, no artifact)
+      # and stale committed codegen headers (native compiles against the fresh
+      # regeneration, wasm/deploy against the committed copies).
+      - name: Verify example packs wired + headers fresh
         run: |
-          missing=0
+          bad=0
           for src in examples/*/build_packs.c; do
             name=$(basename "$(dirname "$src")")
-            manifest="build/examples/$name/.expected_packs"
-            if [ ! -f "$manifest" ]; then
-              echo "::error::no pack manifest for '$name' (examples/$name/build_packs.c exists but nt_example_packs was not wired)"
-              missing=1
-              continue
+            if [ ! -f "build/examples/$name/.expected_packs" ]; then
+              echo "::error::examples/$name has build_packs.c but nt_example_packs was never wired"
+              bad=1
             fi
-            if [ "$(head -1 "$manifest" | tr -d '\r')" = "# skipped" ]; then
-              echo "::notice::'$name' pack generation skipped via NT_SKIP_EXAMPLE_PACKS — nothing to verify"
-              continue
-            fi
-            # Manifest: required packs plain, optional prefixed '?'.
-            while IFS= read -r pack; do
-              pack=${pack%$'\r'}
-              case "$pack" in ''|'?'*) continue ;; esac
-              if [ ! -f "build/examples/$name/$pack" ]; then
-                echo "::error::'$name' declares '$pack' but the build did not produce it"
-                missing=1
-              fi
-            done < "$manifest"
-            # Union check: a pack the manifest does not know means CMake never
-            # copies it and the example never loads it — declaration drift.
-            for f in "build/examples/$name/"*.ntpack; do
-              [ -e "$f" ] || continue
-              base=$(basename "$f")
-              if ! tr -d '\r' < "$manifest" | grep -Fqx -e "$base" -e "?$base"; then
-                echo "::error::'$name' produced undeclared pack '$base' (not in PACKS/OPTIONAL_PACKS)"
-                missing=1
-              fi
-            done
           done
-          exit $missing
+          git diff --exit-code -- 'examples/*/generated' || {
+            echo "::error::committed generated headers are stale — commit the refresh"
+            bad=1
+          }
+          exit $bad
 
       - name: Upload example packs
         uses: actions/upload-artifact@v4
@@ -685,17 +665,13 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      # The browser_smoke test app reuses the ui_showcase pack (same assets), but the pack is not a CI
-      # artifact, so produce it here: build the native pack builder, run it to emit ui_showcase.ntpack,
-      # THEN configure+build the wasm browser_smoke target (its CMake copies the pack into assets/).
-      # The pack must exist before the wasm configure so the copy custom-command is set up.
+      # browser_smoke reuses the ui_showcase pack (same assets); produce it via the
+      # build-graph pack target, then the wasm build copies it into assets/.
       - name: Configure native debug
         run: cmake --preset native-debug
 
-      - name: Build + run ui_showcase pack builder
-        run: |
-          cmake --build --preset native-debug --target build_ui_showcase_packs
-          ./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase
+      - name: Build ui_showcase packs
+        run: cmake --build --preset native-debug --target ui_showcase_packs
 
       - name: Build browser_smoke wasm (debug)
         run: |

@@ -299,7 +299,16 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     write_register_labels(f, func_prefix, ce, total_ce);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
-    (void)fclose(f);
+    /* Disk-full surfaces at flush; a torn header in the source tree must not
+     * pass as success (the builder would look up-to-date and never rerun). */
+    bool header_ok = (ferror(f) == 0);
+    header_ok = (fclose(f) == 0) && header_ok;
+    if (!header_ok) {
+        (void)remove(header_path);
+        NT_LOG_WARN("Failed writing codegen header: %s", header_path);
+        free(ce);
+        return NT_BUILD_ERR_IO;
+    }
 
     NT_LOG_INFO("Generated header: %s (%u assets)", header_path, ctx->pending_count);
     free(ce);

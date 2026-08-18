@@ -1099,14 +1099,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     double write_secs = nt_time_now() - t_write_start;
 
-    if (!write_ok) {
+    /* A failed write/publish must leave NO pack at the final path — a stale
+     * previous pack would be silently copied by later wasm builds. */
+    if (!write_ok || !nt_builder_publish_pack(tmp_path, ctx->output_path)) {
         (void)remove(tmp_path);
-        NT_BUILD_ASSERT(0 && "finish_pack: failed to write pack file");
-    }
-
-    if (!nt_builder_publish_pack(tmp_path, ctx->output_path)) {
-        (void)remove(tmp_path);
-        NT_BUILD_ASSERT(0 && "finish_pack: cannot publish pack file");
+        (void)remove(ctx->output_path);
+        NT_BUILD_ASSERT(0 && "finish_pack: failed to write or publish pack file");
     }
 
     /* Generate codegen header (.h with ASSET_* constants) */

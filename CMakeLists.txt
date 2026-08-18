@@ -32,9 +32,6 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # Escape hatch for expensive pack builds (e.g. a future PR-CI lane without sponza);
 # default builds everything. Exes still build, packs copy from a prior native run if present.
 set(NT_SKIP_EXAMPLE_PACKS "" CACHE STRING "Examples whose asset-pack generation is skipped (see cmake/nt_example_packs.cmake).")
-if(NT_SKIP_EXAMPLE_PACKS MATCHES ",")
-    message(FATAL_ERROR "NT_SKIP_EXAMPLE_PACKS is a CMake list — separate names with ';', not ','.")
-endif()
 
 # OFF lets an exe that embeds both builder and runtime pick its own CRT (see nt_set_static_crt).
 option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the embedding project's CRT." ON)

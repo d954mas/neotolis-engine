@@ -40,13 +40,9 @@ function(nt_example_packs)
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )
         set(_copy_list ${PACKS_PACKS})
-        # Manifest: required packs plain, optional prefixed '?' (may be absent,
-        # but nothing outside this union may appear).
-        set(_manifest ${PACKS_PACKS})
-        foreach(PACK ${PACKS_OPTIONAL_PACKS})
-            list(APPEND _manifest "?${PACK}")
-        endforeach()
-        string(REPLACE ";" "\n" _manifest_body "${_manifest}")
+        # Manifest existence tells the CI guard this example is wired; the pack
+        # list is informational (missing packs already fail the build itself).
+        string(REPLACE ";" "\n" _manifest_body "${PACKS_PACKS}")
         file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "${_manifest_body}\n")
     elseif(_skipped)
         foreach(PACK ${PACKS_PACKS})
@@ -64,19 +60,9 @@ function(nt_example_packs)
         file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "# skipped\n")
     else()
         # WASM: wire every copy. A missing pack fails the build with a clear
-        # ninja error until a native build creates it — then the same edge
-        # copies it, no reconfigure needed.
+        # ninja error ("no known rule to make <pack>") until a native build
+        # creates it — then the same edge copies it, no reconfigure needed.
         set(_copy_list ${PACKS_PACKS})
-        foreach(PACK ${PACKS_PACKS})
-            if(NOT EXISTS "${PACKS_PACK_DIR}/${PACK}")
-                list(APPEND _missing ${PACK})
-            endif()
-        endforeach()
-        if(_missing)
-            message(WARNING "${PACKS_NAME}: pack(s) '${_missing}' not found at"
-                " ${PACKS_PACK_DIR}. Build a native preset first; building"
-                " ${PACKS_TARGET} before that fails.")
-        endif()
     endif()
 
     foreach(PACK ${_copy_list})
