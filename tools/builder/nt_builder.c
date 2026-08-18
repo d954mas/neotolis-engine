@@ -291,6 +291,25 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
+/* Atomic pack publish: tmp -> final. On Windows, replacing the destination
+ * fails with a sharing violation while a running example (or AV scan) holds
+ * the pack open — retry briefly before giving up. */
+static bool nt_builder_publish_pack(const char *tmp_path, const char *output_path) {
+#ifdef _WIN32
+    for (int attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+            Sleep(200);
+        }
+        if (MoveFileExA(tmp_path, output_path, MOVEFILE_REPLACE_EXISTING) != 0) {
+            return true;
+        }
+    }
+    return false;
+#else
+    return rename(tmp_path, output_path) == 0;
+#endif
+}
+
 static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t kind) {
     switch (kind) {
     case NT_BUILD_ASSET_MESH:
@@ -1052,7 +1071,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     char tmp_path[sizeof(ctx->output_path) + 8];
     (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", ctx->output_path);
     FILE *file = fopen(tmp_path, "wb");
-    NT_BUILD_ASSERT(file && "finish_pack: cannot open output file");
+    NT_BUILD_ASSERT(file && "finish_pack: cannot open tmp output file");
 
     bool write_ok = true;
     write_ok = write_ok && (fwrite(&header, sizeof(header), 1, file) == 1);
@@ -1077,12 +1096,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write pack file");
     }
 
-#ifdef _WIN32
-    bool publish_ok = MoveFileExA(tmp_path, ctx->output_path, MOVEFILE_REPLACE_EXISTING) != 0;
-#else
-    bool publish_ok = rename(tmp_path, ctx->output_path) == 0;
-#endif
-    if (!publish_ok) {
+    if (!nt_builder_publish_pack(tmp_path, ctx->output_path)) {
         (void)remove(tmp_path);
         NT_BUILD_ASSERT(0 && "finish_pack: cannot publish pack file");
     }

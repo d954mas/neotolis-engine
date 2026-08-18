@@ -368,6 +368,10 @@ jobs:
               missing=1
               continue
             fi
+            if [ "$(head -1 "$manifest" | tr -d '\r')" = "# skipped" ]; then
+              echo "::notice::'$name' pack generation skipped via NT_SKIP_EXAMPLE_PACKS — nothing to verify"
+              continue
+            fi
             while IFS= read -r pack; do
               pack=${pack%$'\r'}
               [ -n "$pack" ] || continue

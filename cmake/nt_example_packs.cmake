@@ -16,8 +16,8 @@
 #
 # OPTIONAL_PACKS may legitimately be absent (content-dependent builder output,
 # e.g. text_cjk when the local font lacks CJK). The generate step cannot
-# declare them as OUTPUT, so they wire as copies only when present, with a
-# configure-dependency to pick them up once they appear.
+# declare them as OUTPUT, so they wire as copies only when present at configure
+# time — an optional pack that appears later needs one reconfigure to be copied.
 #
 # PACK_DIR is shared by every preset; do not build two presets concurrently —
 # their builder runs would race on the same pack files.
@@ -69,7 +69,8 @@ function(nt_example_packs)
             message(WARNING "${PACKS_NAME}: skipped pack(s) '${_missing}' not present at"
                 " ${PACKS_PACK_DIR}; ${PACKS_TARGET} builds without them.")
         endif()
-        file(REMOVE "${PACKS_PACK_DIR}/.expected_packs")
+        # Marker (not absence) so the CI guard reports "skipped", not "not wired".
+        file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "# skipped\n")
     else()
         # WASM: wire every copy. A missing pack fails the build with a clear
         # ninja error until a native build creates it — then the same edge
@@ -90,9 +91,6 @@ function(nt_example_packs)
     foreach(PACK ${PACKS_OPTIONAL_PACKS})
         if(EXISTS "${PACKS_PACK_DIR}/${PACK}")
             list(APPEND _copy_list ${PACK})
-        else()
-            set_property(DIRECTORY APPEND PROPERTY
-                CMAKE_CONFIGURE_DEPENDS "${PACKS_PACK_DIR}/${PACK}")
         endif()
     endforeach()
 
