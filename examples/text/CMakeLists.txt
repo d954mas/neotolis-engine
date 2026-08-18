@@ -37,23 +37,16 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# Copy packs from shared location to preset output
-set(TEXT_PACK_NAMES text_base.ntpack)
-if(EXISTS "${TEXT_PACK_DIR}/text_cjk.ntpack")
-    list(APPEND TEXT_PACK_NAMES text_cjk.ntpack)
-endif()
-foreach(PACK ${TEXT_PACK_NAMES})
-    add_custom_command(
-        OUTPUT "${TEXT_ASSETS_DIR}/${PACK}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${TEXT_ASSETS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TEXT_PACK_DIR}/${PACK}" "${TEXT_ASSETS_DIR}/${PACK}"
-        DEPENDS "${TEXT_PACK_DIR}/${PACK}"
-        COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-    )
-    list(APPEND TEXT_PACK_OUTPUTS "${TEXT_ASSETS_DIR}/${PACK}")
-endforeach()
-add_custom_target(text_packs DEPENDS ${TEXT_PACK_OUTPUTS})
-add_dependencies(text_demo text_packs)
+# text_cjk is OPTIONAL: the builder skips it when the local font lacks CJK glyphs.
+nt_example_packs(
+    NAME text
+    TARGET text_demo
+    BUILDER build_text_packs
+    PACK_DIR "${TEXT_PACK_DIR}"
+    ASSETS_DIR "${TEXT_ASSETS_DIR}"
+    PACKS text_base.ntpack
+    OPTIONAL_PACKS text_cjk.ntpack
+)
 
 # Optional CDN base URL
 if(NT_CDN_URL)

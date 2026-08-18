@@ -42,12 +42,13 @@ emcmake cmake --preset wasm-release
 bash scripts/check.sh                 # sanity check that the environment is alive
 ```
 
-Running an example additionally needs its asset packs: build the example's
-`build_<name>_packs` target, then run the produced binary with the example's build dir,
-e.g. `cmake --build --preset native-debug --target build_ui_showcase_packs &&
-./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase`.
-Packs depend only on the builder exe — after editing shader/asset sources, delete the
-`.ntpack` before visual QA to force a repack.
+Native example builds produce their asset packs automatically (pack builders are
+wired into the build graph — `cmake/nt_example_packs.cmake`); wasm presets copy
+packs a prior native build produced, so build a native preset first. Cold sponza
+pack encode is long; `build/examples/*/_cache` makes reruns seconds.
+`NT_SKIP_EXAMPLE_PACKS=<name;...>` skips pack generation per example (exe still
+builds). Packs depend only on the builder exe — after editing shader/asset
+sources, delete the `.ntpack` before visual QA to force a repack.
 
 ## Philosophy
 
@@ -141,7 +142,7 @@ Environment differences a local Windows host cannot reproduce:
 - `nt_atlas_begin` requires atlas-level `shape == RECT` when `extrude > 0`.
 - Changing a validator contract: first grep every constructor of that data shape — spec literals AND parameterized helpers.
 - `nt_builder.lib` is not linkable ad hoc from a shell (unresolved glad/cgltf externals outside its CMake `PUBLIC` link set) — behavioural probes need a real CMake target.
-- `examples/{atlas,bunnymark,text}/generated/*.h` are stale in git (pack targets aren't in the default build). Revert, don't commit, if a generator run dirties them.
+- `examples/*/generated/*.h` are builder output committed to git; pack builds run inside every native build, so if one dirties them the committed copies were stale — commit the refresh (output is deterministic, no timestamps).
 - Visual QA: self-capture of GL windows (GDI/PrintWindow) does not work here. Pixel-exact checks: devapi `capture.frame` (glReadPixels, works headless, needs `NT_DEVAPI_ENABLED=ON` + CAPTURE group). Aesthetics/layout: ask the user to run and look — say explicitly what to check.
 - Browser smoke tests drive `tests/browser/app` (`window.__nt` hooks), not the showcase.
 - wasm links failing with `node.exe ... returned 3221225794` (0xC0000142) on random emscripten tools = transient Windows process-spawn exhaustion under parallel links — retry once before investigating.

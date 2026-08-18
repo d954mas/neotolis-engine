@@ -28,79 +28,26 @@ set_target_properties(slice9_demo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${SLICE9_DEMO_OUTPUT_DIR}"
 )
 
-set(SLICE9_DEMO_PACK_NAMES slice9_demo.ntpack)
-
-# Pack builder + copy wiring.
-# Native: the builder runs at BUILD time to produce the pack, then the pack copies into the
-# preset's assets/. The copy DEPENDS on the pack output, which DEPENDS on the builder target --
-# so a clean configure+build always produces and copies the pack with no reconfigure step.
-# Emscripten: the builder can't run under wasm, so the pack must already exist from a prior native
-# build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
-    add_executable(slice9_demo_build_packs build_packs.c)
-    target_link_libraries(slice9_demo_build_packs PRIVATE nt_builder nt_log)
-    target_compile_definitions(slice9_demo_build_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_set_static_crt(slice9_demo_build_packs)
-    nt_set_warning_flags(slice9_demo_build_packs)
-    nt_set_sanitizer_flags(slice9_demo_build_packs)
-    set_target_properties(slice9_demo_build_packs PROPERTIES
+    add_executable(build_slice9_demo_packs build_packs.c)
+    target_link_libraries(build_slice9_demo_packs PRIVATE nt_builder nt_log)
+    target_compile_definitions(build_slice9_demo_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_set_static_crt(build_slice9_demo_packs)
+    nt_set_warning_flags(build_slice9_demo_packs)
+    nt_set_sanitizer_flags(build_slice9_demo_packs)
+    set_target_properties(build_slice9_demo_packs PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${SLICE9_DEMO_OUTPUT_DIR}"
     )
-
-    # build_packs.c reads raw assets via paths relative to the project root.
-    foreach(PACK ${SLICE9_DEMO_PACK_NAMES})
-        list(APPEND SLICE9_DEMO_PACK_FILES "${SLICE9_DEMO_PACK_DIR}/${PACK}")
-    endforeach()
-    add_custom_command(
-        OUTPUT ${SLICE9_DEMO_PACK_FILES}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${SLICE9_DEMO_PACK_DIR}"
-        COMMAND "$<TARGET_FILE:slice9_demo_build_packs>" "${SLICE9_DEMO_PACK_DIR}"
-        DEPENDS slice9_demo_build_packs
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Building slice9_demo pack(s)"
-    )
-
-    foreach(PACK ${SLICE9_DEMO_PACK_NAMES})
-        add_custom_command(
-            OUTPUT "${SLICE9_DEMO_ASSETS_DIR}/${PACK}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${SLICE9_DEMO_ASSETS_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${SLICE9_DEMO_PACK_DIR}/${PACK}" "${SLICE9_DEMO_ASSETS_DIR}/${PACK}"
-            DEPENDS "${SLICE9_DEMO_PACK_DIR}/${PACK}"
-            COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-        )
-        list(APPEND SLICE9_DEMO_PACK_OUTPUTS "${SLICE9_DEMO_ASSETS_DIR}/${PACK}")
-    endforeach()
-    add_custom_target(slice9_demo_packs DEPENDS ${SLICE9_DEMO_PACK_OUTPUTS})
-    add_dependencies(slice9_demo slice9_demo_packs)
-else()
-    # WASM: builder can't run; copy the pack a prior native build produced into this preset.
-    set(SLICE9_DEMO_PACKS_PRESENT TRUE)
-    foreach(PACK ${SLICE9_DEMO_PACK_NAMES})
-        if(NOT EXISTS "${SLICE9_DEMO_PACK_DIR}/${PACK}")
-            set(SLICE9_DEMO_PACKS_PRESENT FALSE)
-        endif()
-    endforeach()
-    if(SLICE9_DEMO_PACKS_PRESENT)
-        foreach(PACK ${SLICE9_DEMO_PACK_NAMES})
-            add_custom_command(
-                OUTPUT "${SLICE9_DEMO_ASSETS_DIR}/${PACK}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${SLICE9_DEMO_ASSETS_DIR}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${SLICE9_DEMO_PACK_DIR}/${PACK}" "${SLICE9_DEMO_ASSETS_DIR}/${PACK}"
-                DEPENDS "${SLICE9_DEMO_PACK_DIR}/${PACK}"
-                COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-            )
-            list(APPEND SLICE9_DEMO_PACK_OUTPUTS "${SLICE9_DEMO_ASSETS_DIR}/${PACK}")
-        endforeach()
-        add_custom_target(slice9_demo_packs DEPENDS ${SLICE9_DEMO_PACK_OUTPUTS})
-        add_dependencies(slice9_demo slice9_demo_packs)
-    else()
-        message(WARNING
-            "slice9_demo: pack not found at ${SLICE9_DEMO_PACK_DIR}. "
-            "Build a native preset first (it produces the pack), then build the wasm preset.")
-    endif()
 endif()
+
+nt_example_packs(
+    NAME slice9_demo
+    TARGET slice9_demo
+    BUILDER build_slice9_demo_packs
+    PACK_DIR "${SLICE9_DEMO_PACK_DIR}"
+    ASSETS_DIR "${SLICE9_DEMO_ASSETS_DIR}"
+    PACKS slice9_demo.ntpack
+)
 
 # Optional CDN base URL
 if(NT_CDN_URL)

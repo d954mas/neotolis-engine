@@ -22,8 +22,6 @@ set_target_properties(rtt_showcase PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${RTT_SHOWCASE_OUTPUT_DIR}"
 )
 
-set(RTT_SHOWCASE_PACK_NAMES rtt_showcase.ntpack)
-
 if(NOT EMSCRIPTEN)
     add_executable(build_rtt_showcase_packs build_packs.c)
     target_link_libraries(build_rtt_showcase_packs PRIVATE nt_builder nt_log)
@@ -34,59 +32,16 @@ if(NOT EMSCRIPTEN)
     set_target_properties(build_rtt_showcase_packs PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${RTT_SHOWCASE_OUTPUT_DIR}"
     )
-
-    foreach(PACK ${RTT_SHOWCASE_PACK_NAMES})
-        list(APPEND RTT_SHOWCASE_PACK_FILES "${RTT_SHOWCASE_PACK_DIR}/${PACK}")
-    endforeach()
-    add_custom_command(
-        OUTPUT ${RTT_SHOWCASE_PACK_FILES}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${RTT_SHOWCASE_PACK_DIR}"
-        COMMAND "$<TARGET_FILE:build_rtt_showcase_packs>" "${RTT_SHOWCASE_PACK_DIR}"
-        DEPENDS build_rtt_showcase_packs
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Building rtt_showcase pack(s)"
-    )
-
-    foreach(PACK ${RTT_SHOWCASE_PACK_NAMES})
-        add_custom_command(
-            OUTPUT "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${RTT_SHOWCASE_ASSETS_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${RTT_SHOWCASE_PACK_DIR}/${PACK}" "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}"
-            DEPENDS "${RTT_SHOWCASE_PACK_DIR}/${PACK}"
-            COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-        )
-        list(APPEND RTT_SHOWCASE_PACK_OUTPUTS "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}")
-    endforeach()
-    add_custom_target(rtt_showcase_packs DEPENDS ${RTT_SHOWCASE_PACK_OUTPUTS})
-    add_dependencies(rtt_showcase rtt_showcase_packs)
-else()
-    set(RTT_SHOWCASE_PACKS_PRESENT TRUE)
-    foreach(PACK ${RTT_SHOWCASE_PACK_NAMES})
-        if(NOT EXISTS "${RTT_SHOWCASE_PACK_DIR}/${PACK}")
-            set(RTT_SHOWCASE_PACKS_PRESENT FALSE)
-        endif()
-    endforeach()
-    if(RTT_SHOWCASE_PACKS_PRESENT)
-        foreach(PACK ${RTT_SHOWCASE_PACK_NAMES})
-            add_custom_command(
-                OUTPUT "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${RTT_SHOWCASE_ASSETS_DIR}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${RTT_SHOWCASE_PACK_DIR}/${PACK}" "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}"
-                DEPENDS "${RTT_SHOWCASE_PACK_DIR}/${PACK}"
-                COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-            )
-            list(APPEND RTT_SHOWCASE_PACK_OUTPUTS "${RTT_SHOWCASE_ASSETS_DIR}/${PACK}")
-        endforeach()
-        add_custom_target(rtt_showcase_packs DEPENDS ${RTT_SHOWCASE_PACK_OUTPUTS})
-        add_dependencies(rtt_showcase rtt_showcase_packs)
-    else()
-        message(WARNING
-            "rtt_showcase: pack not found at ${RTT_SHOWCASE_PACK_DIR}. "
-            "Build a native preset first (it produces the pack), then build the wasm preset.")
-    endif()
 endif()
+
+nt_example_packs(
+    NAME rtt_showcase
+    TARGET rtt_showcase
+    BUILDER build_rtt_showcase_packs
+    PACK_DIR "${RTT_SHOWCASE_PACK_DIR}"
+    ASSETS_DIR "${RTT_SHOWCASE_ASSETS_DIR}"
+    PACKS rtt_showcase.ntpack
+)
 
 if(NT_CDN_URL)
     target_compile_definitions(rtt_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")

@@ -581,7 +581,7 @@
         {
             "label": "Build & run slice9_demo packs (debug)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target slice9_demo_build_packs && build\\examples\\slice9_demo\\native-debug\\slice9_demo_build_packs.exe build/examples/slice9_demo",
+            "command": "cmake --build build/_cmake/native-debug --target build_slice9_demo_packs && build\\examples\\slice9_demo\\native-debug\\build_slice9_demo_packs.exe build/examples/slice9_demo",
             "dependsOn": ["Configure native-debug"],
             "dependsOrder": "sequence",
             "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
@@ -601,7 +601,7 @@
         {
             "label": "Build & run slice9_demo packs (release command)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-release --target slice9_demo_build_packs && build\\examples\\slice9_demo\\native-release\\slice9_demo_build_packs.exe build/examples/slice9_demo",
+            "command": "cmake --build build/_cmake/native-release --target build_slice9_demo_packs && build\\examples\\slice9_demo\\native-release\\build_slice9_demo_packs.exe build/examples/slice9_demo",
             "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "problemMatcher": "$gcc"
         },
