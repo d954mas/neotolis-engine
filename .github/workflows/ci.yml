@@ -386,7 +386,7 @@ jobs:
             for f in "build/examples/$name/"*.ntpack; do
               [ -e "$f" ] || continue
               base=$(basename "$f")
-              if ! tr -d '\r' < "$manifest" | grep -qx -e "$base" -e "?$base"; then
+              if ! tr -d '\r' < "$manifest" | grep -Fqx -e "$base" -e "?$base"; then
                 echo "::error::'$name' produced undeclared pack '$base' (not in PACKS/OPTIONAL_PACKS)"
                 missing=1
               fi
