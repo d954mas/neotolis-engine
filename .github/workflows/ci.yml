@@ -764,7 +764,7 @@ jobs:
                 --endpoint-url "$R2_ENDPOINT" \
                 --no-progress \
                 --content-type application/octet-stream \
-                --cache-control "public, max-age=31536000, immutable"
+                --cache-control "public, max-age=300, must-revalidate" # keys are unversioned; immutable would pin stale packs after updates
             done
           done
 

@@ -1047,7 +1047,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     double t_write_start = nt_time_now();
 
-    FILE *file = fopen(ctx->output_path, "wb");
+    /* Write to .tmp, publish by atomic rename — the shared pack path can be
+     * observed by concurrent preset builds; a torn pack must never be visible. */
+    char tmp_path[sizeof(ctx->output_path) + 8];
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", ctx->output_path);
+    FILE *file = fopen(tmp_path, "wb");
     NT_BUILD_ASSERT(file && "finish_pack: cannot open output file");
 
     bool write_ok = true;
@@ -1069,8 +1073,18 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double write_secs = nt_time_now() - t_write_start;
 
     if (!write_ok) {
-        (void)remove(ctx->output_path);
+        (void)remove(tmp_path);
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write pack file");
+    }
+
+#ifdef _WIN32
+    bool publish_ok = MoveFileExA(tmp_path, ctx->output_path, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    bool publish_ok = rename(tmp_path, ctx->output_path) == 0;
+#endif
+    if (!publish_ok) {
+        (void)remove(tmp_path);
+        NT_BUILD_ASSERT(0 && "finish_pack: cannot publish pack file");
     }
 
     /* Generate codegen header (.h with ASSET_* constants) */
