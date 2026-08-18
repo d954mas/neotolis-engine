@@ -104,6 +104,24 @@ jobs:
           name: rtt-showcase-packs
           path: build/examples/rtt_showcase
 
+      - name: Download slice9_demo packs
+        uses: actions/download-artifact@v4
+        with:
+          name: slice9-demo-packs
+          path: build/examples/slice9_demo
+
+      - name: Download ui_3d_demo packs
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-3d-demo-packs
+          path: build/examples/ui_3d_demo
+
+      - name: Download ui_showcase packs
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-showcase-packs
+          path: build/examples/ui_showcase
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -503,6 +521,30 @@ jobs:
           path: build/examples/rtt_showcase/*.ntpack
           retention-days: 1
 
+      # slice9_demo/ui_3d_demo/ui_showcase packs come from the all-targets release
+      # build (their exe targets depend on the pack custom targets) — no explicit
+      # builder-run step above.
+      - name: Upload slice9_demo packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: slice9-demo-packs
+          path: build/examples/slice9_demo/*.ntpack
+          retention-days: 1
+
+      - name: Upload ui_3d_demo packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-3d-demo-packs
+          path: build/examples/ui_3d_demo/*.ntpack
+          retention-days: 1
+
+      - name: Upload ui_showcase packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-showcase-packs
+          path: build/examples/ui_showcase/*.ntpack
+          retention-days: 1
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \
@@ -816,6 +858,24 @@ jobs:
         with:
           name: rtt-showcase-packs
           path: build/examples/rtt_showcase
+
+      - name: Download slice9_demo packs
+        uses: actions/download-artifact@v4
+        with:
+          name: slice9-demo-packs
+          path: build/examples/slice9_demo
+
+      - name: Download ui_3d_demo packs
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-3d-demo-packs
+          path: build/examples/ui_3d_demo
+
+      - name: Download ui_showcase packs
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-showcase-packs
+          path: build/examples/ui_showcase
 
       - uses: actions/setup-node@v4
         with:
