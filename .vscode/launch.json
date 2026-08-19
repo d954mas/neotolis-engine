@@ -315,7 +315,7 @@
             "name": "Build Slice9 Demo Packs",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/slice9_demo/native-release/slice9_demo_build_packs.exe",
+            "program": "${workspaceFolder}/build/examples/slice9_demo/native-release/build_slice9_demo_packs.exe",
             "args": ["build/examples/slice9_demo"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",

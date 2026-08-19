@@ -33,20 +33,15 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# Copy packs from shared location to preset output
-set(SP_PACK_NAMES sponza_core.ntpack sponza_geo.ntpack sponza_tex.ntpack sponza_full.ntpack)
-foreach(PACK ${SP_PACK_NAMES})
-    add_custom_command(
-        OUTPUT "${SP_ASSETS_DIR}/${PACK}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${SP_ASSETS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SP_PACK_DIR}/${PACK}" "${SP_ASSETS_DIR}/${PACK}"
-        DEPENDS "${SP_PACK_DIR}/${PACK}"
-        COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-    )
-    list(APPEND SP_PACK_OUTPUTS "${SP_ASSETS_DIR}/${PACK}")
-endforeach()
-add_custom_target(sponza_packs DEPENDS ${SP_PACK_OUTPUTS})
-add_dependencies(sponza sponza_packs)
+# Cold pack build re-encodes every GLTF texture (long); _cache makes reruns seconds.
+nt_example_packs(
+    NAME sponza
+    TARGET sponza
+    BUILDER build_sponza_packs
+    PACK_DIR "${SP_PACK_DIR}"
+    ASSETS_DIR "${SP_ASSETS_DIR}"
+    PACKS sponza_core.ntpack sponza_geo.ntpack sponza_tex.ntpack sponza_full.ntpack
+)
 
 # Optional CDN base URL (set by CI for deployed builds)
 if(NT_CDN_URL)

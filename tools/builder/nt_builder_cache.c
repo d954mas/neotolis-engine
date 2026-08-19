@@ -13,6 +13,7 @@
 #else
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 /* --- opts_version_hash: serialize kind + type-specific fields + builder version --- */
@@ -220,9 +221,15 @@ bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64
     char path[1024];
     nt_builder_build_cache_path(cache_dir, decoded_hash, opts_hash, path, sizeof(path));
 
-    /* Write to temp + rename for crash safety */
-    char tmp_path[1040];
-    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    /* Write to per-process temp + rename — concurrent preset builds share the
+     * cache dir; a shared tmp would let one writer scribble the other's file. */
+    char tmp_path[1064];
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", path, pid);
 
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {

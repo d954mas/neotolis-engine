@@ -123,6 +123,9 @@ Nested atlas transactions assert. Committing an empty transaction asserts. `nt_b
 Rules:
 - Constants are typed compound literals `((nt_hash64_t){...})` -- work with `nt_resource_request` without casts.
 - Hash values match `nt_hash64_str(normalized_path)` at runtime. The header is the single source of truth.
+  Exception: `ATLAS_REGION` constants hash the region name alone (not the `atlas/name` path) — the runtime
+  looks regions up per-atlas by name hash (`nt_atlas_find_region`, see `engine/atlas/nt_atlas.h`), while the
+  identifier and comment still carry the full path for readability.
 - Identifier format: `ASSET_{TYPE}_{
     PATH
 }` where path includes file extension (`.vert`, `.frag`, `.glb` etc.) to avoid collisions between same-stem files. Slashes, dots, dashes become underscores, uppercased.

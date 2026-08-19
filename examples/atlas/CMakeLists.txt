@@ -33,20 +33,14 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# Copy packs from shared location to preset output
-set(ATLAS_PACK_NAMES atlas_demo.ntpack)
-foreach(PACK ${ATLAS_PACK_NAMES})
-    add_custom_command(
-        OUTPUT "${ATLAS_ASSETS_DIR}/${PACK}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ATLAS_ASSETS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ATLAS_PACK_DIR}/${PACK}" "${ATLAS_ASSETS_DIR}/${PACK}"
-        DEPENDS "${ATLAS_PACK_DIR}/${PACK}"
-        COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-    )
-    list(APPEND ATLAS_PACK_OUTPUTS "${ATLAS_ASSETS_DIR}/${PACK}")
-endforeach()
-add_custom_target(atlas_demo_packs DEPENDS ${ATLAS_PACK_OUTPUTS})
-add_dependencies(atlas_demo atlas_demo_packs)
+nt_example_packs(
+    NAME atlas
+    TARGET atlas_demo
+    BUILDER build_atlas_packs
+    PACK_DIR "${ATLAS_PACK_DIR}"
+    ASSETS_DIR "${ATLAS_ASSETS_DIR}"
+    PACKS atlas_demo.ntpack
+)
 
 # Optional CDN base URL
 if(NT_CDN_URL)

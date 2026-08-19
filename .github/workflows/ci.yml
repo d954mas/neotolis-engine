@@ -68,41 +68,13 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      - name: Download textured_quad packs
+      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
+      # archive at the pre-wildcard prefix of its glob (build/examples).
+      - name: Download example packs
         uses: actions/download-artifact@v4
         with:
-          name: tq-packs
-          path: build/examples/textured_quad
-
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
-
-      - name: Download text packs
-        uses: actions/download-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text
-
-      - name: Download atlas packs
-        uses: actions/download-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas
-
-      - name: Download bunnymark packs
-        uses: actions/download-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark
-
-      - name: Download rtt_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase
+          name: example-packs
+          path: build/examples
 
       - name: Build baseline WASM debug artifacts
         run: |
@@ -348,56 +320,24 @@ jobs:
           echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
 
-      # Release first — builds packs that debug/WASM need
+      # Release first — its all-targets build produces every example's packs
+      # (pack builders are wired into the build graph; see cmake/nt_example_packs.cmake).
+      # The debug build later re-runs builders warm (seconds, thanks to _cache).
       - name: Configure native release
         run: cmake --preset native-release
 
-      - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs build_rtt_showcase_packs
-
+      # Cold sponza encode is the long pole (up to ~2h); the cache keeps it in seconds.
       - name: Restore builder cache
         uses: actions/cache@v4
         with:
-          path: |
-            build/examples/sponza/_cache
-            build/examples/textured_quad/_cache
-            build/examples/text/_cache
-            build/examples/atlas/_cache
-            build/examples/rtt_showcase/_cache
+          path: build/examples/*/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
-      - name: Build asset packs — textured_quad (release)
-        timeout-minutes: 10
-        run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
-
-      - name: Build asset packs — sponza (release)
-        timeout-minutes: 120
-        run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
-
-      - name: Build asset packs — text (release)
-        timeout-minutes: 10
-        run: ./build/examples/text/native-release/build_text_packs build/examples/text
-
-      - name: Build asset packs — atlas (release)
-        timeout-minutes: 10
-        run: ./build/examples/atlas/native-release/build_atlas_packs build/examples/atlas
-
-      - name: Build asset packs — bunnymark (release)
-        timeout-minutes: 10
-        run: ./build/examples/bunnymark/native-release/build_bunnymark_packs build/examples/bunnymark
-
-      - name: Build asset packs — rtt_showcase (release)
-        timeout-minutes: 10
-        run: ./build/examples/rtt_showcase/native-release/build_rtt_showcase_packs build/examples/rtt_showcase
-
-      # Bunnymark/rtt_showcase CMakeLists wire per-preset asset copy at configure time
-      # only if .ntpack files exist (graceful local DX). The packs were just
-      # generated above, so reconfigure to wire the copy step before build-all.
-      - name: Reconfigure native release (wire generated pack copies)
-        run: cmake --preset native-release
-
+      # 180 min: cold ccache compile + cold sponza encode share this step, and a
+      # timed-out job saves no caches — the retry would be equally cold.
       - name: Build native release (all targets)
+        timeout-minutes: 180
         run: cmake --build --preset native-release
 
       - name: Verify native release output
@@ -410,6 +350,37 @@ jobs:
 
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
+
+      # Guard + upload run HERE, before any debug preset builds, so the artifact
+      # carries release-builder bytes. Missing or partial packs already failed the
+      # all-targets build (copy edges + success stamp, cmake/nt_example_packs.cmake);
+      # the two drifts that WOULD stay silent are an example whose build_packs.c was
+      # never wired (the original #331 class — no manifest, no edges, no artifact)
+      # and stale committed codegen headers (native compiles against the fresh
+      # regeneration, wasm/deploy against the committed copies).
+      - name: Verify example packs wired + headers fresh
+        run: |
+          bad=0
+          for src in examples/*/build_packs.c; do
+            name=$(basename "$(dirname "$src")")
+            if [ ! -f "build/examples/$name/.expected_packs" ]; then
+              echo "::error::examples/$name has build_packs.c but nt_example_packs was never wired"
+              bad=1
+            fi
+          done
+          git diff --exit-code -- 'examples/*/generated' || {
+            echo "::error::committed generated headers are stale — commit the refresh"
+            bad=1
+          }
+          exit $bad
+
+      - name: Upload example packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-packs
+          path: build/examples/*/*.ntpack
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Configure native release tests (FULL asserts)
         run: cmake --preset native-release-test
@@ -460,48 +431,6 @@ jobs:
 
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
-
-      - name: Upload textured_quad packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: tq-packs
-          path: build/examples/textured_quad/*.ntpack
-          retention-days: 1
-
-      - name: Upload sponza packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza/*.ntpack
-          retention-days: 1
-
-      - name: Upload text packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text/*.ntpack
-          retention-days: 1
-
-      - name: Upload atlas packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas/*.ntpack
-          retention-days: 1
-
-      - name: Upload bunnymark packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark/*.ntpack
-          retention-days: 1
-
-      - name: Upload rtt_showcase packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase/*.ntpack
-          retention-days: 1
 
       - name: Submodule consumption test
         run: |
@@ -736,17 +665,13 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      # The browser_smoke test app reuses the ui_showcase pack (same assets), but the pack is not a CI
-      # artifact, so produce it here: build the native pack builder, run it to emit ui_showcase.ntpack,
-      # THEN configure+build the wasm browser_smoke target (its CMake copies the pack into assets/).
-      # The pack must exist before the wasm configure so the copy custom-command is set up.
+      # browser_smoke reuses the ui_showcase pack (same assets); produce it via the
+      # build-graph pack target, then the wasm build copies it into assets/.
       - name: Configure native debug
         run: cmake --preset native-debug
 
-      - name: Build + run ui_showcase pack builder
-        run: |
-          cmake --build --preset native-debug --target build_ui_showcase_packs
-          ./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase
+      - name: Build ui_showcase packs
+        run: cmake --build --preset native-debug --target ui_showcase_packs
 
       - name: Build browser_smoke wasm (debug)
         run: |
@@ -781,41 +706,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download textured_quad packs
+      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
+      # archive at the pre-wildcard prefix of its glob (build/examples).
+      - name: Download example packs
         uses: actions/download-artifact@v4
         with:
-          name: tq-packs
-          path: build/examples/textured_quad
-
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
-
-      - name: Download text packs
-        uses: actions/download-artifact@v4
-        with:
-          name: text-packs
-          path: build/examples/text
-
-      - name: Download atlas packs
-        uses: actions/download-artifact@v4
-        with:
-          name: atlas-packs
-          path: build/examples/atlas
-
-      - name: Download bunnymark packs
-        uses: actions/download-artifact@v4
-        with:
-          name: bunnymark-packs
-          path: build/examples/bunnymark
-
-      - name: Download rtt_showcase packs
-        uses: actions/download-artifact@v4
-        with:
-          name: rtt-showcase-packs
-          path: build/examples/rtt_showcase
+          name: example-packs
+          path: build/examples
 
       - uses: actions/setup-node@v4
         with:
@@ -858,7 +755,7 @@ jobs:
                 --endpoint-url "$R2_ENDPOINT" \
                 --no-progress \
                 --content-type application/octet-stream \
-                --cache-control "public, max-age=31536000, immutable"
+                --cache-control "public, max-age=300, must-revalidate" # keys are unversioned; immutable would pin stale packs after updates
             done
           done
 

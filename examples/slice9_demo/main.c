@@ -2,7 +2,7 @@
  * Shows same panel at 3 sizes (corner non-stretch proof) + animated panel
  * with scale/opacity/offset/rotation transform inheritance to children.
  * Keys: S scale | O opacity | P position | R rotation | A all | D debug
- * Build packs: slice9_demo_build_packs build/examples/slice9_demo */
+ * Build packs: build_slice9_demo_packs build/examples/slice9_demo */
 
 // #region includes
 #include "app/nt_app.h"

@@ -27,14 +27,6 @@ nt_set_warning_flags(ui_showcase)
 nt_set_sanitizer_flags(ui_showcase)
 set_target_properties(ui_showcase PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${UI_SHOWCASE_OUTPUT_DIR}")
 
-set(UI_SHOWCASE_PACK_NAMES ui_showcase.ntpack)
-
-# Pack builder + copy wiring.
-# Native: the builder runs at BUILD time to produce the pack, then the pack copies into the
-# preset's assets/. The copy DEPENDS on the pack output, which DEPENDS on the builder target --
-# so a clean configure+build always produces and copies the pack with no reconfigure step.
-# Emscripten: the builder can't run under wasm, so the pack must already exist from a prior native
-# build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
     target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
@@ -45,61 +37,16 @@ if(NOT EMSCRIPTEN)
     set_target_properties(build_ui_showcase_packs PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${UI_SHOWCASE_OUTPUT_DIR}"
     )
-
-    # build_packs.c reads raw assets via paths relative to the project root.
-    foreach(PACK ${UI_SHOWCASE_PACK_NAMES})
-        list(APPEND UI_SHOWCASE_PACK_FILES "${UI_SHOWCASE_PACK_DIR}/${PACK}")
-    endforeach()
-    add_custom_command(
-        OUTPUT ${UI_SHOWCASE_PACK_FILES}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${UI_SHOWCASE_PACK_DIR}"
-        COMMAND "$<TARGET_FILE:build_ui_showcase_packs>" "${UI_SHOWCASE_PACK_DIR}"
-        DEPENDS build_ui_showcase_packs
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Building ui_showcase pack(s)"
-    )
-
-    foreach(PACK ${UI_SHOWCASE_PACK_NAMES})
-        add_custom_command(
-            OUTPUT "${UI_SHOWCASE_ASSETS_DIR}/${PACK}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${UI_SHOWCASE_ASSETS_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${UI_SHOWCASE_PACK_DIR}/${PACK}" "${UI_SHOWCASE_ASSETS_DIR}/${PACK}"
-            DEPENDS "${UI_SHOWCASE_PACK_DIR}/${PACK}"
-            COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-        )
-        list(APPEND UI_SHOWCASE_PACK_OUTPUTS "${UI_SHOWCASE_ASSETS_DIR}/${PACK}")
-    endforeach()
-    add_custom_target(ui_showcase_packs DEPENDS ${UI_SHOWCASE_PACK_OUTPUTS})
-    add_dependencies(ui_showcase ui_showcase_packs)
-else()
-    # WASM: builder can't run; copy the pack a prior native build produced into this preset.
-    set(UI_SHOWCASE_PACKS_PRESENT TRUE)
-    foreach(PACK ${UI_SHOWCASE_PACK_NAMES})
-        if(NOT EXISTS "${UI_SHOWCASE_PACK_DIR}/${PACK}")
-            set(UI_SHOWCASE_PACKS_PRESENT FALSE)
-        endif()
-    endforeach()
-    if(UI_SHOWCASE_PACKS_PRESENT)
-        foreach(PACK ${UI_SHOWCASE_PACK_NAMES})
-            add_custom_command(
-                OUTPUT "${UI_SHOWCASE_ASSETS_DIR}/${PACK}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${UI_SHOWCASE_ASSETS_DIR}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${UI_SHOWCASE_PACK_DIR}/${PACK}" "${UI_SHOWCASE_ASSETS_DIR}/${PACK}"
-                DEPENDS "${UI_SHOWCASE_PACK_DIR}/${PACK}"
-                COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-            )
-            list(APPEND UI_SHOWCASE_PACK_OUTPUTS "${UI_SHOWCASE_ASSETS_DIR}/${PACK}")
-        endforeach()
-        add_custom_target(ui_showcase_packs DEPENDS ${UI_SHOWCASE_PACK_OUTPUTS})
-        add_dependencies(ui_showcase ui_showcase_packs)
-    else()
-        message(WARNING
-            "ui_showcase: pack not found at ${UI_SHOWCASE_PACK_DIR}. "
-            "Build a native preset first (it produces the pack), then build the wasm preset.")
-    endif()
 endif()
+
+nt_example_packs(
+    NAME ui_showcase
+    TARGET ui_showcase
+    BUILDER build_ui_showcase_packs
+    PACK_DIR "${UI_SHOWCASE_PACK_DIR}"
+    ASSETS_DIR "${UI_SHOWCASE_ASSETS_DIR}"
+    PACKS ui_showcase.ntpack
+)
 
 # Optional CDN base URL
 if(NT_CDN_URL)

@@ -33,21 +33,14 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# Copy packs from shared location to preset output (all presets, including wasm)
-# Packs must be built first: build_tq_packs <TQ_PACK_DIR> (from project root)
-set(TQ_PACK_NAMES base.ntpack lenna_pixel.ntpack lenna_hires.ntpack)
-foreach(PACK ${TQ_PACK_NAMES})
-    add_custom_command(
-        OUTPUT "${TQ_ASSETS_DIR}/${PACK}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${TQ_ASSETS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TQ_PACK_DIR}/${PACK}" "${TQ_ASSETS_DIR}/${PACK}"
-        DEPENDS "${TQ_PACK_DIR}/${PACK}"
-        COMMENT "Copying ${PACK} → ${NT_PRESET_NAME}/assets/"
-    )
-    list(APPEND TQ_PACK_OUTPUTS "${TQ_ASSETS_DIR}/${PACK}")
-endforeach()
-add_custom_target(textured_quad_packs DEPENDS ${TQ_PACK_OUTPUTS})
-add_dependencies(textured_quad textured_quad_packs)
+nt_example_packs(
+    NAME textured_quad
+    TARGET textured_quad
+    BUILDER build_tq_packs
+    PACK_DIR "${TQ_PACK_DIR}"
+    ASSETS_DIR "${TQ_ASSETS_DIR}"
+    PACKS base.ntpack lenna_pixel.ntpack lenna_hires.ntpack
+)
 
 # Optional CDN base URL (set by CI for deployed builds)
 if(NT_CDN_URL)

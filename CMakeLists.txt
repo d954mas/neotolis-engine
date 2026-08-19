@@ -10,6 +10,7 @@ include(cmake/warnings.cmake)
 include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
+include(cmake/nt_example_packs.cmake)
 
 if(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
     set(_nt_default_em_cache "${NT_ENGINE_ROOT}/build/emscripten-cache")
@@ -27,6 +28,10 @@ endif()
 
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
+
+# Escape hatch for expensive pack builds (e.g. a future PR-CI lane without sponza);
+# default builds everything. Exes still build, packs copy from a prior native run if present.
+set(NT_SKIP_EXAMPLE_PACKS "" CACHE STRING "Examples whose asset-pack generation is skipped (see cmake/nt_example_packs.cmake).")
 
 # OFF lets an exe that embeds both builder and runtime pick its own CRT (see nt_set_static_crt).
 option(NT_STATIC_CRT "Pin the static release CRT on Windows targets; OFF inherits the embedding project's CRT." ON)
@@ -202,6 +207,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/slice9_demo)
     add_subdirectory(examples/ui_3d_demo)
     add_subdirectory(examples/ui_showcase)
+    # A typo in the skip list would silently run the multi-hour build it tried to avoid.
+    get_property(_nt_pack_names GLOBAL PROPERTY NT_EXAMPLE_PACK_NAMES)
+    foreach(_nt_skip ${NT_SKIP_EXAMPLE_PACKS})
+        if(NOT "${_nt_skip}" IN_LIST _nt_pack_names)
+            message(FATAL_ERROR "NT_SKIP_EXAMPLE_PACKS: unknown example '${_nt_skip}' (known: ${_nt_pack_names})")
+        endif()
+    endforeach()
     # Minimal standalone web smoke-test app (window.__nt hooks the browser specs drive).
     add_subdirectory(tests/browser/app)
     # devapi host links nt_devapi via the transport split: native nt_devapi_net (TCP) OR web
