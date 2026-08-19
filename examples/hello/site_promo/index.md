@@ -1,5 +1,5 @@
 ---
-title: Hello Triangle
+title: Hello
 description: Minimal WASM example demonstrating engine initialization and WebGL canvas setup.
 ---
 
