@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: d0eab00
+# Commit: ad71659
 
 ## WASM Section Sizes
 
