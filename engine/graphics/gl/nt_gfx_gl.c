@@ -79,8 +79,8 @@ typedef struct {
 typedef struct {
     GLuint vao;
     GLuint program;
-    bool depth_test;
-    bool depth_write;
+    bool depth_test_enabled;
+    bool depth_write_enabled;
     GLenum depth_func;
     uint8_t cull_mode;
     bool blend_enabled;
@@ -90,10 +90,10 @@ typedef struct {
     GLenum blend_dst_alpha;
     GLenum blend_op_rgb;
     GLenum blend_op_alpha;
-    float blend_constant[4];
-    bool polygon_offset;
-    float po_factor;
-    float po_units;
+    float blend_constant_color[4];
+    bool polygon_offset_enabled;
+    float polygon_offset_factor;
+    float polygon_offset_units;
     /* Store layouts for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
     nt_vertex_layout_t instance_layout;
@@ -171,22 +171,22 @@ static uint32_t s_transcode_buf_idle = 0;
 static struct {
     GLuint vao;
     GLuint program;
-    bool depth_test;
-    bool depth_write;
+    bool depth_test_enabled;
+    bool depth_write_enabled;
     GLenum depth_func;
     uint8_t cull_mode;
-    bool blend;
+    bool blend_enabled;
     GLenum blend_src_rgb;
     GLenum blend_dst_rgb;
     GLenum blend_src_alpha;
     GLenum blend_dst_alpha;
     GLenum blend_op_rgb;
     GLenum blend_op_alpha;
-    float blend_constant[4];
-    bool polygon_offset;
-    float po_factor;
-    float po_units;
-    GLenum active_texture;                           /* current glActiveTexture unit */
+    float blend_constant_color[4];
+    bool polygon_offset_enabled;
+    float polygon_offset_factor;
+    float polygon_offset_units;
+    GLenum active_texture_unit;
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
 } s_gl_cache;
 
@@ -223,22 +223,22 @@ static void nt_gfx_gl_cache_reset(void) {
 
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
-    s_gl_cache.depth_test = false;
-    s_gl_cache.depth_write = true;   /* GL default: depth write enabled */
-    s_gl_cache.depth_func = GL_LESS; /* GL default */
+    s_gl_cache.depth_test_enabled = false;
+    s_gl_cache.depth_write_enabled = true; /* GL default: depth write enabled */
+    s_gl_cache.depth_func = GL_LESS;       /* GL default */
     s_gl_cache.cull_mode = 0;
-    s_gl_cache.blend = false;
+    s_gl_cache.blend_enabled = false;
     s_gl_cache.blend_src_rgb = GL_ONE;
     s_gl_cache.blend_dst_rgb = GL_ZERO;
     s_gl_cache.blend_src_alpha = GL_ONE;
     s_gl_cache.blend_dst_alpha = GL_ZERO;
     s_gl_cache.blend_op_rgb = GL_FUNC_ADD;
     s_gl_cache.blend_op_alpha = GL_FUNC_ADD;
-    memset(s_gl_cache.blend_constant, 0, sizeof(s_gl_cache.blend_constant));
-    s_gl_cache.polygon_offset = false;
-    s_gl_cache.po_factor = 0.0F;
-    s_gl_cache.po_units = 0.0F;
-    s_gl_cache.active_texture = GL_TEXTURE0;
+    memset(s_gl_cache.blend_constant_color, 0, sizeof(s_gl_cache.blend_constant_color));
+    s_gl_cache.polygon_offset_enabled = false;
+    s_gl_cache.polygon_offset_factor = 0.0F;
+    s_gl_cache.polygon_offset_units = 0.0F;
+    s_gl_cache.active_texture_unit = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
 }
 
@@ -298,7 +298,7 @@ static GLenum map_blend_op(nt_blend_op_t op) {
     }
 }
 
-static bool blend_constant_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
+static bool blend_constant_color_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
 
 static GLenum map_depth_func(nt_depth_func_t f) {
     switch (f) {
@@ -763,7 +763,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);
     /* Pass clears must not inherit the previous pipeline's depth-write mask. */
-    bool restore_depth_write = !s_gl_cache.depth_write;
+    bool restore_depth_write = !s_gl_cache.depth_write_enabled;
     if (restore_depth_write) {
         glDepthMask(GL_TRUE);
     }
@@ -832,21 +832,21 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     s_bound_pipeline_slot = backend_handle;
 
     /* Depth test */
-    if (s_gl_cache.depth_test != pip->depth_test) {
-        if (pip->depth_test) {
+    if (s_gl_cache.depth_test_enabled != pip->depth_test_enabled) {
+        if (pip->depth_test_enabled) {
             glEnable(GL_DEPTH_TEST);
         } else {
             glDisable(GL_DEPTH_TEST);
         }
-        s_gl_cache.depth_test = pip->depth_test;
+        s_gl_cache.depth_test_enabled = pip->depth_test_enabled;
     }
-    if (pip->depth_test && s_gl_cache.depth_func != pip->depth_func) {
+    if (pip->depth_test_enabled && s_gl_cache.depth_func != pip->depth_func) {
         glDepthFunc(pip->depth_func);
         s_gl_cache.depth_func = pip->depth_func;
     }
-    if (s_gl_cache.depth_write != pip->depth_write) {
-        glDepthMask(pip->depth_write ? GL_TRUE : GL_FALSE);
-        s_gl_cache.depth_write = pip->depth_write;
+    if (s_gl_cache.depth_write_enabled != pip->depth_write_enabled) {
+        glDepthMask(pip->depth_write_enabled ? GL_TRUE : GL_FALSE);
+        s_gl_cache.depth_write_enabled = pip->depth_write_enabled;
     }
 
     /* Cull mode */
@@ -861,13 +861,13 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     }
 
     /* Blend */
-    if (s_gl_cache.blend != pip->blend_enabled) {
+    if (s_gl_cache.blend_enabled != pip->blend_enabled) {
         if (pip->blend_enabled) {
             glEnable(GL_BLEND);
         } else {
             glDisable(GL_BLEND);
         }
-        s_gl_cache.blend = pip->blend_enabled;
+        s_gl_cache.blend_enabled = pip->blend_enabled;
     }
     if (pip->blend_enabled && (s_gl_cache.blend_src_rgb != pip->blend_src_rgb || s_gl_cache.blend_dst_rgb != pip->blend_dst_rgb || s_gl_cache.blend_src_alpha != pip->blend_src_alpha ||
                                s_gl_cache.blend_dst_alpha != pip->blend_dst_alpha)) {
@@ -882,24 +882,24 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.blend_op_rgb = pip->blend_op_rgb;
         s_gl_cache.blend_op_alpha = pip->blend_op_alpha;
     }
-    if (pip->blend_enabled && !blend_constant_equal(s_gl_cache.blend_constant, pip->blend_constant)) {
-        glBlendColor(pip->blend_constant[0], pip->blend_constant[1], pip->blend_constant[2], pip->blend_constant[3]);
-        memcpy(s_gl_cache.blend_constant, pip->blend_constant, sizeof(pip->blend_constant));
+    if (pip->blend_enabled && !blend_constant_color_equal(s_gl_cache.blend_constant_color, pip->blend_constant_color)) {
+        glBlendColor(pip->blend_constant_color[0], pip->blend_constant_color[1], pip->blend_constant_color[2], pip->blend_constant_color[3]);
+        memcpy(s_gl_cache.blend_constant_color, pip->blend_constant_color, sizeof(pip->blend_constant_color));
     }
 
     /* Polygon offset */
-    if (s_gl_cache.polygon_offset != pip->polygon_offset) {
-        if (pip->polygon_offset) {
+    if (s_gl_cache.polygon_offset_enabled != pip->polygon_offset_enabled) {
+        if (pip->polygon_offset_enabled) {
             glEnable(GL_POLYGON_OFFSET_FILL);
         } else {
             glDisable(GL_POLYGON_OFFSET_FILL);
         }
-        s_gl_cache.polygon_offset = pip->polygon_offset;
+        s_gl_cache.polygon_offset_enabled = pip->polygon_offset_enabled;
     }
-    if (pip->polygon_offset && (s_gl_cache.po_factor != pip->po_factor || s_gl_cache.po_units != pip->po_units)) {
-        glPolygonOffset(pip->po_factor, pip->po_units);
-        s_gl_cache.po_factor = pip->po_factor;
-        s_gl_cache.po_units = pip->po_units;
+    if (pip->polygon_offset_enabled && (s_gl_cache.polygon_offset_factor != pip->polygon_offset_factor || s_gl_cache.polygon_offset_units != pip->polygon_offset_units)) {
+        glPolygonOffset(pip->polygon_offset_factor, pip->polygon_offset_units);
+        s_gl_cache.polygon_offset_factor = pip->polygon_offset_factor;
+        s_gl_cache.polygon_offset_units = pip->polygon_offset_units;
     }
 }
 
@@ -1083,8 +1083,8 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
     pip->vao = vao;
     pip->program = program;
-    pip->depth_test = desc->depth_test;
-    pip->depth_write = desc->depth_write;
+    pip->depth_test_enabled = desc->depth_test;
+    pip->depth_write_enabled = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
     pip->cull_mode = desc->cull_mode;
     pip->blend_enabled = desc->blend.enabled;
@@ -1094,10 +1094,10 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->blend_dst_alpha = map_blend_factor(desc->blend.dst_alpha);
     pip->blend_op_rgb = map_blend_op(desc->blend.op_rgb);
     pip->blend_op_alpha = map_blend_op(desc->blend.op_alpha);
-    memcpy(pip->blend_constant, desc->blend.constant_color, sizeof(pip->blend_constant));
-    pip->polygon_offset = desc->polygon_offset;
-    pip->po_factor = desc->polygon_offset_factor;
-    pip->po_units = desc->polygon_offset_units;
+    memcpy(pip->blend_constant_color, desc->blend.constant_color, sizeof(pip->blend_constant_color));
+    pip->polygon_offset_enabled = desc->polygon_offset;
+    pip->polygon_offset_factor = desc->polygon_offset_factor;
+    pip->polygon_offset_units = desc->polygon_offset_units;
     pip->layout = desc->layout;
     pip->instance_layout = desc->instance_layout;
 
@@ -1341,7 +1341,7 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
 }
 
 static void nt_gfx_gl_invalidate_active_texture_binding(void) {
-    uint32_t active_slot = s_gl_cache.active_texture - GL_TEXTURE0;
+    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
     if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
         s_gl_cache.bound_textures[active_slot] = 0;
     }
@@ -1457,7 +1457,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     }
 
     /* Invalidate state cache: glBindTexture dirtied the active unit's binding */
-    uint32_t active_slot = s_gl_cache.active_texture - GL_TEXTURE0;
+    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
     if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
         s_gl_cache.bound_textures[active_slot] = 0;
     }
@@ -1574,9 +1574,9 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     s_texture_gl[slot] = tex;
 
     /* Invalidate cache */
-    uint32_t active_slot_c = s_gl_cache.active_texture - GL_TEXTURE0;
-    if (active_slot_c < NT_GFX_MAX_TEXTURE_SLOTS) {
-        s_gl_cache.bound_textures[active_slot_c] = 0;
+    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
+    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
+        s_gl_cache.bound_textures[active_slot] = 0;
     }
 
     return slot;
@@ -1851,9 +1851,9 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
         return; /* already bound to this slot */
     }
     GLenum unit = GL_TEXTURE0 + slot;
-    if (s_gl_cache.active_texture != unit) {
+    if (s_gl_cache.active_texture_unit != unit) {
         glActiveTexture(unit);
-        s_gl_cache.active_texture = unit;
+        s_gl_cache.active_texture_unit = unit;
     }
     glBindTexture(GL_TEXTURE_2D, tex);
     s_gl_cache.bound_textures[slot] = tex;
