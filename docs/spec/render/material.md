@@ -85,9 +85,10 @@ Material stores render state (blend state, depth test/write, cull mode) because 
 
 `nt_blend_state_t` is the public, backend-neutral fixed-function blend state. It
 contains separate source and destination factors and operations for RGB and
-alpha, plus the constant blend color. A zero-filled state disables blending.
-The complete WebGL 2 core factor and operation sets are public; invalid WebGL
-combinations assert during pipeline creation.
+alpha, plus the constant blend color. Constant color components must be finite
+and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
+core factor and operation sets are public; invalid WebGL combinations assert
+during pipeline creation.
 
 The fragment shader output is the source (`src`); the color already stored in
 the pass target is the destination (`dst`). For each channel, the enabled blend

@@ -662,6 +662,15 @@ static bool blend_factor_uses_constant_color(nt_blend_factor_t factor) { return 
 
 static bool blend_factor_uses_constant_alpha(nt_blend_factor_t factor) { return factor == NT_BLEND_CONSTANT_ALPHA || factor == NT_BLEND_ONE_MINUS_CONSTANT_ALPHA; }
 
+static bool blend_constant_color_valid(const float color[4]) {
+    for (uint8_t i = 0; i < 4; i++) {
+        if (!(color[i] >= 0.0F && color[i] <= 1.0F)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool blend_state_valid(const nt_blend_state_t *blend) {
     if (!blend->enabled) {
         return true;
@@ -669,9 +678,9 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
 
     bool uses_constant_color = blend_factor_uses_constant_color(blend->src_rgb) || blend_factor_uses_constant_color(blend->dst_rgb);
     bool uses_constant_alpha = blend_factor_uses_constant_alpha(blend->src_rgb) || blend_factor_uses_constant_alpha(blend->dst_rgb);
-    return blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) && blend_factor_valid(blend->dst_alpha) &&
-           blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE && blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE &&
-           !(uses_constant_color && uses_constant_alpha);
+    return blend_constant_color_valid(blend->constant_color) && blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) &&
+           blend_factor_valid(blend->dst_alpha) && blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE &&
+           blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
 }
 
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {

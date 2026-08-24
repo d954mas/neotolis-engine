@@ -6,6 +6,7 @@
 #include "nt_texture_format.h"
 #include "unity.h"
 
+#include <math.h>
 #include <setjmp.h>
 #include <string.h>
 
@@ -294,6 +295,10 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
 
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
     nt_blend_state_t blend = nt_blend_alpha();
+    blend.src_rgb = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+
+    blend = nt_blend_alpha();
     blend.dst_rgb = UINT8_MAX;
     expect_pipeline_blend_assert(blend);
 }
@@ -317,6 +322,20 @@ void test_gfx_pipeline_rejects_invalid_alpha_blend_factors(void) {
 void test_gfx_pipeline_rejects_invalid_alpha_blend_operation(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.op_alpha = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_invalid_blend_constant_color(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.constant_color[0] = -0.1F;
+    expect_pipeline_blend_assert(blend);
+
+    blend = nt_blend_alpha();
+    blend.constant_color[1] = 1.1F;
+    expect_pipeline_blend_assert(blend);
+
+    blend = nt_blend_alpha();
+    blend.constant_color[2] = NAN;
     expect_pipeline_blend_assert(blend);
 }
 
@@ -1136,6 +1155,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_constant_color);
     RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_as_destination_factor);
     RUN_TEST(test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors);
     RUN_TEST(test_gfx_pipeline_accepts_constant_color_rgb_with_constant_alpha_source_alpha);

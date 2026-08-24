@@ -174,7 +174,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
-    key = key * 0x9E3779B97F4A7C15ULL + nt_material_render_state_hash(mat_info);
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_count;
     for (uint8_t i = 0; i < mat_info->attr_map_count; i++) {
         key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_hashes[i];

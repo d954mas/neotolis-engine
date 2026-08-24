@@ -117,9 +117,6 @@ typedef struct {
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
-/* Canonical render-state hash shared by sprite and mesh pipeline caches. */
-static inline uint64_t nt_material_render_state_hash(const nt_material_info_t *info) { return info->render_state_hash; }
-
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_material_init(const nt_material_desc_t *desc);

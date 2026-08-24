@@ -13,6 +13,9 @@ ShaderAsset defines interface, not values.
 
 ## ShaderAsset fields
 
+> **Status:** `ShaderAsset` is planned. Runtime shaders are currently
+> `NT_ASSET_SHADER_CODE` blobs; materials provide render state explicitly.
+
 ```c
 typedef struct ShaderAsset {
     ShaderCodeRef vs;
