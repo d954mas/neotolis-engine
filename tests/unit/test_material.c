@@ -76,6 +76,68 @@ static nt_material_create_desc_t make_test_desc(void) {
     return d;
 }
 
+static void assert_blend_rgb(nt_blend_state_t blend, nt_blend_factor_t src, nt_blend_factor_t dst, nt_blend_op_t op) {
+    TEST_ASSERT_TRUE(blend.enabled);
+    TEST_ASSERT_EQUAL(src, blend.src_rgb);
+    TEST_ASSERT_EQUAL(dst, blend.dst_rgb);
+    TEST_ASSERT_EQUAL(op, blend.op_rgb);
+}
+
+static void assert_blend_preserves_alpha(nt_blend_state_t blend) {
+    TEST_ASSERT_EQUAL(NT_BLEND_ZERO, blend.src_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE, blend.dst_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_OP_ADD, blend.op_alpha);
+}
+
+static void assert_blend_source_over_alpha(nt_blend_state_t blend) {
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE, blend.src_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE_MINUS_SRC_ALPHA, blend.dst_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_OP_ADD, blend.op_alpha);
+}
+
+void test_blend_opaque_disables_blending(void) {
+    nt_blend_state_t blend = nt_blend_opaque();
+    TEST_ASSERT_FALSE(blend.enabled);
+}
+
+void test_blend_alpha_uses_straight_source(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    assert_blend_rgb(blend, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE_MINUS_SRC_ALPHA, NT_BLEND_OP_ADD);
+    assert_blend_source_over_alpha(blend);
+}
+
+void test_blend_alpha_premultiplied_uses_source_as_is(void) {
+    nt_blend_state_t blend = nt_blend_alpha_premultiplied();
+    assert_blend_rgb(blend, NT_BLEND_ONE, NT_BLEND_ONE_MINUS_SRC_ALPHA, NT_BLEND_OP_ADD);
+    assert_blend_source_over_alpha(blend);
+}
+
+void test_blend_additive_presets_preserve_destination_alpha(void) {
+    nt_blend_state_t straight = nt_blend_additive();
+    assert_blend_rgb(straight, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(straight);
+
+    nt_blend_state_t premultiplied = nt_blend_additive_premultiplied();
+    assert_blend_rgb(premultiplied, NT_BLEND_ONE, NT_BLEND_ONE, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(premultiplied);
+}
+
+void test_blend_subtractive_presets_preserve_destination_alpha(void) {
+    nt_blend_state_t straight = nt_blend_subtractive();
+    assert_blend_rgb(straight, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE, NT_BLEND_OP_REVERSE_SUBTRACT);
+    assert_blend_preserves_alpha(straight);
+
+    nt_blend_state_t premultiplied = nt_blend_subtractive_premultiplied();
+    assert_blend_rgb(premultiplied, NT_BLEND_ONE, NT_BLEND_ONE, NT_BLEND_OP_REVERSE_SUBTRACT);
+    assert_blend_preserves_alpha(premultiplied);
+}
+
+void test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha(void) {
+    nt_blend_state_t blend = nt_blend_multiply();
+    assert_blend_rgb(blend, NT_BLEND_DST_COLOR, NT_BLEND_ZERO, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(blend);
+}
+
 /* ---- Test 1: init/shutdown lifecycle ---- */
 
 void test_init_shutdown(void) {
@@ -150,13 +212,64 @@ void test_create_stores_param_values(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_create_stores_render_state(void) {
     nt_material_create_desc_t d = make_test_desc();
+    d.blend = nt_blend_multiply();
+    d.blend.constant_color[0] = 0.25F;
+    d.blend.constant_color[1] = 0.5F;
+    d.blend.constant_color[2] = 0.75F;
+    d.blend.constant_color[3] = 1.0F;
     nt_material_t mat = nt_material_create(&d);
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_TRUE(info->depth_test);
     TEST_ASSERT_TRUE(info->depth_write);
     TEST_ASSERT_EQUAL(NT_CULL_BACK, info->cull_mode);
-    TEST_ASSERT_EQUAL(NT_BLEND_MODE_OPAQUE, info->blend_mode);
+    TEST_ASSERT_EQUAL_MEMORY(&d.blend, &info->blend, sizeof(d.blend));
+}
+
+void test_disabled_blend_uses_canonical_render_state_hash(void) {
+    nt_material_create_desc_t opaque_desc = make_test_desc();
+    nt_material_create_desc_t disabled_alpha_desc = make_test_desc();
+    opaque_desc.blend = nt_blend_opaque();
+    disabled_alpha_desc.blend = nt_blend_alpha();
+    disabled_alpha_desc.blend.enabled = false;
+    disabled_alpha_desc.blend.constant_color[0] = 0.5F;
+
+    nt_material_t opaque = nt_material_create(&opaque_desc);
+    nt_material_t disabled_alpha = nt_material_create(&disabled_alpha_desc);
+    const nt_material_info_t *opaque_info = nt_material_get_info(opaque);
+    const nt_material_info_t *disabled_alpha_info = nt_material_get_info(disabled_alpha);
+
+    TEST_ASSERT_EQUAL_UINT64(opaque_info->render_state_hash, disabled_alpha_info->render_state_hash);
+}
+
+void test_enabled_blend_changes_render_state_hash(void) {
+    nt_material_create_desc_t alpha_desc = make_test_desc();
+    nt_material_create_desc_t additive_desc = make_test_desc();
+    alpha_desc.blend = nt_blend_alpha();
+    additive_desc.blend = nt_blend_additive();
+
+    nt_material_t alpha = nt_material_create(&alpha_desc);
+    nt_material_t additive = nt_material_create(&additive_desc);
+    const nt_material_info_t *alpha_info = nt_material_get_info(alpha);
+    const nt_material_info_t *additive_info = nt_material_get_info(additive);
+
+    TEST_ASSERT_NOT_EQUAL_UINT64(alpha_info->render_state_hash, additive_info->render_state_hash);
+}
+
+void test_blend_reserved_byte_is_canonicalized(void) {
+    nt_material_create_desc_t clean_desc = make_test_desc();
+    nt_material_create_desc_t dirty_desc = make_test_desc();
+    clean_desc.blend = nt_blend_alpha();
+    dirty_desc.blend = nt_blend_alpha();
+    dirty_desc.blend._reserved = UINT8_MAX;
+
+    nt_material_t clean = nt_material_create(&clean_desc);
+    nt_material_t dirty = nt_material_create(&dirty_desc);
+    const nt_material_info_t *clean_info = nt_material_get_info(clean);
+    const nt_material_info_t *dirty_info = nt_material_get_info(dirty);
+
+    TEST_ASSERT_EQUAL_UINT8(0, dirty_info->blend._reserved);
+    TEST_ASSERT_EQUAL_UINT64(clean_info->render_state_hash, dirty_info->render_state_hash);
 }
 
 /* ---- Test 7: attr_map stored correctly ---- */
@@ -519,7 +632,16 @@ int main(void) {
     RUN_TEST(test_create_stores_texture_count);
     RUN_TEST(test_create_stores_param_count);
     RUN_TEST(test_create_stores_param_values);
+    RUN_TEST(test_blend_opaque_disables_blending);
+    RUN_TEST(test_blend_alpha_uses_straight_source);
+    RUN_TEST(test_blend_alpha_premultiplied_uses_source_as_is);
+    RUN_TEST(test_blend_additive_presets_preserve_destination_alpha);
+    RUN_TEST(test_blend_subtractive_presets_preserve_destination_alpha);
+    RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
+    RUN_TEST(test_disabled_blend_uses_canonical_render_state_hash);
+    RUN_TEST(test_enabled_blend_changes_render_state_hash);
+    RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);
     RUN_TEST(test_create_hashes_param_names);

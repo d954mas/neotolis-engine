@@ -136,6 +136,7 @@ void nt_gfx_stub_test_fail_next_render_target_resize(void);
 void nt_gfx_stub_test_set_context_lost(bool lost);
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void);
 uint32_t nt_gfx_stub_test_last_instance_offset(void);
+nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void);
 void nt_gfx_stub_test_reset(void);
 #endif
 

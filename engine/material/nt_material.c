@@ -158,12 +158,26 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
 
     /* Render state */
-    slot->info.blend_mode = desc->blend_mode;
+    memcpy(slot->info.blend.constant_color, desc->blend.constant_color, sizeof(slot->info.blend.constant_color));
+    slot->info.blend.src_rgb = desc->blend.src_rgb;
+    slot->info.blend.dst_rgb = desc->blend.dst_rgb;
+    slot->info.blend.src_alpha = desc->blend.src_alpha;
+    slot->info.blend.dst_alpha = desc->blend.dst_alpha;
+    slot->info.blend.op_rgb = desc->blend.op_rgb;
+    slot->info.blend.op_alpha = desc->blend.op_alpha;
+    slot->info.blend.enabled = desc->blend.enabled;
     slot->info.depth_test = desc->depth_test;
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
     NT_ASSERT(desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
     slot->info.color_mode = desc->color_mode;
+
+    const nt_blend_state_t hash_blend = slot->info.blend.enabled ? slot->info.blend : nt_blend_opaque();
+    slot->info.render_state_hash = nt_hash64(&hash_blend, sizeof(hash_blend)).value;
+    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_test;
+    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_write;
+    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.cull_mode;
+    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */
     slot->info.label = desc->label;

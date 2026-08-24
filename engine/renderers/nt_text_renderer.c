@@ -137,12 +137,6 @@ static void create_pipeline(void) {
             },
     };
 
-    /* Slug shader requires premultiplied alpha blend (ONE, ONE_MINUS_SRC_ALPHA).
-     * Material should be created with NT_BLEND_MODE_ALPHA for correct results. */
-    if (info->blend_mode != NT_BLEND_MODE_ALPHA) {
-        NT_LOG_WARN("text material '%s': expected NT_BLEND_MODE_ALPHA for Slug rendering", info->label ? info->label : "?");
-    }
-
     /* Read render state from material — same pattern as mesh_renderer */
     s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = (nt_shader_t){info->resolved_vs},
@@ -151,9 +145,7 @@ static void create_pipeline(void) {
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
-        .blend = (info->blend_mode == NT_BLEND_MODE_ALPHA),
-        .blend_src = NT_BLEND_ONE,
-        .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .blend = info->blend,
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     });

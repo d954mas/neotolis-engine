@@ -193,6 +193,185 @@ static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, 
     return pip;
 }
 
+static void test_custom_blend_state_reaches_gl_unchanged(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.constant_color[0] = 0.2F;
+    blend.constant_color[1] = 0.3F;
+    blend.constant_color[2] = 0.4F;
+    blend.constant_color[3] = 0.5F;
+    blend.src_rgb = NT_BLEND_CONSTANT_COLOR;
+    blend.dst_rgb = NT_BLEND_ONE_MINUS_DST_COLOR;
+    blend.src_alpha = NT_BLEND_SRC_ALPHA;
+    blend.dst_alpha = NT_BLEND_ONE_MINUS_DST_ALPHA;
+    blend.op_rgb = NT_BLEND_OP_SUBTRACT;
+    blend.op_alpha = NT_BLEND_OP_MAX;
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .blend = blend,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
+    nt_gfx_bind_pipeline(pipeline);
+
+    GLint value = 0;
+    glGetIntegerv(GL_BLEND_SRC_RGB, &value);
+    TEST_ASSERT_EQUAL_INT(GL_CONSTANT_COLOR, value);
+    glGetIntegerv(GL_BLEND_DST_RGB, &value);
+    TEST_ASSERT_EQUAL_INT(GL_ONE_MINUS_DST_COLOR, value);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &value);
+    TEST_ASSERT_EQUAL_INT(GL_SRC_ALPHA, value);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &value);
+    TEST_ASSERT_EQUAL_INT(GL_ONE_MINUS_DST_ALPHA, value);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &value);
+    TEST_ASSERT_EQUAL_INT(GL_FUNC_SUBTRACT, value);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &value);
+    TEST_ASSERT_EQUAL_INT(GL_MAX, value);
+    float constant[4] = {0};
+    glGetFloatv(GL_BLEND_COLOR, constant);
+    TEST_ASSERT_INT_WITHIN(1, 200, (int)(constant[0] * 1000.0F));
+    TEST_ASSERT_INT_WITHIN(1, 300, (int)(constant[1] * 1000.0F));
+    TEST_ASSERT_INT_WITHIN(1, 400, (int)(constant[2] * 1000.0F));
+    TEST_ASSERT_INT_WITHIN(1, 500, (int)(constant[3] * 1000.0F));
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static void test_all_public_blend_enums_reach_gl(void) {
+    static const struct {
+        nt_blend_factor_t factor;
+        GLenum expected;
+    } factor_cases[] = {
+        {NT_BLEND_ZERO, GL_ZERO},
+        {NT_BLEND_ONE, GL_ONE},
+        {NT_BLEND_SRC_COLOR, GL_SRC_COLOR},
+        {NT_BLEND_ONE_MINUS_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR},
+        {NT_BLEND_DST_COLOR, GL_DST_COLOR},
+        {NT_BLEND_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_DST_COLOR},
+        {NT_BLEND_SRC_ALPHA, GL_SRC_ALPHA},
+        {NT_BLEND_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA},
+        {NT_BLEND_DST_ALPHA, GL_DST_ALPHA},
+        {NT_BLEND_ONE_MINUS_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA},
+        {NT_BLEND_CONSTANT_COLOR, GL_CONSTANT_COLOR},
+        {NT_BLEND_ONE_MINUS_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_COLOR},
+        {NT_BLEND_CONSTANT_ALPHA, GL_CONSTANT_ALPHA},
+        {NT_BLEND_ONE_MINUS_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA},
+        {NT_BLEND_SRC_ALPHA_SATURATE, GL_SRC_ALPHA_SATURATE},
+    };
+    static const struct {
+        nt_blend_op_t op;
+        GLenum expected;
+    } op_cases[] = {
+        {NT_BLEND_OP_ADD, GL_FUNC_ADD}, {NT_BLEND_OP_SUBTRACT, GL_FUNC_SUBTRACT}, {NT_BLEND_OP_REVERSE_SUBTRACT, GL_FUNC_REVERSE_SUBTRACT}, {NT_BLEND_OP_MIN, GL_MIN}, {NT_BLEND_OP_MAX, GL_MAX},
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
+    for (size_t i = 0; i < sizeof(factor_cases) / sizeof(factor_cases[0]); i++) {
+        nt_blend_state_t blend = nt_blend_alpha();
+        blend.src_rgb = factor_cases[i].factor;
+        blend.dst_rgb = NT_BLEND_ZERO;
+        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+            .vertex_shader = vs,
+            .fragment_shader = fs,
+            .blend = blend,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+        nt_gfx_bind_pipeline(pipeline);
+        GLint actual = 0;
+        glGetIntegerv(GL_BLEND_SRC_RGB, &actual);
+        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, actual);
+        nt_gfx_destroy_pipeline(pipeline);
+    }
+    for (size_t i = 0; i < sizeof(op_cases) / sizeof(op_cases[0]); i++) {
+        nt_blend_state_t blend = nt_blend_alpha();
+        blend.op_rgb = op_cases[i].op;
+        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+            .vertex_shader = vs,
+            .fragment_shader = fs,
+            .blend = blend,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+        nt_gfx_bind_pipeline(pipeline);
+        GLint actual = 0;
+        glGetIntegerv(GL_BLEND_EQUATION_RGB, &actual);
+        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, actual);
+        nt_gfx_destroy_pipeline(pipeline);
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(void) {
+    static const char *fragment_source = "precision mediump float;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(0.5, 0.25, 0.75, 0.25); }\n";
+    static const float fullscreen_tri[6] = {-1.0F, -1.0F, 3.0F, -1.0F, -1.0F, 3.0F};
+    const nt_vertex_layout_t layout = {
+        .stride = sizeof(float) * 2,
+        .attr_count = 1,
+        .attrs = {{.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT2, .offset = 0}},
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = layout,
+        .blend = nt_blend_multiply(),
+    });
+    nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = fullscreen_tri,
+        .size = sizeof(fullscreen_tri),
+    });
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_NONE,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, vertices.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    uint8_t pixels[4U * 4U * 4U] = {0};
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.2F, 0.4F, 0.8F, 0.6F}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_buffer(vertices);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    assert_rgba(pixels, 16, 26, 26, 153, 153);
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_buffer(vertices);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 /* Hardware comparison filters the 0/1 results, so the shadow edge lands between
    them. The blend weights are implementation-dependent, hence a bounds check
    rather than an exact midpoint. */
@@ -447,6 +626,9 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
+    RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
+    RUN_TEST(test_all_public_blend_enums_reach_gl);
+    RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_depth_buffer_uses_explicit_format);

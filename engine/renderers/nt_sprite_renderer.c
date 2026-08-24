@@ -288,7 +288,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     uint64_t key = nt_sprite_layout_hash(mat_info);
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
-    key = key * 0x9E3779B97F4A7C15ULL + nt_material_state_bits(mat_info);
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
     /* Linear scan for cached entry */
     for (uint16_t i = 0; i < s_sprite.count; i++) {
@@ -309,14 +309,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
     desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = (mat_info->blend_mode == NT_BLEND_MODE_ALPHA);
-    if (desc.blend) {
-        /* Premultiplied-alpha blend: material with NT_BLEND_MODE_ALPHA
-         * pairs with builder-side premultiplication. nt_text_renderer uses the
-         * same (ONE, ONE_MINUS_SRC_ALPHA) recipe. */
-        desc.blend_src = NT_BLEND_ONE;
-        desc.blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA;
-    }
+    desc.blend = mat_info->blend;
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 

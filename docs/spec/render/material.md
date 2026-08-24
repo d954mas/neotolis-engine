@@ -36,7 +36,7 @@ typedef struct MaterialAssetHeader {
     ShaderAssetRef vertex_shader;
     ShaderAssetRef fragment_shader;
 
-    BlendMode blend_mode;
+    nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
     CullMode cull_mode;
@@ -81,6 +81,51 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 
 ## Render state and material
 
-Material stores render state (blend mode, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state + mesh vertex layout at render time.
+Material stores render state (blend state, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state + mesh vertex layout at render time.
+
+`nt_blend_state_t` is the public, backend-neutral fixed-function blend state. It
+contains separate source and destination factors and operations for RGB and
+alpha, plus the constant blend color. Constant color components must be finite
+and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
+core factor and operation sets are public; invalid WebGL combinations assert
+during pipeline creation.
+
+The fragment shader output is the source (`src`); the color already stored in
+the pass target is the destination (`dst`). For each channel, the enabled blend
+state computes:
+
+```text
+result = operation(src * src_factor, dst * dst_factor)
+```
+
+RGB and alpha use their own factors and operations. `MIN` and `MAX` follow the
+graphics API rule and ignore factors. The pass does not reinterpret the state
+based on its target.
+
+Common states are returned by functions, so callers can use a preset directly
+or edit the returned struct before material creation:
+
+| Function | RGB result | Alpha result |
+| --- | --- | --- |
+| `nt_blend_opaque()` | blending disabled | source replaces destination |
+| `nt_blend_alpha()` | `src.rgb * src.a + dst.rgb * (1 - src.a)` | source-over |
+| `nt_blend_alpha_premultiplied()` | `src.rgb + dst.rgb * (1 - src.a)` | source-over |
+| `nt_blend_additive()` | `src.rgb * src.a + dst.rgb` | destination preserved |
+| `nt_blend_additive_premultiplied()` | `src.rgb + dst.rgb` | destination preserved |
+| `nt_blend_subtractive()` | `dst.rgb - src.rgb * src.a` | destination preserved |
+| `nt_blend_subtractive_premultiplied()` | `dst.rgb - src.rgb` | destination preserved |
+| `nt_blend_multiply()` | `dst.rgb * src.rgb` | destination preserved |
+
+Straight and premultiplied presets are separate because the blend unit cannot
+infer how the shader encoded `src.rgb`. A premultiplied shader must output RGB
+already multiplied by source alpha; a straight shader must not. Multiply uses
+RGB as a multiplier instead: white is a no-op and black fully darkens. To shape
+it by coverage, the fragment shader outputs
+`mix(vec3(1.0), tint, coverage)` as RGB.
+
+Blend state is immutable after `nt_material_create`. A game that switches blend
+state creates separate materials sharing the same shader and texture resource
+handles, then selects the required material. Numeric material params remain
+mutable through the existing setters.
 
 Sort order is **not** a material property. Sorting is game-controlled: game code gets entities by tag, sorts them (by material for opaques, by depth for transparents, or any custom order), and submits draw items to the renderer in that order. The renderer draws in submission order and batches consecutive compatible items. See [Sorting Policy](items-sorting-batching.md).

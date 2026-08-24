@@ -174,7 +174,12 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
-    key = key * 0x9E3779B97F4A7C15ULL + nt_material_state_bits(mat_info);
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_count;
+    for (uint8_t i = 0; i < mat_info->attr_map_count; i++) {
+        key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_hashes[i];
+        key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[i];
+    }
 
     /* Linear scan for cached entry */
     for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
@@ -228,11 +233,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
     desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = (mat_info->blend_mode == NT_BLEND_MODE_ALPHA);
-    if (desc.blend) {
-        desc.blend_src = NT_BLEND_SRC_ALPHA;
-        desc.blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA;
-    }
+    desc.blend = mat_info->blend;
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 

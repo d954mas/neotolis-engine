@@ -13,6 +13,9 @@ ShaderAsset defines interface, not values.
 
 ## ShaderAsset fields
 
+> **Status:** `ShaderAsset` is planned. Runtime shaders are currently
+> `NT_ASSET_SHADER_CODE` blobs; materials provide render state explicitly.
+
 ```c
 typedef struct ShaderAsset {
     ShaderCodeRef vs;
@@ -26,7 +29,7 @@ typedef struct ShaderAsset {
     uint16_t object_usage_mask;
     uint16_t global_usage_mask;
 
-    BlendMode default_blend_mode;
+    nt_blend_state_t default_blend;
     bool default_depth_test;
     bool default_depth_write;
     CullMode default_cull_mode;
@@ -53,3 +56,22 @@ Fixed object-level params for v0.1: world_matrix, object_color, object_params0.
 Possible globals: view, proj, view_proj, camera_pos, time, light_dir. Start minimal, expand later.
 
 WebGL 2 Uniform Buffer Objects can be used to share globals efficiently across shaders.
+
+## Fragment output and blending
+
+The fragment shader defines the source color representation; material blend
+state defines how the fixed-function blend unit combines it with the target.
+They form an explicit contract. Straight-alpha shaders pair with straight
+presets, and premultiplied-alpha shaders pair with premultiplied presets. No
+renderer converts between the representations.
+
+Multiply is representation-independent with respect to source alpha because its
+RGB multiplier carries coverage itself. An alpha-shaped darkening shader uses:
+
+```glsl
+vec3 multiplier = mix(vec3(1.0), tint, coverage);
+frag_color = vec4(multiplier, 1.0);
+```
+
+With `nt_blend_multiply()`, white leaves the destination unchanged, black fully
+darkens it, and destination alpha is preserved.

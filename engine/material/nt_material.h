@@ -22,13 +22,6 @@ typedef struct {
 
 #define NT_MATERIAL_INVALID ((nt_material_t){0})
 
-/* ---- Blend mode enum ---- */
-
-typedef enum {
-    NT_BLEND_MODE_OPAQUE = 0,
-    NT_BLEND_MODE_ALPHA,
-} nt_blend_mode_t;
-
 /* ---- Cull mode enum ---- */
 
 typedef enum {
@@ -72,7 +65,7 @@ typedef struct {
     uint8_t attr_map_count;
     nt_material_entity_param_desc_t entity_params[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
-    nt_blend_mode_t blend_mode;
+    nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
@@ -113,21 +106,16 @@ typedef struct {
     uint8_t attr_map_count;
     uint32_t entity_param_hashes[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
-    nt_blend_mode_t blend_mode;
+    nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
     nt_color_mode_t color_mode;
+    uint64_t render_state_hash;
     uint32_t version;
     bool ready;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
-
-/* Pack render-state fields into a single u32 for pipeline-cache key building.
- * Used by sprite/mesh renderers — same layout, single source of truth. */
-static inline uint32_t nt_material_state_bits(const nt_material_info_t *info) {
-    return ((uint32_t)info->blend_mode) | ((uint32_t)info->depth_test << 4) | ((uint32_t)info->depth_write << 5) | ((uint32_t)info->cull_mode << 6) | ((uint32_t)info->color_mode << 8);
-}
 
 /* ---- Lifecycle ---- */
 

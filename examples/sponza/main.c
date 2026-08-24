@@ -311,7 +311,7 @@ static void load_scene_from_manifest(void) {
             mat_desc.attr_map_count = 3;
             mat_desc.params[0] = (nt_material_param_desc_t){.name = "u_alpha_cutoff", .value = {(float)mn->alpha_cutoff_x100 / 100.0F}};
             mat_desc.param_count = 1;
-            mat_desc.blend_mode = NT_BLEND_MODE_OPAQUE;
+            mat_desc.blend = nt_blend_opaque();
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {
             /* Diffuse: diffuse only, 3 streams */

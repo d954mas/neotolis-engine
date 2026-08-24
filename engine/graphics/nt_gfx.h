@@ -125,12 +125,110 @@ typedef enum {
     NT_ATTR_TEXCOORD0 = 3,
 } nt_attr_location_t;
 
-typedef enum {
+typedef uint8_t nt_blend_factor_t;
+enum {
     NT_BLEND_ZERO = 0,
     NT_BLEND_ONE,
+    NT_BLEND_SRC_COLOR,
+    NT_BLEND_ONE_MINUS_SRC_COLOR,
+    NT_BLEND_DST_COLOR,
+    NT_BLEND_ONE_MINUS_DST_COLOR,
     NT_BLEND_SRC_ALPHA,
     NT_BLEND_ONE_MINUS_SRC_ALPHA,
-} nt_blend_factor_t;
+    NT_BLEND_DST_ALPHA,
+    NT_BLEND_ONE_MINUS_DST_ALPHA,
+    NT_BLEND_CONSTANT_COLOR,
+    NT_BLEND_ONE_MINUS_CONSTANT_COLOR,
+    NT_BLEND_CONSTANT_ALPHA,
+    NT_BLEND_ONE_MINUS_CONSTANT_ALPHA,
+    NT_BLEND_SRC_ALPHA_SATURATE,
+};
+
+typedef uint8_t nt_blend_op_t;
+enum {
+    NT_BLEND_OP_ADD = 0,
+    NT_BLEND_OP_SUBTRACT,
+    NT_BLEND_OP_REVERSE_SUBTRACT,
+    NT_BLEND_OP_MIN,
+    NT_BLEND_OP_MAX,
+};
+
+typedef struct {
+    float constant_color[4];
+    nt_blend_factor_t src_rgb;
+    nt_blend_factor_t dst_rgb;
+    nt_blend_factor_t src_alpha;
+    nt_blend_factor_t dst_alpha;
+    nt_blend_op_t op_rgb;
+    nt_blend_op_t op_alpha;
+    bool enabled;
+    uint8_t _reserved;
+} nt_blend_state_t;
+
+_Static_assert(sizeof(nt_blend_state_t) == 24, "nt_blend_state_t layout changed");
+
+/* Presets return ordinary structs; callers may override any field. */
+static inline nt_blend_state_t nt_blend_opaque(void) { return (nt_blend_state_t){0}; }
+
+static inline nt_blend_state_t nt_blend_alpha(void) {
+    return (nt_blend_state_t){
+        .src_rgb = NT_BLEND_SRC_ALPHA,
+        .dst_rgb = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .src_alpha = NT_BLEND_ONE,
+        .dst_alpha = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .op_rgb = NT_BLEND_OP_ADD,
+        .op_alpha = NT_BLEND_OP_ADD,
+        .enabled = true,
+    };
+}
+
+static inline nt_blend_state_t nt_blend_alpha_premultiplied(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.src_rgb = NT_BLEND_ONE;
+    return blend;
+}
+
+static inline nt_blend_state_t nt_blend_additive(void) {
+    return (nt_blend_state_t){
+        .src_rgb = NT_BLEND_SRC_ALPHA,
+        .dst_rgb = NT_BLEND_ONE,
+        .src_alpha = NT_BLEND_ZERO,
+        .dst_alpha = NT_BLEND_ONE,
+        .op_rgb = NT_BLEND_OP_ADD,
+        .op_alpha = NT_BLEND_OP_ADD,
+        .enabled = true,
+    };
+}
+
+static inline nt_blend_state_t nt_blend_additive_premultiplied(void) {
+    nt_blend_state_t blend = nt_blend_additive();
+    blend.src_rgb = NT_BLEND_ONE;
+    return blend;
+}
+
+static inline nt_blend_state_t nt_blend_subtractive(void) {
+    nt_blend_state_t blend = nt_blend_additive();
+    blend.op_rgb = NT_BLEND_OP_REVERSE_SUBTRACT;
+    return blend;
+}
+
+static inline nt_blend_state_t nt_blend_subtractive_premultiplied(void) {
+    nt_blend_state_t blend = nt_blend_additive_premultiplied();
+    blend.op_rgb = NT_BLEND_OP_REVERSE_SUBTRACT;
+    return blend;
+}
+
+static inline nt_blend_state_t nt_blend_multiply(void) {
+    return (nt_blend_state_t){
+        .src_rgb = NT_BLEND_DST_COLOR,
+        .dst_rgb = NT_BLEND_ZERO,
+        .src_alpha = NT_BLEND_ZERO,
+        .dst_alpha = NT_BLEND_ONE,
+        .op_rgb = NT_BLEND_OP_ADD,
+        .op_alpha = NT_BLEND_OP_ADD,
+        .enabled = true,
+    };
+}
 
 typedef enum {
     NT_DEPTH_LESS = 0,
@@ -215,9 +313,7 @@ typedef struct {
     bool depth_write;
     nt_depth_func_t depth_func;
     uint8_t cull_mode; /* 0=none, 1=back, 2=front (matches nt_cull_mode_t) */
-    bool blend;
-    nt_blend_factor_t blend_src;
-    nt_blend_factor_t blend_dst;
+    nt_blend_state_t blend;
     bool polygon_offset;                /* enable GL_POLYGON_OFFSET_FILL */
     float polygon_offset_factor;        /* glPolygonOffset factor (typically 1.0) */
     float polygon_offset_units;         /* glPolygonOffset units (typically 1.0) */

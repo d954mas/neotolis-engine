@@ -285,7 +285,7 @@ static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
 
 /* ---- Helper: create a minimal real material backed by gfx_stub shader handles ---- */
 
-static nt_material_t create_test_material(void) {
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sprite_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "sprite_fs"});
 
@@ -314,6 +314,7 @@ static nt_material_t create_test_material(void) {
     desc.fs = fs_res;
     desc.depth_test = false;
     desc.depth_write = false;
+    desc.blend = blend;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "test_sprite_material";
@@ -322,6 +323,8 @@ static nt_material_t create_test_material(void) {
     nt_material_step();
     return mat;
 }
+
+static nt_material_t create_test_material(void) { return create_test_material_with_blend(nt_blend_opaque()); }
 
 /* ---- Helper: material declaring a custom per-vertex attr_map ----
  *
@@ -512,6 +515,27 @@ void test_sprite_renderer_pipeline_cache(void) {
     /* Re-issuing the same materials must NOT inflate the cache */
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+}
+
+void test_sprite_renderer_forwards_material_blend_state(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.constant_color[1] = 0.5F;
+    blend.src_rgb = NT_BLEND_CONSTANT_COLOR;
+    blend.dst_rgb = NT_BLEND_ONE_MINUS_DST_COLOR;
+    blend.src_alpha = NT_BLEND_SRC_ALPHA_SATURATE;
+    blend.dst_alpha = NT_BLEND_ONE_MINUS_DST_ALPHA;
+    blend.op_rgb = NT_BLEND_OP_SUBTRACT;
+    blend.op_alpha = NT_BLEND_OP_MAX;
+    s_atlas_res = register_test_atlas(0xB1ULL);
+    nt_material_t mat = create_test_material_with_blend(blend);
+    nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH)};
+    nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
+
+    nt_sprite_renderer_draw_list(&item, 1);
+
+    nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
+    TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 }
 
 /* ---- Test: batch grouping by batch_key ----
@@ -1090,6 +1114,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_init_shutdown);
     RUN_TEST(test_sprite_renderer_vertex_size_assert);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
+    RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_batch_key_atlas_change);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
