@@ -111,14 +111,14 @@ typedef struct {
     bool depth_write;
     nt_cull_mode_t cull_mode;
     nt_color_mode_t color_mode;
-    uint64_t state_hash;
+    uint64_t render_state_hash;
     uint32_t version;
     bool ready;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
 /* Canonical render-state hash shared by sprite and mesh pipeline caches. */
-static inline uint64_t nt_material_state_hash(const nt_material_info_t *info) { return info->state_hash; }
+static inline uint64_t nt_material_render_state_hash(const nt_material_info_t *info) { return info->render_state_hash; }
 
 /* ---- Lifecycle ---- */
 
