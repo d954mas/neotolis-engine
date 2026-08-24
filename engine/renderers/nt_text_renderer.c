@@ -112,11 +112,6 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline creation
-static bool is_premultiplied_alpha_blend(const nt_blend_state_t *blend) {
-    return blend->enabled && blend->src_rgb == NT_BLEND_ONE && blend->dst_rgb == NT_BLEND_ONE_MINUS_SRC_ALPHA && blend->src_alpha == NT_BLEND_ONE && blend->dst_alpha == NT_BLEND_ONE_MINUS_SRC_ALPHA &&
-           blend->op_rgb == NT_BLEND_OP_ADD && blend->op_alpha == NT_BLEND_OP_ADD;
-}
-
 static void create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     if (!info || !info->ready) {
@@ -141,10 +136,6 @@ static void create_pipeline(void) {
                 {.location = 5, .format = NT_FORMAT_FLOAT, .offset = 68},  /* a_depth_bias */
             },
     };
-
-    if (!is_premultiplied_alpha_blend(&info->blend)) {
-        NT_LOG_WARN("text material '%s': expected nt_blend_alpha_premultiplied()", info->label ? info->label : "?");
-    }
 
     /* Read render state from material — same pattern as mesh_renderer */
     s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){

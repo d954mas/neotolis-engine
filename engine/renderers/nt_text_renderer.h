@@ -27,7 +27,7 @@ void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* Material must use the slug_text vs/fs, ALPHA blend, cull NONE. u_alpha_cutoff is an opt-in param:
+/* Material must use the slug_text vs/fs, a blend compatible with its premultiplied output, and cull NONE. u_alpha_cutoff is an opt-in param:
  * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard; omit it and
  * the unset uniform reads 0 → no discard (the renderer binds only declared params). Both setters
  * auto-flush staging on change. */

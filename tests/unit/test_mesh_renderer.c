@@ -76,7 +76,12 @@ static nt_mesh_t create_test_mesh(void) {
 
 /* ---- Helper: create a real GFX shader and register it as a resource, then create material ---- */
 
-static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) {
+typedef struct {
+    nt_resource_t vs;
+    nt_resource_t fs;
+} test_shader_resources_t;
+
+static test_shader_resources_t create_test_shader_resources(void) {
     /* Create actual GFX shader handles so pipeline creation validates them */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,
@@ -110,12 +115,17 @@ static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) {
 
     nt_resource_step(); /* resolve virtual packs immediately */
 
+    return (test_shader_resources_t){.vs = vs_res, .fs = fs_res};
+}
+
+static nt_material_t create_test_material_with_attr(test_shader_resources_t shaders, nt_color_mode_t color_mode, const char *stream_name, uint8_t location) {
+
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = vs_res;
-    desc.fs = fs_res;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
+    desc.vs = shaders.vs;
+    desc.fs = shaders.fs;
+    desc.attr_map[0].stream_name = stream_name;
+    desc.attr_map[0].location = location;
     desc.attr_map_count = 1;
     desc.depth_test = true;
     desc.depth_write = true;
@@ -129,6 +139,8 @@ static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) {
 
     return mat;
 }
+
+static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_shader_resources(), color_mode, "position", 0); }
 
 static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
 
@@ -360,6 +372,23 @@ void test_pipeline_cache_different_layouts(void) {
     items[1].sort_key = 1;
     items[1].entity = e1.id;
     items[1].batch_key = nt_batch_key(mat_b.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
+void test_pipeline_cache_different_material_attr_maps(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    test_shader_resources_t shaders = create_test_shader_resources();
+    nt_material_t mat_a = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 0);
+    nt_material_t mat_b = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 1);
+    nt_entity_t e0 = create_test_entity(mesh, mat_a);
+    nt_entity_t e1 = create_test_entity(mesh, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_batch_key(mat_a.id, mesh.id)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_batch_key(mat_b.id, mesh.id)},
+    };
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -642,6 +671,7 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_restore_gpu);
     /* Color mode tests */
     RUN_TEST(test_draw_list_color_mode_float4);
