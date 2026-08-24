@@ -83,7 +83,7 @@ typedef struct {
     bool depth_write;
     GLenum depth_func;
     uint8_t cull_mode;
-    bool blend;
+    bool blend_enabled;
     GLenum blend_src_rgb;
     GLenum blend_dst_rgb;
     GLenum blend_src_alpha;
@@ -861,28 +861,28 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     }
 
     /* Blend */
-    if (s_gl_cache.blend != pip->blend) {
-        if (pip->blend) {
+    if (s_gl_cache.blend != pip->blend_enabled) {
+        if (pip->blend_enabled) {
             glEnable(GL_BLEND);
         } else {
             glDisable(GL_BLEND);
         }
-        s_gl_cache.blend = pip->blend;
+        s_gl_cache.blend = pip->blend_enabled;
     }
-    if (pip->blend && (s_gl_cache.blend_src_rgb != pip->blend_src_rgb || s_gl_cache.blend_dst_rgb != pip->blend_dst_rgb || s_gl_cache.blend_src_alpha != pip->blend_src_alpha ||
-                       s_gl_cache.blend_dst_alpha != pip->blend_dst_alpha)) {
+    if (pip->blend_enabled && (s_gl_cache.blend_src_rgb != pip->blend_src_rgb || s_gl_cache.blend_dst_rgb != pip->blend_dst_rgb || s_gl_cache.blend_src_alpha != pip->blend_src_alpha ||
+                               s_gl_cache.blend_dst_alpha != pip->blend_dst_alpha)) {
         glBlendFuncSeparate(pip->blend_src_rgb, pip->blend_dst_rgb, pip->blend_src_alpha, pip->blend_dst_alpha);
         s_gl_cache.blend_src_rgb = pip->blend_src_rgb;
         s_gl_cache.blend_dst_rgb = pip->blend_dst_rgb;
         s_gl_cache.blend_src_alpha = pip->blend_src_alpha;
         s_gl_cache.blend_dst_alpha = pip->blend_dst_alpha;
     }
-    if (pip->blend && (s_gl_cache.blend_op_rgb != pip->blend_op_rgb || s_gl_cache.blend_op_alpha != pip->blend_op_alpha)) {
+    if (pip->blend_enabled && (s_gl_cache.blend_op_rgb != pip->blend_op_rgb || s_gl_cache.blend_op_alpha != pip->blend_op_alpha)) {
         glBlendEquationSeparate(pip->blend_op_rgb, pip->blend_op_alpha);
         s_gl_cache.blend_op_rgb = pip->blend_op_rgb;
         s_gl_cache.blend_op_alpha = pip->blend_op_alpha;
     }
-    if (pip->blend && !blend_constant_equal(s_gl_cache.blend_constant, pip->blend_constant)) {
+    if (pip->blend_enabled && !blend_constant_equal(s_gl_cache.blend_constant, pip->blend_constant)) {
         glBlendColor(pip->blend_constant[0], pip->blend_constant[1], pip->blend_constant[2], pip->blend_constant[3]);
         memcpy(s_gl_cache.blend_constant, pip->blend_constant, sizeof(pip->blend_constant));
     }
@@ -1087,7 +1087,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->depth_write = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
     pip->cull_mode = desc->cull_mode;
-    pip->blend = desc->blend.enabled;
+    pip->blend_enabled = desc->blend.enabled;
     pip->blend_src_rgb = map_blend_factor(desc->blend.src_rgb);
     pip->blend_dst_rgb = map_blend_factor(desc->blend.dst_rgb);
     pip->blend_src_alpha = map_blend_factor(desc->blend.src_alpha);
