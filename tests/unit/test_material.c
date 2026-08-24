@@ -242,6 +242,36 @@ void test_disabled_blend_uses_canonical_state_hash(void) {
     TEST_ASSERT_EQUAL_UINT64(opaque_info->state_hash, disabled_alpha_info->state_hash);
 }
 
+void test_enabled_blend_changes_state_hash(void) {
+    nt_material_create_desc_t alpha_desc = make_test_desc();
+    nt_material_create_desc_t additive_desc = make_test_desc();
+    alpha_desc.blend = nt_blend_alpha();
+    additive_desc.blend = nt_blend_additive();
+
+    nt_material_t alpha = nt_material_create(&alpha_desc);
+    nt_material_t additive = nt_material_create(&additive_desc);
+    const nt_material_info_t *alpha_info = nt_material_get_info(alpha);
+    const nt_material_info_t *additive_info = nt_material_get_info(additive);
+
+    TEST_ASSERT_NOT_EQUAL_UINT64(alpha_info->state_hash, additive_info->state_hash);
+}
+
+void test_blend_reserved_byte_is_canonicalized(void) {
+    nt_material_create_desc_t clean_desc = make_test_desc();
+    nt_material_create_desc_t dirty_desc = make_test_desc();
+    clean_desc.blend = nt_blend_alpha();
+    dirty_desc.blend = nt_blend_alpha();
+    dirty_desc.blend._reserved = UINT8_MAX;
+
+    nt_material_t clean = nt_material_create(&clean_desc);
+    nt_material_t dirty = nt_material_create(&dirty_desc);
+    const nt_material_info_t *clean_info = nt_material_get_info(clean);
+    const nt_material_info_t *dirty_info = nt_material_get_info(dirty);
+
+    TEST_ASSERT_EQUAL_UINT8(0, dirty_info->blend._reserved);
+    TEST_ASSERT_EQUAL_UINT64(clean_info->state_hash, dirty_info->state_hash);
+}
+
 /* ---- Test 7: attr_map stored correctly ---- */
 
 void test_create_stores_attr_map(void) {
@@ -610,6 +640,8 @@ int main(void) {
     RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
     RUN_TEST(test_disabled_blend_uses_canonical_state_hash);
+    RUN_TEST(test_enabled_blend_changes_state_hash);
+    RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);
     RUN_TEST(test_create_hashes_param_names);

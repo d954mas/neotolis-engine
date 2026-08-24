@@ -35,6 +35,7 @@ static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
 static uint32_t s_stub_last_update_buffer_offset;
 static uint32_t s_stub_last_instance_offset;
+static nt_blend_state_t s_stub_last_pipeline_blend;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_STUB_MAX_SLOTS) {
@@ -68,6 +69,7 @@ void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
 uint32_t nt_gfx_stub_test_last_instance_offset(void) { return s_stub_last_instance_offset; }
+nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void) { return s_stub_last_pipeline_blend; }
 
 void nt_gfx_stub_test_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_STUB_MAX_SLOTS; i++) {
@@ -92,6 +94,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_next_texture_backend = 0;
     s_stub_last_update_buffer_offset = 0;
     s_stub_last_instance_offset = 0;
+    s_stub_last_pipeline_blend = (nt_blend_state_t){0};
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_next_texture_create = false;
@@ -180,7 +183,11 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
 
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
+#ifdef NT_TEST_ACCESS
+    s_stub_last_pipeline_blend = desc->blend;
+#else
     (void)desc;
+#endif
     (void)vs_backend;
     (void)fs_backend;
     return 1;

@@ -304,9 +304,29 @@ void test_gfx_pipeline_rejects_invalid_blend_operation(void) {
     expect_pipeline_blend_assert(blend);
 }
 
-void test_gfx_pipeline_rejects_src_alpha_saturate_outside_source_rgb(void) {
+void test_gfx_pipeline_rejects_invalid_alpha_blend_factors(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.src_alpha = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+
+    blend = nt_blend_alpha();
+    blend.dst_alpha = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_invalid_alpha_blend_operation(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.op_alpha = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_src_alpha_saturate_as_destination_factor(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.dst_rgb = NT_BLEND_SRC_ALPHA_SATURATE;
+    expect_pipeline_blend_assert(blend);
+
+    blend = nt_blend_alpha();
+    blend.dst_alpha = NT_BLEND_SRC_ALPHA_SATURATE;
     expect_pipeline_blend_assert(blend);
 }
 
@@ -1114,7 +1134,9 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
-    RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_outside_source_rgb);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
+    RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_as_destination_factor);
     RUN_TEST(test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors);
     RUN_TEST(test_gfx_pipeline_accepts_constant_color_rgb_with_constant_alpha_source_alpha);
     RUN_TEST(test_gfx_pipeline_accepts_src_alpha_saturate_for_source_alpha);

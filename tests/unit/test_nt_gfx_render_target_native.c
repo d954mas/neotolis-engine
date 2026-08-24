@@ -246,6 +246,76 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
     nt_gfx_destroy_shader(vs);
 }
 
+static void test_all_public_blend_enums_reach_gl(void) {
+    static const struct {
+        nt_blend_factor_t factor;
+        GLenum expected;
+    } factor_cases[] = {
+        {NT_BLEND_ZERO, GL_ZERO},
+        {NT_BLEND_ONE, GL_ONE},
+        {NT_BLEND_SRC_COLOR, GL_SRC_COLOR},
+        {NT_BLEND_ONE_MINUS_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR},
+        {NT_BLEND_DST_COLOR, GL_DST_COLOR},
+        {NT_BLEND_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_DST_COLOR},
+        {NT_BLEND_SRC_ALPHA, GL_SRC_ALPHA},
+        {NT_BLEND_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA},
+        {NT_BLEND_DST_ALPHA, GL_DST_ALPHA},
+        {NT_BLEND_ONE_MINUS_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA},
+        {NT_BLEND_CONSTANT_COLOR, GL_CONSTANT_COLOR},
+        {NT_BLEND_ONE_MINUS_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_COLOR},
+        {NT_BLEND_CONSTANT_ALPHA, GL_CONSTANT_ALPHA},
+        {NT_BLEND_ONE_MINUS_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA},
+        {NT_BLEND_SRC_ALPHA_SATURATE, GL_SRC_ALPHA_SATURATE},
+    };
+    static const struct {
+        nt_blend_op_t op;
+        GLenum expected;
+    } op_cases[] = {
+        {NT_BLEND_OP_ADD, GL_FUNC_ADD}, {NT_BLEND_OP_SUBTRACT, GL_FUNC_SUBTRACT}, {NT_BLEND_OP_REVERSE_SUBTRACT, GL_FUNC_REVERSE_SUBTRACT}, {NT_BLEND_OP_MIN, GL_MIN}, {NT_BLEND_OP_MAX, GL_MAX},
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
+    for (size_t i = 0; i < sizeof(factor_cases) / sizeof(factor_cases[0]); i++) {
+        nt_blend_state_t blend = nt_blend_alpha();
+        blend.src_rgb = factor_cases[i].factor;
+        blend.dst_rgb = NT_BLEND_ZERO;
+        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+            .vertex_shader = vs,
+            .fragment_shader = fs,
+            .blend = blend,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+        nt_gfx_bind_pipeline(pipeline);
+        GLint actual = 0;
+        glGetIntegerv(GL_BLEND_SRC_RGB, &actual);
+        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, actual);
+        nt_gfx_destroy_pipeline(pipeline);
+    }
+    for (size_t i = 0; i < sizeof(op_cases) / sizeof(op_cases[0]); i++) {
+        nt_blend_state_t blend = nt_blend_alpha();
+        blend.op_rgb = op_cases[i].op;
+        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+            .vertex_shader = vs,
+            .fragment_shader = fs,
+            .blend = blend,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+        nt_gfx_bind_pipeline(pipeline);
+        GLint actual = 0;
+        glGetIntegerv(GL_BLEND_EQUATION_RGB, &actual);
+        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, actual);
+        nt_gfx_destroy_pipeline(pipeline);
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(void) {
     static const char *fragment_source = "precision mediump float;\n"
                                          "out vec4 frag_color;\n"
@@ -557,6 +627,7 @@ int main(void) {
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
+    RUN_TEST(test_all_public_blend_enums_reach_gl);
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);

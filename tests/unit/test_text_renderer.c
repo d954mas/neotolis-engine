@@ -8,6 +8,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "nt_font_format.h"
@@ -118,6 +119,28 @@ static nt_font_t s_font;
 static const float s_identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_hash32_t pack_id = nt_hash32_str("text_blend_pack");
+    nt_hash64_t vs_id = nt_hash64_str("text_blend_vs");
+    nt_hash64_t fs_id = nt_hash64_str("text_blend_fs");
+    nt_resource_create_pack(pack_id, 0);
+    nt_resource_register(pack_id, vs_id, NT_ASSET_SHADER_CODE, vs.id);
+    nt_resource_register(pack_id, fs_id, NT_ASSET_SHADER_CODE, fs.id);
+    nt_resource_t vs_res = nt_resource_request(vs_id, NT_ASSET_SHADER_CODE);
+    nt_resource_t fs_res = nt_resource_request(fs_id, NT_ASSET_SHADER_CODE);
+    nt_resource_step();
+    nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = vs_res,
+        .fs = fs_res,
+        .blend = blend,
+        .cull_mode = NT_CULL_NONE,
+    });
+    nt_material_step();
+    return material;
+}
+
 /* ---- Unity setUp / tearDown ---- */
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
@@ -169,6 +192,23 @@ void tearDown(void) {
 void test_utf8_decode_ascii(void) {
     nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(3, nt_text_renderer_test_glyph_count());
+}
+
+void test_text_renderer_forwards_material_blend_state(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.constant_color[2] = 0.75F;
+    blend.src_rgb = NT_BLEND_CONSTANT_COLOR;
+    blend.dst_rgb = NT_BLEND_ONE_MINUS_DST_COLOR;
+    blend.src_alpha = NT_BLEND_SRC_ALPHA_SATURATE;
+    blend.dst_alpha = NT_BLEND_ONE_MINUS_DST_ALPHA;
+    blend.op_rgb = NT_BLEND_OP_SUBTRACT;
+    blend.op_alpha = NT_BLEND_OP_MAX;
+    nt_material_t material = create_test_material_with_blend(blend);
+
+    nt_text_renderer_set_material(material);
+
+    nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
+    TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 }
 
 /* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */
@@ -710,6 +750,7 @@ void test_reset_decoration_fill_only(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_utf8_decode_ascii);
+    RUN_TEST(test_text_renderer_forwards_material_blend_state);
     RUN_TEST(test_utf8_decode_cyrillic);
     RUN_TEST(test_utf8_decode_cjk);
     RUN_TEST(test_measure_returns_nonzero);

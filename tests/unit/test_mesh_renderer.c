@@ -118,7 +118,7 @@ static test_shader_resources_t create_test_shader_resources(void) {
     return (test_shader_resources_t){.vs = vs_res, .fs = fs_res};
 }
 
-static nt_material_t create_test_material_with_attr(test_shader_resources_t shaders, nt_color_mode_t color_mode, const char *stream_name, uint8_t location) {
+static nt_material_t create_test_material_with_attr(test_shader_resources_t shaders, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -129,6 +129,7 @@ static nt_material_t create_test_material_with_attr(test_shader_resources_t shad
     desc.attr_map_count = 1;
     desc.depth_test = true;
     desc.depth_write = true;
+    desc.blend = blend;
     desc.cull_mode = NT_CULL_BACK;
     desc.color_mode = color_mode;
     desc.label = "test_material";
@@ -140,9 +141,11 @@ static nt_material_t create_test_material_with_attr(test_shader_resources_t shad
     return mat;
 }
 
-static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_shader_resources(), color_mode, "position", 0); }
+static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_shader_resources(), color_mode, "position", 0, nt_blend_opaque()); }
 
 static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
+
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_shader_resources(), NT_COLOR_MODE_NONE, "position", 0, blend); }
 
 /* ---- Helper: create a fully-equipped test entity ---- */
 
@@ -250,6 +253,26 @@ void test_draw_list_single_item(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_instance_total());
+}
+
+void test_mesh_renderer_forwards_material_blend_state(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.constant_color[0] = 0.25F;
+    blend.src_rgb = NT_BLEND_CONSTANT_COLOR;
+    blend.dst_rgb = NT_BLEND_ONE_MINUS_DST_COLOR;
+    blend.src_alpha = NT_BLEND_SRC_ALPHA_SATURATE;
+    blend.dst_alpha = NT_BLEND_ONE_MINUS_DST_ALPHA;
+    blend.op_rgb = NT_BLEND_OP_SUBTRACT;
+    blend.op_alpha = NT_BLEND_OP_MAX;
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_with_blend(blend);
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_batch_key(mat.id, mesh.id)};
+
+    nt_mesh_renderer_draw_list(&item, 1);
+
+    nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
+    TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 }
 
 /* ---- Test 4: 3 items with same material+mesh -> 1 draw call, 3 instances ---- */
@@ -381,8 +404,8 @@ void test_pipeline_cache_different_layouts(void) {
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
     test_shader_resources_t shaders = create_test_shader_resources();
-    nt_material_t mat_a = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 0);
-    nt_material_t mat_b = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 1);
+    nt_material_t mat_a = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -666,6 +689,7 @@ int main(void) {
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_draw_list_single_item);
+    RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
