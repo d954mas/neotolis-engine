@@ -606,7 +606,7 @@ int main(void) {
         .fs = s_fs_handle,
         .textures = {{.name = "u_texture", .resource = atlas_tex_handle}},
         .texture_count = 1,
-        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
@@ -619,7 +619,7 @@ int main(void) {
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = slug_vs,
         .fs = slug_fs,
-        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,

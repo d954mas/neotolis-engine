@@ -76,6 +76,68 @@ static nt_material_create_desc_t make_test_desc(void) {
     return d;
 }
 
+static void assert_blend_rgb(nt_blend_state_t blend, nt_blend_factor_t src, nt_blend_factor_t dst, nt_blend_op_t op) {
+    TEST_ASSERT_TRUE(blend.enabled);
+    TEST_ASSERT_EQUAL(src, blend.src_rgb);
+    TEST_ASSERT_EQUAL(dst, blend.dst_rgb);
+    TEST_ASSERT_EQUAL(op, blend.op_rgb);
+}
+
+static void assert_blend_preserves_alpha(nt_blend_state_t blend) {
+    TEST_ASSERT_EQUAL(NT_BLEND_ZERO, blend.src_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE, blend.dst_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_OP_ADD, blend.op_alpha);
+}
+
+static void assert_blend_source_over_alpha(nt_blend_state_t blend) {
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE, blend.src_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_ONE_MINUS_SRC_ALPHA, blend.dst_alpha);
+    TEST_ASSERT_EQUAL(NT_BLEND_OP_ADD, blend.op_alpha);
+}
+
+void test_blend_opaque_disables_blending(void) {
+    nt_blend_state_t blend = nt_blend_opaque();
+    TEST_ASSERT_FALSE(blend.enabled);
+}
+
+void test_blend_alpha_uses_straight_source(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    assert_blend_rgb(blend, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE_MINUS_SRC_ALPHA, NT_BLEND_OP_ADD);
+    assert_blend_source_over_alpha(blend);
+}
+
+void test_blend_alpha_premultiplied_uses_source_as_is(void) {
+    nt_blend_state_t blend = nt_blend_alpha_premultiplied();
+    assert_blend_rgb(blend, NT_BLEND_ONE, NT_BLEND_ONE_MINUS_SRC_ALPHA, NT_BLEND_OP_ADD);
+    assert_blend_source_over_alpha(blend);
+}
+
+void test_blend_additive_presets_preserve_destination_alpha(void) {
+    nt_blend_state_t straight = nt_blend_additive();
+    assert_blend_rgb(straight, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(straight);
+
+    nt_blend_state_t premultiplied = nt_blend_additive_premultiplied();
+    assert_blend_rgb(premultiplied, NT_BLEND_ONE, NT_BLEND_ONE, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(premultiplied);
+}
+
+void test_blend_subtractive_presets_preserve_destination_alpha(void) {
+    nt_blend_state_t straight = nt_blend_subtractive();
+    assert_blend_rgb(straight, NT_BLEND_SRC_ALPHA, NT_BLEND_ONE, NT_BLEND_OP_REVERSE_SUBTRACT);
+    assert_blend_preserves_alpha(straight);
+
+    nt_blend_state_t premultiplied = nt_blend_subtractive_premultiplied();
+    assert_blend_rgb(premultiplied, NT_BLEND_ONE, NT_BLEND_ONE, NT_BLEND_OP_REVERSE_SUBTRACT);
+    assert_blend_preserves_alpha(premultiplied);
+}
+
+void test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha(void) {
+    nt_blend_state_t blend = nt_blend_multiply();
+    assert_blend_rgb(blend, NT_BLEND_DST_COLOR, NT_BLEND_ZERO, NT_BLEND_OP_ADD);
+    assert_blend_preserves_alpha(blend);
+}
+
 /* ---- Test 1: init/shutdown lifecycle ---- */
 
 void test_init_shutdown(void) {
@@ -150,13 +212,18 @@ void test_create_stores_param_values(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_create_stores_render_state(void) {
     nt_material_create_desc_t d = make_test_desc();
+    d.blend = nt_blend_multiply();
+    d.blend.constant_color[0] = 0.25F;
+    d.blend.constant_color[1] = 0.5F;
+    d.blend.constant_color[2] = 0.75F;
+    d.blend.constant_color[3] = 1.0F;
     nt_material_t mat = nt_material_create(&d);
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_TRUE(info->depth_test);
     TEST_ASSERT_TRUE(info->depth_write);
     TEST_ASSERT_EQUAL(NT_CULL_BACK, info->cull_mode);
-    TEST_ASSERT_EQUAL(NT_BLEND_MODE_OPAQUE, info->blend_mode);
+    TEST_ASSERT_EQUAL_MEMORY(&d.blend, &info->blend, sizeof(d.blend));
 }
 
 /* ---- Test 7: attr_map stored correctly ---- */
@@ -519,6 +586,12 @@ int main(void) {
     RUN_TEST(test_create_stores_texture_count);
     RUN_TEST(test_create_stores_param_count);
     RUN_TEST(test_create_stores_param_values);
+    RUN_TEST(test_blend_opaque_disables_blending);
+    RUN_TEST(test_blend_alpha_uses_straight_source);
+    RUN_TEST(test_blend_alpha_premultiplied_uses_source_as_is);
+    RUN_TEST(test_blend_additive_presets_preserve_destination_alpha);
+    RUN_TEST(test_blend_subtractive_presets_preserve_destination_alpha);
+    RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);

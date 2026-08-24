@@ -112,6 +112,11 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline creation
+static bool is_premultiplied_alpha_blend(const nt_blend_state_t *blend) {
+    return blend->enabled && blend->src_rgb == NT_BLEND_ONE && blend->dst_rgb == NT_BLEND_ONE_MINUS_SRC_ALPHA && blend->src_alpha == NT_BLEND_ONE && blend->dst_alpha == NT_BLEND_ONE_MINUS_SRC_ALPHA &&
+           blend->op_rgb == NT_BLEND_OP_ADD && blend->op_alpha == NT_BLEND_OP_ADD;
+}
+
 static void create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     if (!info || !info->ready) {
@@ -137,10 +142,8 @@ static void create_pipeline(void) {
             },
     };
 
-    /* Slug shader requires premultiplied alpha blend (ONE, ONE_MINUS_SRC_ALPHA).
-     * Material should be created with NT_BLEND_MODE_ALPHA for correct results. */
-    if (info->blend_mode != NT_BLEND_MODE_ALPHA) {
-        NT_LOG_WARN("text material '%s': expected NT_BLEND_MODE_ALPHA for Slug rendering", info->label ? info->label : "?");
+    if (!is_premultiplied_alpha_blend(&info->blend)) {
+        NT_LOG_WARN("text material '%s': expected nt_blend_alpha_premultiplied()", info->label ? info->label : "?");
     }
 
     /* Read render state from material — same pattern as mesh_renderer */
@@ -151,9 +154,7 @@ static void create_pipeline(void) {
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
-        .blend = (info->blend_mode == NT_BLEND_MODE_ALPHA),
-        .blend_src = NT_BLEND_ONE,
-        .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .blend = info->blend,
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     });

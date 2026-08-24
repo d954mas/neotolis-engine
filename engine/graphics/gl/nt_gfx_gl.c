@@ -84,8 +84,13 @@ typedef struct {
     GLenum depth_func;
     uint8_t cull_mode;
     bool blend;
-    GLenum blend_src;
-    GLenum blend_dst;
+    GLenum blend_src_rgb;
+    GLenum blend_dst_rgb;
+    GLenum blend_src_alpha;
+    GLenum blend_dst_alpha;
+    GLenum blend_op_rgb;
+    GLenum blend_op_alpha;
+    float blend_constant[4];
     bool polygon_offset;
     float po_factor;
     float po_units;
@@ -171,8 +176,13 @@ static struct {
     GLenum depth_func;
     uint8_t cull_mode;
     bool blend;
-    GLenum blend_src;
-    GLenum blend_dst;
+    GLenum blend_src_rgb;
+    GLenum blend_dst_rgb;
+    GLenum blend_src_alpha;
+    GLenum blend_dst_alpha;
+    GLenum blend_op_rgb;
+    GLenum blend_op_alpha;
+    float blend_constant[4];
     bool polygon_offset;
     float po_factor;
     float po_units;
@@ -204,7 +214,9 @@ static void nt_gfx_gl_cache_reset(void) {
     glDepthFunc(GL_LESS);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ZERO);
+    glBlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+    glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+    glBlendColor(0.0F, 0.0F, 0.0F, 0.0F);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(0.0F, 0.0F);
     glActiveTexture(GL_TEXTURE0);
@@ -216,8 +228,13 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.depth_func = GL_LESS; /* GL default */
     s_gl_cache.cull_mode = 0;
     s_gl_cache.blend = false;
-    s_gl_cache.blend_src = GL_ONE;  /* GL default */
-    s_gl_cache.blend_dst = GL_ZERO; /* GL default */
+    s_gl_cache.blend_src_rgb = GL_ONE;
+    s_gl_cache.blend_dst_rgb = GL_ZERO;
+    s_gl_cache.blend_src_alpha = GL_ONE;
+    s_gl_cache.blend_dst_alpha = GL_ZERO;
+    s_gl_cache.blend_op_rgb = GL_FUNC_ADD;
+    s_gl_cache.blend_op_alpha = GL_FUNC_ADD;
+    memset(s_gl_cache.blend_constant, 0, sizeof(s_gl_cache.blend_constant));
     s_gl_cache.polygon_offset = false;
     s_gl_cache.po_factor = 0.0F;
     s_gl_cache.po_units = 0.0F;
@@ -233,14 +250,55 @@ static GLenum map_blend_factor(nt_blend_factor_t f) {
         return GL_ZERO;
     case NT_BLEND_ONE:
         return GL_ONE;
+    case NT_BLEND_SRC_COLOR:
+        return GL_SRC_COLOR;
+    case NT_BLEND_ONE_MINUS_SRC_COLOR:
+        return GL_ONE_MINUS_SRC_COLOR;
+    case NT_BLEND_DST_COLOR:
+        return GL_DST_COLOR;
+    case NT_BLEND_ONE_MINUS_DST_COLOR:
+        return GL_ONE_MINUS_DST_COLOR;
     case NT_BLEND_SRC_ALPHA:
         return GL_SRC_ALPHA;
     case NT_BLEND_ONE_MINUS_SRC_ALPHA:
         return GL_ONE_MINUS_SRC_ALPHA;
+    case NT_BLEND_DST_ALPHA:
+        return GL_DST_ALPHA;
+    case NT_BLEND_ONE_MINUS_DST_ALPHA:
+        return GL_ONE_MINUS_DST_ALPHA;
+    case NT_BLEND_CONSTANT_COLOR:
+        return GL_CONSTANT_COLOR;
+    case NT_BLEND_ONE_MINUS_CONSTANT_COLOR:
+        return GL_ONE_MINUS_CONSTANT_COLOR;
+    case NT_BLEND_CONSTANT_ALPHA:
+        return GL_CONSTANT_ALPHA;
+    case NT_BLEND_ONE_MINUS_CONSTANT_ALPHA:
+        return GL_ONE_MINUS_CONSTANT_ALPHA;
+    case NT_BLEND_SRC_ALPHA_SATURATE:
+        return GL_SRC_ALPHA_SATURATE;
     default:
         return GL_ONE;
     }
 }
+
+static GLenum map_blend_op(nt_blend_op_t op) {
+    switch (op) {
+    case NT_BLEND_OP_ADD:
+        return GL_FUNC_ADD;
+    case NT_BLEND_OP_SUBTRACT:
+        return GL_FUNC_SUBTRACT;
+    case NT_BLEND_OP_REVERSE_SUBTRACT:
+        return GL_FUNC_REVERSE_SUBTRACT;
+    case NT_BLEND_OP_MIN:
+        return GL_MIN;
+    case NT_BLEND_OP_MAX:
+        return GL_MAX;
+    default:
+        return GL_FUNC_ADD;
+    }
+}
+
+static bool blend_constant_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
 
 static GLenum map_depth_func(nt_depth_func_t f) {
     switch (f) {
@@ -811,10 +869,22 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         }
         s_gl_cache.blend = pip->blend;
     }
-    if (pip->blend && (s_gl_cache.blend_src != pip->blend_src || s_gl_cache.blend_dst != pip->blend_dst)) {
-        glBlendFunc(pip->blend_src, pip->blend_dst);
-        s_gl_cache.blend_src = pip->blend_src;
-        s_gl_cache.blend_dst = pip->blend_dst;
+    if (pip->blend && (s_gl_cache.blend_src_rgb != pip->blend_src_rgb || s_gl_cache.blend_dst_rgb != pip->blend_dst_rgb || s_gl_cache.blend_src_alpha != pip->blend_src_alpha ||
+                       s_gl_cache.blend_dst_alpha != pip->blend_dst_alpha)) {
+        glBlendFuncSeparate(pip->blend_src_rgb, pip->blend_dst_rgb, pip->blend_src_alpha, pip->blend_dst_alpha);
+        s_gl_cache.blend_src_rgb = pip->blend_src_rgb;
+        s_gl_cache.blend_dst_rgb = pip->blend_dst_rgb;
+        s_gl_cache.blend_src_alpha = pip->blend_src_alpha;
+        s_gl_cache.blend_dst_alpha = pip->blend_dst_alpha;
+    }
+    if (pip->blend && (s_gl_cache.blend_op_rgb != pip->blend_op_rgb || s_gl_cache.blend_op_alpha != pip->blend_op_alpha)) {
+        glBlendEquationSeparate(pip->blend_op_rgb, pip->blend_op_alpha);
+        s_gl_cache.blend_op_rgb = pip->blend_op_rgb;
+        s_gl_cache.blend_op_alpha = pip->blend_op_alpha;
+    }
+    if (pip->blend && !blend_constant_equal(s_gl_cache.blend_constant, pip->blend_constant)) {
+        glBlendColor(pip->blend_constant[0], pip->blend_constant[1], pip->blend_constant[2], pip->blend_constant[3]);
+        memcpy(s_gl_cache.blend_constant, pip->blend_constant, sizeof(pip->blend_constant));
     }
 
     /* Polygon offset */
@@ -1017,9 +1087,14 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->depth_write = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
     pip->cull_mode = desc->cull_mode;
-    pip->blend = desc->blend;
-    pip->blend_src = map_blend_factor(desc->blend_src);
-    pip->blend_dst = map_blend_factor(desc->blend_dst);
+    pip->blend = desc->blend.enabled;
+    pip->blend_src_rgb = map_blend_factor(desc->blend.src_rgb);
+    pip->blend_dst_rgb = map_blend_factor(desc->blend.dst_rgb);
+    pip->blend_src_alpha = map_blend_factor(desc->blend.src_alpha);
+    pip->blend_dst_alpha = map_blend_factor(desc->blend.dst_alpha);
+    pip->blend_op_rgb = map_blend_op(desc->blend.op_rgb);
+    pip->blend_op_alpha = map_blend_op(desc->blend.op_alpha);
+    memcpy(pip->blend_constant, desc->blend.constant_color, sizeof(pip->blend_constant));
     pip->polygon_offset = desc->polygon_offset;
     pip->po_factor = desc->polygon_offset_factor;
     pip->po_units = desc->polygon_offset_units;

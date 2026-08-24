@@ -656,6 +656,29 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     return result;
 }
 
+static bool blend_factor_valid(nt_blend_factor_t factor) { return factor <= NT_BLEND_SRC_ALPHA_SATURATE; }
+
+static bool blend_factor_uses_constant_color(nt_blend_factor_t factor) { return factor == NT_BLEND_CONSTANT_COLOR || factor == NT_BLEND_ONE_MINUS_CONSTANT_COLOR; }
+
+static bool blend_factor_uses_constant_alpha(nt_blend_factor_t factor) { return factor == NT_BLEND_CONSTANT_ALPHA || factor == NT_BLEND_ONE_MINUS_CONSTANT_ALPHA; }
+
+static bool blend_state_valid(const nt_blend_state_t *blend) {
+    if (!blend->enabled) {
+        return true;
+    }
+
+    const nt_blend_factor_t factors[] = {blend->src_rgb, blend->dst_rgb, blend->src_alpha, blend->dst_alpha};
+    bool uses_constant_color = false;
+    bool uses_constant_alpha = false;
+    for (uint8_t i = 0; i < 4; i++) {
+        uses_constant_color |= blend_factor_uses_constant_color(factors[i]);
+        uses_constant_alpha |= blend_factor_uses_constant_alpha(factors[i]);
+    }
+    return blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) && blend_factor_valid(blend->dst_alpha) &&
+           blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE && blend->src_alpha != NT_BLEND_SRC_ALPHA_SATURATE &&
+           blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
+}
+
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     nt_pipeline_t result = {0};
     if (!desc) {
@@ -674,6 +697,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
         return result;
     }
+    NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     if (id == 0) {

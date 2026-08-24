@@ -268,6 +268,41 @@ void test_gfx_pipeline_rejects_invalid_shaders(void) {
     TEST_ASSERT_EQUAL_UINT32(0, pip.id);
 }
 
+static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .blend = blend,
+    }));
+}
+
+void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.dst_rgb = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_invalid_blend_operation(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.op_rgb = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_src_alpha_saturate_outside_source_rgb(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.dst_rgb = NT_BLEND_SRC_ALPHA_SATURATE;
+    expect_pipeline_blend_assert(blend);
+}
+
+void test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors(void) {
+    nt_blend_state_t blend = nt_blend_alpha();
+    blend.src_rgb = NT_BLEND_CONSTANT_COLOR;
+    blend.dst_rgb = NT_BLEND_CONSTANT_ALPHA;
+    expect_pipeline_blend_assert(blend);
+}
+
 /* ---- Texture: make with valid data ---- */
 
 void test_gfx_make_texture_valid(void) {
@@ -1048,6 +1083,10 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_shader);
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
+    RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_outside_source_rgb);
+    RUN_TEST(test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors);
     /* Texture tests */
     RUN_TEST(test_gfx_make_texture_valid);
     RUN_TEST(test_gfx_make_texture_requires_explicit_format);
