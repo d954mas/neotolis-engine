@@ -226,6 +226,22 @@ void test_create_stores_render_state(void) {
     TEST_ASSERT_EQUAL_MEMORY(&d.blend, &info->blend, sizeof(d.blend));
 }
 
+void test_disabled_blend_uses_canonical_state_hash(void) {
+    nt_material_create_desc_t opaque_desc = make_test_desc();
+    nt_material_create_desc_t disabled_alpha_desc = make_test_desc();
+    opaque_desc.blend = nt_blend_opaque();
+    disabled_alpha_desc.blend = nt_blend_alpha();
+    disabled_alpha_desc.blend.enabled = false;
+    disabled_alpha_desc.blend.constant_color[0] = 0.5F;
+
+    nt_material_t opaque = nt_material_create(&opaque_desc);
+    nt_material_t disabled_alpha = nt_material_create(&disabled_alpha_desc);
+    const nt_material_info_t *opaque_info = nt_material_get_info(opaque);
+    const nt_material_info_t *disabled_alpha_info = nt_material_get_info(disabled_alpha);
+
+    TEST_ASSERT_EQUAL_UINT64(opaque_info->state_hash, disabled_alpha_info->state_hash);
+}
+
 /* ---- Test 7: attr_map stored correctly ---- */
 
 void test_create_stores_attr_map(void) {
@@ -593,6 +609,7 @@ int main(void) {
     RUN_TEST(test_blend_subtractive_presets_preserve_destination_alpha);
     RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
+    RUN_TEST(test_disabled_blend_uses_canonical_state_hash);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);
     RUN_TEST(test_create_hashes_param_names);
