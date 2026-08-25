@@ -43,9 +43,7 @@ bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
     return false;
 }
 
-/* No-op, not a trap: cleanup must not crash. Unreachable anyway -- only called
-   inside a successfully started transcode session. */
-void nt_basisu_stop_transcoding(void) {}
+void nt_basisu_stop_transcoding(void) { NT_BASISU_STUB_TRAP(); }
 
 bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t output_blocks, nt_basisu_format_t format) {
     (void)basis_data;
