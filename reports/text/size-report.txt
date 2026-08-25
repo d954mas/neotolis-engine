@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: 2f74891
+# Commit: e13f534
 
 ## WASM Section Sizes
 

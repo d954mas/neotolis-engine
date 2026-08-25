@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 2f74891
+# Commit: e13f534
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 190 B
-Code              648690 B
-Data              234465 B
-Custom             37459 B
+Code              648695 B
+Data              234506 B
+Custom             37473 B
 ---------------- ----------
-TOTAL             922591 B
+TOTAL             922651 B
 
 ## Top 30 Functions by Size
 
@@ -25,7 +25,7 @@ TOTAL             922591 B
 --------  ----
 47109 B   nt_gfx_activate_texture
 34486 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-32978 B   frame
+32982 B   frame
 32820 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 25118 B   nt_font_lookup_glyph_offset
 21449 B   basist::astc_ldr_t::grid_weight_dct::decode_block_weights(float, unsigned int, astc_helpers::log_astc_block&, basist::bitwise_decoder*, basist::astc_ldr_t::astc_block_grid_data const*, basist::astc_ldr_t::grid_weight_dct::block_stats*, basisu::vector<float>&, basist::astc_ldr_t::dct_syms const*) const
@@ -55,7 +55,7 @@ TOTAL             922591 B
  5675 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
 
 Total functions: 391
-Total code size: 648008 B
+Total code size: 648013 B
 
 ## Built Engine Archives
 
@@ -68,6 +68,7 @@ libnt_app_stub.a            2620 B
 libnt_atlas.a               6850 B
 libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
+libnt_basisu_transcoder_stub.a    1198 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
@@ -78,8 +79,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                68530 B
-libnt_gfx_stub.a           40112 B
+libnt_gfx.a                68570 B
+libnt_gfx_stub.a           41246 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,9 +114,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5896088 B
+TOTAL (archives)         5898460 B
 
 ## Data Segments Summary
 
-Segments: 234
-Total data size: 232733 B
+Segments: 235
+Total data size: 232768 B
