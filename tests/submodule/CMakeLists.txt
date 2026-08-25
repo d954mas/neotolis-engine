@@ -13,6 +13,7 @@ add_executable(submodule_test main.c)
 nt_set_sanitizer_flags(submodule_test)
 target_link_libraries(submodule_test PRIVATE
     nt_gfx_stub
+    nt_basisu_transcoder_stub
     nt_resource
     nt_entity
     nt_comp_storage

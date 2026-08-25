@@ -22,7 +22,7 @@ target_link_libraries(devapi_host PRIVATE
     # entity.set reaches these via describe()/apply(); only nt_entity is transitive, so list explicitly.
     nt_transform_comp nt_drawable_comp nt_comp_storage nt_entity nt_math
     nt_platform
-    nt_gfx)
+    nt_gfx nt_basisu_transcoder_stub)
 if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).

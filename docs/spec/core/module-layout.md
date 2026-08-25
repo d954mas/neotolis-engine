@@ -1,7 +1,7 @@
 # Module Layout
 
 Directory layout of engine modules and the interface/impl/stub composition model
-for swappable modules (log, input, http, gfx, window, app, fs, clipboard).
+for swappable modules (log, input, http, gfx, basisu, window, app, fs, clipboard).
 Consumers link header-only interface targets; each executable picks exactly one
 impl at link time — omission is a loud link error, enforced by CI scripts.
 Includes stub semantics and runtime capability queries.
@@ -40,6 +40,7 @@ engine/
     window/                 # swappable: nt_window.h + native/ web/ stub/
     app/                    # swappable: nt_app.h + native/ web/ stub/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
+    basisu/                 # swappable: nt_basisu_transcoder.h + stub/ (real impl is a top-level C++ TU)
     postfx/                 # optional fixed helpers over nt_gfx_interface
     ui/
     font/
@@ -86,7 +87,13 @@ Two gates enforce this:
   expected unresolved-symbol error is observed).
 
 Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
-`nt_window`, `nt_app`, `nt_fs`, `nt_clipboard`.
+`nt_basisu_transcoder`, `nt_window`, `nt_app`, `nt_fs`, `nt_clipboard`.
+
+`nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
+Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a
+texture-less executable C-only. The builder (`tools/builder`) and
+`test_basisu_roundtrip` link the real impl directly — they are executables
+picking an impl, not engine modules, so the no-real-impl gate does not apply.
 
 Fixed helper modules may sit above a swappable interface without selecting its
 implementation. `engine/postfx` is optional and currently starts with
@@ -141,10 +148,26 @@ A no-op stub is NOT sufficient when either:
    deletes the selection locally AND stores it remotely; a no-op store turns cut
    into silent DATA LOSS.
 
-For those cases expose a runtime capability query `bool nt_X_available(void)`
-(real → `true`, stub → `false`) and let the caller branch: skip the destructive
-half, or gray out the affordance. `nt_clipboard_available()` is the engine's
-example — the text field makes Ctrl+X a no-op when it returns `false`.
+For those cases there are two remedies; pick by who can act on the absence:
+
+**Runtime capability query** — `bool nt_X_available(void)` (real → `true`,
+stub → `false`), letting the caller branch: skip the destructive half, or gray
+out the affordance. `nt_clipboard_available()` is the engine's example — the
+text field makes Ctrl+X a no-op when it returns `false`. Use this when the
+caller is code with an affordance to disable and "not available" is a
+legitimate composition the game ships with.
+
+**Loud-fail stub** — every entry point asserts (`NT_ASSERT(0 && ...)`) and
+returns its failure value, so under `NT_ASSERT_MODE=OFF` the caller's existing
+error path still runs (log + failed asset), never a silent no-op. Use this when
+hitting the stub is a build-composition BUG, not a state anyone can branch on:
+the caller is a data-driven loop with no affordance to gray out, and the data
+that reaches the stub should never have been shipped with it.
+`nt_basisu_transcoder_stub` is the engine's example — a BASIS-compressed
+texture in a pack while the stub is linked means the build packed basis content
+but did not link the transcoder; the game dev must fix the composition, so the
+stub traps at the first activation. No `nt_basisu_available()` query exists,
+deliberately: offering one would invite masking that bug with a fallback.
 
 Availability is a link-time/runtime fact, so it MUST be a linked symbol
 (function), NEVER a `#define`. A macro is compile-time and per-TU; it cannot

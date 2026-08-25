@@ -8,9 +8,9 @@ target_link_libraries(atlas_demo PRIVATE nt_core nt_app nt_input nt_window nt_ma
 # Generated asset headers from builder (atlas_assets.h etc.)
 target_include_directories(atlas_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)
-    target_link_libraries(atlas_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    target_link_libraries(atlas_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_basisu_transcoder_stub)
 else()
-    target_link_libraries(atlas_demo PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(atlas_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_basisu_transcoder_stub)
 endif()
 
 nt_set_warning_flags(atlas_demo)

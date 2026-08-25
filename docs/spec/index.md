@@ -101,7 +101,7 @@ lifetime, and naming vocabulary.
 | `engine/clipboard` | [core/module-layout.md](core/module-layout.md) (stub semantics example) |
 | `engine/postfx` | [core/module-layout.md](core/module-layout.md) (composition); contract in `nt_postfx_blur.h` |
 | *(`engine/systems` — placeholder dir, no code)* | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) (the game calls systems explicitly) |
-| `engine/basisu`, `engine/fpng` | [builder/builder.md](builder/builder.md) (texture encode), [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (frame capture) |
+| `engine/basisu`, `engine/fpng` | [builder/builder.md](builder/builder.md) (texture encode), [core/module-layout.md](core/module-layout.md) (swappable transcoder), [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (frame capture) |
 | `engine/math`, `engine/color`, `engine/utf8`, `engine/base64` | small utility modules — no dedicated chapter |
 | `shared/include` | binary formats shared by builder + runtime (`nt_*_format.h`) → [assets/ntpack.md](assets/ntpack.md), [assets/runtime-formats.md](assets/runtime-formats.md), [assets/resource.md](assets/resource.md) |
 | `tools/builder` | [builder/builder.md](builder/builder.md) |

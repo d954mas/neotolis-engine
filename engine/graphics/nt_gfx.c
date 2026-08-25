@@ -3,9 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef NT_HAS_BASISU
 #include "basisu/nt_basisu_transcoder.h"
-#endif
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -13,10 +11,8 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
-#ifdef NT_HAS_BASISU
 /* Lazy transcoder initialization (one-time, at first v2 texture activation) */
 static bool s_transcoder_initialized = false;
-#endif
 
 /* ---- Buffer metadata (minimal info kept for runtime validation) ---- */
 
@@ -1671,7 +1667,6 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* ---- Asset activators ---- */
 
 /* BASIS-only: RAW path bakes filter into desc and uses make_texture instead. */
-#ifdef NT_HAS_BASISU
 static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAssetHeaderV2 *hdr) {
     nt_sampler_desc_t sd = {
         .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
@@ -1685,7 +1680,6 @@ static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAsset
     uint32_t slot = nt_pool_slot_index(tex_id);
     s_gfx.texture_metas[slot].default_sampler = s;
 }
-#endif
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1758,10 +1752,6 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-#ifndef NT_HAS_BASISU
-    NT_LOG_ERROR("activate_texture: BASIS compression not available (built without NT_HAS_BASISU)");
-    return 0;
-#else
     /* Lazy transcoder init */
     if (!s_transcoder_initialized) {
         nt_basisu_transcoder_global_init();
@@ -1772,7 +1762,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     uint32_t basis_size = hdr2->data_size;
 
     if (!nt_basisu_validate_header(basis_data, basis_size)) {
-        NT_LOG_ERROR("activate_texture: invalid Basis data");
+        NT_LOG_ERROR("activate_texture: Basis validate failed (bad data or stub transcoder linked)");
         return 0;
     }
 
@@ -1827,7 +1817,6 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     s_gfx.texture_metas[slot].compressed = true;
     texture_attach_default_sampler(id, hdr2);
     return id;
-#endif /* NT_HAS_BASISU */
 }
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {

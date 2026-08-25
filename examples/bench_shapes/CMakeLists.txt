@@ -1,9 +1,9 @@
 add_executable(bench_shapes main.c)
 target_link_libraries(bench_shapes PRIVATE nt_core nt_app nt_input nt_window nt_shape_renderer nt_math nt_log)
 if(EMSCRIPTEN)
-    target_link_libraries(bench_shapes PRIVATE nt_platform_web nt_gfx)
+    target_link_libraries(bench_shapes PRIVATE nt_platform_web nt_gfx nt_basisu_transcoder_stub)
 else()
-    target_link_libraries(bench_shapes PRIVATE nt_gfx)
+    target_link_libraries(bench_shapes PRIVATE nt_gfx nt_basisu_transcoder_stub)
 endif()
 
 # Strict warning and sanitizer policy

@@ -38,9 +38,9 @@ target_include_directories(bunnymark_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/g
 
 if(EMSCRIPTEN)
     # nt_platform (memory probe for metrics mem_used) is distinct from nt_platform_web (window target).
-    target_link_libraries(bunnymark_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs)
+    target_link_libraries(bunnymark_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_basisu_transcoder)
 else()
-    target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_platform)
+    target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_platform nt_basisu_transcoder)
 endif()
 
 nt_set_warning_flags(bunnymark_demo)

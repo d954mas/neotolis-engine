@@ -2,6 +2,10 @@
 # C++ module -- enable_language(CXX) scoped to this subdirectory
 enable_language(CXX)
 
+# Header-only interface carries the C API header; the exe selects the impl
+# (real transcoder or stub) like every other swappable module.
+nt_declare_interface(nt_basisu_transcoder)
+
 # Shared transcoder build config. The builder's encoder compiles the same basisu
 # headers and links this TU, so its defines must match exactly (ODR).
 add_library(nt_basisu_transcoder_config INTERFACE)
@@ -35,6 +39,7 @@ add_library(nt_basisu_transcoder STATIC
 target_include_directories(nt_basisu_transcoder PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_include_directories(nt_basisu_transcoder PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
 target_link_libraries(nt_basisu_transcoder PRIVATE nt_basisu_transcoder_config)
+target_link_libraries(nt_basisu_transcoder PUBLIC nt_basisu_transcoder_interface)
 
 # -fno-strict-aliasing required by Basis transcoder (TEX-10)
 target_compile_options(nt_basisu_transcoder PRIVATE -fno-strict-aliasing)
@@ -54,3 +59,11 @@ set_target_properties(nt_basisu_transcoder PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
 )
+
+# Loud-fail stub: texture-less builds skip the C++ transcoder (and its stdlib
+# on wasm). Pure C so a stub exe stays C-only.
+nt_add_module(nt_basisu_transcoder_stub LOG_DOMAIN "basisu_stub"
+    stub/nt_basisu_stub.c
+    nt_basisu_transcoder.h
+)
+target_link_libraries(nt_basisu_transcoder_stub PUBLIC nt_core nt_basisu_transcoder_interface)

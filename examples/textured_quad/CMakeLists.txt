@@ -8,9 +8,9 @@ target_link_libraries(textured_quad PRIVATE nt_core nt_app nt_input nt_window nt
 # Generated asset headers from builder (tq_assets.h etc.)
 target_include_directories(textured_quad PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)
-    target_link_libraries(textured_quad PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    target_link_libraries(textured_quad PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_basisu_transcoder_stub)
 else()
-    target_link_libraries(textured_quad PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(textured_quad PRIVATE nt_gfx nt_http_stub nt_fs nt_basisu_transcoder_stub)
 endif()
 
 nt_set_warning_flags(textured_quad)

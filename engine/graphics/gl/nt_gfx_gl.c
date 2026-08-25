@@ -8,9 +8,7 @@
  * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
-#ifdef NT_HAS_BASISU
 #include "basisu/nt_basisu_transcoder.h"
-#endif
 #include "core/nt_assert.h"
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
@@ -1463,7 +1461,6 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     }
 }
 
-#ifdef NT_HAS_BASISU
 /* Per-mip transcode + compressed upload (Basis Universal) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
@@ -1581,7 +1578,6 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
     return slot;
 }
-#endif /* NT_HAS_BASISU */
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
