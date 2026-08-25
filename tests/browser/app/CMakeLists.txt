@@ -22,9 +22,9 @@ target_include_directories(browser_smoke PRIVATE "${CMAKE_SOURCE_DIR}/examples/u
 # nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the real impl
 # so Ctrl+C/X/V work in the field. web = async cache-on-paste, native = glfw.
 if(EMSCRIPTEN)
-    target_link_libraries(browser_smoke PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard)
+    target_link_libraries(browser_smoke PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard nt_basisu_transcoder_stub)
 else()
-    target_link_libraries(browser_smoke PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform)
+    target_link_libraries(browser_smoke PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform nt_basisu_transcoder_stub)
 endif()
 
 nt_set_warning_flags(browser_smoke)
