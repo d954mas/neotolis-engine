@@ -37,6 +37,15 @@ static uint32_t s_dec_theirs[MAX_INDICES];
 static uint16_t s_dec16_ours[MAX_INDICES];
 static uint16_t s_dec16_theirs[MAX_INDICES];
 
+static bool all_in_range(const uint32_t *indices, uint32_t count, uint32_t vertex_count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (indices[i] >= vertex_count) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* One full parity pass over s_indices[0..index_count) with the given vertex bound */
 static void check_parity(uint32_t index_count, uint32_t vertex_count) {
     uint32_t bound = nt_meshwire_encode_indices_bound(index_count, vertex_count);
@@ -54,13 +63,13 @@ static void check_parity(uint32_t index_count, uint32_t vertex_count) {
     TEST_ASSERT_EQUAL_MEMORY(s_theirs, s_ours, ours_size);
 
     /* 2. cross-decode agreement, u32 */
-    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, (uint32_t)theirs_size));
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, (uint32_t)theirs_size, vertex_count));
     TEST_ASSERT_EQUAL(0, meshopt_decodeIndexBuffer(s_dec_theirs, index_count, 4, s_ours, ours_size));
     TEST_ASSERT_EQUAL_MEMORY(s_dec_theirs, s_dec_ours, (size_t)index_count * 4);
 
     /* 2b. u16 destination path when indices fit */
     if (vertex_count <= 65535) {
-        TEST_ASSERT_TRUE(nt_meshwire_decode_indices(s_dec16_ours, index_count, 2, s_theirs, (uint32_t)theirs_size));
+        TEST_ASSERT_TRUE(nt_meshwire_decode_indices(s_dec16_ours, index_count, 2, s_theirs, (uint32_t)theirs_size, vertex_count));
         TEST_ASSERT_EQUAL(0, meshopt_decodeIndexBuffer(s_dec16_theirs, index_count, 2, s_ours, ours_size));
         TEST_ASSERT_EQUAL_MEMORY(s_dec16_theirs, s_dec16_ours, (size_t)index_count * 2);
         for (uint32_t i = 0; i < index_count; i++) {
@@ -212,11 +221,13 @@ static void test_corrupt_streams_rejected(void) {
     uint32_t size = nt_meshwire_encode_indices(s_ours, bound, s_indices, index_count);
     TEST_ASSERT_TRUE(size > 0);
 
-    /* truncations: every result must match upstream's accept/reject verdict */
+    /* truncations: our verdict must be upstream's AND the range gate (we are
+     * strictly stricter: upstream has no vertex_count and can accept streams
+     * decoding to out-of-range indices) */
     for (uint32_t cut = 0; cut < size; cut += 7) {
-        bool ours_ok = nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_ours, cut);
+        bool ours_ok = nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_ours, cut, 500);
         bool theirs_ok = meshopt_decodeIndexBuffer(s_dec_theirs, index_count, 4, s_ours, cut) == 0;
-        TEST_ASSERT_EQUAL(theirs_ok, ours_ok);
+        TEST_ASSERT_EQUAL(theirs_ok && all_in_range(s_dec_theirs, index_count, 500), ours_ok);
     }
 
     /* single-byte corruptions: verdicts AND decoded bytes (when accepted) match.
@@ -225,9 +236,9 @@ static void test_corrupt_streams_rejected(void) {
     for (uint32_t pos = 1; pos < size; pos += 3) {
         memcpy(s_theirs, s_ours, size);
         s_theirs[pos] ^= (uint8_t)(1U << (pos % 8));
-        bool ours_ok = nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, size);
+        bool ours_ok = nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, size, 500);
         bool theirs_ok = meshopt_decodeIndexBuffer(s_dec_theirs, index_count, 4, s_theirs, size) == 0;
-        TEST_ASSERT_EQUAL(theirs_ok, ours_ok);
+        TEST_ASSERT_EQUAL(theirs_ok && all_in_range(s_dec_theirs, index_count, 500), ours_ok);
         if (ours_ok) {
             TEST_ASSERT_EQUAL_MEMORY(s_dec_theirs, s_dec_ours, (size_t)index_count * 4);
         }
@@ -236,7 +247,7 @@ static void test_corrupt_streams_rejected(void) {
     /* wrong header / version: ours is v1-only by contract */
     memcpy(s_theirs, s_ours, size);
     s_theirs[0] = 0xE0; /* v0 stream header */
-    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, size));
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(s_dec_ours, index_count, 4, s_theirs, size, 500));
 }
 
 int main(void) {

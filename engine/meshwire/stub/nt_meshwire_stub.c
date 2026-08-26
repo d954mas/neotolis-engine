@@ -8,12 +8,13 @@
    returns route into nt_gfx's activate error path (log + FAILED asset). */
 #define NT_MESHWIRE_STUB_TRAP() NT_ASSERT(0 && "wire-encoded mesh but nt_meshwire_stub linked -- link nt_meshwire")
 
-bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size) {
+bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size, uint32_t vertex_count) {
     (void)dst;
     (void)index_count;
     (void)elem_size;
     (void)src;
     (void)src_size;
+    (void)vertex_count;
     NT_MESHWIRE_STUB_TRAP();
     return false;
 }

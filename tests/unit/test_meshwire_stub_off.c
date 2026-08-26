@@ -12,7 +12,7 @@ static const uint8_t fake_wire[8] = {0xE1, 0x00, 0x00, 0x00};
 static uint8_t out_buf[64];
 
 static void test_stub_off_returns_failure(void) {
-    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(out_buf, 3, 2, fake_wire, sizeof(fake_wire)));
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(out_buf, 3, 2, fake_wire, sizeof(fake_wire), 3));
     uint32_t elem_sizes[1] = {4};
     TEST_ASSERT_FALSE(nt_meshwire_reinterleave(out_buf, fake_wire, 2, elem_sizes, 1));
 }

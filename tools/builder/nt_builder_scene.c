@@ -354,8 +354,11 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             NT_BUILD_ASSERT(index_buf && "scene mesh: index buffer alloc failed");
 
-            size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
-            cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
+            ret = nt_builder_unpack_indices(prim->indices, "scene mesh", index_buf, index_count, index_type);
+            if (ret != NT_BUILD_OK) {
+                free(index_buf);
+                goto cleanup_streams;
+            }
         }
 
         /* Compute tangents if needed */

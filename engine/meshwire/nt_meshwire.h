@@ -16,8 +16,10 @@ extern "C" {
 
 /* Decode a MESHOPT index wire stream into a plain index array.
  * dst: index_count * elem_size bytes, elem_size 2 or 4 (per index_type).
- * Returns false on a malformed stream (dst contents undefined then). */
-bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size);
+ * Every decoded index must be < vertex_count -- a malformed stream that
+ * decodes out-of-range (e.g. from unseeded FIFO slots) is rejected, not
+ * published. Returns false on a malformed stream (dst contents undefined). */
+bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size, uint32_t vertex_count);
 
 /* Re-interleave SOA vertex planes into the interleaved GPU form.
  * src holds one plane per stream in order; plane i element size =

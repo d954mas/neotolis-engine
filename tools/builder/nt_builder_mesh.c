@@ -358,6 +358,32 @@ static void nt_clamp_aabb_to_position_count(const NtStreamLayout *layout, uint32
     }
 }
 
+nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, const char *label, uint8_t *index_buf, uint32_t index_count, uint8_t index_type) {
+    uint32_t *tmp = (uint32_t *)malloc((size_t)index_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(tmp && "index unpack alloc failed");
+    cgltf_size unpacked = cgltf_accessor_unpack_indices(acc, tmp, sizeof(uint32_t), index_count);
+    if (unpacked != index_count) {
+        free(tmp);
+        NT_LOG_ERROR("%s: unpacked %u of %u indices (sparse accessor or missing buffer view)", label, (uint32_t)unpacked, index_count);
+        return NT_BUILD_ERR_FORMAT;
+    }
+    if (index_type == 1) {
+        uint16_t *dst16 = (uint16_t *)index_buf;
+        for (uint32_t i = 0; i < index_count; i++) {
+            if (tmp[i] > 65535U) {
+                NT_LOG_ERROR("%s: index[%u] = %u does not fit uint16 (mesh has <= 65535 vertices)", label, i, tmp[i]);
+                free(tmp);
+                return NT_BUILD_ERR_VALIDATION;
+            }
+            dst16[i] = (uint16_t)tmp[i];
+        }
+    } else {
+        memcpy(index_buf, tmp, (size_t)index_count * sizeof(uint32_t));
+    }
+    free(tmp);
+    return NT_BUILD_OK;
+}
+
 /* --- Wire encode: SOA planes + meshopt index stream (decoded by nt_meshwire) --- */
 
 /* Permutes interleaved vertices into per-stream planes (the pinned SOA plane
@@ -417,7 +443,7 @@ static uint8_t *nt_encode_indices_meshopt(uint8_t *index_buf, uint32_t index_cou
     NT_BUILD_ASSERT(enc_size > 0 && "meshwire index encode failed");
 
     uint32_t idx_elem = (index_type == 1) ? 2U : 4U;
-    bool decode_ok = nt_meshwire_decode_indices(index_buf, index_count, idx_elem, enc, enc_size);
+    bool decode_ok = nt_meshwire_decode_indices(index_buf, index_count, idx_elem, enc, enc_size, vertex_count);
     NT_BUILD_ASSERT(decode_ok && "meshwire decode-back failed -- codec broken");
 
     if (enc_size >= index_data_size) {
@@ -580,8 +606,11 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             NT_BUILD_ASSERT(index_buf && "index buffer alloc failed");
 
-            size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
-            cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
+            ret = nt_builder_unpack_indices(prim->indices, path, index_buf, index_count, index_type);
+            if (ret != NT_BUILD_OK) {
+                free(index_buf);
+                goto cleanup_streams;
+            }
         }
 
         ret = nt_builder_build_mesh_buffer(layout, stream_count, stream_floats, vertex_count, prim, index_buf, index_count, index_type, index_data_size, out_data, out_size);

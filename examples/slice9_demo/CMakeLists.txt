@@ -30,7 +30,7 @@ set_target_properties(slice9_demo PROPERTIES
 
 if(NOT EMSCRIPTEN)
     add_executable(build_slice9_demo_packs build_packs.c)
-    target_link_libraries(build_slice9_demo_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_slice9_demo_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_slice9_demo_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_slice9_demo_packs)
     nt_set_warning_flags(build_slice9_demo_packs)

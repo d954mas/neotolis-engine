@@ -2007,7 +2007,7 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
             NT_LOG_ERROR("activate_mesh: index decode alloc failed (%u bytes)", gpu_index_size);
             return false;
         }
-        if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size)) {
+        if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size, hdr->vertex_count)) {
             NT_LOG_ERROR("activate_mesh: index wire decode failed");
             free(idx_tmp);
             return false;

@@ -2024,6 +2024,85 @@ void test_scene_mesh_narrow_color_vec4_to_vec3(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
+/* Triangle glb whose index accessor is UNSIGNED_INT (5125): cgltf refuses to
+ * narrow u32 -> u16, so the builder must unpack at source width and narrow. */
+static void write_test_glb_indices_u32(const char *path) {
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5125,\"count\":3,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":12}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":48}]"
+                           "}";
+
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+
+    float positions[] = {
+        0.0F, 0.0F, 0.0F, /* v0 */
+        1.0F, 0.0F, 0.0F, /* v1 */
+        0.0F, 1.0F, 0.0F, /* v2 */
+    };
+    uint32_t indices[] = {0, 2, 1};
+
+    uint32_t bin_padded = (uint32_t)sizeof(positions) + (uint32_t)sizeof(indices);
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions, sizeof(positions), 1, f);
+    (void)fwrite(indices, sizeof(indices), 1, f);
+    (void)fclose(f);
+}
+
+void test_mesh_u32_index_accessor_narrows_to_u16(void) {
+    const char *glb_path = TMP_DIR "/idx_u32.glb";
+    write_test_glb_indices_u32(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size));
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(1, hdr->index_type); /* narrowed to u16 (3 vertices) */
+    TEST_ASSERT_EQUAL_UINT32(3, hdr->index_count);
+    /* 1 triangle stays RAW; values must survive the u32 source (were zeroed
+     * before the unpack fix), canonical rotation keeps 0 first */
+    const uint16_t *idx = (const uint16_t *)(data + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + hdr->vertex_data_size);
+    TEST_ASSERT_EQUAL_UINT16(0, idx[0]);
+    TEST_ASSERT_EQUAL_UINT16(2, idx[1]);
+    TEST_ASSERT_EQUAL_UINT16(1, idx[2]);
+
+    free(data);
+}
+
 /* --- Mesh wire round-trip: builder encode -> nt_meshwire decode --- */
 
 /* Rotate a triple so the smallest index leads (winding preserved) */
@@ -2072,7 +2151,7 @@ void test_mesh_wire_roundtrip_cube(void) {
     /* Indices: decode the wire stream, then check the triangle multiset matches
      * the source glTF up to rotation (the codec's canonicalization contract) */
     uint16_t decoded[36];
-    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(decoded, 36, 2, wire_idx, hdr->index_data_size));
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(decoded, 36, 2, wire_idx, hdr->index_data_size, hdr->vertex_count));
 
     cgltf_options options;
     memset(&options, 0, sizeof(options));
@@ -9051,6 +9130,7 @@ int main(void) {
     RUN_TEST(test_layout_accepts_shipped_sponza_layouts);
     RUN_TEST(test_layout_rejects_count_gt_source_components);
     RUN_TEST(test_mesh_narrow_color_vec4_to_vec3);
+    RUN_TEST(test_mesh_u32_index_accessor_narrows_to_u16);
     RUN_TEST(test_mesh_wire_roundtrip_cube);
     RUN_TEST(test_mesh_wire_tiny_mesh_stays_raw);
     RUN_TEST(test_mesh_wire_non_triangle_count_stays_raw);

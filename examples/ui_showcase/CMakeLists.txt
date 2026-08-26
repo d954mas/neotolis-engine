@@ -29,7 +29,7 @@ set_target_properties(ui_showcase PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${UI_SHOW
 
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
-    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_ui_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_ui_showcase_packs)
     nt_set_warning_flags(build_ui_showcase_packs)

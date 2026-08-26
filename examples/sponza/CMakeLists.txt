@@ -23,7 +23,7 @@ set_target_properties(sponza PROPERTIES
 # Pack builder (native only)
 if(NOT EMSCRIPTEN)
     add_executable(build_sponza_packs build_packs.c)
-    target_link_libraries(build_sponza_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_sponza_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_sponza_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_sponza_packs)
     nt_set_warning_flags(build_sponza_packs)

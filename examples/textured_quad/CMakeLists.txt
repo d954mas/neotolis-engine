@@ -23,7 +23,7 @@ set_target_properties(textured_quad PROPERTIES
 # Pack builder (native only)
 if(NOT EMSCRIPTEN)
     add_executable(build_tq_packs build_packs.c)
-    target_link_libraries(build_tq_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_tq_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_tq_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_tq_packs)
     nt_set_warning_flags(build_tq_packs)

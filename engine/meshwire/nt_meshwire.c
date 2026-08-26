@@ -22,9 +22,10 @@ static void nt_mw_write_triangle(void *destination, uint32_t tri, uint32_t index
 }
 
 /* Port of meshopt_decodeIndexBuffer (stream format v1 only -- the builder
- * never writes anything else; a v0 stream is rejected as malformed). */
+ * never writes anything else; a v0 stream is rejected as malformed), plus a
+ * range gate upstream lacks: every decoded index must be < vertex_count. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — mirrors the reference decoder structure 1:1
-bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size) {
+bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size, uint32_t vertex_count) {
     if (dst == NULL || src == NULL || (elem_size != 2 && elem_size != 4) || index_count % 3 != 0) {
         return false;
     }
@@ -93,6 +94,9 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
             nt_mw_push_edge_fifo(edgefifo, c, b, &edgefifooffset);
             nt_mw_push_edge_fifo(edgefifo, a, c, &edgefifooffset);
 
+            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+                return false;
+            }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);
         } else if (codetri < 0xFE) {
             /* fast path: codeaux from the stream-tail table */
@@ -115,6 +119,9 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
             uint32_t fec0 = (fec == 0) ? 1U : 0U;
             next += fec0;
 
+            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+                return false;
+            }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);
 
             nt_mw_push_vertex_fifo(vertexfifo, a, &vertexfifooffset, 1);
@@ -157,6 +164,9 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
                 last = c = nt_mw_decode_index(&data, last);
             }
 
+            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+                return false;
+            }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);
 
             nt_mw_push_vertex_fifo(vertexfifo, a, &vertexfifooffset, 1);

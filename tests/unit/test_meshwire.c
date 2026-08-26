@@ -52,17 +52,26 @@ static void test_reinterleave_rejects_bad_args(void) {
     TEST_ASSERT_FALSE(nt_meshwire_reinterleave(NULL, buf, 2, elem_sizes, 2));
 }
 
+static void test_decode_indices_rejects_out_of_range(void) {
+    /* Structurally valid v1 stream (header + zero codes + zero tail) whose
+     * edge codes hit unseeded FIFO slots (UINT32_MAX): the decoder must
+     * reject it instead of publishing out-of-range indices. */
+    uint8_t wire[1 + 4 + 16] = {0xE1};
+    uint16_t dst[12] = {0};
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 12, 2, wire, sizeof(wire), 100));
+}
+
 static void test_decode_indices_rejects_garbage(void) {
     /* No valid meshopt header byte -- the decoder must fail, not crash */
     const uint8_t garbage[16] = {0x00, 0xFF, 0x13, 0x37};
     uint16_t dst[3] = {0};
-    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 3, 2, garbage, sizeof(garbage)));
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 3, 2, garbage, sizeof(garbage), 3));
 }
 
 static void test_decode_indices_rejects_bad_elem_size(void) {
     const uint8_t wire[4] = {0xE1, 0x00, 0x00, 0x00};
     uint8_t dst[16];
-    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 3, 3, wire, sizeof(wire)));
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 3, 3, wire, sizeof(wire), 3));
 }
 
 int main(void) {
@@ -70,6 +79,7 @@ int main(void) {
     RUN_TEST(test_reinterleave_mixed_elem_sizes);
     RUN_TEST(test_reinterleave_single_stream_is_identity);
     RUN_TEST(test_reinterleave_rejects_bad_args);
+    RUN_TEST(test_decode_indices_rejects_out_of_range);
     RUN_TEST(test_decode_indices_rejects_garbage);
     RUN_TEST(test_decode_indices_rejects_bad_elem_size);
     return UNITY_END();

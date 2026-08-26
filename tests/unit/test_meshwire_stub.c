@@ -12,7 +12,7 @@ void tearDown(void) {}
 static const uint8_t fake_wire[8] = {0xE1, 0x00, 0x00, 0x00};
 static uint8_t out_buf[64];
 
-static void test_stub_decode_indices_asserts(void) { NT_TEST_EXPECT_ASSERT((void)nt_meshwire_decode_indices(out_buf, 3, 2, fake_wire, sizeof(fake_wire))); }
+static void test_stub_decode_indices_asserts(void) { NT_TEST_EXPECT_ASSERT((void)nt_meshwire_decode_indices(out_buf, 3, 2, fake_wire, sizeof(fake_wire), 3)); }
 
 static void test_stub_reinterleave_asserts(void) {
     uint32_t elem_sizes[1] = {4};
