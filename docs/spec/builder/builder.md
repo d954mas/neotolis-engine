@@ -89,6 +89,10 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 
 Builder must check: references between assets, resource types, mesh/material/shader compatibility, required attributes, runtime format generation correctness, audio format validity.
 
+**Mesh stream layouts** (both `add_mesh` and the scene API share one validator): stream count and per-stream component count ranges, valid stream type, `normalized` only on integer types, a required POSITION stream, and the WebGL2 alignment rule — every attribute's byte offset and the vertex stride must be multiples of that attribute's type size. Desktop GL tolerates misaligned layouts, so without this check a bad layout draws in native runs and fails only in the browser; the builder rejects it offline with the offending stream named.
+
+**Component narrowing.** A layout entry may declare `source_components` (default 0): the source accessor must then carry exactly that many components and the leading `count` are packed — e.g. a VEC4 `COLOR_0` narrowed to RGB, or a computed tangent's handedness dropped. Narrowing is declared explicitly so a genuine source/layout width mismatch still fails the build; `count` greater than the source width (widening/padding) is rejected. Computed (MikkTSpace) tangents count as a 4-component source and require their POSITION/NORMAL/UV0 input streams at full width (3/3/2).
+
 ## Asserts vs. graceful content errors
 
 The builder distinguishes two failure classes:
