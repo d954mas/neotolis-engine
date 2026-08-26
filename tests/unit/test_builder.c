@@ -608,7 +608,7 @@ void test_mesh_round_trip(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/mesh_rt.ntpack";
@@ -650,7 +650,7 @@ void test_missing_position_attribute_errors(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/no_pos.ntpack";
@@ -861,7 +861,7 @@ void test_dump_gzip_sizes(void) {
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/dump_gz_test.ntpack";
@@ -940,7 +940,7 @@ void test_multi_asset_pack(void) {
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/multi_test.ntpack";
@@ -1067,8 +1067,8 @@ void test_glob_shaders(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_e2e_real_assets(void) {
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/e2e.ntpack";
@@ -1372,6 +1372,80 @@ static void write_test_glb_with_node(const char *path) {
     (void)fclose(f);
 }
 
+/* --- Write a glb with POSITION/NORMAL/TEXCOORD_0 + VEC4 COLOR_0 (narrowing tests) --- */
+
+static void write_test_glb_color4(const char *path) {
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"scene\":0,"
+                           "\"scenes\":[{\"nodes\":[0]}],"
+                           "\"nodes\":[{\"mesh\":0,\"name\":\"RichTri\"}],"
+                           "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"COLOR_0\":3},\"indices\":4}]}],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+                           "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
+                           "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},"
+                           "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":24},"
+                           "{\"buffer\":0,\"byteOffset\":96,\"byteLength\":48},"
+                           "{\"buffer\":0,\"byteOffset\":144,\"byteLength\":6}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":152}]"
+                           "}";
+
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    float normals[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
+    float uvs[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
+    float colors[] = {1.0F, 0.5F, 0.25F, 0.75F, 0.0F, 1.0F, 0.0F, 1.0F, 0.25F, 0.25F, 1.0F, 0.0F};
+    uint16_t indices[] = {0, 1, 2};
+    uint16_t idx_pad = 0;
+
+    uint32_t bin_data_size = (uint32_t)(sizeof(positions) + sizeof(normals) + sizeof(uvs) + sizeof(colors) + sizeof(indices) + sizeof(idx_pad));
+    uint32_t bin_padded = (bin_data_size + 3U) & ~3U;
+
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions, sizeof(positions), 1, f);
+    (void)fwrite(normals, sizeof(normals), 1, f);
+    (void)fwrite(uvs, sizeof(uvs), 1, f);
+    (void)fwrite(colors, sizeof(colors), 1, f);
+    (void)fwrite(indices, sizeof(indices), 1, f);
+    (void)fwrite(&idx_pad, sizeof(idx_pad), 1, f);
+
+    (void)fclose(f);
+}
+
 /* --- glb scene parse test --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1416,7 +1490,7 @@ void test_scene_mesh_rejects_missing_position(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
 
     NtStreamLayout layout[] = {
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
@@ -1435,7 +1509,7 @@ void test_scene_mesh_rejects_count_out_of_range(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 5, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 5, false, 0},
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
@@ -1455,8 +1529,8 @@ void test_scene_mesh_computed_tangent_requires_count4(void) {
 
     /* MikkTSpace writes 4 floats per vertex; a 3-count layout would scramble the interleave */
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 3, false, 0},
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
@@ -1472,9 +1546,9 @@ void test_scene_mesh_computed_tangent_requires_count4(void) {
 void test_layout_rejects_misaligned_offset(void) {
     /* u8x3 color puts the following f32 uv at offset 15 -- WebGL2 INVALID_OPERATION at vertexAttribPointer */
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
 }
@@ -1482,8 +1556,8 @@ void test_layout_rejects_misaligned_offset(void) {
 void test_layout_rejects_misaligned_stride(void) {
     /* Last stream u8x3 makes stride 15 -- not a multiple of the f32 position's type size */
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true, 0},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 2));
 }
@@ -1491,10 +1565,10 @@ void test_layout_rejects_misaligned_stride(void) {
 void test_layout_accepts_aligned_16_byte_packing(void) {
     /* The compact packing this feature exists for: 6 + 3 + 3 + 4 = 16 bytes, every offset aligned */
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
-        {"normal", "NORMAL", NT_STREAM_INT8, 3, true},
-        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_INT8, 3, true, 0},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout, 4));
 }
@@ -1502,25 +1576,166 @@ void test_layout_accepts_aligned_16_byte_packing(void) {
 void test_layout_accepts_shipped_sponza_layouts(void) {
     /* Regression guard: the flagship example's three layouts must keep validating */
     NtStreamLayout layout_full[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
     };
     NtStreamLayout layout_diffuse[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
     };
     NtStreamLayout layout_base[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
-        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true, 0},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_full, 4));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_diffuse, 3));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_base, 4));
+}
+
+/* --- Component narrowing (source_components) --- */
+
+void test_layout_rejects_count_gt_source_components(void) {
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 3, false, 2},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 2));
+}
+
+void test_mesh_narrow_color_vec4_to_vec3(void) {
+    const char *glb_path = TMP_DIR "/narrow_c4.glb";
+    write_test_glb_color4(glb_path);
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 3, false, 4},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(2, hdr->stream_count);
+    TEST_ASSERT_EQUAL_UINT32(3, hdr->vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(3U * 24U, hdr->vertex_data_size); /* (3 + 3) floats per vertex */
+
+    const NtStreamDesc *descs = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    TEST_ASSERT_EQUAL_UINT8(3, descs[1].count); /* narrowed in the pack */
+
+    /* Leading RGB of each VEC4 color survives, alpha dropped */
+    const float expected[] = {
+        0.0F, 0.0F, 0.0F, 1.0F,  0.5F,  0.25F, /* v0 */
+        1.0F, 0.0F, 0.0F, 0.0F,  1.0F,  0.0F,  /* v1 */
+        0.0F, 1.0F, 0.0F, 0.25F, 0.25F, 1.0F   /* v2 */
+    };
+    const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
+    TEST_ASSERT_EQUAL_MEMORY(expected, verts, sizeof(expected));
+
+    free(data);
+}
+
+void test_mesh_narrow_requires_declaration(void) {
+    const char *glb_path = TMP_DIR "/narrow_nodecl.glb";
+    write_test_glb_color4(glb_path);
+
+    /* count 3 vs VEC4 source without source_components stays an error */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+}
+
+void test_mesh_narrow_rejects_source_mismatch(void) {
+    const char *glb_path = TMP_DIR "/narrow_srcmm.glb";
+    write_test_glb_color4(glb_path);
+
+    /* Declared source width must match the accessor exactly (asset drift stays caught) */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 3, false, 3},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+}
+
+void test_mesh_narrow_u8_16_byte_packing(void) {
+    const char *glb_path = TMP_DIR "/narrow_16b.glb";
+    write_test_glb_color4(glb_path);
+
+    /* The compact packing #344 exists for: 6 + 3 + 3 + 4 = 16 bytes per vertex */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_INT8, 3, true, 0},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true, 4},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 4, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT32(3U * 16U, hdr->vertex_data_size);
+
+    /* Vertex 0: normal (0,0,1) snorm8 at offset 6, color (1.0,0.5,0.25,drop) unorm8 at offset 9 */
+    const uint8_t *v0 = data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc));
+    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[6]);
+    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[7]);
+    TEST_ASSERT_EQUAL_INT8(127, (int8_t)v0[8]);
+    TEST_ASSERT_EQUAL_UINT8(255, v0[9]);
+    TEST_ASSERT_EQUAL_UINT8(128, v0[10]);
+    TEST_ASSERT_EQUAL_UINT8(64, v0[11]);
+
+    free(data);
+}
+
+void test_scene_mesh_computed_tangent_narrow_declared(void) {
+    const char *glb_path = TMP_DIR "/narrow_tan.glb";
+    write_test_glb_color4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    /* Dropping computed handedness is allowed when declared as source_components=4 */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 3, false, 4},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 4, NT_TANGENT_COMPUTE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT32(3U * 44U, hdr->vertex_data_size); /* (3+3+2+3) floats per vertex */
+    const NtStreamDesc *descs = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    TEST_ASSERT_EQUAL_UINT8(3, descs[3].count);
+
+    /* UVs align with the XY plane, so MikkTSpace's tangent is (1,0,0); w was dropped */
+    const float *v0 = (const float *)(data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc)));
+    const float *tan0 = v0 + 8;
+    TEST_ASSERT_TRUE(tan0[0] > 0.99F && tan0[0] < 1.01F);
+    TEST_ASSERT_TRUE(tan0[1] > -0.01F && tan0[1] < 0.01F);
+    TEST_ASSERT_TRUE(tan0[2] > -0.01F && tan0[2] < 0.01F);
+
+    free(data);
+    nt_builder_free_glb_scene(&scene);
 }
 
 /* --- Helper: read shader source from a single-shader pack --- */
@@ -1909,7 +2124,7 @@ void test_add_mesh_by_name(void) {
     const char *glb_path = TMP_DIR "/multi_mesh.glb";
     write_test_multi_mesh_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/by_name.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -1950,7 +2165,7 @@ void test_add_mesh_by_index(void) {
     const char *glb_path = TMP_DIR "/multi_mesh_idx.glb";
     write_test_multi_mesh_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/by_index.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -1982,7 +2197,7 @@ void test_add_mesh_single_unchanged(void) {
     const char *glb_path = TMP_DIR "/single_unch.glb";
     write_test_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/single_unch.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -2012,7 +2227,7 @@ void test_add_mesh_by_name_not_found(void) {
     const char *glb_path = TMP_DIR "/multi_mesh_nf.glb";
     write_test_multi_mesh_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/name_nf.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -2026,7 +2241,7 @@ void test_add_mesh_by_index_out_of_range(void) {
     const char *glb_path = TMP_DIR "/multi_mesh_oor.glb";
     write_test_multi_mesh_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/index_oor.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -2040,7 +2255,7 @@ void test_add_mesh_resource_name_override(void) {
     const char *glb_path = TMP_DIR "/multi_mesh_rn.glb";
     write_test_multi_mesh_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     const char *pack_path = TMP_DIR "/res_name.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -2105,7 +2320,7 @@ void test_codegen_generates_header(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
     nt_builder_add_mesh(ctx, glb_path, &opts);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
@@ -2140,7 +2355,7 @@ void test_codegen_hash_matches_runtime(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
     nt_builder_add_mesh(ctx, glb_path, &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -2178,7 +2393,7 @@ void test_codegen_path_to_identifier(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
     nt_builder_add_mesh(ctx, glb_path, &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -2205,7 +2420,7 @@ void test_codegen_renamed_assets(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
     nt_builder_add_mesh(ctx, glb_path, &opts);
     nt_builder_rename(ctx, glb_path, "meshes/my_cube");
@@ -2243,7 +2458,7 @@ void test_merge_combined_header(void) {
     /* Pack 1: mesh */
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_pack1.ntpack");
     nt_builder_set_header_dir(ctx, TMP_DIR "/merge_hdr");
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -2276,7 +2491,7 @@ void test_merge_dedup(void) {
 
     MKDIR(TMP_DIR "/merge_dedup_hdr");
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     /* Two packs with the same mesh (same path = same hash, each in its own context) */
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_dup1.ntpack");
@@ -2349,7 +2564,7 @@ void test_builder_mesh_has_aabb(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
 
     const char *pack_path = TMP_DIR "/aabb_mesh.ntpack";
@@ -2755,7 +2970,7 @@ void test_dedup_cross_source_mesh_file_vs_scene(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
     nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 1, .tangent_mode = NT_TANGENT_NONE};
 
@@ -3393,7 +3608,7 @@ void test_parallel_deterministic(void) {
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     /* Build 1: single-threaded via set_threads(1) */
     {
@@ -3444,7 +3659,7 @@ void test_parallel_basic(void) {
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     nt_builder_set_threads(ctx, 4);
@@ -3515,7 +3730,7 @@ void test_parallel_with_cache(void) {
     write_test_png(png_path);
     write_test_glb(glb_path);
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     /* Build 1: populates cache */
     {
@@ -3565,7 +3780,7 @@ void test_parallel_with_dedup(void) {
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
-    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
 
     /* Same assets added twice (will early-dedup) + other assets (will encode) */
     for (int pass = 0; pass < 2; pass++) {
@@ -8347,6 +8562,12 @@ int main(void) {
     RUN_TEST(test_layout_rejects_misaligned_stride);
     RUN_TEST(test_layout_accepts_aligned_16_byte_packing);
     RUN_TEST(test_layout_accepts_shipped_sponza_layouts);
+    RUN_TEST(test_layout_rejects_count_gt_source_components);
+    RUN_TEST(test_mesh_narrow_color_vec4_to_vec3);
+    RUN_TEST(test_mesh_narrow_requires_declaration);
+    RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
+    RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
+    RUN_TEST(test_scene_mesh_computed_tangent_narrow_declared);
 
     /* Include resolver */
     RUN_TEST(test_include_basic);

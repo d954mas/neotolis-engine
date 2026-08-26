@@ -270,6 +270,19 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
                                          uint8_t **out_data, uint32_t *out_size);
 /* Shared stream-layout validation for both mesh decode paths. `label` prefixes log messages. */
 nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
+
+/* Compact a stream unpacked at src_components floats/vertex down to the leading count.
+ * Forward copy is safe in place: every write index precedes its read index. */
+static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_count, uint32_t src_components, uint32_t count) {
+    if (src_components == count) {
+        return;
+    }
+    for (uint32_t v = 0; v < vertex_count; v++) {
+        for (uint32_t c = 0; c < count; c++) {
+            data[((size_t)v * count) + c] = data[((size_t)v * src_components) + c];
+        }
+    }
+}
 nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
 

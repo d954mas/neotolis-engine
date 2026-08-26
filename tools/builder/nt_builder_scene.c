@@ -240,10 +240,18 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         }
     }
 
-    /* MikkTSpace emits 4 floats per vertex; interleave indexes by layout count -- any other count scrambles data. */
-    if (need_compute_tangent && layout[tangent_stream_idx].count != 4) {
-        NT_LOG_ERROR("mesh[%u] prim[%u]: computed TANGENT requires count 4, layout declares %u", mesh_index, primitive_index, (uint32_t)layout[tangent_stream_idx].count);
-        return NT_BUILD_ERR_VALIDATION;
+    /* MikkTSpace emits 4 floats per vertex; interleave indexes by layout count -- any other count scrambles data.
+     * Narrowing a computed tangent must be declared as source_components=4, like any other 4-component source. */
+    if (need_compute_tangent) {
+        uint8_t tan_src = layout[tangent_stream_idx].source_components;
+        if (tan_src != 0 && tan_src != 4) {
+            NT_LOG_ERROR("mesh[%u] prim[%u]: computed TANGENT has 4 source components, source_components must be 0 or 4 (got %u)", mesh_index, primitive_index, (uint32_t)tan_src);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+        if (tan_src == 0 && layout[tangent_stream_idx].count != 4) {
+            NT_LOG_ERROR("mesh[%u] prim[%u]: computed TANGENT requires count 4, layout declares %u", mesh_index, primitive_index, (uint32_t)layout[tangent_stream_idx].count);
+            return NT_BUILD_ERR_VALIDATION;
+        }
     }
 
     /* Extract vertex streams */
@@ -274,9 +282,10 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         }
 
         uint32_t acc_components = (uint32_t)cgltf_num_components(acc->type);
-        if (acc_components != layout[s].count) {
+        uint32_t src_components = (layout[s].source_components != 0) ? layout[s].source_components : layout[s].count;
+        if (acc_components != src_components) {
             NT_LOG_ERROR("mesh[%u] prim[%u]: attribute %s has %u components, layout expects %u", mesh_index, primitive_index, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components,
-                         (uint32_t)layout[s].count);
+                         src_components);
             ret = NT_BUILD_ERR_VALIDATION;
             goto cleanup_streams;
         }
@@ -290,7 +299,8 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             goto cleanup_streams;
         }
 
-        cgltf_size float_count = (cgltf_size)count * (cgltf_size)layout[s].count;
+        /* cgltf can only unpack whole source-width elements; narrow by compacting after */
+        cgltf_size float_count = (cgltf_size)count * (cgltf_size)src_components;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
         NT_BUILD_ASSERT(stream_floats[s] && "scene mesh: float buffer alloc failed");
 
@@ -299,6 +309,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             ret = NT_BUILD_ERR_FORMAT;
             goto cleanup_streams;
         }
+        nt_builder_narrow_stream_floats(stream_floats[s], count, src_components, layout[s].count);
     }
 
     if (!vertex_count_set || vertex_count == 0) {
@@ -348,23 +359,36 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             float *pos_data = NULL;
             float *norm_data = NULL;
             float *uv_data = NULL;
+            uint8_t pos_count = 0;
+            uint8_t norm_count = 0;
+            uint8_t uv_count = 0;
 
             for (uint32_t s = 0; s < stream_count; s++) {
                 if (layout[s].gltf_name != NULL) {
                     if (strcmp(layout[s].gltf_name, "POSITION") == 0) {
                         pos_data = stream_floats[s];
+                        pos_count = layout[s].count;
                     }
                     if (strcmp(layout[s].gltf_name, "NORMAL") == 0) {
                         norm_data = stream_floats[s];
+                        norm_count = layout[s].count;
                     }
                     if (strcmp(layout[s].gltf_name, "TEXCOORD_0") == 0) {
                         uv_data = stream_floats[s];
+                        uv_count = layout[s].count;
                     }
                 }
             }
 
             if (!pos_data || !norm_data || !uv_data) {
                 NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION, NORMAL, TEXCOORD_0", mesh_index, primitive_index);
+                free(index_buf);
+                ret = NT_BUILD_ERR_VALIDATION;
+                goto cleanup_streams;
+            }
+            /* MikkTSpace reads fixed float[3]/float[3]/float[2] strides -- a narrowed input stream would shift every vertex */
+            if (pos_count != 3 || norm_count != 3 || uv_count != 2) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION/NORMAL count 3 and TEXCOORD_0 count 2", mesh_index, primitive_index);
                 free(index_buf);
                 ret = NT_BUILD_ERR_VALIDATION;
                 goto cleanup_streams;
@@ -403,6 +427,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                 free(index_buf);
                 goto cleanup_streams;
             }
+            nt_builder_narrow_stream_floats(stream_floats[tangent_stream_idx], vertex_count, 4, layout[tangent_stream_idx].count);
         }
 
         /* Handle TANGENT_NONE: fill with zero */

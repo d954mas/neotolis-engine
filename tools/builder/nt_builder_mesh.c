@@ -9,6 +9,31 @@
 
 static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
 
+static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s, const NtStreamLayout *st) {
+    const char *name = st->engine_name ? st->engine_name : "(null)";
+    if (st->count < 1 || st->count > 4) {
+        NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, st->count);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (nt_stream_type_size((uint8_t)st->type) == 0) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, name, (int)st->type);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (st->source_components > 4) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': source_components %u out of range [0, 4]", label, s, name, (uint32_t)st->source_components);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (st->source_components != 0 && st->count > st->source_components) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': count %u exceeds source_components %u (widening is not supported)", label, s, name, (uint32_t)st->count, (uint32_t)st->source_components);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (st->normalized && (st->type == NT_STREAM_FLOAT32 || st->type == NT_STREAM_FLOAT16)) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, name);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    return NT_BUILD_OK;
+}
+
 nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtStreamLayout *layout, uint32_t stream_count) {
     if (stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
         NT_LOG_ERROR("%s: stream_count %u out of range [1, %d]", label, stream_count, NT_MESH_MAX_STREAMS);
@@ -17,16 +42,7 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
 
     bool has_position = false;
     for (uint32_t s = 0; s < stream_count; s++) {
-        if (layout[s].count < 1 || layout[s].count > 4) {
-            NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, layout[s].count);
-            return NT_BUILD_ERR_VALIDATION;
-        }
-        if (nt_stream_type_size((uint8_t)layout[s].type) == 0) {
-            NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, layout[s].engine_name ? layout[s].engine_name : "(null)", (int)layout[s].type);
-            return NT_BUILD_ERR_VALIDATION;
-        }
-        if (layout[s].normalized && (layout[s].type == NT_STREAM_FLOAT32 || layout[s].type == NT_STREAM_FLOAT16)) {
-            NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, layout[s].engine_name ? layout[s].engine_name : "(null)");
+        if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
@@ -231,8 +247,9 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
         }
 
         uint32_t acc_components = (uint32_t)cgltf_num_components(acc->type);
-        if (acc_components != layout[s].count) {
-            NT_LOG_ERROR("%s: attribute %s has %u components, layout expects %u", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components, (uint32_t)layout[s].count);
+        uint32_t src_components = (layout[s].source_components != 0) ? layout[s].source_components : layout[s].count;
+        if (acc_components != src_components) {
+            NT_LOG_ERROR("%s: attribute %s has %u components, layout expects %u", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components, src_components);
             return NT_BUILD_ERR_VALIDATION;
         }
 
@@ -245,7 +262,8 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
             return NT_BUILD_ERR_VALIDATION;
         }
 
-        cgltf_size float_count = (cgltf_size)vertex_count * (cgltf_size)layout[s].count;
+        /* cgltf can only unpack whole source-width elements; narrow by compacting after */
+        cgltf_size float_count = (cgltf_size)vertex_count * (cgltf_size)src_components;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
         NT_BUILD_ASSERT(stream_floats[s] && "failed to allocate float buffer for vertex stream");
 
@@ -254,6 +272,7 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
             NT_LOG_ERROR("%s: failed to unpack floats for %s", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
             return NT_BUILD_ERR_FORMAT;
         }
+        nt_builder_narrow_stream_floats(stream_floats[s], vertex_count, src_components, layout[s].count);
     }
 
     if (!vertex_count_set) {

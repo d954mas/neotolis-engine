@@ -103,11 +103,17 @@ typedef struct {
 
 /* Explicit stream layout -- game declares which glTF attributes to extract */
 typedef struct {
-    const char *engine_name; /* e.g. "position", "uv0" */
-    const char *gltf_name;   /* e.g. "POSITION", "TEXCOORD_0" */
-    nt_stream_type_t type;   /* target type in output (may differ from glTF) */
-    uint8_t count;           /* components per vertex (1-4) */
-    bool normalized;         /* true = normalize to [0,1] or [-1,1] in runtime */
+    const char *engine_name;   /* e.g. "position", "uv0" */
+    const char *gltf_name;     /* e.g. "POSITION", "TEXCOORD_0" */
+    nt_stream_type_t type;     /* target type in output (may differ from glTF) */
+    uint8_t count;             /* components per vertex in the pack (1-4) */
+    bool normalized;           /* true = normalize to [0,1] or [-1,1] in runtime */
+    uint8_t source_components; /* 0 = source must have exactly `count` components (default).
+                                * 1-4 = source must have exactly this many; the leading `count`
+                                * are packed, the rest dropped (e.g. VEC4 COLOR_0 -> RGB).
+                                * Narrowing is declared explicitly so a genuine source/layout
+                                * mismatch still fails the build. `count` may not exceed it.
+                                * Computed (MikkTSpace) tangents have 4 source components. */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */
