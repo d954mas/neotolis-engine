@@ -7,6 +7,7 @@
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
+#include "meshwire/nt_meshwire.h"
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
@@ -1935,6 +1936,10 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
         return false;
     }
+    if (hdr->vertex_wire > NT_MESH_WIRE_VTX_SOA || hdr->index_wire > NT_MESH_WIRE_IDX_MESHOPT) {
+        NT_LOG_ERROR("activate_mesh: invalid wire tags %u/%u", (uint32_t)hdr->vertex_wire, (uint32_t)hdr->index_wire);
+        return false;
+    }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
         NT_LOG_ERROR("activate_mesh: invalid stream_count");
         return false;
@@ -1961,8 +1966,65 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: index_count %u with index_type none", hdr->index_count);
         return false;
     }
-    if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
+    if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
+        if (hdr->index_type == 0 || hdr->index_count == 0 || hdr->index_count % 3 != 0) {
+            NT_LOG_ERROR("activate_mesh: MESHOPT wire with index_type %u index_count %u", (uint32_t)hdr->index_type, hdr->index_count);
+            return false;
+        }
+        uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
+        /* Decoded size must fit a u32: it feeds malloc, and a wasm size_t wraps at 4 GB */
+        if (decoded_size > UINT32_MAX) {
+            NT_LOG_ERROR("activate_mesh: decoded index size overflow (index_count %u)", hdr->index_count);
+            return false;
+        }
+        if (hdr->index_data_size == 0 || hdr->index_data_size > decoded_size) {
+            NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u vs decoded %u", hdr->index_data_size, (uint32_t)decoded_size);
+            return false;
+        }
+    } else if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
         NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
+        return false;
+    }
+    return true;
+}
+
+/* Uploads the IBO from the wire index block (decoding MESHOPT first).
+ * *out_ibo stays {0} for non-indexed meshes; returns false on failure
+ * (nothing left to clean up). */
+static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_data, nt_buffer_t *out_ibo) {
+    *out_ibo = (nt_buffer_t){0};
+    if (hdr->index_type == 0 || hdr->index_count == 0) {
+        return true;
+    }
+    uint32_t idx_elem = (hdr->index_type == 1) ? 2U : 4U;
+    const uint8_t *gpu_index_data = index_data;
+    uint32_t gpu_index_size = hdr->index_data_size;
+    uint8_t *idx_tmp = NULL;
+    if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
+        gpu_index_size = hdr->index_count * idx_elem; /* fits u32 -- validated */
+        idx_tmp = malloc(gpu_index_size);
+        if (!idx_tmp) {
+            NT_LOG_ERROR("activate_mesh: index decode alloc failed (%u bytes)", gpu_index_size);
+            return false;
+        }
+        if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size)) {
+            NT_LOG_ERROR("activate_mesh: index wire decode failed");
+            free(idx_tmp);
+            return false;
+        }
+        gpu_index_data = idx_tmp;
+    }
+    *out_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = gpu_index_data,
+        .size = gpu_index_size,
+        .index_type = hdr->index_type,
+        .label = NULL,
+    });
+    free(idx_tmp);
+    if (out_ibo->id == 0) {
+        NT_LOG_ERROR("activate_mesh: IBO creation failed");
         return false;
     }
     return true;
@@ -1977,33 +2039,46 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
 
+    /* Wire → GPU decode into transient heap: load path, not hot path (frame
+       scratch rejected — packs mount mid-gameplay, 512 KB shared budget). */
+    const uint8_t *gpu_vertex_data = vertex_data;
+    uint8_t *soa_tmp = NULL;
+    if (hdr->vertex_wire == NT_MESH_WIRE_VTX_SOA && hdr->vertex_data_size > 0) {
+        soa_tmp = malloc(hdr->vertex_data_size);
+        if (!soa_tmp) {
+            NT_LOG_ERROR("activate_mesh: SOA decode alloc failed (%u bytes)", hdr->vertex_data_size);
+            return 0;
+        }
+        const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+        uint32_t elem_sizes[NT_MESH_MAX_STREAMS];
+        for (uint8_t i = 0; i < hdr->stream_count; i++) {
+            elem_sizes[i] = nt_stream_type_size(streams[i].type) * streams[i].count;
+        }
+        if (!nt_meshwire_reinterleave(soa_tmp, vertex_data, hdr->vertex_count, elem_sizes, hdr->stream_count)) {
+            NT_LOG_ERROR("activate_mesh: SOA re-interleave failed");
+            free(soa_tmp);
+            return 0;
+        }
+        gpu_vertex_data = soa_tmp;
+    }
+
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_IMMUTABLE,
-        .data = vertex_data,
+        .data = gpu_vertex_data,
         .size = hdr->vertex_data_size,
         .label = NULL,
     });
+    free(soa_tmp); /* make_buffer uploaded (IMMUTABLE copies at creation) */
     if (vbo.id == 0) {
         NT_LOG_ERROR("activate_mesh: VBO creation failed");
         return 0;
     }
 
-    nt_buffer_t ibo = {0};
-    if (hdr->index_type != 0 && hdr->index_data_size > 0) {
-        ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_INDEX,
-            .usage = NT_USAGE_IMMUTABLE,
-            .data = index_data,
-            .size = hdr->index_data_size,
-            .index_type = hdr->index_type,
-            .label = NULL,
-        });
-        if (ibo.id == 0) {
-            NT_LOG_ERROR("activate_mesh: IBO creation failed");
-            nt_gfx_destroy_buffer(vbo);
-            return 0;
-        }
+    nt_buffer_t ibo;
+    if (!mesh_make_ibo(hdr, index_data, &ibo)) {
+        nt_gfx_destroy_buffer(vbo);
+        return 0;
     }
 
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);

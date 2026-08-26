@@ -9,7 +9,7 @@ target_link_libraries(capture_host PRIVATE
     nt_devapi_capture nt_devapi_core nt_devapi_discovery
     nt_gfx nt_fpng
     nt_resource nt_http nt_fs
-    nt_platform nt_basisu_transcoder_stub)
+    nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)
 if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link).
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).

@@ -12,9 +12,9 @@ target_link_libraries(text_demo PRIVATE
 target_include_directories(text_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 if(EMSCRIPTEN)
-    target_link_libraries(text_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_basisu_transcoder_stub)
+    target_link_libraries(text_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_basisu_transcoder_stub nt_meshwire_stub)
 else()
-    target_link_libraries(text_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_basisu_transcoder_stub)
+    target_link_libraries(text_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_basisu_transcoder_stub nt_meshwire_stub)
 endif()
 
 nt_set_warning_flags(text_demo)

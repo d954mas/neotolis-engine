@@ -85,12 +85,12 @@ typedef enum {
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;            /* NT_MESH_MAGIC */
-    uint16_t version;          /* NT_MESH_VERSION */
-    uint8_t stream_count;      /* number of NtStreamDesc after header */
-    uint8_t index_type;        /* 0=none, 1=uint16, 2=uint32 (GPU element width) */
-    uint8_t vertex_wire;       /* nt_mesh_wire_vtx_t */
-    uint8_t index_wire;        /* nt_mesh_wire_idx_t */
+    uint32_t magic;       /* NT_MESH_MAGIC */
+    uint16_t version;     /* NT_MESH_VERSION */
+    uint8_t stream_count; /* number of NtStreamDesc after header */
+    uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 (GPU element width) */
+    uint8_t vertex_wire;  /* nt_mesh_wire_vtx_t */
+    uint8_t index_wire;   /* nt_mesh_wire_idx_t */
     uint8_t _pad[2];
     uint32_t vertex_count;     /* number of vertices */
     uint32_t index_count;      /* number of indices (0 if index_type==0) */

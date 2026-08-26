@@ -16,10 +16,10 @@ target_include_directories(ui_3d_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gener
 
 # nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.
 if(EMSCRIPTEN)
-    target_link_libraries(ui_3d_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub)
+    target_link_libraries(ui_3d_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub)
 else()
     # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel.
-    target_link_libraries(ui_3d_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub)
+    target_link_libraries(ui_3d_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)
 endif()
 
 nt_set_warning_flags(ui_3d_demo)
