@@ -933,6 +933,21 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_basisu_stub_off PRIVATE nt_core unity)
     nt_setup_test_target(test_basisu_stub_off)
 
+    # --- meshwire real impl: SOA re-interleave + index-decode rejection ---
+    add_executable(test_meshwire unit/test_meshwire.c)
+    target_link_libraries(test_meshwire PRIVATE nt_meshwire unity)
+    nt_setup_test_target(test_meshwire)
+
+    # --- meshwire stub loud-fail contract (mirrors test_basisu_stub / _off) ---
+    add_executable(test_meshwire_stub unit/test_meshwire_stub.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_meshwire_stub PRIVATE nt_meshwire_stub nt_core unity)
+    target_include_directories(test_meshwire_stub PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_meshwire_stub)
+
+    add_executable(test_meshwire_stub_off unit/test_meshwire_stub_off.c unit/test_helpers/nt_meshwire_stub_assert_off_tu.c)
+    target_link_libraries(test_meshwire_stub_off PRIVATE nt_core unity)
+    nt_setup_test_target(test_meshwire_stub_off)
+
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
     target_link_libraries(test_mesh_renderer PRIVATE

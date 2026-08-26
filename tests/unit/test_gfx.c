@@ -1043,6 +1043,140 @@ void test_mesh_info_fields(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
+/* ---- Mesh wire decode (v3): SOA vertices, MESHOPT indices ---- */
+
+void test_activate_mesh_soa_wire_decodes(void) {
+    /* 2 streams (f32x3 + u8x4), 2 vertices, no indices */
+    enum { VD = 32 };
+    uint8_t blob[sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + VD];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->vertex_wire = NT_MESH_WIRE_VTX_SOA;
+    hdr->vertex_count = 2;
+    hdr->vertex_data_size = VD;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0].name_hash = 1;
+    sd[0].type = NT_STREAM_FLOAT32;
+    sd[0].count = 3;
+    sd[1].name_hash = 2;
+    sd[1].type = NT_STREAM_UINT8;
+    sd[1].count = 4;
+    sd[1].normalized = 1;
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_mesh(handle);
+}
+
+/* meshopt v1 stream for the 2x5-grid triangle list (24 indices, 10 verts),
+ * generated with the vendored codec -- keeps the positive path hermetic */
+static const uint8_t k_meshopt_wire_24[] = {
+    0xE1, 0xFE, 0x1E, 0x10, 0x0E, 0x10, 0x0E, 0x10, 0x0E, 0x0F, 0x0A, 0x00, //
+    0x76, 0x87, 0x56, 0x67, 0x78, 0xA9, 0x86, 0x65, 0x89, 0x68, 0x98, 0x01, //
+    0x69, 0x00, 0x00,
+};
+
+#define MESHOPT_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 120 + sizeof(k_meshopt_wire_24))
+
+static void fill_meshopt_mesh_blob(uint8_t *blob) {
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 1;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->vertex_count = 10;
+    hdr->index_count = 24;
+    hdr->vertex_data_size = 120;
+    hdr->index_data_size = (uint32_t)sizeof(k_meshopt_wire_24);
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = 1;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+    memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 120, k_meshopt_wire_24, sizeof(k_meshopt_wire_24));
+}
+
+void test_activate_mesh_meshopt_wire_decodes(void) {
+    uint8_t blob[MESHOPT_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_meshopt_mesh_blob(blob);
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info((nt_mesh_t){.id = handle});
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_UINT32(24, info->index_count);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, info->ibo.id);
+    nt_gfx_deactivate_mesh(handle);
+}
+
+void test_activate_mesh_rejects_corrupt_meshopt_stream(void) {
+    uint8_t blob[MESHOPT_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_meshopt_mesh_blob(blob);
+    /* Garbage in place of the codec header byte -- decode must fail, activate must return 0 */
+    blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 120] = 0x00;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_bad_wire_tags(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_wire = 2;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    ((NtMeshAssetHeader *)blob)->vertex_wire = 0;
+    ((NtMeshAssetHeader *)blob)->index_wire = 2;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_meshopt_without_indices(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->index_type = 0;
+    hdr->index_count = 0;
+    hdr->index_data_size = 6; /* wire bytes present but no index_type */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_meshopt_non_triangle_count(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->index_count = 4;
+    hdr->index_data_size = 6;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_meshopt_wire_larger_than_decoded(void) {
+    uint8_t blob[MESH_BLOB_BYTES + 2];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->index_data_size = 8; /* > decoded 3 * 2 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->index_type = 2;
+    /* decoded = 0xC0000000 * 4 > UINT32_MAX: a 32-bit size_t malloc would wrap */
+    hdr->index_count = 0xC0000000U;
+    hdr->index_data_size = 6;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
 /* ---- Uniform buffer tests ---- */
 
 void test_make_uniform_buffer(void) {
@@ -1490,6 +1624,14 @@ int main(void) {
     RUN_TEST(test_activate_shader_bad_magic);
     RUN_TEST(test_deactivate_mesh_clears_table);
     RUN_TEST(test_mesh_info_fields);
+    RUN_TEST(test_activate_mesh_soa_wire_decodes);
+    RUN_TEST(test_activate_mesh_meshopt_wire_decodes);
+    RUN_TEST(test_activate_mesh_rejects_corrupt_meshopt_stream);
+    RUN_TEST(test_activate_mesh_rejects_bad_wire_tags);
+    RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
+    RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
+    RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);
+    RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_bind_uniform_buffer);
