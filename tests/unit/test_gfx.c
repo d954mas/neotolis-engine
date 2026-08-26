@@ -877,6 +877,29 @@ void test_activate_shader_bad_version(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(NtShaderCodeHeader) + code_size));
 }
 
+void test_activate_shader_rejects_32bit_size_wrap(void) {
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION;
+    /* 32-bit sizeof(header) + code_size would wrap below blob size and OOB-read */
+    hdr->code_size = 0xFFFFFFF8U;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_shader_rejects_missing_nul(void) {
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 8];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION;
+    hdr->code_size = 4;
+    /* deliberately no NUL inside code_size -- the guard under test must reject this */
+    memcpy(blob + sizeof(NtShaderCodeHeader), "voidmain", 8); // NOLINT(bugprone-not-null-terminated-result)
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+}
+
 /* ---- Deactivate mesh clears table ---- */
 
 void test_deactivate_mesh_clears_table(void) {
@@ -1348,6 +1371,8 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_index_size_mismatch);
     RUN_TEST(test_activate_mesh_rejects_index_count_with_type_none);
     RUN_TEST(test_activate_shader_bad_version);
+    RUN_TEST(test_activate_shader_rejects_32bit_size_wrap);
+    RUN_TEST(test_activate_shader_rejects_missing_nul);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);

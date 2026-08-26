@@ -2059,8 +2059,14 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;
     }
-    if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
+    /* 64-bit sum: a corrupt code_size must not wrap the truncation check into a pass */
+    if ((uint64_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
         NT_LOG_ERROR("activate_shader: blob truncated");
+        return 0;
+    }
+    /* The source is consumed as a C string -- the builder always writes the trailing NUL */
+    if (hdr->code_size == 0 || data[sizeof(NtShaderCodeHeader) + hdr->code_size - 1] != 0) {
+        NT_LOG_ERROR("activate_shader: source not NUL-terminated");
         return 0;
     }
     const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));
