@@ -1,7 +1,7 @@
 # Module Layout
 
 Directory layout of engine modules and the interface/impl/stub composition model
-for swappable modules (log, input, http, gfx, basisu, window, app, fs, clipboard).
+for swappable modules (log, input, http, gfx, basisu, meshwire, window, app, fs, clipboard).
 Consumers link header-only interface targets; each executable picks exactly one
 impl at link time — omission is a loud link error, enforced by CI scripts.
 Includes stub semantics and runtime capability queries.
@@ -41,6 +41,7 @@ engine/
     app/                    # swappable: nt_app.h + native/ web/ stub/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
     basisu/                 # swappable: nt_basisu_transcoder.h + stub/ (real impl is a top-level C++ TU)
+    meshwire/               # swappable: nt_meshwire.h + stub/ (real impl is a top-level C++ TU)
     postfx/                 # optional fixed helpers over nt_gfx_interface
     ui/
     font/
@@ -87,13 +88,19 @@ Two gates enforce this:
   expected unresolved-symbol error is observed).
 
 Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
-`nt_basisu_transcoder`, `nt_window`, `nt_app`, `nt_fs`, `nt_clipboard`.
+`nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs`,
+`nt_clipboard`.
 
 `nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
 Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a
 texture-less executable C-only. The builder (`tools/builder`) and
 `test_basisu_roundtrip` link the real impl directly — they are executables
 picking an impl, not engine modules, so the no-real-impl gate does not apply.
+
+`nt_meshwire` follows the same size-motivated shape: the real impl is the
+vendored meshopt index codec plus the SoA re-interleave loop (C++ TU), the stub
+keeps an executable without builder-packed meshes C-only. The builder links the
+real impl directly for encode + canonicalize.
 
 Fixed helper modules may sit above a swappable interface without selecting its
 implementation. `engine/postfx` is optional and currently starts with
