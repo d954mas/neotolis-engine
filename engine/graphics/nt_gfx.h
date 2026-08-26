@@ -99,24 +99,22 @@ typedef enum {
     NT_USAGE_STREAM,        /* GL: STREAM_DRAW */
 } nt_buffer_usage_t;
 
+/* Vertex attribute component type. With count (1-4) and normalized this spans
+ * the full WebGL2 vertexAttribPointer space -- no enum of allowed combinations. */
 typedef enum {
-    NT_FORMAT_FLOAT = 0,
-    NT_FORMAT_FLOAT2,
-    NT_FORMAT_FLOAT3,
-    NT_FORMAT_FLOAT4,
-    NT_FORMAT_HALF,     /* GL_HALF_FLOAT × 1 */
-    NT_FORMAT_HALF2,    /* GL_HALF_FLOAT × 2 */
-    NT_FORMAT_HALF3,    /* GL_HALF_FLOAT × 3 */
-    NT_FORMAT_HALF4,    /* GL_HALF_FLOAT × 4 */
-    NT_FORMAT_SHORT2,   /* GL_SHORT × 2 */
-    NT_FORMAT_SHORT2N,  /* GL_SHORT × 2, normalized to [-1, 1] */
-    NT_FORMAT_USHORT2N, /* GL_UNSIGNED_SHORT × 2, normalized to [0, 1] */
-    NT_FORMAT_SHORT4,   /* GL_SHORT × 4 */
-    NT_FORMAT_SHORT4N,  /* GL_SHORT × 4, normalized */
-    NT_FORMAT_UBYTE4,   /* GL_UNSIGNED_BYTE × 4 */
-    NT_FORMAT_UBYTE4N,  /* GL_UNSIGNED_BYTE × 4, normalized */
-    NT_FORMAT_BYTE4N,   /* GL_BYTE × 4, normalized */
-} nt_vertex_format_t;
+    NT_VERTEX_FLOAT = 0, /* GL_FLOAT, 4 bytes */
+    NT_VERTEX_HALF,      /* GL_HALF_FLOAT, 2 bytes */
+    NT_VERTEX_UINT8,     /* GL_UNSIGNED_BYTE, 1 byte */
+    NT_VERTEX_INT8,      /* GL_BYTE, 1 byte */
+    NT_VERTEX_UINT16,    /* GL_UNSIGNED_SHORT, 2 bytes */
+    NT_VERTEX_INT16,     /* GL_SHORT, 2 bytes */
+} nt_vertex_type_t;
+
+/* Byte size of one component of a vertex attribute type (0 for invalid values) */
+static inline uint16_t nt_vertex_type_size(nt_vertex_type_t type) {
+    static const uint16_t sizes[] = {4, 2, 1, 1, 2, 2};
+    return ((uint32_t)type < 6) ? sizes[type] : 0;
+}
 
 typedef enum {
     NT_ATTR_POSITION = 0,
@@ -273,7 +271,9 @@ typedef enum {
 
 typedef struct {
     uint8_t location;
-    nt_vertex_format_t format;
+    nt_vertex_type_t type;
+    uint8_t count;   /* components per attribute, 1-4 */
+    bool normalized; /* integer types only: map to [0,1] / [-1,1] */
     uint16_t offset;
 } nt_vertex_attr_t;
 

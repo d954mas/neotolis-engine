@@ -311,93 +311,22 @@ static GLenum map_depth_func(nt_depth_func_t f) {
     }
 }
 
-static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type, GLboolean *normalized) {
-    switch (fmt) {
-    case NT_FORMAT_FLOAT:
-        *size = 1;
-        *type = GL_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_FLOAT2:
-        *size = 2;
-        *type = GL_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_FLOAT3:
-        *size = 3;
-        *type = GL_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_FLOAT4:
-        *size = 4;
-        *type = GL_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_HALF:
-        *size = 1;
-        *type = GL_HALF_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_HALF2:
-        *size = 2;
-        *type = GL_HALF_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_HALF3:
-        *size = 3;
-        *type = GL_HALF_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_HALF4:
-        *size = 4;
-        *type = GL_HALF_FLOAT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_SHORT2:
-        *size = 2;
-        *type = GL_SHORT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_SHORT2N:
-        *size = 2;
-        *type = GL_SHORT;
-        *normalized = GL_TRUE;
-        break;
-    case NT_FORMAT_USHORT2N:
-        *size = 2;
-        *type = GL_UNSIGNED_SHORT;
-        *normalized = GL_TRUE;
-        break;
-    case NT_FORMAT_SHORT4:
-        *size = 4;
-        *type = GL_SHORT;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_SHORT4N:
-        *size = 4;
-        *type = GL_SHORT;
-        *normalized = GL_TRUE;
-        break;
-    case NT_FORMAT_UBYTE4:
-        *size = 4;
-        *type = GL_UNSIGNED_BYTE;
-        *normalized = GL_FALSE;
-        break;
-    case NT_FORMAT_UBYTE4N:
-        *size = 4;
-        *type = GL_UNSIGNED_BYTE;
-        *normalized = GL_TRUE;
-        break;
-    case NT_FORMAT_BYTE4N:
-        *size = 4;
-        *type = GL_BYTE;
-        *normalized = GL_TRUE;
-        break;
+static GLenum map_vertex_type(nt_vertex_type_t t) {
+    switch (t) {
+    case NT_VERTEX_FLOAT:
+        return GL_FLOAT;
+    case NT_VERTEX_HALF:
+        return GL_HALF_FLOAT;
+    case NT_VERTEX_UINT8:
+        return GL_UNSIGNED_BYTE;
+    case NT_VERTEX_INT8:
+        return GL_BYTE;
+    case NT_VERTEX_UINT16:
+        return GL_UNSIGNED_SHORT;
+    case NT_VERTEX_INT16:
+        return GL_SHORT;
     default:
-        *size = 4;
-        *type = GL_FLOAT;
-        *normalized = GL_FALSE;
-        break;
+        return GL_FLOAT;
     }
 }
 
@@ -1232,11 +1161,7 @@ void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
         const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].layout;
         for (uint8_t i = 0; i < layout->attr_count; i++) {
             const nt_vertex_attr_t *attr = &layout->attrs[i];
-            GLint size;
-            GLenum type;
-            GLboolean normalized;
-            get_format_params(attr->format, &size, &type, &normalized);
-            glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
+            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
         }
     }
@@ -1262,11 +1187,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
         const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
         for (uint8_t i = 0; i < layout->attr_count; i++) {
             const nt_vertex_attr_t *attr = &layout->attrs[i];
-            GLint size;
-            GLenum type;
-            GLboolean normalized;
-            get_format_params(attr->format, &size, &type, &normalized);
-            glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
+            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
         }
     }

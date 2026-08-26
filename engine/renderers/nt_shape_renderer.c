@@ -242,8 +242,8 @@ static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
                 .stride = (uint16_t)sizeof(nt_shape_renderer_vertex_t),
                 .attrs =
                     {
-                        {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = NT_ATTR_COLOR, .format = NT_FORMAT_UBYTE4N, .offset = 12},
+                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                        {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
                     },
             },
         .depth_test = depth,
@@ -268,7 +268,7 @@ static nt_pipeline_t make_line_pipeline(bool depth) {
                 .stride = (uint16_t)(2 * sizeof(float)),
                 .attrs =
                     {
-                        {.location = 0, .format = NT_FORMAT_FLOAT2, .offset = 0},
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
                     },
             },
         .instance_layout =
@@ -277,9 +277,9 @@ static nt_pipeline_t make_line_pipeline(bool depth) {
                 .stride = (uint16_t)sizeof(nt_shape_line_instance_t),
                 .attrs =
                     {
-                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
-                        {.location = 3, .format = NT_FORMAT_UBYTE4N, .offset = 24},
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                        {.location = 3, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 24},
                     },
             },
         .depth_test = depth,
@@ -301,7 +301,7 @@ static nt_pipeline_t make_inst_pipeline(bool depth) {
                 .stride = (uint16_t)(3 * sizeof(float)),
                 .attrs =
                     {
-                        {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
                     },
             },
         .instance_layout =
@@ -310,10 +310,10 @@ static nt_pipeline_t make_inst_pipeline(bool depth) {
                 .stride = (uint16_t)sizeof(nt_shape_instance_t),
                 .attrs =
                     {
-                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
-                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},
-                        {.location = 4, .format = NT_FORMAT_UBYTE4N, .offset = 40},
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
+                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
                     },
             },
         .depth_test = depth,
@@ -338,7 +338,7 @@ static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
                 .stride = (uint16_t)(4 * sizeof(float)), /* vec4 template */
                 .attrs =
                     {
-                        {.location = 0, .format = NT_FORMAT_FLOAT4, .offset = 0},
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
                     },
             },
         .instance_layout =
@@ -347,10 +347,10 @@ static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
                 .stride = (uint16_t)sizeof(nt_shape_instance_t),
                 .attrs =
                     {
-                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
-                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},
-                        {.location = 4, .format = NT_FORMAT_UBYTE4N, .offset = 40},
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
+                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
                     },
             },
         .depth_test = depth,

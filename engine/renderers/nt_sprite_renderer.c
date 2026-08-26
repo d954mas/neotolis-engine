@@ -223,9 +223,9 @@ static nt_vertex_layout_t s_sprite_layout = {
     .attr_count = 3,
     .attrs =
         {
-            {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-            {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_USHORT2N, .offset = 12},
-            {.location = NT_ATTR_COLOR, .format = NT_FORMAT_UBYTE4N, .offset = 16},
+            {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+            {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+            {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
         },
 };
 
@@ -252,7 +252,8 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
         NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS && "sprite extended layout exceeds NT_GFX_MAX_VERTEX_ATTRS");
         assert_attr_location_free(&layout, mat_info->attr_map_locations[ai]);
         layout.attrs[layout.attr_count].location = mat_info->attr_map_locations[ai];
-        layout.attrs[layout.attr_count].format = NT_FORMAT_FLOAT4; /* each declared custom attr is one vec4 */
+        layout.attrs[layout.attr_count].type = NT_VERTEX_FLOAT; /* each declared custom attr is one vec4 */
+        layout.attrs[layout.attr_count].count = 4;
         layout.attrs[layout.attr_count].offset = offset;
         layout.attr_count++;
         offset += 16; /* FLOAT4 */

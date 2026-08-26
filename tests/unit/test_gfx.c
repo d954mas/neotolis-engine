@@ -201,7 +201,7 @@ void test_gfx_make_destroy_pipeline(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_destroy_pipeline(pip);
@@ -215,7 +215,7 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
@@ -832,7 +832,7 @@ void test_bind_instance_buffer_rejects_unaligned_offset(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_bind_pipeline(pip);
@@ -852,7 +852,7 @@ void test_bind_instance_buffer_requires_pipeline_each_frame(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
@@ -1091,7 +1091,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
