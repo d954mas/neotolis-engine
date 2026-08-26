@@ -268,6 +268,8 @@ nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t sr
 nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
                                          uint8_t **out_data, uint32_t *out_size);
+/* Shared stream-layout validation for both mesh decode paths. `label` prefixes log messages. */
+nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
 nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
 

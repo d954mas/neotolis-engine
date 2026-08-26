@@ -1406,6 +1406,67 @@ void test_glb_scene_parse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, scene.mesh_count);
 }
 
+/* --- Scene mesh layout validation (shared validator wired into the scene path) --- */
+
+void test_scene_mesh_rejects_missing_position(void) {
+    const char *glb_path = TMP_DIR "/scene_nopos.glb";
+    write_test_glb_with_node(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_NONE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_scene_mesh_rejects_count_out_of_range(void) {
+    const char *glb_path = TMP_DIR "/scene_badcount.glb";
+    write_test_glb_with_node(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 5, false},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_NONE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_scene_mesh_computed_tangent_requires_count4(void) {
+    const char *glb_path = TMP_DIR "/scene_tan3.glb";
+    write_test_glb_with_node(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    /* MikkTSpace writes 4 floats per vertex; a 3-count layout would scramble the interleave */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 3, false},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_COMPUTE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+
+    nt_builder_free_glb_scene(&scene);
+}
+
 /* --- Helper: read shader source from a single-shader pack --- */
 
 static char *read_shader_source_from_pack(const char *pack_path, uint32_t *out_code_size) {
@@ -8223,6 +8284,9 @@ int main(void) {
 
     /* Scene parse */
     RUN_TEST(test_glb_scene_parse);
+    RUN_TEST(test_scene_mesh_rejects_missing_position);
+    RUN_TEST(test_scene_mesh_rejects_count_out_of_range);
+    RUN_TEST(test_scene_mesh_computed_tangent_requires_count4);
 
     /* Include resolver */
     RUN_TEST(test_include_basic);

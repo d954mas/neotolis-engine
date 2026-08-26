@@ -189,6 +189,13 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    char label[64];
+    (void)snprintf(label, sizeof(label), "scene mesh[%u] prim[%u]", mesh_index, primitive_index);
+    nt_build_result_t layout_ret = nt_builder_validate_stream_layout(label, layout, stream_count);
+    if (layout_ret != NT_BUILD_OK) {
+        return layout_ret;
+    }
+
     /* Determine which streams need tangent data from MikkTSpace */
     int32_t tangent_stream_idx = -1;
     bool need_compute_tangent = false;
@@ -231,6 +238,12 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             }
             break;
         }
+    }
+
+    /* MikkTSpace emits 4 floats per vertex; interleave indexes by layout count -- any other count scrambles data. */
+    if (need_compute_tangent && layout[tangent_stream_idx].count != 4) {
+        NT_LOG_ERROR("mesh[%u] prim[%u]: computed TANGENT requires count 4, layout declares %u", mesh_index, primitive_index, (uint32_t)layout[tangent_stream_idx].count);
+        return NT_BUILD_ERR_VALIDATION;
     }
 
     /* Extract vertex streams */

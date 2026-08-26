@@ -5,22 +5,22 @@
 #include "cgltf.h"
 /* clang-format on */
 
-/* --- Stream layout validation --- */
+/* --- Stream layout validation (shared by add_mesh and scene mesh paths) --- */
 
-static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
+nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtStreamLayout *layout, uint32_t stream_count) {
     if (stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
-        NT_LOG_ERROR("%s: stream_count %u out of range [1, %d]", path, stream_count, NT_MESH_MAX_STREAMS);
+        NT_LOG_ERROR("%s: stream_count %u out of range [1, %d]", label, stream_count, NT_MESH_MAX_STREAMS);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     bool has_position = false;
     for (uint32_t s = 0; s < stream_count; s++) {
         if (layout[s].count < 1 || layout[s].count > 4) {
-            NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", path, s, layout[s].count);
+            NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, layout[s].count);
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].normalized && (layout[s].type == NT_STREAM_FLOAT32 || layout[s].type == NT_STREAM_FLOAT16)) {
-            NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", path, s, layout[s].engine_name ? layout[s].engine_name : "(null)");
+            NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, layout[s].engine_name ? layout[s].engine_name : "(null)");
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
@@ -28,7 +28,7 @@ static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStr
         }
     }
     if (!has_position) {
-        NT_LOG_ERROR("%s: stream layout missing required POSITION attribute", path);
+        NT_LOG_ERROR("%s: stream layout missing required POSITION attribute", label);
         return NT_BUILD_ERR_VALIDATION;
     }
     return NT_BUILD_OK;
@@ -337,7 +337,7 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    nt_build_result_t ret = nt_validate_stream_layout(path, layout, stream_count);
+    nt_build_result_t ret = nt_builder_validate_stream_layout(path, layout, stream_count);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
