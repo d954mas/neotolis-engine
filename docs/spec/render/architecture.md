@@ -49,8 +49,9 @@ renderer_draw_sprite(...);
 
 A pipeline's vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
-allowed combinations; the full `vertexAttribPointer` space is available to
-game-built pipelines and mesh-pack streams alike. The pack's on-disk stream
+allowed combinations; the float/half/byte/short subset of the
+`vertexAttribPointer` space (no int32 or 2_10_10_2 packed types) is available
+to game-built pipelines and mesh-pack streams alike. The pack's on-disk stream
 type enum stays separate from the gfx vertex type enum in the vertex-layout
 API (the mesh renderer maps between them totally; the mesh-activation side
 table `nt_gfx_mesh_info_t` still stores raw pack descs — a known, contained

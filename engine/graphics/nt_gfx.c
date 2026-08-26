@@ -705,6 +705,7 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];
         NT_ASSERT(attr->count >= 1 && attr->count <= 4);
         NT_ASSERT(nt_vertex_type_size(attr->type) != 0);
+        NT_ASSERT(!(attr->normalized && (attr->type == NT_VERTEX_FLOAT || attr->type == NT_VERTEX_HALF)) && "normalized is for integer types only");
         NT_ASSERT((attr->offset % nt_vertex_type_size(attr->type)) == 0 && "WebGL2: attribute offset must be a multiple of its type size");
         NT_ASSERT((layout->stride % nt_vertex_type_size(attr->type)) == 0 && "WebGL2: stride must be a multiple of each attribute's type size");
     }
@@ -1914,6 +1915,17 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
             NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
             return false;
+        }
+        if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
+            return false;
+        }
+        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
+        for (uint8_t p = 0; p < i; p++) {
+            if (streams[p].name_hash == streams[i].name_hash) {
+                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
+                return false;
+            }
         }
         expected_stride += nt_stream_type_size(streams[i].type) * streams[i].count;
     }

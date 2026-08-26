@@ -330,6 +330,20 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
     return vertex_buf;
 }
 
+/* Narrowed POSITION drops trailing axes from the pack -- the AABB must not
+ * keep extents the vertex data no longer carries. */
+static void nt_clamp_aabb_to_position_count(const NtStreamLayout *layout, uint32_t stream_count, float aabb_min[3], float aabb_max[3]) {
+    for (uint32_t s = 0; s < stream_count; s++) {
+        if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
+            for (uint32_t axis = layout[s].count; axis < 3; axis++) {
+                aabb_min[axis] = 0.0F;
+                aabb_max[axis] = 0.0F;
+            }
+            return;
+        }
+    }
+}
+
 /* --- Shared: build binary mesh output buffer from mesh components --- */
 
 nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uint32_t stream_count, float *stream_floats[], uint32_t vertex_count, const cgltf_primitive *prim, uint8_t *index_buf,
@@ -355,6 +369,7 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     mesh_hdr.index_data_size = index_data_size;
     if (prim) {
         nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
+        nt_clamp_aabb_to_position_count(layout, stream_count, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
     }
 
     NtStreamDesc descs[NT_MESH_MAX_STREAMS];

@@ -1383,7 +1383,7 @@ static void write_test_glb_color4(const char *path) {
                            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"COLOR_0\":3},\"indices\":4}]}],"
                            "\"accessors\":["
                            "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
-                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "\"max\":[1.0,1.0,0.5],\"min\":[0.0,0.0,0.0]},"
                            "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
                            "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
                            "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},"
@@ -1403,7 +1403,8 @@ static void write_test_glb_color4(const char *path) {
     uint32_t json_padded = (json_len + 3U) & ~3U;
     uint32_t json_padding = json_padded - json_len;
 
-    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    /* v2 has a non-zero z so narrowed-POSITION AABB behavior is observable */
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.5F};
     float normals[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
     float uvs[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
     float colors[] = {1.0F, 0.5F, 0.25F, 0.75F, 0.0F, 1.0F, 0.0F, 1.0F, 0.25F, 0.25F, 1.0F, 0.0F};
@@ -1638,7 +1639,7 @@ void test_mesh_narrow_color_vec4_to_vec3(void) {
     const float expected[] = {
         0.0F, 0.0F, 0.0F, 1.0F,  0.5F,  0.25F, /* v0 */
         1.0F, 0.0F, 0.0F, 0.0F,  1.0F,  0.0F,  /* v1 */
-        0.0F, 1.0F, 0.0F, 0.25F, 0.25F, 1.0F   /* v2 */
+        0.0F, 1.0F, 0.5F, 0.25F, 0.25F, 1.0F   /* v2 */
     };
     const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
     TEST_ASSERT_EQUAL_MEMORY(expected, verts, sizeof(expected));
@@ -1858,6 +1859,10 @@ void test_mesh_narrow_first_stream_position_to_vec2(void) {
     const float expected[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F}; /* xy of the 3 vertices */
     const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc);
     TEST_ASSERT_EQUAL_MEMORY(expected, verts, sizeof(expected));
+
+    /* The source AABB has z extent 0.5; the pack carries no z, so the header must not either */
+    TEST_ASSERT_TRUE(hdr->aabb_max[0] == 1.0F && hdr->aabb_max[1] == 1.0F);
+    TEST_ASSERT_TRUE(hdr->aabb_min[2] == 0.0F && hdr->aabb_max[2] == 0.0F);
 
     free(data);
 }
