@@ -938,6 +938,22 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_meshwire PRIVATE nt_meshwire unity)
     nt_setup_test_target(test_meshwire)
 
+    # --- meshwire byte-parity vs vendored upstream codec ---
+    # The ONLY target allowed to compile deps/meshoptimizer (check_crt_pins.sh):
+    # the C port must stay byte-compatible with the reference encoder/decoder.
+    enable_language(CXX)
+    add_library(meshopt_ref STATIC ${NT_ENGINE_ROOT}/deps/meshoptimizer/indexcodec.cpp)
+    target_include_directories(meshopt_ref PUBLIC ${NT_ENGINE_ROOT}/deps/meshoptimizer)
+    target_compile_options(meshopt_ref PRIVATE -w)
+    nt_set_static_crt_cxx(meshopt_ref)
+    set_target_properties(meshopt_ref PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    if(NOT WIN32 AND NOT EMSCRIPTEN)
+        target_link_libraries(meshopt_ref PUBLIC stdc++)
+    endif()
+    add_executable(test_meshwire_diff unit/test_meshwire_diff.c)
+    target_link_libraries(test_meshwire_diff PRIVATE nt_meshwire nt_meshwire_encoder meshopt_ref unity)
+    nt_setup_test_target(test_meshwire_diff)
+
     # --- meshwire stub loud-fail contract (mirrors test_basisu_stub / _off) ---
     add_executable(test_meshwire_stub unit/test_meshwire_stub.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_meshwire_stub PRIVATE nt_meshwire_stub nt_core unity)

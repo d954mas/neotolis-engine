@@ -41,7 +41,7 @@ engine/
     app/                    # swappable: nt_app.h + native/ web/ stub/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
     basisu/                 # swappable: nt_basisu_transcoder.h + stub/ (real impl is a top-level C++ TU)
-    meshwire/               # swappable: nt_meshwire.h + stub/ (real impl is a top-level C++ TU)
+    meshwire/               # swappable: nt_meshwire.h + stub/ (+ builder-only nt_meshwire_encoder)
     postfx/                 # optional fixed helpers over nt_gfx_interface
     ui/
     font/
@@ -97,10 +97,13 @@ texture-less executable C-only. The builder (`tools/builder`) and
 `test_basisu_roundtrip` link the real impl directly — they are executables
 picking an impl, not engine modules, so the no-real-impl gate does not apply.
 
-`nt_meshwire` follows the same size-motivated shape: the real impl is the
-vendored meshopt index codec plus the SoA re-interleave loop (C++ TU), the stub
-keeps an executable without builder-packed meshes C-only. The builder links the
-real impl directly for encode + canonicalize.
+`nt_meshwire` follows the same size-motivated shape: the real impl is a C port
+of the meshopt index codec (stream format v1) plus the SoA re-interleave loop;
+the stub keeps an executable without builder-packed meshes free of the decoder.
+The encoder lives in a separate TU/target (`nt_meshwire_encoder`) that only the
+builder links, so runtime binaries carry no encode code structurally. The
+vendored upstream C++ codec (`deps/meshoptimizer`) is a TEST-ONLY byte-parity
+reference compiled solely into `test_meshwire_diff`.
 
 Fixed helper modules may sit above a swappable interface without selecting its
 implementation. `engine/postfx` is optional and currently starts with

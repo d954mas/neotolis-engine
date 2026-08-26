@@ -51,7 +51,8 @@ WIRE size of the index block):
   A pure permutation: `vertex_data_size` equals the interleaved size. Decode =
   re-interleave (`nt_meshwire_reinterleave`).
 - `index_wire`: `RAW` (plain u16/u32 array) or `MESHOPT` — a meshopt index
-  codec stream (version 1, vendored in `deps/meshoptimizer`). Decoded size is
+  codec stream (format version 1; a C port in `engine/meshwire`, byte-parity
+  pinned against the test-only reference in `deps/meshoptimizer`). Decoded size is
   `index_count * element size`; validation requires triangles
   (`index_count % 3 == 0`), a non-zero wire no larger than the decoded size,
   and a decoded size that fits `uint32_t`.

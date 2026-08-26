@@ -3,7 +3,8 @@
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "cgltf.h"
-#include "meshoptimizer.h"
+#include "meshwire/nt_meshwire.h"
+#include "meshwire/nt_meshwire_encode.h"
 /* clang-format on */
 
 /* --- Stream layout validation (shared by add_mesh and scene mesh paths) --- */
@@ -407,24 +408,23 @@ static uint8_t *nt_encode_indices_meshopt(uint8_t *index_buf, uint32_t index_cou
         memcpy(idx32, index_buf, (size_t)index_count * sizeof(uint32_t));
     }
 
-    /* Pin the codec version explicitly: the upstream default may drift on re-vendor */
-    meshopt_encodeIndexVersion(1);
-    size_t bound = meshopt_encodeIndexBufferBound(index_count, vertex_count);
-    unsigned char *enc = (unsigned char *)malloc(bound);
+    uint32_t bound = nt_meshwire_encode_indices_bound(index_count, vertex_count);
+    NT_BUILD_ASSERT(bound > 0 && "index encode bound overflow");
+    uint8_t *enc = (uint8_t *)malloc(bound);
     NT_BUILD_ASSERT(enc && "index encode alloc failed");
-    size_t enc_size = meshopt_encodeIndexBuffer(enc, bound, idx32, index_count);
+    uint32_t enc_size = nt_meshwire_encode_indices(enc, bound, idx32, index_count);
     free(idx32);
-    NT_BUILD_ASSERT(enc_size > 0 && "meshopt index encode failed");
+    NT_BUILD_ASSERT(enc_size > 0 && "meshwire index encode failed");
 
     uint32_t idx_elem = (index_type == 1) ? 2U : 4U;
-    int decode_rc = meshopt_decodeIndexBuffer(index_buf, index_count, idx_elem, enc, enc_size);
-    NT_BUILD_ASSERT(decode_rc == 0 && "meshopt decode-back failed -- vendored codec broken");
+    bool decode_ok = nt_meshwire_decode_indices(index_buf, index_count, idx_elem, enc, enc_size);
+    NT_BUILD_ASSERT(decode_ok && "meshwire decode-back failed -- codec broken");
 
     if (enc_size >= index_data_size) {
         free(enc); /* rare (tiny meshes): canonical RAW already in index_buf */
         return NULL;
     }
-    *out_encoded_size = (uint32_t)enc_size;
+    *out_encoded_size = enc_size;
     return enc;
 }
 
