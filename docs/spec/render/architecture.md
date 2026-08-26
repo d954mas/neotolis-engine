@@ -56,12 +56,13 @@ type enum stays separate from the gfx vertex type enum in the vertex-layout
 API (the mesh renderer maps between them totally; the mesh-activation side
 table `nt_gfx_mesh_info_t` still stores raw pack descs — a known, contained
 exception). Pipeline creation asserts the WebGL2 alignment rules (attribute
-offset and stride multiples of the attribute's type size): game-declared
-layouts never pass through the builder's validator, and desktop GL accepts
-what the browser rejects. Pack-derived layouts flow through the same assert,
-so a stale pre-validation pack crashes early instead of failing only in the
-browser. Pipelines are cached, so the check is off the hot path; per-stream
-type/count from pack data is safety-netted earlier, at mesh activation.
+offset and stride multiples of the attribute's type size, locations within
+the WebGL2-guaranteed 16): game-declared layouts never pass through the
+builder's validator, and desktop GL accepts what the browser rejects.
+Pack data never reaches those asserts: mesh activation hard-rejects invalid
+per-stream type/count/normalized, duplicate name hashes, and misaligned
+offsets/strides before any pipeline exists. Pipelines are cached, so the
+asserts are off the hot path.
 
 ### Render targets
 

@@ -1799,6 +1799,16 @@ void test_layout_rejects_engine_name_hash_collision(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
 }
 
+void test_layout_rejects_duplicate_gltf_name(void) {
+    /* One source attribute feeds one stream: duplicates make AABB and tangent
+     * handling depend on layout order */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 2, false, 3},
+        {"position_full", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 2));
+}
+
 void test_layout_rejects_normalized_float(void) {
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, true, 0},
@@ -8736,6 +8746,7 @@ int main(void) {
     RUN_TEST(test_scene_mesh_asserts_invalid_tangent_mode);
     RUN_TEST(test_layout_rejects_duplicate_engine_name);
     RUN_TEST(test_layout_rejects_engine_name_hash_collision);
+    RUN_TEST(test_layout_rejects_duplicate_gltf_name);
     RUN_TEST(test_layout_rejects_normalized_float);
     RUN_TEST(test_layout_rejects_invalid_stream_type);
     RUN_TEST(test_scene_mesh_narrow_color_vec4_to_vec3);

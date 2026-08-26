@@ -60,6 +60,14 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
                 return NT_BUILD_ERR_VALIDATION;
             }
         }
+        /* One source attribute -> one stream: duplicates make behavior order-dependent
+         * (AABB follows the first POSITION; tangent compute replaces only the first TANGENT). */
+        for (uint32_t p = 0; p < s; p++) {
+            if (layout[p].gltf_name != NULL && layout[s].gltf_name != NULL && strcmp(layout[p].gltf_name, layout[s].gltf_name) == 0) {
+                NT_LOG_ERROR("%s: stream[%u] duplicates gltf_name '%s' of stream[%u]", label, s, layout[s].gltf_name, p);
+                return NT_BUILD_ERR_VALIDATION;
+            }
+        }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
             has_position = true;
         }

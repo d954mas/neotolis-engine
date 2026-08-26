@@ -309,6 +309,21 @@ void test_gfx_pipeline_asserts_duplicate_location(void) {
     nt_gfx_destroy_shader(fs);
 }
 
+void test_gfx_pipeline_asserts_location_out_of_range(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* WebGL2 guarantees only 16 attribute locations; 16 is already out of range */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    }));
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 void test_gfx_pipeline_asserts_normalized_float(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
@@ -764,6 +779,24 @@ void test_activate_mesh_rejects_normalized_float_stream(void) {
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
     ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->normalized = 1;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_misaligned_stream(void) {
+    /* f32x3 + u8x3 = stride 15, not a multiple of the f32 type size (WebGL2 rule) */
+    enum { BLOB_MIS = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 15 };
+    uint8_t blob[BLOB_MIS];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->index_type = 0;
+    hdr->vertex_count = 1;
+    hdr->vertex_data_size = 15;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3};
+    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_UINT8, .count = 3, .normalized = 1};
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -1304,6 +1337,8 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_stride_255_boundary);
     RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
     RUN_TEST(test_gfx_pipeline_asserts_normalized_float);
+    RUN_TEST(test_gfx_pipeline_asserts_location_out_of_range);
+    RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
     RUN_TEST(test_activate_mesh_rejects_duplicate_name_hash);
     RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
     RUN_TEST(test_activate_mesh_bad_version);

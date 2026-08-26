@@ -703,6 +703,7 @@ static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex
 static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     for (uint8_t i = 0; i < layout->attr_count; i++) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];
+        NT_ASSERT(attr->location < NT_GFX_MAX_VERTEX_ATTRS && "WebGL2 guarantees only 16 vertex attribute locations");
         NT_ASSERT(attr->count >= 1 && attr->count <= 4);
         NT_ASSERT(nt_vertex_type_size(attr->type) != 0);
         NT_ASSERT(!(attr->normalized && (attr->type == NT_VERTEX_FLOAT || attr->type == NT_VERTEX_HALF)) && "normalized is for integer types only");
@@ -1878,6 +1879,42 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     return activate_texture_impl(data, size);
 }
 
+/* Per-stream half of the pack mesh safety net: type/count/normalized validity,
+ * unique name hashes, and the WebGL2 offset/stride alignment rules. */
+static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
+    uint32_t stride = 0;
+    for (uint8_t i = 0; i < stream_count; i++) {
+        if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
+            return false;
+        }
+        if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
+            return false;
+        }
+        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
+        for (uint8_t p = 0; p < i; p++) {
+            if (streams[p].name_hash == streams[i].name_hash) {
+                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
+                return false;
+            }
+        }
+        if (stride % nt_stream_type_size(streams[i].type) != 0) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] offset %u misaligned for type size %u", i, stride, nt_stream_type_size(streams[i].type));
+            return false;
+        }
+        stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    }
+    for (uint8_t i = 0; i < stream_count; i++) {
+        if (stride % nt_stream_type_size(streams[i].type) != 0) {
+            NT_LOG_ERROR("activate_mesh: stride %u misaligned for stream[%u] type size %u", stride, i, nt_stream_type_size(streams[i].type));
+            return false;
+        }
+    }
+    *out_stride = stride;
+    return true;
+}
+
 /* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
  * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
 static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
@@ -1908,26 +1945,11 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: blob truncated");
         return false;
     }
-    /* Per-stream type/count are pack input feeding glVertexAttribPointer */
+    /* Per-stream descs are pack input feeding glVertexAttribPointer */
     const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
     uint32_t expected_stride = 0;
-    for (uint8_t i = 0; i < hdr->stream_count; i++) {
-        if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
-            return false;
-        }
-        if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
-            return false;
-        }
-        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
-        for (uint8_t p = 0; p < i; p++) {
-            if (streams[p].name_hash == streams[i].name_hash) {
-                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
-                return false;
-            }
-        }
-        expected_stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    if (!mesh_streams_valid(streams, hdr->stream_count, &expected_stride)) {
+        return false;
     }
     if ((uint64_t)hdr->vertex_count * expected_stride != hdr->vertex_data_size) {
         NT_LOG_ERROR("activate_mesh: vertex_data_size %u != vertex_count %u * stride %u", hdr->vertex_data_size, hdr->vertex_count, expected_stride);
