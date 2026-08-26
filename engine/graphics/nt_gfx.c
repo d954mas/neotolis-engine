@@ -698,9 +698,6 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     if (!desc) {
         return result;
     }
-    assert_layout_webgl2_rules(&desc->layout);
-    assert_layout_webgl2_rules(&desc->instance_layout);
-
     if (!nt_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
         NT_LOG_ERROR("pipeline creation failed: invalid shader handle");
         return result;
@@ -713,6 +710,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
         return result;
     }
+    /* After the attr_count bounds check -- the loops read attr_count entries. */
+    assert_layout_webgl2_rules(&desc->layout);
+    assert_layout_webgl2_rules(&desc->instance_layout);
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
@@ -1874,6 +1874,15 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     if (required > size) {
         NT_LOG_ERROR("activate_mesh: blob truncated");
         return 0;
+    }
+    /* Per-stream type/count are pack input feeding glVertexAttribPointer -- safety-net them here
+     * (spec: runtime validates magic/version/type/sizes) instead of asserting at pipeline build. */
+    const NtStreamDesc *desc_check = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    for (uint8_t i = 0; i < hdr->stream_count; i++) {
+        if (nt_stream_type_size(desc_check[i].type) == 0 || desc_check[i].count < 1 || desc_check[i].count > 4) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)desc_check[i].type, (uint32_t)desc_check[i].count);
+            return 0;
+        }
     }
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;

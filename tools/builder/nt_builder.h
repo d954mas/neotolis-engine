@@ -113,7 +113,8 @@ typedef struct {
                                 * are packed, the rest dropped (e.g. VEC4 COLOR_0 -> RGB).
                                 * Narrowing is declared explicitly so a genuine source/layout
                                 * mismatch still fails the build. `count` may not exceed it.
-                                * Computed (MikkTSpace) tangents have 4 source components. */
+                                * Computed (MikkTSpace) tangents have 4 source components (scene API
+                                * only; add_mesh reads TANGENT from the glTF, tangent_mode reserved). */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */

@@ -274,6 +274,7 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
 /* Compact a stream unpacked at src_components floats/vertex down to the leading count.
  * Forward copy is safe in place: every write index precedes its read index. */
 static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_count, uint32_t src_components, uint32_t count) {
+    NT_BUILD_ASSERT(count <= src_components && "narrow helper: widening not supported");
     if (src_components == count) {
         return;
     }

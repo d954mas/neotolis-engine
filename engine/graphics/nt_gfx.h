@@ -100,7 +100,8 @@ typedef enum {
 } nt_buffer_usage_t;
 
 /* Vertex attribute component type. With count (1-4) and normalized this spans
- * the full WebGL2 vertexAttribPointer space -- no enum of allowed combinations. */
+ * the vertexAttribPointer space over float/half/byte/short types -- no enum of
+ * allowed combinations. (No int32 or 2_10_10_2 packed types.) */
 typedef enum {
     NT_VERTEX_FLOAT = 0, /* GL_FLOAT, 4 bytes */
     NT_VERTEX_HALF,      /* GL_HALF_FLOAT, 2 bytes */

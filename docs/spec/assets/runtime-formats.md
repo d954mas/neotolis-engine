@@ -30,9 +30,9 @@ Attributes: POSITION (required), NORMAL (optional), UV0 (optional), COLOR0 (opti
 
 Preferred data types: position float16 or float32, normals snorm8 packed, uv unorm16, colors uint8 normalized. Avoid runtime unpacking.
 
-A stream is `(type, count 1-4, normalized)` — any combination WebGL2's
-`vertexAttribPointer` accepts, including 3-component byte/short streams
-(snorm8×3 normals, unorm8×3 colors). The builder can narrow a wider source
+A stream is `(type, count 1-4, normalized)` — the `vertexAttribPointer` space
+over float32/float16/byte/short types (no int32 or 2_10_10_2 packed types),
+including 3-component byte/short streams (snorm8×3 normals, unorm8×3 colors). The builder can narrow a wider source
 accessor to the leading components when the layout declares it
 (`source_components`, see [Builder](../builder/builder.md)). Constraint carried
 by the format: WebGL2 requires every attribute's offset and the vertex stride

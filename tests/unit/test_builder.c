@@ -1484,7 +1484,9 @@ void test_glb_scene_parse(void) {
 
 void test_scene_mesh_rejects_missing_position(void) {
     const char *glb_path = TMP_DIR "/scene_nopos.glb";
-    write_test_glb_with_node(glb_path);
+    /* Fixture HAS a NORMAL attribute: without the validator wired into the scene
+     * path this decode would succeed, so the test pins the wiring itself. */
+    write_test_glb_color4(glb_path);
 
     nt_glb_scene_t scene = {0};
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
@@ -1522,7 +1524,9 @@ void test_scene_mesh_rejects_count_out_of_range(void) {
 
 void test_scene_mesh_computed_tangent_requires_count4(void) {
     const char *glb_path = TMP_DIR "/scene_tan3.glb";
-    write_test_glb_with_node(glb_path);
+    /* Fixture has POSITION/NORMAL/TEXCOORD_0, so the count-4 guard is the only
+     * error path that can fire -- the test pins the guard, not an older check. */
+    write_test_glb_color4(glb_path);
 
     nt_glb_scene_t scene = {0};
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
@@ -1530,11 +1534,13 @@ void test_scene_mesh_computed_tangent_requires_count4(void) {
     /* MikkTSpace writes 4 floats per vertex; a 3-count layout would scramble the interleave */
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
         {"tangent", "TANGENT", NT_STREAM_FLOAT32, 3, false, 0},
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_COMPUTE, &data, &size);
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 4, NT_TANGENT_COMPUTE, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
 
@@ -1699,6 +1705,70 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     TEST_ASSERT_EQUAL_UINT8(255, v0[9]);
     TEST_ASSERT_EQUAL_UINT8(128, v0[10]);
     TEST_ASSERT_EQUAL_UINT8(64, v0[11]);
+
+    free(data);
+}
+
+void test_layout_rejects_normalized_float(void) {
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, true, 0},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 1));
+}
+
+void test_layout_rejects_invalid_stream_type(void) {
+    NtStreamLayout layout[] = {
+        /* deliberately out-of-range: the validator must reject garbage type values */
+        {"position", "POSITION", (nt_stream_type_t)99, 3, false, 0}, // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 1));
+}
+
+void test_scene_mesh_narrow_color_vec4_to_vec3(void) {
+    const char *glb_path = TMP_DIR "/scene_narrow_c4.glb";
+    write_test_glb_color4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    /* Pins the narrowing call in the SCENE extraction loop (the tangent path has its own) */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 3, false, 4},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_NONE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT32(3U * 24U, hdr->vertex_data_size);
+    const float expected_v0[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.25F};
+    const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
+    TEST_ASSERT_EQUAL_MEMORY(expected_v0, verts, sizeof(expected_v0));
+
+    free(data);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_mesh_narrow_first_stream_position_to_vec2(void) {
+    const char *glb_path = TMP_DIR "/narrow_pos2.glb";
+    write_test_glb_color4(glb_path);
+
+    /* Narrowing the FIRST stream, down to count 2 (a 2D game dropping z) */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 2, false, 3},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT32(3U * 8U, hdr->vertex_data_size);
+    const float expected[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F}; /* xy of the 3 vertices */
+    const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc);
+    TEST_ASSERT_EQUAL_MEMORY(expected, verts, sizeof(expected));
 
     free(data);
 }
@@ -8567,6 +8637,10 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_requires_declaration);
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
+    RUN_TEST(test_layout_rejects_normalized_float);
+    RUN_TEST(test_layout_rejects_invalid_stream_type);
+    RUN_TEST(test_scene_mesh_narrow_color_vec4_to_vec3);
+    RUN_TEST(test_mesh_narrow_first_stream_position_to_vec2);
     RUN_TEST(test_scene_mesh_computed_tangent_narrow_declared);
 
     /* Include resolver */

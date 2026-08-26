@@ -215,7 +215,7 @@ void nt_sprite_renderer_restore_gpu(void) {
 /* Build the fixed sprite vertex layout once — 20-byte stride is locked.
  * Uses NT_ATTR_POSITION/COLOR/TEXCOORD0 location enum so the sprite vertex
  * shader can declare matching layout(location=N) bindings.
- * texcoord uses USHORT2N: GL normalizes 0..65535 → 0..1 in the shader at no
+ * texcoord uses normalized uint16: GL maps 0..65535 → 0..1 in the shader at no
  * cost, and atlas UVs are already u16 in the blob — emit copies them
  * verbatim without a float roundtrip. */
 static nt_vertex_layout_t s_sprite_layout = {

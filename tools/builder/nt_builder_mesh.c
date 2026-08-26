@@ -10,7 +10,11 @@
 static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
 
 static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s, const NtStreamLayout *st) {
-    const char *name = st->engine_name ? st->engine_name : "(null)";
+    if (st->engine_name == NULL) {
+        NT_LOG_ERROR("%s: stream[%u] engine_name is NULL", label, s);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    const char *name = st->engine_name;
     if (st->count < 1 || st->count > 4) {
         NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, st->count);
         return NT_BUILD_ERR_VALIDATION;
@@ -73,7 +77,7 @@ static nt_build_result_t nt_validate_layout_alignment(const char *label, const N
     for (uint32_t s = 0; s < stream_count; s++) {
         uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
         if (stride % comp_size != 0) {
-            NT_LOG_ERROR("%s: vertex stride %u is not a multiple of stream[%u] '%s' type size %u (WebGL2 rule) -- pad the layout to a multiple of the largest type", label, stride, s,
+            NT_LOG_ERROR("%s: vertex stride %u is not a multiple of stream[%u] '%s' type size %u (WebGL2 rule) -- widen a count or change a stream type so the stride divides evenly", label, stride, s,
                          layout[s].engine_name ? layout[s].engine_name : "(null)", comp_size);
             return NT_BUILD_ERR_VALIDATION;
         }
