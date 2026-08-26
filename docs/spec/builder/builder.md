@@ -93,6 +93,21 @@ Builder must check: references between assets, resource types, mesh/material/sha
 
 **Component narrowing.** A layout entry may declare `source_components` (default 0): the source accessor must then carry exactly that many components and the leading `count` are packed — e.g. a VEC4 `COLOR_0` narrowed to RGB, or a computed tangent's handedness dropped. Narrowing is declared explicitly so a genuine source/layout width mismatch still fails the build; `count` greater than the source width (widening/padding) is rejected. Narrowing affects only the pack layout, never builder computations: streams are extracted at source width, MikkTSpace runs on full-width data, and compaction to the declared counts happens last. So a mesh can pack a narrowed POSITION and computed tangents at once. Computed (MikkTSpace) tangents count as a 4-component source; their POSITION/NORMAL/UV0 inputs must be VEC3/VEC3/VEC2 **sources** — automatic for conformant glTF.
 
+**Mesh wire encode.** The shared mesh-buffer builder (`nt_builder_build_mesh_buffer`,
+one choke point for `add_mesh` and the scene API) emits the wire form of
+[runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v3)
+automatically — no knob. Vertices are always written as SOA planes. Indices
+are encoded with the meshopt index codec when `index_type != 0`,
+`index_count > 0` and `index_count % 3 == 0`, and the encoded stream is kept
+only if it is smaller than RAW. Before encoding, every index is validated
+`< vertex_count` (`NT_BUILD_ERR_VALIDATION` otherwise — the codec sizes its
+encode buffer from `vertex_count`, and this also closes the RAW path's silent
+out-of-range hole). The encoder pins `meshopt_encodeIndexVersion(1)` and then
+decodes its own stream back, storing the decoded (canonicalized) order as the
+pack ground truth; a decode-back failure is `NT_BUILD_ASSERT` (broken vendored
+codec, never a silent RAW fallback). MikkTSpace, AABB and vertex data are
+computed before canonicalization and are invariant under it.
+
 **Tangent model.** The layout expresses tangent presence (a TANGENT stream or not); `tangent_mode` only says where the data comes from: `AUTO` (glTF, else MikkTSpace), `COMPUTE` (always MikkTSpace), `REQUIRE` (glTF or build error). A mesh without normal mapping simply omits the TANGENT stream. Tangent computation exists only in the scene API; `add_mesh` reads TANGENT from the glTF and asserts on any mode other than `AUTO`.
 
 ## Asserts vs. graceful content errors

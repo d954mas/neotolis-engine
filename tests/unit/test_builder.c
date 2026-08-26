@@ -29,6 +29,8 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 #include "nt_builder_atlas_geometry.h"
 #include "nt_builder_atlas_test.h"
 #include "nt_builder_internal.h"
+#include "cgltf.h"
+#include "meshwire/nt_meshwire.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
 #include "stb_truetype.h"
@@ -1710,11 +1712,11 @@ void test_mesh_narrow_color_vec4_to_vec3(void) {
     const NtStreamDesc *descs = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
     TEST_ASSERT_EQUAL_UINT8(3, descs[1].count); /* narrowed in the pack */
 
-    /* Leading RGB of each VEC4 color survives, alpha dropped */
+    /* Leading RGB of each VEC4 color survives, alpha dropped.
+     * Wire form is SOA: position plane (v0,v1,v2) then color plane. */
     const float expected[] = {
-        0.0F, 0.0F, 0.0F, 1.0F,  0.5F,  0.25F, /* v0 */
-        1.0F, 0.0F, 0.0F, 0.0F,  1.0F,  0.0F,  /* v1 */
-        0.0F, 1.0F, 0.5F, 0.25F, 0.25F, 1.0F   /* v2 */
+        0.0F, 0.0F, 0.0F,  1.0F, 0.0F, 0.0F, 0.0F,  1.0F,  0.5F, /* positions */
+        1.0F, 0.5F, 0.25F, 0.0F, 1.0F, 0.0F, 0.25F, 0.25F, 1.0F  /* colors */
     };
     const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
     TEST_ASSERT_EQUAL_MEMORY(expected, verts, sizeof(expected));
@@ -1773,14 +1775,15 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     TEST_ASSERT_EQUAL_UINT32(3U * 16U, hdr->vertex_data_size);
 
-    /* Vertex 0: normal (0,0,1) snorm8 at offset 6, color (1.0,0.5,0.25,drop) unorm8 at offset 9 */
+    /* Vertex 0: normal (0,0,1) snorm8, color (1.0,0.5,0.25,drop) unorm8.
+     * SOA wire: normal plane after the 18 B position plane, color plane after it (27). */
     const uint8_t *v0 = data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc));
-    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[6]);
-    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[7]);
-    TEST_ASSERT_EQUAL_INT8(127, (int8_t)v0[8]);
-    TEST_ASSERT_EQUAL_UINT8(255, v0[9]);
-    TEST_ASSERT_EQUAL_UINT8(128, v0[10]);
-    TEST_ASSERT_EQUAL_UINT8(64, v0[11]);
+    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[18]);
+    TEST_ASSERT_EQUAL_INT8(0, (int8_t)v0[19]);
+    TEST_ASSERT_EQUAL_INT8(127, (int8_t)v0[20]);
+    TEST_ASSERT_EQUAL_UINT8(255, v0[27]);
+    TEST_ASSERT_EQUAL_UINT8(128, v0[28]);
+    TEST_ASSERT_EQUAL_UINT8(64, v0[29]);
 
     free(data);
 }
@@ -1808,11 +1811,12 @@ void test_scene_mesh_narrow_position_with_computed_tangent(void) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     TEST_ASSERT_EQUAL_UINT32(3U * 44U, hdr->vertex_data_size); /* (2+3+2+4) floats per vertex */
 
-    /* Vertex 0: pos narrowed to xy, tangent computed from full-width inputs = (1,0,0,+-1) */
+    /* Vertex 0: pos narrowed to xy, tangent computed from full-width inputs = (1,0,0,+-1).
+     * SOA wire: tangent plane starts after pos/normal/uv planes (3*(2+3+2) floats). */
     const float *v0 = (const float *)(data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc)));
     const float expected_pos_uv[2] = {0.0F, 0.0F};
     TEST_ASSERT_EQUAL_MEMORY(expected_pos_uv, v0, sizeof(expected_pos_uv));
-    const float *tan0 = v0 + 7;
+    const float *tan0 = v0 + 21;
     TEST_ASSERT_TRUE(tan0[0] > 0.99F && tan0[0] < 1.01F);
     TEST_ASSERT_TRUE(tan0[3] > 0.99F || tan0[3] < -0.99F); /* handedness present */
 
@@ -1895,10 +1899,11 @@ void test_scene_mesh_tangent_auto_prefers_gltf(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     /* AUTO with an authored glTF tangent must extract it, not run MikkTSpace:
-     * authored (0,1,0,-1) vs computed (1,0,0,+1) */
+     * authored (0,1,0,-1) vs computed (1,0,0,+1).
+     * SOA wire: tangent plane starts after the 3-vertex position plane (36 B). */
     const float expected_tan0[] = {0.0F, 1.0F, 0.0F, -1.0F};
     const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
-    TEST_ASSERT_EQUAL_MEMORY(expected_tan0, verts + 12, sizeof(expected_tan0));
+    TEST_ASSERT_EQUAL_MEMORY(expected_tan0, verts + 36, sizeof(expected_tan0));
 
     free(data);
     nt_builder_free_glb_scene(&scene);
@@ -2008,12 +2013,154 @@ void test_scene_mesh_narrow_color_vec4_to_vec3(void) {
 
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     TEST_ASSERT_EQUAL_UINT32(3U * 24U, hdr->vertex_data_size);
-    const float expected_v0[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.25F};
+    /* SOA wire: v0 position at the plane start, v0 color right after the 36 B position plane */
+    const float expected_pos0[] = {0.0F, 0.0F, 0.0F};
+    const float expected_col0[] = {1.0F, 0.5F, 0.25F};
     const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
-    TEST_ASSERT_EQUAL_MEMORY(expected_v0, verts, sizeof(expected_v0));
+    TEST_ASSERT_EQUAL_MEMORY(expected_pos0, verts, sizeof(expected_pos0));
+    TEST_ASSERT_EQUAL_MEMORY(expected_col0, verts + 36, sizeof(expected_col0));
 
     free(data);
     nt_builder_free_glb_scene(&scene);
+}
+
+/* --- Mesh wire round-trip: builder encode -> nt_meshwire decode --- */
+
+/* Rotate a triple so the smallest index leads (winding preserved) */
+static void canon_tri(uint32_t t[3]) {
+    while (t[0] > t[1] || t[0] > t[2]) {
+        uint32_t tmp = t[0];
+        t[0] = t[1];
+        t[1] = t[2];
+        t[2] = tmp;
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_mesh_wire_roundtrip_cube(void) {
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_mesh("assets/meshes/cube.glb", layout, 2, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size));
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_VTX_SOA, hdr->vertex_wire);
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_MESHOPT, hdr->index_wire);
+    TEST_ASSERT_EQUAL_UINT8(1, hdr->index_type);
+    TEST_ASSERT_EQUAL_UINT32(36, hdr->index_count);
+    TEST_ASSERT_TRUE(hdr->index_data_size < 36 * 2); /* wire must beat RAW or the builder keeps RAW */
+
+    const uint8_t *wire_vtx = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
+    const uint8_t *wire_idx = wire_vtx + hdr->vertex_data_size;
+
+    /* Vertices: re-interleave and check the SOA plane contract independently --
+     * vertex v must carry plane bytes posplane[v*12..] then uvplane[v*8..] */
+    const uint32_t elem_sizes[2] = {12, 8};
+    uint8_t *gpu_vtx = (uint8_t *)malloc(hdr->vertex_data_size);
+    TEST_ASSERT_NOT_NULL(gpu_vtx);
+    TEST_ASSERT_TRUE(nt_meshwire_reinterleave(gpu_vtx, wire_vtx, hdr->vertex_count, elem_sizes, 2));
+    const uint8_t *uv_plane = wire_vtx + ((size_t)hdr->vertex_count * 12);
+    for (uint32_t v = 0; v < hdr->vertex_count; v++) {
+        TEST_ASSERT_EQUAL_MEMORY(wire_vtx + ((size_t)v * 12), gpu_vtx + ((size_t)v * 20), 12);
+        TEST_ASSERT_EQUAL_MEMORY(uv_plane + ((size_t)v * 8), gpu_vtx + ((size_t)v * 20) + 12, 8);
+    }
+    free(gpu_vtx);
+
+    /* Indices: decode the wire stream, then check the triangle multiset matches
+     * the source glTF up to rotation (the codec's canonicalization contract) */
+    uint16_t decoded[36];
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(decoded, 36, 2, wire_idx, hdr->index_data_size));
+
+    cgltf_options options;
+    memset(&options, 0, sizeof(options));
+    cgltf_data *gltf = NULL;
+    TEST_ASSERT_EQUAL(cgltf_result_success, cgltf_parse_file(&options, "assets/meshes/cube.glb", &gltf));
+    TEST_ASSERT_EQUAL(cgltf_result_success, cgltf_load_buffers(&options, gltf, "assets/meshes/cube.glb"));
+    const cgltf_accessor *iacc = gltf->meshes[0].primitives[0].indices;
+    TEST_ASSERT_EQUAL_UINT32(36, (uint32_t)iacc->count);
+    uint32_t original[36];
+    cgltf_accessor_unpack_indices(iacc, original, sizeof(uint32_t), 36);
+    cgltf_free(gltf);
+
+    bool used[12] = {false};
+    for (uint32_t t = 0; t < 12; t++) {
+        uint32_t dec[3] = {decoded[(size_t)t * 3], decoded[((size_t)t * 3) + 1], decoded[((size_t)t * 3) + 2]};
+        TEST_ASSERT_TRUE(dec[0] < hdr->vertex_count && dec[1] < hdr->vertex_count && dec[2] < hdr->vertex_count);
+        canon_tri(dec);
+        bool matched = false;
+        for (uint32_t o = 0; o < 12 && !matched; o++) {
+            if (used[o]) {
+                continue;
+            }
+            uint32_t org[3] = {original[(size_t)o * 3], original[((size_t)o * 3) + 1], original[((size_t)o * 3) + 2]};
+            canon_tri(org);
+            if (org[0] == dec[0] && org[1] == dec[1] && org[2] == dec[2]) {
+                used[o] = true;
+                matched = true;
+            }
+        }
+        TEST_ASSERT_TRUE_MESSAGE(matched, "decoded triangle not found in source glTF");
+    }
+
+    free(data);
+}
+
+/* --- Builder wire policy branches (direct choke-point calls) --- */
+
+void test_mesh_wire_tiny_mesh_stays_raw(void) {
+    /* 1 triangle: encoded stream (>= 17 B) cannot beat 6 B RAW */
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    float *streams[1] = {pos};
+    uint16_t idx[3] = {0, 1, 2};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 3, 1, 6, &data, &size));
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_RAW, hdr->index_wire);
+    TEST_ASSERT_EQUAL_UINT32(6, hdr->index_data_size);
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_VTX_SOA, hdr->vertex_wire);
+    free(data);
+}
+
+void test_mesh_wire_non_triangle_count_stays_raw(void) {
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    float *streams[1] = {pos};
+    uint16_t idx[4] = {0, 1, 2, 0}; /* not a multiple of 3 -- codec gate must skip */
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 4, 1, 8, &data, &size));
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_RAW, hdr->index_wire);
+    TEST_ASSERT_EQUAL_UINT32(8, hdr->index_data_size);
+    free(data);
+}
+
+void test_mesh_wire_non_indexed_stays_raw(void) {
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    float *streams[1] = {pos};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, NULL, 0, 0, 0, &data, &size));
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_RAW, hdr->index_wire);
+    TEST_ASSERT_EQUAL_UINT32(0, hdr->index_data_size);
+    free(data);
+}
+
+void test_mesh_wire_rejects_out_of_range_index(void) {
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    float *streams[1] = {pos};
+    uint16_t idx[3] = {0, 1, 7}; /* 7 >= vertex_count 3 */
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 3, 1, 6, &data, &size));
 }
 
 void test_mesh_narrow_first_stream_position_to_vec2(void) {
@@ -2066,9 +2213,10 @@ void test_scene_mesh_computed_tangent_narrow_declared(void) {
     const NtStreamDesc *descs = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
     TEST_ASSERT_EQUAL_UINT8(3, descs[3].count);
 
-    /* UVs align with the XY plane, so MikkTSpace's tangent is (1,0,0); w was dropped */
+    /* UVs align with the XY plane, so MikkTSpace's tangent is (1,0,0); w was dropped.
+     * SOA wire: tangent plane starts after pos/normal/uv planes (3*(3+3+2) floats). */
     const float *v0 = (const float *)(data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc)));
-    const float *tan0 = v0 + 8;
+    const float *tan0 = v0 + 24;
     TEST_ASSERT_TRUE(tan0[0] > 0.99F && tan0[0] < 1.01F);
     TEST_ASSERT_TRUE(tan0[1] > -0.01F && tan0[1] < 0.01F);
     TEST_ASSERT_TRUE(tan0[2] > -0.01F && tan0[2] < 0.01F);
@@ -8903,6 +9051,11 @@ int main(void) {
     RUN_TEST(test_layout_accepts_shipped_sponza_layouts);
     RUN_TEST(test_layout_rejects_count_gt_source_components);
     RUN_TEST(test_mesh_narrow_color_vec4_to_vec3);
+    RUN_TEST(test_mesh_wire_roundtrip_cube);
+    RUN_TEST(test_mesh_wire_tiny_mesh_stays_raw);
+    RUN_TEST(test_mesh_wire_non_triangle_count_stays_raw);
+    RUN_TEST(test_mesh_wire_non_indexed_stays_raw);
+    RUN_TEST(test_mesh_wire_rejects_out_of_range_index);
     RUN_TEST(test_mesh_narrow_requires_declaration);
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
