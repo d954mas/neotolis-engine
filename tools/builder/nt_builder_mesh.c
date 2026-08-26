@@ -49,6 +49,14 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
         if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
+        /* Duplicate engine_name = duplicate NtStreamDesc.name_hash: the runtime matches
+         * shader locations by that hash, so both streams bind one location, last wins. */
+        for (uint32_t p = 0; p < s; p++) {
+            if (strcmp(layout[p].engine_name, layout[s].engine_name) == 0) {
+                NT_LOG_ERROR("%s: stream[%u] duplicates engine_name '%s' of stream[%u]", label, s, layout[s].engine_name, p);
+                return NT_BUILD_ERR_VALIDATION;
+            }
+        }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
             has_position = true;
         }

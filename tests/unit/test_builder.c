@@ -1709,6 +1709,16 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     free(data);
 }
 
+void test_layout_rejects_duplicate_engine_name(void) {
+    /* Same engine_name = same name_hash: both streams would bind one shader location */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"uv0", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
+}
+
 void test_layout_rejects_normalized_float(void) {
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, true, 0},
@@ -8637,6 +8647,7 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_requires_declaration);
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
+    RUN_TEST(test_layout_rejects_duplicate_engine_name);
     RUN_TEST(test_layout_rejects_normalized_float);
     RUN_TEST(test_layout_rejects_invalid_stream_type);
     RUN_TEST(test_scene_mesh_narrow_color_vec4_to_vec3);
