@@ -14,6 +14,10 @@ static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s,
         NT_LOG_ERROR("%s: stream[%u] engine_name is NULL", label, s);
         return NT_BUILD_ERR_VALIDATION;
     }
+    if (st->gltf_name == NULL) {
+        NT_LOG_ERROR("%s: stream[%u] '%s': gltf_name is NULL", label, s, st->engine_name);
+        return NT_BUILD_ERR_VALIDATION;
+    }
     const char *name = st->engine_name;
     if (st->count < 1 || st->count > 4) {
         NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, st->count);
@@ -258,7 +262,7 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
     for (uint32_t s = 0; s < stream_count; s++) {
         const cgltf_accessor *acc = NULL;
         for (cgltf_size a = 0; a < prim->attributes_count; a++) {
-            if (layout[s].gltf_name != NULL && strcmp(prim->attributes[a].name, layout[s].gltf_name) == 0) {
+            if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, layout[s].gltf_name) == 0) {
                 acc = prim->attributes[a].data;
                 break;
             }

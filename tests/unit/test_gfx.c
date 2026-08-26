@@ -339,6 +339,46 @@ void test_gfx_pipeline_asserts_normalized_float(void) {
     nt_gfx_destroy_shader(fs);
 }
 
+void test_gfx_pipeline_asserts_misaligned_offset(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* f32 attr at offset 2: WebGL2 requires offset % 4 == 0 */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 2}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_misaligned_stride(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* stride 13 with an f32 attr: WebGL2 requires stride % 4 == 0 */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 13, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_bad_instance_layout(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* Pins that the instance layout goes through the same WebGL2 asserts */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 4}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 void test_gfx_pipeline_stride_255_boundary(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
@@ -798,6 +838,43 @@ void test_activate_mesh_rejects_misaligned_stream(void) {
     sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3};
     sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_UINT8, .count = 3, .normalized = 1};
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_misaligned_offset(void) {
+    /* u8x2 + f32x1 + u8x2: f32 offset 2 misaligned, but stride 8 divides evenly by
+     * every type size -- ONLY the offset branch can reject this blob */
+    enum { BLOB_OFF = sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + 8 };
+    uint8_t blob[BLOB_OFF];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 3;
+    hdr->index_type = 0;
+    hdr->vertex_count = 1;
+    hdr->vertex_data_size = 8;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1};
+    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 1};
+    sd[2] = (NtStreamDesc){.name_hash = 0x33333333, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1};
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_texture_bad_version(void) {
+    uint32_t pixel_size = 2 * 2 * 4;
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
+    memset(blob, 0, sizeof(blob));
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    hdr->magic = NT_TEXTURE_MAGIC;
+    hdr->version = NT_TEXTURE_VERSION_V2 + 1;
+    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+    hdr->width = 2;
+    hdr->height = 2;
+    hdr->mip_count = 1;
+    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->data_size = pixel_size;
+    /* graceful reject, not a trap: stale packs must not be misparsed */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(NtTextureAssetHeaderV2) + pixel_size));
 }
 
 void test_activate_mesh_bad_version(void) {
@@ -1361,6 +1438,11 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
     RUN_TEST(test_gfx_pipeline_asserts_normalized_float);
     RUN_TEST(test_gfx_pipeline_asserts_location_out_of_range);
+    RUN_TEST(test_gfx_pipeline_asserts_misaligned_offset);
+    RUN_TEST(test_gfx_pipeline_asserts_misaligned_stride);
+    RUN_TEST(test_gfx_pipeline_asserts_bad_instance_layout);
+    RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
+    RUN_TEST(test_activate_texture_bad_version);
     RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
     RUN_TEST(test_activate_mesh_rejects_duplicate_name_hash);
     RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);

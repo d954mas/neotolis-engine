@@ -679,9 +679,6 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
            blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
 }
 
-/* WebGL2 raises INVALID_OPERATION when an attribute offset or the stride is not a
- * multiple of the attribute's type size; desktop GL tolerates it, so without this
- * a bad layout only fails in the browser. Off hot path (pipelines are cached). */
 /* A location used twice (within a layout or across vertex/instance layouts) means
  * glVertexAttribPointer runs twice on one slot -- last bind wins, silently wrong data. */
 static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
@@ -699,6 +696,9 @@ static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex
     return true;
 }
 
+/* WebGL2 raises INVALID_OPERATION when an attribute offset or the stride is not a
+ * multiple of the attribute's type size; desktop GL tolerates it, so without this
+ * a bad layout only fails in the browser. Off hot path (pipelines are cached). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     for (uint8_t i = 0; i < layout->attr_count; i++) {

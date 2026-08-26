@@ -1447,6 +1447,81 @@ static void write_test_glb_color4(const char *path) {
     (void)fclose(f);
 }
 
+/* --- Write a glb with POSITION/NORMAL/TEXCOORD_0 + authored VEC4 TANGENT --- */
+
+static void write_test_glb_tangent4(const char *path) {
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"scene\":0,"
+                           "\"scenes\":[{\"nodes\":[0]}],"
+                           "\"nodes\":[{\"mesh\":0,\"name\":\"RichTri\"}],"
+                           "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"TANGENT\":3},\"indices\":4}]}],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.5],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},"
+                           "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},"
+                           "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},"
+                           "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":24},"
+                           "{\"buffer\":0,\"byteOffset\":96,\"byteLength\":48},"
+                           "{\"buffer\":0,\"byteOffset\":144,\"byteLength\":6}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":152}]"
+                           "}";
+
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.5F};
+    float normals[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
+    float uvs[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
+    /* authored tangents distinguishable from MikkTSpace output (1,0,0,+1) */
+    float colors[] = {0.0F, 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F, -1.0F};
+    uint16_t indices[] = {0, 1, 2};
+    uint16_t idx_pad = 0;
+
+    uint32_t bin_data_size = (uint32_t)(sizeof(positions) + sizeof(normals) + sizeof(uvs) + sizeof(colors) + sizeof(indices) + sizeof(idx_pad));
+    uint32_t bin_padded = (bin_data_size + 3U) & ~3U;
+
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions, sizeof(positions), 1, f);
+    (void)fwrite(normals, sizeof(normals), 1, f);
+    (void)fwrite(uvs, sizeof(uvs), 1, f);
+    (void)fwrite(colors, sizeof(colors), 1, f);
+    (void)fwrite(indices, sizeof(indices), 1, f);
+    (void)fwrite(&idx_pad, sizeof(idx_pad), 1, f);
+
+    (void)fclose(f);
+}
+
 /* --- glb scene parse test --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1756,6 +1831,96 @@ void test_add_mesh_asserts_non_auto_tangent_mode(void) {
     uint32_t size = 0;
     /* Tangent computation is scene-API only: a mode add_mesh would ignore must fail loudly */
     EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_COMPUTE, NULL, UINT32_MAX, &data, &size));
+}
+
+void test_layout_rejects_null_gltf_name(void) {
+    NtStreamLayout layout[] = {
+        {"position", NULL, NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 1));
+}
+
+void test_scene_mesh_asserts_tangent_mode_without_stream(void) {
+    const char *glb_path = TMP_DIR "/scene_modeless.glb";
+    write_test_glb_color4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    /* A provenance request with no TANGENT stream to apply it to is a config contradiction */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_COMPUTE, &data, &size));
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_scene_mesh_tangent_require_absent_errors(void) {
+    const char *glb_path = TMP_DIR "/scene_req_notan.glb";
+    write_test_glb_color4(glb_path); /* no TANGENT attribute in the glTF */
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_REQUIRE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
+    TEST_ASSERT_NULL(data);
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_scene_mesh_tangent_auto_prefers_gltf(void) {
+    const char *glb_path = TMP_DIR "/scene_tan_auto.glb";
+    write_test_glb_tangent4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_AUTO, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    /* AUTO with an authored glTF tangent must extract it, not run MikkTSpace:
+     * authored (0,1,0,-1) vs computed (1,0,0,+1) */
+    const float expected_tan0[] = {0.0F, 1.0F, 0.0F, -1.0F};
+    const uint8_t *verts = data + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
+    TEST_ASSERT_EQUAL_MEMORY(expected_tan0, verts + 12, sizeof(expected_tan0));
+
+    free(data);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_scene_mesh_tangent_require_present_ok(void) {
+    const char *glb_path = TMP_DIR "/scene_tan_req.glb";
+    write_test_glb_tangent4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_REQUIRE, &data, &size));
+
+    free(data);
+    nt_builder_free_glb_scene(&scene);
 }
 
 void test_scene_mesh_asserts_invalid_tangent_mode(void) {
@@ -8743,6 +8908,11 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
     RUN_TEST(test_scene_mesh_narrow_position_with_computed_tangent);
     RUN_TEST(test_add_mesh_asserts_non_auto_tangent_mode);
+    RUN_TEST(test_layout_rejects_null_gltf_name);
+    RUN_TEST(test_scene_mesh_asserts_tangent_mode_without_stream);
+    RUN_TEST(test_scene_mesh_tangent_require_absent_errors);
+    RUN_TEST(test_scene_mesh_tangent_auto_prefers_gltf);
+    RUN_TEST(test_scene_mesh_tangent_require_present_ok);
     RUN_TEST(test_scene_mesh_asserts_invalid_tangent_mode);
     RUN_TEST(test_layout_rejects_duplicate_engine_name);
     RUN_TEST(test_layout_rejects_engine_name_hash_collision);

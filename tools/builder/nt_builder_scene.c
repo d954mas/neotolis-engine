@@ -219,6 +219,9 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         }
     }
 
+    /* A provenance request that cannot apply is a config contradiction (same rule as add_mesh) */
+    NT_BUILD_ASSERT((tangent_stream_idx >= 0 || tangent_mode == NT_TANGENT_AUTO) && "tangent_mode set but the layout has no TANGENT stream");
+
     /* Determine tangent handling */
     if (tangent_stream_idx >= 0) {
         switch (tangent_mode) {
