@@ -45,15 +45,18 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
     }
 
     bool has_position = false;
+    uint32_t name_hashes[NT_MESH_MAX_STREAMS];
     for (uint32_t s = 0; s < stream_count; s++) {
         if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
-        /* Duplicate engine_name = duplicate NtStreamDesc.name_hash: the runtime matches
-         * shader locations by that hash, so both streams bind one location, last wins. */
+        /* The runtime matches shader locations by NtStreamDesc.name_hash, so two streams
+         * whose names share a hash (identical OR a 32-bit collision) bind one location,
+         * last wins. Compare the hashes the pack will actually carry. */
+        name_hashes[s] = nt_hash32_str(layout[s].engine_name).value;
         for (uint32_t p = 0; p < s; p++) {
-            if (strcmp(layout[p].engine_name, layout[s].engine_name) == 0) {
-                NT_LOG_ERROR("%s: stream[%u] duplicates engine_name '%s' of stream[%u]", label, s, layout[s].engine_name, p);
+            if (name_hashes[p] == name_hashes[s]) {
+                NT_LOG_ERROR("%s: stream[%u] '%s' and stream[%u] '%s' share name_hash 0x%08x -- rename one", label, s, layout[s].engine_name, p, layout[p].engine_name, name_hashes[s]);
                 return NT_BUILD_ERR_VALIDATION;
             }
         }

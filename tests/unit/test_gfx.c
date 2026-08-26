@@ -293,6 +293,30 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
     nt_gfx_destroy_shader(vs);
 }
 
+void test_gfx_pipeline_stride_255_boundary(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* WebGL2 caps vertexAttribPointer stride at 255; u8 attr keeps 255 alignment-legal */
+    nt_pipeline_t ok = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 255, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, ok.id);
+    nt_gfx_destroy_pipeline(ok);
+
+    nt_pipeline_t bad = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 256, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
+    });
+    TEST_ASSERT_EQUAL_UINT32(0, bad.id);
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.src_rgb = UINT8_MAX;
@@ -1151,6 +1175,7 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_shader);
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
+    RUN_TEST(test_gfx_pipeline_stride_255_boundary);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);

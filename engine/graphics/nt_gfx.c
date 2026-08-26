@@ -710,6 +710,12 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
         return result;
     }
+    /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
+     * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
+    if (desc->layout.stride > 255 || desc->instance_layout.stride > 255) {
+        NT_LOG_ERROR("pipeline creation failed: stride %u exceeds WebGL2 max 255", (uint32_t)((desc->layout.stride > 255) ? desc->layout.stride : desc->instance_layout.stride));
+        return result;
+    }
     /* After the attr_count bounds check -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     assert_layout_webgl2_rules(&desc->instance_layout);

@@ -1682,7 +1682,7 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     const char *glb_path = TMP_DIR "/narrow_16b.glb";
     write_test_glb_color4(glb_path);
 
-    /* The compact packing #344 exists for: 6 + 3 + 3 + 4 = 16 bytes per vertex */
+    /* Compact 16-byte packing: 6 + 3 + 3 + 4 bytes per vertex */
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
         {"normal", "NORMAL", NT_STREAM_INT8, 3, true, 0},
@@ -1715,6 +1715,17 @@ void test_layout_rejects_duplicate_engine_name(void) {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
         {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
         {"uv0", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
+}
+
+void test_layout_rejects_engine_name_hash_collision(void) {
+    /* Distinct strings, same XXH32(seed 0) = 0xfbb31832 -- the pack carries only the
+     * hash, so the runtime cannot tell these apart either */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"attr4040", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"attr168680", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
 }
@@ -8648,6 +8659,7 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
     RUN_TEST(test_layout_rejects_duplicate_engine_name);
+    RUN_TEST(test_layout_rejects_engine_name_hash_collision);
     RUN_TEST(test_layout_rejects_normalized_float);
     RUN_TEST(test_layout_rejects_invalid_stream_type);
     RUN_TEST(test_scene_mesh_narrow_color_vec4_to_vec3);
