@@ -660,49 +660,7 @@ void test_activate_texture_too_small(void) {
     TEST_ASSERT_EQUAL_UINT32(0, handle);
 }
 
-/* ---- Activator: mesh valid blob ---- */
-
-void test_activate_mesh_valid_blob(void) {
-    /* Build: header + 1 stream desc + 12 bytes vertex data + 6 bytes index data */
-    uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
-    uint32_t vdata_size = 12; /* 1 vertex, 3 floats */
-    uint32_t idata_size = 6;  /* 3 uint16 indices */
-    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
-    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6];
-    memset(blob, 0, sizeof(blob));
-
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = NT_MESH_MAGIC;
-    hdr->version = NT_MESH_VERSION;
-    hdr->stream_count = 1;
-    hdr->index_type = 1; /* uint16 */
-    hdr->vertex_count = 1;
-    hdr->index_count = 3;
-    hdr->vertex_data_size = vdata_size;
-    hdr->index_data_size = idata_size;
-
-    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = 0x12345678;
-    sd->type = NT_STREAM_FLOAT32;
-    sd->count = 3;
-
-    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
-    nt_gfx_deactivate_mesh(handle);
-}
-
-/* ---- Activator: mesh bad magic ---- */
-
-void test_activate_mesh_bad_magic(void) {
-    uint8_t blob[sizeof(NtMeshAssetHeader)];
-    memset(blob, 0, sizeof(blob));
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = 0xDEADBEEF;
-    uint32_t handle = nt_gfx_activate_mesh(blob, sizeof(blob));
-    TEST_ASSERT_EQUAL_UINT32(0, handle);
-}
-
-/* ---- Activator: mesh bad version / inconsistent sizes / 32-bit wrap ---- */
+/* ---- Activator: mesh valid blob (shared fixture = positive control) ---- */
 
 static void fill_valid_mesh_blob(uint8_t *blob) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
@@ -722,6 +680,52 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
 
 #define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6)
 
+void test_activate_mesh_valid_blob(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_mesh(handle);
+}
+
+/* ---- Activator: mesh bad magic ---- */
+
+void test_activate_mesh_bad_magic(void) {
+    uint8_t blob[sizeof(NtMeshAssetHeader)];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = 0xDEADBEEF;
+    uint32_t handle = nt_gfx_activate_mesh(blob, sizeof(blob));
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: mesh bad version / inconsistent sizes / 32-bit wrap ---- */
+
+void test_activate_mesh_rejects_bad_stream_type(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->type = 99;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_index_size_mismatch(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->index_count = 4; /* 4 * 2 != index_data_size 6 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_index_count_with_type_none(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->index_type = 0; /* index_count stays 3 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
 void test_activate_mesh_bad_version(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
@@ -740,10 +744,13 @@ void test_activate_mesh_rejects_size_mismatch(void) {
 }
 
 void test_activate_mesh_rejects_32bit_size_wrap(void) {
-    /* A 32-bit required-sum would wrap past the truncation check and OOB-read */
+    /* A 32-bit required-sum wraps to 46 <= blob size and would OOB-read. The blob is
+     * arithmetically consistent (0x15555554 * 12 == 0xFFFFFFF0), so every product
+     * cross-check passes and ONLY a 64-bit truncation check can reject it. */
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_count = 0x15555554U;
     ((NtMeshAssetHeader *)blob)->vertex_data_size = 0xFFFFFFF0U;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
@@ -778,6 +785,22 @@ void test_activate_shader_bad_magic(void) {
     hdr->magic = 0xDEADBEEF;
     uint32_t handle = nt_gfx_activate_shader(blob, sizeof(blob));
     TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: shader bad version ---- */
+
+void test_activate_shader_bad_version(void) {
+    const char *source = "void main() {}";
+    uint32_t code_size = (uint32_t)strlen(source) + 1;
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION + 1;
+    hdr->code_size = code_size;
+    memcpy(blob + sizeof(NtShaderCodeHeader), source, code_size);
+    /* graceful reject, not a trap: stale packs must not be misparsed */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(NtShaderCodeHeader) + code_size));
 }
 
 /* ---- Deactivate mesh clears table ---- */
@@ -1242,6 +1265,10 @@ int main(void) {
     RUN_TEST(test_activate_mesh_bad_version);
     RUN_TEST(test_activate_mesh_rejects_size_mismatch);
     RUN_TEST(test_activate_mesh_rejects_32bit_size_wrap);
+    RUN_TEST(test_activate_mesh_rejects_bad_stream_type);
+    RUN_TEST(test_activate_mesh_rejects_index_size_mismatch);
+    RUN_TEST(test_activate_mesh_rejects_index_count_with_type_none);
+    RUN_TEST(test_activate_shader_bad_version);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);

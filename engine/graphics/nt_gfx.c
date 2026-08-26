@@ -1869,7 +1869,10 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: bad magic");
         return 0;
     }
-    NT_ASSERT(hdr->version == NT_TEXTURE_VERSION_V2 && "activate_texture: version mismatch -- rebuild packs");
+    if (hdr->version != NT_TEXTURE_VERSION_V2) {
+        NT_LOG_ERROR("activate_texture: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_TEXTURE_VERSION_V2);
+        return 0;
+    }
 
     return activate_texture_impl(data, size);
 }

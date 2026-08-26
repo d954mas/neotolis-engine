@@ -20,7 +20,7 @@ Examples:
 
 ## Runtime format validation
 
-Runtime must validate: magic, version, type, sizes/offsets, required vertex/material compatibility. Builder validation is primary. Runtime validation is safety net.
+Runtime must validate: magic, version, type, sizes/offsets. Required attributes (e.g. POSITION) are a builder guarantee — the runtime sees only name hashes and cannot identify them. Builder validation is primary. Runtime validation is safety net.
 
 ## Mesh format strategy
 
