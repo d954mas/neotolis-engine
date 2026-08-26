@@ -1467,6 +1467,62 @@ void test_scene_mesh_computed_tangent_requires_count4(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
+/* --- Stream layout alignment validation (WebGL2 offset/stride rules) --- */
+
+void test_layout_rejects_misaligned_offset(void) {
+    /* u8x3 color puts the following f32 uv at offset 15 -- WebGL2 INVALID_OPERATION at vertexAttribPointer */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
+}
+
+void test_layout_rejects_misaligned_stride(void) {
+    /* Last stream u8x3 makes stride 15 -- not a multiple of the f32 position's type size */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 2));
+}
+
+void test_layout_accepts_aligned_16_byte_packing(void) {
+    /* The compact packing this feature exists for: 6 + 3 + 3 + 4 = 16 bytes, every offset aligned */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
+        {"normal", "NORMAL", NT_STREAM_INT8, 3, true},
+        {"color", "COLOR_0", NT_STREAM_UINT8, 3, true},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout, 4));
+}
+
+void test_layout_accepts_shipped_sponza_layouts(void) {
+    /* Regression guard: the flagship example's three layouts must keep validating */
+    NtStreamLayout layout_full[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false},
+    };
+    NtStreamLayout layout_diffuse[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+    };
+    NtStreamLayout layout_base[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
+    };
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_full, 4));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_diffuse, 3));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_validate_stream_layout("test", layout_base, 4));
+}
+
 /* --- Helper: read shader source from a single-shader pack --- */
 
 static char *read_shader_source_from_pack(const char *pack_path, uint32_t *out_code_size) {
@@ -8287,6 +8343,10 @@ int main(void) {
     RUN_TEST(test_scene_mesh_rejects_missing_position);
     RUN_TEST(test_scene_mesh_rejects_count_out_of_range);
     RUN_TEST(test_scene_mesh_computed_tangent_requires_count4);
+    RUN_TEST(test_layout_rejects_misaligned_offset);
+    RUN_TEST(test_layout_rejects_misaligned_stride);
+    RUN_TEST(test_layout_accepts_aligned_16_byte_packing);
+    RUN_TEST(test_layout_accepts_shipped_sponza_layouts);
 
     /* Include resolver */
     RUN_TEST(test_include_basic);

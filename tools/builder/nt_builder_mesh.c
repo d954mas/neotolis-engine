@@ -7,6 +7,8 @@
 
 /* --- Stream layout validation (shared by add_mesh and scene mesh paths) --- */
 
+static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
+
 nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtStreamLayout *layout, uint32_t stream_count) {
     if (stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
         NT_LOG_ERROR("%s: stream_count %u out of range [1, %d]", label, stream_count, NT_MESH_MAX_STREAMS);
@@ -17,6 +19,10 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
     for (uint32_t s = 0; s < stream_count; s++) {
         if (layout[s].count < 1 || layout[s].count > 4) {
             NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, layout[s].count);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+        if (nt_stream_type_size((uint8_t)layout[s].type) == 0) {
+            NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, layout[s].engine_name ? layout[s].engine_name : "(null)", (int)layout[s].type);
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].normalized && (layout[s].type == NT_STREAM_FLOAT32 || layout[s].type == NT_STREAM_FLOAT16)) {
@@ -30,6 +36,31 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
     if (!has_position) {
         NT_LOG_ERROR("%s: stream layout missing required POSITION attribute", label);
         return NT_BUILD_ERR_VALIDATION;
+    }
+    return nt_validate_layout_alignment(label, layout, stream_count);
+}
+
+/* WebGL2 rejects attribute offset/stride not divisible by the attribute's type size
+ * (desktop GL tolerates it, so a bad layout would only fail in the browser). */
+static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count) {
+    uint32_t offset = 0;
+    for (uint32_t s = 0; s < stream_count; s++) {
+        uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
+        if (offset % comp_size != 0) {
+            NT_LOG_ERROR("%s: stream[%u] '%s' offset %u is not a multiple of its type size %u (WebGL2 rule) -- reorder streams so larger types come first", label, s,
+                         layout[s].engine_name ? layout[s].engine_name : "(null)", offset, comp_size);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+        offset += comp_size * layout[s].count;
+    }
+    uint32_t stride = offset;
+    for (uint32_t s = 0; s < stream_count; s++) {
+        uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
+        if (stride % comp_size != 0) {
+            NT_LOG_ERROR("%s: vertex stride %u is not a multiple of stream[%u] '%s' type size %u (WebGL2 rule) -- pad the layout to a multiple of the largest type", label, stride, s,
+                         layout[s].engine_name ? layout[s].engine_name : "(null)", comp_size);
+            return NT_BUILD_ERR_VALIDATION;
+        }
     }
     return NT_BUILD_OK;
 }
