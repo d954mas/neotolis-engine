@@ -189,7 +189,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    NT_BUILD_ASSERT((unsigned)tangent_mode <= (unsigned)NT_TANGENT_NONE && "invalid tangent_mode");
+    NT_BUILD_ASSERT((unsigned)tangent_mode <= (unsigned)NT_TANGENT_REQUIRE && "invalid tangent_mode");
 
     char label[64];
     (void)snprintf(label, sizeof(label), "scene mesh[%u] prim[%u]", mesh_index, primitive_index);
@@ -222,9 +222,6 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
     /* Determine tangent handling */
     if (tangent_stream_idx >= 0) {
         switch (tangent_mode) {
-        case NT_TANGENT_NONE:
-            /* Skip tangent -- leave tangent_stream_idx but fill with zeros */
-            break;
         case NT_TANGENT_AUTO:
             if (!has_gltf_tangent) {
                 need_compute_tangent = true;
@@ -256,16 +253,19 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         }
     }
 
-    /* Extract vertex streams */
+    /* Extract vertex streams at SOURCE width -- narrowing is a pack-layout property,
+     * so builder computations (MikkTSpace) always see full-width data; streams are
+     * compacted to their layout counts only after the tangent block. */
     float *stream_floats[NT_MESH_MAX_STREAMS];
     memset((void *)stream_floats, 0, sizeof(stream_floats));
+    uint32_t src_widths[NT_MESH_MAX_STREAMS] = {0};
     uint32_t vertex_count = 0;
     bool vertex_count_set = false;
     nt_build_result_t ret = NT_BUILD_OK;
 
     for (uint32_t s = 0; s < stream_count; s++) {
         /* Skip TANGENT stream if we need to compute it */
-        if ((int32_t)s == tangent_stream_idx && (need_compute_tangent || tangent_mode == NT_TANGENT_NONE)) {
+        if ((int32_t)s == tangent_stream_idx && need_compute_tangent) {
             continue;
         }
 
@@ -311,7 +311,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             ret = NT_BUILD_ERR_FORMAT;
             goto cleanup_streams;
         }
-        nt_builder_narrow_stream_floats(stream_floats[s], count, src_components, layout[s].count);
+        src_widths[s] = src_components;
     }
 
     if (!vertex_count_set || vertex_count == 0) {
@@ -361,23 +361,23 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             float *pos_data = NULL;
             float *norm_data = NULL;
             float *uv_data = NULL;
-            uint8_t pos_count = 0;
-            uint8_t norm_count = 0;
-            uint8_t uv_count = 0;
+            uint32_t pos_src = 0;
+            uint32_t norm_src = 0;
+            uint32_t uv_src = 0;
 
             for (uint32_t s = 0; s < stream_count; s++) {
                 if (layout[s].gltf_name != NULL) {
                     if (strcmp(layout[s].gltf_name, "POSITION") == 0) {
                         pos_data = stream_floats[s];
-                        pos_count = layout[s].count;
+                        pos_src = src_widths[s];
                     }
                     if (strcmp(layout[s].gltf_name, "NORMAL") == 0) {
                         norm_data = stream_floats[s];
-                        norm_count = layout[s].count;
+                        norm_src = src_widths[s];
                     }
                     if (strcmp(layout[s].gltf_name, "TEXCOORD_0") == 0) {
                         uv_data = stream_floats[s];
-                        uv_count = layout[s].count;
+                        uv_src = src_widths[s];
                     }
                 }
             }
@@ -388,9 +388,10 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                 ret = NT_BUILD_ERR_VALIDATION;
                 goto cleanup_streams;
             }
-            /* MikkTSpace reads fixed float[3]/float[3]/float[2] strides -- a narrowed input stream would shift every vertex */
-            if (pos_count != 3 || norm_count != 3 || uv_count != 2) {
-                NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION/NORMAL count 3 and TEXCOORD_0 count 2", mesh_index, primitive_index);
+            /* MikkTSpace reads fixed float[3]/float[3]/float[2] strides. Streams are still at
+             * SOURCE width here, so this holds for any conformant glTF regardless of narrowing. */
+            if (pos_src != 3 || norm_src != 3 || uv_src != 2) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires VEC3 POSITION/NORMAL and VEC2 TEXCOORD_0 sources", mesh_index, primitive_index);
                 free(index_buf);
                 ret = NT_BUILD_ERR_VALIDATION;
                 goto cleanup_streams;
@@ -429,13 +430,12 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                 free(index_buf);
                 goto cleanup_streams;
             }
-            nt_builder_narrow_stream_floats(stream_floats[tangent_stream_idx], vertex_count, 4, layout[tangent_stream_idx].count);
+            src_widths[tangent_stream_idx] = 4; /* MikkTSpace output */
         }
 
-        /* Handle TANGENT_NONE: fill with zero */
-        if (tangent_stream_idx >= 0 && tangent_mode == NT_TANGENT_NONE) {
-            stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * layout[tangent_stream_idx].count, sizeof(float));
-            NT_BUILD_ASSERT(stream_floats[tangent_stream_idx] && "scene mesh: tangent zero-fill alloc failed");
+        /* All computations done -- compact every stream to its declared pack width */
+        for (uint32_t s = 0; s < stream_count; s++) {
+            nt_builder_narrow_stream_floats(stream_floats[s], vertex_count, src_widths[s], layout[s].count);
         }
 
         /* Build final mesh buffer */

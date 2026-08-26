@@ -397,7 +397,8 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
                                          uint8_t **out_data, uint32_t *out_size) {
-    (void)tangent_mode; /* reserved for future tangent support in add_mesh path */
+    /* Tangent computation is scene-API only; a non-default mode here would be silently ignored */
+    NT_BUILD_ASSERT(tangent_mode == NT_TANGENT_AUTO && "add_mesh reads TANGENT from the glTF; use the scene API to compute tangents");
     if (!path || !layout || !out_data || !out_size) {
         return NT_BUILD_ERR_VALIDATION;
     }

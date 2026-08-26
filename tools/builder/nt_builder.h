@@ -113,8 +113,9 @@ typedef struct {
                                 * are packed, the rest dropped (e.g. VEC4 COLOR_0 -> RGB).
                                 * Narrowing is declared explicitly so a genuine source/layout
                                 * mismatch still fails the build. `count` may not exceed it.
-                                * Computed (MikkTSpace) tangents have 4 source components (scene API
-                                * only; add_mesh reads TANGENT from the glTF, tangent_mode reserved). */
+                                * Computed (MikkTSpace) tangents have 4 source components. Narrowing
+                                * affects only the pack: builder computations always read full
+                                * source-width data. */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */
@@ -123,12 +124,14 @@ typedef enum {
     NT_BUILD_SHADER_FRAGMENT = 1,
 } nt_build_shader_stage_t;
 
-/* Tangent computation mode for scene mesh extraction */
+/* Tangent provenance for scene mesh extraction. The LAYOUT expresses tangent
+ * presence (a TANGENT stream or not); the mode only says where its data comes
+ * from. Scene API only -- add_mesh reads TANGENT from the glTF and asserts on
+ * any other mode. */
 typedef enum {
     NT_TANGENT_AUTO = 0,    /* extract from glTF if present, compute MikkTSpace if not */
     NT_TANGENT_COMPUTE = 1, /* always compute via MikkTSpace (ignore glTF tangents) */
     NT_TANGENT_REQUIRE = 2, /* error if glTF doesn't have tangents */
-    NT_TANGENT_NONE = 3,    /* skip tangent attribute entirely */
 } nt_tangent_mode_t;
 
 /* Mesh options for add_mesh and scene mesh extraction */

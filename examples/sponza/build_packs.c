@@ -376,23 +376,21 @@ static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool 
                 shader_type = classify_material(mat, cm);
             }
 
+            /* Tangent presence is expressed by the layout (stream 4); mode is always AUTO */
             const NtStreamLayout *layout = NULL;
             uint32_t stream_count = 0;
-            nt_tangent_mode_t tangent_mode = NT_TANGENT_NONE;
 
             if (use_base_quality) {
                 layout = layout_base;
                 stream_count = (shader_type == SPONZA_SHADER_FULL) ? 4 : 3;
-                tangent_mode = (shader_type == SPONZA_SHADER_FULL) ? NT_TANGENT_AUTO : NT_TANGENT_NONE;
             } else if (shader_type == SPONZA_SHADER_FULL) {
                 layout = layout_full;
                 stream_count = 4;
-                tangent_mode = NT_TANGENT_AUTO;
             } else {
                 layout = layout_diffuse;
                 stream_count = 3;
-                tangent_mode = NT_TANGENT_NONE;
             }
+            nt_tangent_mode_t tangent_mode = NT_TANGENT_AUTO;
 
             const char *rid = mesh_rid(mi, pi);
             nt_mesh_opts_t opts = {

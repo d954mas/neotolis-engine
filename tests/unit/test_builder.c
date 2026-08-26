@@ -1496,7 +1496,7 @@ void test_scene_mesh_rejects_missing_position(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_NONE, &data, &size);
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_AUTO, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
 
@@ -1515,7 +1515,7 @@ void test_scene_mesh_rejects_count_out_of_range(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_NONE, &data, &size);
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1, NT_TANGENT_AUTO, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
 
@@ -1623,7 +1623,7 @@ void test_mesh_narrow_color_vec4_to_vec3(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
@@ -1657,7 +1657,7 @@ void test_mesh_narrow_requires_declaration(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
 }
@@ -1673,7 +1673,7 @@ void test_mesh_narrow_rejects_source_mismatch(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
 }
@@ -1691,7 +1691,7 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 4, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 4, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
@@ -1707,6 +1707,54 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     TEST_ASSERT_EQUAL_UINT8(64, v0[11]);
 
     free(data);
+}
+
+void test_scene_mesh_narrow_position_with_computed_tangent(void) {
+    const char *glb_path = TMP_DIR "/narrow_pos_tan.glb";
+    write_test_glb_color4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    /* Narrowing is a pack property: MikkTSpace sees the full VEC3 positions,
+     * the pack still gets vec2 */
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 2, false, 3},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 4, NT_TANGENT_COMPUTE, &data, &size);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    TEST_ASSERT_EQUAL_UINT32(3U * 44U, hdr->vertex_data_size); /* (2+3+2+4) floats per vertex */
+
+    /* Vertex 0: pos narrowed to xy, tangent computed from full-width inputs = (1,0,0,+-1) */
+    const float *v0 = (const float *)(data + sizeof(NtMeshAssetHeader) + (4 * sizeof(NtStreamDesc)));
+    const float expected_pos_uv[2] = {0.0F, 0.0F};
+    TEST_ASSERT_EQUAL_MEMORY(expected_pos_uv, v0, sizeof(expected_pos_uv));
+    const float *tan0 = v0 + 7;
+    TEST_ASSERT_TRUE(tan0[0] > 0.99F && tan0[0] < 1.01F);
+    TEST_ASSERT_TRUE(tan0[3] > 0.99F || tan0[3] < -0.99F); /* handedness present */
+
+    free(data);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_add_mesh_asserts_non_auto_tangent_mode(void) {
+    const char *glb_path = TMP_DIR "/addmesh_tan.glb";
+    write_test_glb_color4(glb_path);
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    /* Tangent computation is scene-API only: a mode add_mesh would ignore must fail loudly */
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_COMPUTE, NULL, UINT32_MAX, &data, &size));
 }
 
 void test_scene_mesh_asserts_invalid_tangent_mode(void) {
@@ -1779,7 +1827,7 @@ void test_scene_mesh_narrow_color_vec4_to_vec3(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_NONE, &data, &size);
+    nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_AUTO, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
@@ -1802,7 +1850,7 @@ void test_mesh_narrow_first_stream_position_to_vec2(void) {
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
-    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_NONE, NULL, UINT32_MAX, &data, &size);
+    nt_build_result_t r = nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
@@ -3083,7 +3131,7 @@ void test_dedup_cross_source_mesh_file_vs_scene(void) {
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
     };
-    nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 1, .tangent_mode = NT_TANGENT_NONE};
+    nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 1, .tangent_mode = NT_TANGENT_AUTO};
 
     /* Parse the scene for scene_mesh path */
     nt_glb_scene_t scene = {0};
@@ -8678,6 +8726,8 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_requires_declaration);
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
+    RUN_TEST(test_scene_mesh_narrow_position_with_computed_tangent);
+    RUN_TEST(test_add_mesh_asserts_non_auto_tangent_mode);
     RUN_TEST(test_scene_mesh_asserts_invalid_tangent_mode);
     RUN_TEST(test_layout_rejects_duplicate_engine_name);
     RUN_TEST(test_layout_rejects_engine_name_hash_collision);
