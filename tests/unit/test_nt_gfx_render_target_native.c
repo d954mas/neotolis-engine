@@ -324,7 +324,7 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     const nt_vertex_layout_t layout = {
         .stride = sizeof(float) * 2,
         .attr_count = 1,
-        .attrs = {{.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT2, .offset = 0}},
+        .attrs = {{.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}},
     };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
@@ -409,15 +409,15 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_vertex_layout_t depth_layout = {
         .stride = sizeof(float) * 3,
         .attr_count = 1,
-        .attrs = {{.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0}},
+        .attrs = {{.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0}},
     };
     nt_vertex_layout_t fullscreen_layout = {
         .stride = sizeof(fullscreen_vertex_t),
         .attr_count = 2,
         .attrs =
             {
-                {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT2, .offset = 0},
-                {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_FLOAT2, .offset = 8},
+                {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
             },
     };
     nt_buffer_t depth_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = right_half_quad, .size = sizeof(right_half_quad)});

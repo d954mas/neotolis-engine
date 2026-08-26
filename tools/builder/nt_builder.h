@@ -103,11 +103,19 @@ typedef struct {
 
 /* Explicit stream layout -- game declares which glTF attributes to extract */
 typedef struct {
-    const char *engine_name; /* e.g. "position", "uv0" */
-    const char *gltf_name;   /* e.g. "POSITION", "TEXCOORD_0" */
-    nt_stream_type_t type;   /* target type in output (may differ from glTF) */
-    uint8_t count;           /* components per vertex (1-4) */
-    bool normalized;         /* true = normalize to [0,1] or [-1,1] in runtime */
+    const char *engine_name;   /* e.g. "position", "uv0" */
+    const char *gltf_name;     /* e.g. "POSITION", "TEXCOORD_0" */
+    nt_stream_type_t type;     /* target type in output (may differ from glTF) */
+    uint8_t count;             /* components per vertex in the pack (1-4) */
+    bool normalized;           /* true = normalize to [0,1] or [-1,1] in runtime */
+    uint8_t source_components; /* 0 = source must have exactly `count` components (default).
+                                * 1-4 = source must have exactly this many; the leading `count`
+                                * are packed, the rest dropped (e.g. VEC4 COLOR_0 -> RGB).
+                                * Narrowing is declared explicitly so a genuine source/layout
+                                * mismatch still fails the build. `count` may not exceed it.
+                                * Computed (MikkTSpace) tangents have 4 source components. Narrowing
+                                * affects only the pack: builder computations always read full
+                                * source-width data. */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */
@@ -116,12 +124,14 @@ typedef enum {
     NT_BUILD_SHADER_FRAGMENT = 1,
 } nt_build_shader_stage_t;
 
-/* Tangent computation mode for scene mesh extraction */
+/* Tangent provenance for scene mesh extraction. The LAYOUT expresses tangent
+ * presence (a TANGENT stream or not); the mode only says where its data comes
+ * from. Scene API only -- add_mesh reads TANGENT from the glTF and asserts on
+ * any other mode. */
 typedef enum {
     NT_TANGENT_AUTO = 0,    /* extract from glTF if present, compute MikkTSpace if not */
     NT_TANGENT_COMPUTE = 1, /* always compute via MikkTSpace (ignore glTF tangents) */
     NT_TANGENT_REQUIRE = 2, /* error if glTF doesn't have tangents */
-    NT_TANGENT_NONE = 3,    /* skip tangent attribute entirely */
 } nt_tangent_mode_t;
 
 /* Mesh options for add_mesh and scene mesh extraction */

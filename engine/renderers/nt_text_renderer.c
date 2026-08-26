@@ -128,12 +128,12 @@ static void create_pipeline(void) {
         .stride = 72,
         .attrs =
             {
-                {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* a_position */
-                {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* a_texcoord */
-                {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 20}, /* a_glyph_data */
-                {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 36}, /* a_glyph_bounds */
-                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 52}, /* a_color */
-                {.location = 5, .format = NT_FORMAT_FLOAT, .offset = 68},  /* a_depth_bias */
+                {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
+                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
+                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
+                {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
+                {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
+                {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
             },
     };
 

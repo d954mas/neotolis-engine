@@ -110,8 +110,8 @@ int main(int argc, char *argv[]) {
     /* --- Mesh + shaders (reuse textured_quad assets) --- */
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
     };
     nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2});
     nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);

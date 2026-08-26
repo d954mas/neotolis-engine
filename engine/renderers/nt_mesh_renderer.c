@@ -47,29 +47,29 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
         .attr_count = 3,
         .stride = NT_INSTANCE_STRIDE_NONE,
         .attrs = {
-            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
         },
     },
     [NT_COLOR_MODE_RGBA8] = {
         .attr_count = 4,
         .stride = NT_INSTANCE_STRIDE_RGBA8,
         .attrs = {
-            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
-            {.location = 7, .format = NT_FORMAT_UBYTE4N, .offset = 48},
+            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
+            {.location = 7, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 48},
         },
     },
     [NT_COLOR_MODE_FLOAT4] = {
         .attr_count = 4,
         .stride = NT_INSTANCE_STRIDE_FLOAT4,
         .attrs = {
-            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
-            {.location = 7, .format = NT_FORMAT_FLOAT4, .offset = 48},
+            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
+            {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 48},
         },
     },
 };
@@ -122,42 +122,26 @@ static void pack_rgba8(uint8_t *dst, const float color[4]) {
 
 /* ---- Stream type to vertex format mapping ---- */
 
-/* Map mesh stream type to GL vertex format.
- * FLOAT32/FLOAT16: exact count 1-4 via lookup table.
- * INT16/UINT16: count 2 or 4, with optional normalization.
- * UINT8/INT8: count must be 4 (vertex colors, bone indices, packed normals).
- * If new byte counts needed, extend nt_vertex_format_t or switch to raw (type, count, normalized). */
-
-/* clang-format off */
-static const nt_vertex_format_t s_float32_formats[4] = {NT_FORMAT_FLOAT, NT_FORMAT_FLOAT2, NT_FORMAT_FLOAT3, NT_FORMAT_FLOAT4};
-static const nt_vertex_format_t s_float16_formats[4] = {NT_FORMAT_HALF,  NT_FORMAT_HALF2,  NT_FORMAT_HALF3,  NT_FORMAT_HALF4};
-/* clang-format on */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized) {
-    uint8_t idx = (count >= 1 && count <= 4) ? (uint8_t)(count - 1) : 3;
+/* Pack stream types and gfx vertex types are distinct enums on purpose: the
+ * pack's on-disk format must not leak into the gfx API. Total mapping --
+ * count and normalized pass through the attribute unchanged. */
+nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) {
     switch (type) {
-    case NT_STREAM_FLOAT32:
-        return s_float32_formats[idx];
-    case NT_STREAM_FLOAT16:
-        return s_float16_formats[idx];
-    case NT_STREAM_INT16:
-        if (count <= 2) {
-            return normalized ? NT_FORMAT_SHORT2N : NT_FORMAT_SHORT2;
-        }
-        return normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4;
     case NT_STREAM_UINT8:
-        NT_ASSERT(count == 4);
-        return normalized ? NT_FORMAT_UBYTE4N : NT_FORMAT_UBYTE4;
+        return NT_VERTEX_UINT8;
     case NT_STREAM_INT8:
-        NT_ASSERT(count == 4);
-        return NT_FORMAT_BYTE4N;
+        return NT_VERTEX_INT8;
     case NT_STREAM_UINT16:
-        /* GL_UNSIGNED_SHORT vertex attrs: uncommon, treat as short for now */
-        return (count <= 2) ? NT_FORMAT_SHORT2 : NT_FORMAT_SHORT4;
+        return NT_VERTEX_UINT16;
+    case NT_STREAM_INT16:
+        return NT_VERTEX_INT16;
+    case NT_STREAM_FLOAT16:
+        return NT_VERTEX_HALF;
+    case NT_STREAM_FLOAT32:
+        return NT_VERTEX_FLOAT;
     default:
         NT_LOG_ERROR("unmapped stream type in vertex layout");
-        return NT_FORMAT_FLOAT4;
+        return NT_VERTEX_FLOAT;
     }
 }
 
@@ -215,7 +199,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
                 break;
             }
             layout.attrs[layout.attr_count].location = location;
-            layout.attrs[layout.attr_count].format = nt_stream_to_vertex_format(stream->type, stream->count, stream->normalized);
+            layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);
+            layout.attrs[layout.attr_count].count = stream->count;
+            layout.attrs[layout.attr_count].normalized = stream->normalized != 0;
             layout.attrs[layout.attr_count].offset = offset;
             layout.attr_count++;
         }

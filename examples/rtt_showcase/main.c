@@ -174,8 +174,8 @@ static bool make_quad_resources(void) {
                 .attr_count = 2,
                 .attrs =
                     {
-                        {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT2, .offset = 0},
-                        {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_FLOAT2, .offset = 8},
+                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
                     },
             },
         .depth_test = false,

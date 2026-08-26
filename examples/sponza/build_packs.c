@@ -331,23 +331,23 @@ static void build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *sce
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
     NtStreamLayout layout_full[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
     };
 
     NtStreamLayout layout_diffuse[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
     };
 
     NtStreamLayout layout_base[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
-        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false, 0},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true, 0},
     };
 
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
@@ -376,23 +376,21 @@ static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool 
                 shader_type = classify_material(mat, cm);
             }
 
+            /* Tangent presence is expressed by the layout (stream 4); mode is always AUTO */
             const NtStreamLayout *layout = NULL;
             uint32_t stream_count = 0;
-            nt_tangent_mode_t tangent_mode = NT_TANGENT_NONE;
 
             if (use_base_quality) {
                 layout = layout_base;
                 stream_count = (shader_type == SPONZA_SHADER_FULL) ? 4 : 3;
-                tangent_mode = (shader_type == SPONZA_SHADER_FULL) ? NT_TANGENT_AUTO : NT_TANGENT_NONE;
             } else if (shader_type == SPONZA_SHADER_FULL) {
                 layout = layout_full;
                 stream_count = 4;
-                tangent_mode = NT_TANGENT_AUTO;
             } else {
                 layout = layout_diffuse;
                 stream_count = 3;
-                tangent_mode = NT_TANGENT_NONE;
             }
+            nt_tangent_mode_t tangent_mode = NT_TANGENT_AUTO;
 
             const char *rid = mesh_rid(mi, pi);
             nt_mesh_opts_t opts = {

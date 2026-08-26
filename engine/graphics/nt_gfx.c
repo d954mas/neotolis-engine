@@ -679,12 +679,44 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
            blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
 }
 
+/* A location used twice (within a layout or across vertex/instance layouts) means
+ * glVertexAttribPointer runs twice on one slot -- last bind wins, silently wrong data. */
+static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
+    uint32_t seen[8] = {0}; /* 256 bits, one per possible location */
+    const nt_vertex_layout_t *layouts[2] = {a, b};
+    for (int l = 0; l < 2; l++) {
+        for (uint8_t i = 0; i < layouts[l]->attr_count; i++) {
+            uint8_t loc = layouts[l]->attrs[i].location;
+            if (seen[loc >> 5U] & (1U << (loc & 31U))) {
+                return false;
+            }
+            seen[loc >> 5U] |= 1U << (loc & 31U);
+        }
+    }
+    return true;
+}
+
+/* WebGL2 raises INVALID_OPERATION when an attribute offset or the stride is not a
+ * multiple of the attribute's type size; desktop GL tolerates it, so without this
+ * a bad layout only fails in the browser. Off hot path (pipelines are cached). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        NT_ASSERT(attr->location < NT_GFX_MAX_VERTEX_ATTRS && "WebGL2 guarantees only 16 vertex attribute locations");
+        NT_ASSERT(attr->count >= 1 && attr->count <= 4);
+        NT_ASSERT(nt_vertex_type_size(attr->type) != 0);
+        NT_ASSERT(!(attr->normalized && (attr->type == NT_VERTEX_FLOAT || attr->type == NT_VERTEX_HALF)) && "normalized is for integer types only");
+        NT_ASSERT((attr->offset % nt_vertex_type_size(attr->type)) == 0 && "WebGL2: attribute offset must be a multiple of its type size");
+        NT_ASSERT((layout->stride % nt_vertex_type_size(attr->type)) == 0 && "WebGL2: stride must be a multiple of each attribute's type size");
+    }
+}
+
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     nt_pipeline_t result = {0};
     if (!desc) {
         return result;
     }
-
     if (!nt_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
         NT_LOG_ERROR("pipeline creation failed: invalid shader handle");
         return result;
@@ -697,6 +729,16 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
         return result;
     }
+    /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
+     * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
+    if (desc->layout.stride > 255 || desc->instance_layout.stride > 255) {
+        NT_LOG_ERROR("pipeline creation failed: stride %u exceeds WebGL2 max 255", (uint32_t)((desc->layout.stride > 255) ? desc->layout.stride : desc->instance_layout.stride));
+        return result;
+    }
+    /* After the attr_count bounds check -- the loops read attr_count entries. */
+    assert_layout_webgl2_rules(&desc->layout);
+    assert_layout_webgl2_rules(&desc->instance_layout);
+    NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
@@ -1829,36 +1871,109 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: bad magic");
         return 0;
     }
-    NT_ASSERT(hdr->version == NT_TEXTURE_VERSION_V2 && "activate_texture: version mismatch -- rebuild packs");
+    if (hdr->version != NT_TEXTURE_VERSION_V2) {
+        NT_LOG_ERROR("activate_texture: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_TEXTURE_VERSION_V2);
+        return 0;
+    }
 
     return activate_texture_impl(data, size);
 }
 
-uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+/* Per-stream half of the pack mesh safety net: type/count/normalized validity,
+ * unique name hashes, and the WebGL2 offset/stride alignment rules. */
+static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
+    uint32_t stride = 0;
+    for (uint8_t i = 0; i < stream_count; i++) {
+        if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
+            return false;
+        }
+        if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
+            return false;
+        }
+        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
+        for (uint8_t p = 0; p < i; p++) {
+            if (streams[p].name_hash == streams[i].name_hash) {
+                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
+                return false;
+            }
+        }
+        if (stride % nt_stream_type_size(streams[i].type) != 0) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] offset %u misaligned for type size %u", i, stride, nt_stream_type_size(streams[i].type));
+            return false;
+        }
+        stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    }
+    for (uint8_t i = 0; i < stream_count; i++) {
+        if (stride % nt_stream_type_size(streams[i].type) != 0) {
+            NT_LOG_ERROR("activate_mesh: stride %u misaligned for stream[%u] type size %u", stride, i, nt_stream_type_size(streams[i].type));
+            return false;
+        }
+    }
+    *out_stride = stride;
+    return true;
+}
+
+/* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
+ * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
+static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtMeshAssetHeader)) {
         NT_LOG_ERROR("activate_mesh: blob too small");
-        return 0;
+        return false;
     }
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     if (hdr->magic != NT_MESH_MAGIC) {
         NT_LOG_ERROR("activate_mesh: bad magic");
-        return 0;
+        return false;
     }
-    NT_ASSERT(hdr->version == NT_MESH_VERSION && "activate_mesh: version mismatch -- rebuild packs");
+    if (hdr->version != NT_MESH_VERSION) {
+        NT_LOG_ERROR("activate_mesh: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_MESH_VERSION);
+        return false;
+    }
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
-        return 0;
+        return false;
     }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
         NT_LOG_ERROR("activate_mesh: invalid stream_count");
-        return 0;
+        return false;
     }
     uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
-    uint32_t required = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
+    uint64_t required = (uint64_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
     if (required > size) {
         NT_LOG_ERROR("activate_mesh: blob truncated");
+        return false;
+    }
+    /* Per-stream descs are pack input feeding glVertexAttribPointer */
+    const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    uint32_t expected_stride = 0;
+    if (!mesh_streams_valid(streams, hdr->stream_count, &expected_stride)) {
+        return false;
+    }
+    if ((uint64_t)hdr->vertex_count * expected_stride != hdr->vertex_data_size) {
+        NT_LOG_ERROR("activate_mesh: vertex_data_size %u != vertex_count %u * stride %u", hdr->vertex_data_size, hdr->vertex_count, expected_stride);
+        return false;
+    }
+    static const uint32_t idx_elem_sizes[3] = {0, 2, 4};
+    uint32_t idx_elem = idx_elem_sizes[hdr->index_type];
+    if (hdr->index_type == 0 && hdr->index_count != 0) {
+        NT_LOG_ERROR("activate_mesh: index_count %u with index_type none", hdr->index_count);
+        return false;
+    }
+    if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
+        NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
+        return false;
+    }
+    return true;
+}
+
+uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+    if (!mesh_blob_valid(data, size)) {
         return 0;
     }
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
 
@@ -1936,13 +2051,22 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_shader: bad magic");
         return 0;
     }
-    NT_ASSERT(hdr->version == NT_SHADER_CODE_VERSION && "activate_shader: version mismatch -- rebuild packs");
+    if (hdr->version != NT_SHADER_CODE_VERSION) {
+        NT_LOG_ERROR("activate_shader: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_SHADER_CODE_VERSION);
+        return 0;
+    }
     if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
         NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;
     }
-    if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
+    /* 64-bit sum: a corrupt code_size must not wrap the truncation check into a pass */
+    if ((uint64_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
         NT_LOG_ERROR("activate_shader: blob truncated");
+        return 0;
+    }
+    /* The source is consumed as a C string -- the builder always writes the trailing NUL */
+    if (hdr->code_size == 0 || data[sizeof(NtShaderCodeHeader) + hdr->code_size - 1] != 0) {
+        NT_LOG_ERROR("activate_shader: source not NUL-terminated");
         return 0;
     }
     const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));

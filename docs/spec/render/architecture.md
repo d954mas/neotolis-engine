@@ -45,6 +45,25 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Vertex layouts
+
+A pipeline's vertex attribute is the raw GL triple `(type, count 1-4,
+normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
+allowed combinations; the float/half/byte/short subset of the
+`vertexAttribPointer` space (no int32 or 2_10_10_2 packed types) is available
+to game-built pipelines and mesh-pack streams alike. The pack's on-disk stream
+type enum stays separate from the gfx vertex type enum in the vertex-layout
+API (the mesh renderer maps between them totally; the mesh-activation side
+table `nt_gfx_mesh_info_t` still stores raw pack descs — a known, contained
+exception). Pipeline creation asserts the WebGL2 alignment rules (attribute
+offset and stride multiples of the attribute's type size, locations within
+the WebGL2-guaranteed 16): game-declared layouts never pass through the
+builder's validator, and desktop GL accepts what the browser rejects.
+Pack data never reaches those asserts: mesh activation hard-rejects invalid
+per-stream type/count/normalized, duplicate name hashes, and misaligned
+offsets/strides before any pipeline exists. Pipelines are cached, so the
+asserts are off the hot path.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a

@@ -201,7 +201,7 @@ void test_gfx_make_destroy_pipeline(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_destroy_pipeline(pip);
@@ -215,7 +215,7 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
@@ -291,6 +291,116 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+}
+
+void test_gfx_pipeline_asserts_duplicate_location(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* Same location in vertex and instance layouts: glVertexAttribPointer twice on one slot */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 4}}},
+    }));
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_location_out_of_range(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* WebGL2 guarantees only 16 attribute locations; 16 is already out of range */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    }));
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_normalized_float(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* GL ignores normalized on float types; the contract allows it on integer types only */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = true}}},
+    }));
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_misaligned_offset(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* f32 attr at offset 2: WebGL2 requires offset % 4 == 0 */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 2}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_misaligned_stride(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* stride 13 with an f32 attr: WebGL2 requires stride % 4 == 0 */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 13, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_asserts_bad_instance_layout(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    /* Pins that the instance layout goes through the same WebGL2 asserts */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 4}}},
+    }));
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
+void test_gfx_pipeline_stride_255_boundary(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* WebGL2 caps vertexAttribPointer stride at 255; u8 attr keeps 255 alignment-legal */
+    nt_pipeline_t ok = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 255, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, ok.id);
+    nt_gfx_destroy_pipeline(ok);
+
+    nt_pipeline_t bad = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 256, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
+    });
+    TEST_ASSERT_EQUAL_UINT32(0, bad.id);
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
 }
 
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
@@ -620,33 +730,31 @@ void test_activate_texture_too_small(void) {
     TEST_ASSERT_EQUAL_UINT32(0, handle);
 }
 
-/* ---- Activator: mesh valid blob ---- */
+/* ---- Activator: mesh valid blob (shared fixture = positive control) ---- */
 
-void test_activate_mesh_valid_blob(void) {
-    /* Build: header + 1 stream desc + 12 bytes vertex data + 6 bytes index data */
-    uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
-    uint32_t vdata_size = 12; /* 1 vertex, 3 floats */
-    uint32_t idata_size = 6;  /* 3 uint16 indices */
-    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
-    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6];
-    memset(blob, 0, sizeof(blob));
-
+static void fill_valid_mesh_blob(uint8_t *blob) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->magic = NT_MESH_MAGIC;
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 1;
-    hdr->index_type = 1; /* uint16 */
+    hdr->index_type = 1;
     hdr->vertex_count = 1;
     hdr->index_count = 3;
-    hdr->vertex_data_size = vdata_size;
-    hdr->index_data_size = idata_size;
-
+    hdr->vertex_data_size = 12;
+    hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd->name_hash = 0x12345678;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+}
 
-    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+#define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6)
+
+void test_activate_mesh_valid_blob(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_mesh(handle);
 }
@@ -660,6 +768,142 @@ void test_activate_mesh_bad_magic(void) {
     hdr->magic = 0xDEADBEEF;
     uint32_t handle = nt_gfx_activate_mesh(blob, sizeof(blob));
     TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: mesh bad version / inconsistent sizes / 32-bit wrap ---- */
+
+void test_activate_mesh_rejects_bad_stream_type(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->type = 99;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_index_size_mismatch(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->index_count = 4; /* 4 * 2 != index_data_size 6 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_index_count_with_type_none(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->index_type = 0; /* index_count stays 3 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_duplicate_name_hash(void) {
+    /* Two streams with one hash would bind one shader location twice (last wins) */
+    enum { BLOB2 = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 20 };
+    uint8_t blob[BLOB2];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->index_type = 0;
+    hdr->vertex_count = 1;
+    hdr->vertex_data_size = 20; /* f32x3 + f32x2 */
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0] = (NtStreamDesc){.name_hash = 0xABCD1234, .type = NT_STREAM_FLOAT32, .count = 3};
+    sd[1] = (NtStreamDesc){.name_hash = 0xABCD1234, .type = NT_STREAM_FLOAT32, .count = 2};
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_normalized_float_stream(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->normalized = 1;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_misaligned_stream(void) {
+    /* f32x3 + u8x3 = stride 15, not a multiple of the f32 type size (WebGL2 rule) */
+    enum { BLOB_MIS = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 15 };
+    uint8_t blob[BLOB_MIS];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->index_type = 0;
+    hdr->vertex_count = 1;
+    hdr->vertex_data_size = 15;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3};
+    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_UINT8, .count = 3, .normalized = 1};
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_misaligned_offset(void) {
+    /* u8x2 + f32x1 + u8x2: f32 offset 2 misaligned, but stride 8 divides evenly by
+     * every type size -- ONLY the offset branch can reject this blob */
+    enum { BLOB_OFF = sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + 8 };
+    uint8_t blob[BLOB_OFF];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 3;
+    hdr->index_type = 0;
+    hdr->vertex_count = 1;
+    hdr->vertex_data_size = 8;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1};
+    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 1};
+    sd[2] = (NtStreamDesc){.name_hash = 0x33333333, .type = NT_STREAM_UINT8, .count = 2, .normalized = 1};
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_texture_bad_version(void) {
+    uint32_t pixel_size = 2 * 2 * 4;
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
+    memset(blob, 0, sizeof(blob));
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
+    hdr->magic = NT_TEXTURE_MAGIC;
+    hdr->version = NT_TEXTURE_VERSION_V2 + 1;
+    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+    hdr->width = 2;
+    hdr->height = 2;
+    hdr->mip_count = 1;
+    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->data_size = pixel_size;
+    /* graceful reject, not a trap: stale packs must not be misparsed */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, (uint32_t)sizeof(NtTextureAssetHeaderV2) + pixel_size));
+}
+
+void test_activate_mesh_bad_version(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->version = NT_MESH_VERSION + 1;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_size_mismatch(void) {
+    /* vertex_data_size disagrees with vertex_count * stride */
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_count = 2;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_32bit_size_wrap(void) {
+    /* A 32-bit required-sum wraps to 46 <= blob size and would OOB-read. The blob is
+     * arithmetically consistent (0x15555554 * 12 == 0xFFFFFFF0), so every product
+     * cross-check passes and ONLY a 64-bit truncation check can reject it. */
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_count = 0x15555554U;
+    ((NtMeshAssetHeader *)blob)->vertex_data_size = 0xFFFFFFF0U;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
 /* ---- Activator: shader valid blob ---- */
@@ -694,6 +938,45 @@ void test_activate_shader_bad_magic(void) {
     TEST_ASSERT_EQUAL_UINT32(0, handle);
 }
 
+/* ---- Activator: shader bad version ---- */
+
+void test_activate_shader_bad_version(void) {
+    const char *source = "void main() {}";
+    uint32_t code_size = (uint32_t)strlen(source) + 1;
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION + 1;
+    hdr->code_size = code_size;
+    memcpy(blob + sizeof(NtShaderCodeHeader), source, code_size);
+    /* graceful reject, not a trap: stale packs must not be misparsed */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(NtShaderCodeHeader) + code_size));
+}
+
+void test_activate_shader_rejects_32bit_size_wrap(void) {
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION;
+    /* 32-bit sizeof(header) + code_size would wrap below blob size and OOB-read */
+    hdr->code_size = 0xFFFFFFF8U;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_shader_rejects_missing_nul(void) {
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 8];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION;
+    hdr->code_size = 4;
+    /* deliberately no NUL inside code_size -- the guard under test must reject this */
+    memcpy(blob + sizeof(NtShaderCodeHeader), "voidmain", 8); // NOLINT(bugprone-not-null-terminated-result)
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(blob, (uint32_t)sizeof(blob)));
+}
+
 /* ---- Deactivate mesh clears table ---- */
 
 void test_deactivate_mesh_clears_table(void) {
@@ -709,7 +992,7 @@ void test_deactivate_mesh_clears_table(void) {
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 1;
     hdr->index_type = 1;
-    hdr->vertex_count = 3;
+    hdr->vertex_count = 1; /* 12 bytes of vertex data = 1 vertex at stride 12 */
     hdr->index_count = 3;
     hdr->vertex_data_size = vdata_size;
     hdr->index_data_size = idata_size;
@@ -832,7 +1115,7 @@ void test_bind_instance_buffer_rejects_unaligned_offset(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_bind_pipeline(pip);
@@ -852,7 +1135,7 @@ void test_bind_instance_buffer_requires_pipeline_each_frame(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
@@ -1091,7 +1374,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = vs,
         .fragment_shader = fs,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
@@ -1151,6 +1434,27 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_shader);
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
+    RUN_TEST(test_gfx_pipeline_stride_255_boundary);
+    RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
+    RUN_TEST(test_gfx_pipeline_asserts_normalized_float);
+    RUN_TEST(test_gfx_pipeline_asserts_location_out_of_range);
+    RUN_TEST(test_gfx_pipeline_asserts_misaligned_offset);
+    RUN_TEST(test_gfx_pipeline_asserts_misaligned_stride);
+    RUN_TEST(test_gfx_pipeline_asserts_bad_instance_layout);
+    RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
+    RUN_TEST(test_activate_texture_bad_version);
+    RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
+    RUN_TEST(test_activate_mesh_rejects_duplicate_name_hash);
+    RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
+    RUN_TEST(test_activate_mesh_bad_version);
+    RUN_TEST(test_activate_mesh_rejects_size_mismatch);
+    RUN_TEST(test_activate_mesh_rejects_32bit_size_wrap);
+    RUN_TEST(test_activate_mesh_rejects_bad_stream_type);
+    RUN_TEST(test_activate_mesh_rejects_index_size_mismatch);
+    RUN_TEST(test_activate_mesh_rejects_index_count_with_type_none);
+    RUN_TEST(test_activate_shader_bad_version);
+    RUN_TEST(test_activate_shader_rejects_32bit_size_wrap);
+    RUN_TEST(test_activate_shader_rejects_missing_nul);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
