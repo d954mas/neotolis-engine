@@ -1709,6 +1709,26 @@ void test_mesh_narrow_u8_16_byte_packing(void) {
     free(data);
 }
 
+void test_scene_mesh_asserts_invalid_tangent_mode(void) {
+    const char *glb_path = TMP_DIR "/scene_badtan.glb";
+    write_test_glb_color4(glb_path);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    /* deliberately out-of-range mode value */
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 1,
+                                                                 (nt_tangent_mode_t)7, // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+                                                                 &data, &size));
+
+    nt_builder_free_glb_scene(&scene);
+}
+
 void test_layout_rejects_duplicate_engine_name(void) {
     /* Same engine_name = same name_hash: both streams would bind one shader location */
     NtStreamLayout layout[] = {
@@ -8658,6 +8678,7 @@ int main(void) {
     RUN_TEST(test_mesh_narrow_requires_declaration);
     RUN_TEST(test_mesh_narrow_rejects_source_mismatch);
     RUN_TEST(test_mesh_narrow_u8_16_byte_packing);
+    RUN_TEST(test_scene_mesh_asserts_invalid_tangent_mode);
     RUN_TEST(test_layout_rejects_duplicate_engine_name);
     RUN_TEST(test_layout_rejects_engine_name_hash_collision);
     RUN_TEST(test_layout_rejects_normalized_float);

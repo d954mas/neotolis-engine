@@ -189,6 +189,8 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    NT_BUILD_ASSERT((unsigned)tangent_mode <= (unsigned)NT_TANGENT_NONE && "invalid tangent_mode");
+
     char label[64];
     (void)snprintf(label, sizeof(label), "scene mesh[%u] prim[%u]", mesh_index, primitive_index);
     nt_build_result_t layout_ret = nt_builder_validate_stream_layout(label, layout, stream_count);

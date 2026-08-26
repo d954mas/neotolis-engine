@@ -293,6 +293,22 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
     nt_gfx_destroy_shader(vs);
 }
 
+void test_gfx_pipeline_asserts_duplicate_location(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+
+    /* Same location in vertex and instance layouts: glVertexAttribPointer twice on one slot */
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 4}}},
+    }));
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 void test_gfx_pipeline_stride_255_boundary(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
@@ -686,6 +702,52 @@ void test_activate_mesh_bad_magic(void) {
     TEST_ASSERT_EQUAL_UINT32(0, handle);
 }
 
+/* ---- Activator: mesh bad version / inconsistent sizes / 32-bit wrap ---- */
+
+static void fill_valid_mesh_blob(uint8_t *blob) {
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 1;
+    hdr->vertex_count = 1;
+    hdr->index_count = 3;
+    hdr->vertex_data_size = 12;
+    hdr->index_data_size = 6;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = 0x12345678;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+}
+
+#define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6)
+
+void test_activate_mesh_bad_version(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->version = NT_MESH_VERSION + 1;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_size_mismatch(void) {
+    /* vertex_data_size disagrees with vertex_count * stride */
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_count = 2;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_32bit_size_wrap(void) {
+    /* A 32-bit required-sum would wrap past the truncation check and OOB-read */
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    ((NtMeshAssetHeader *)blob)->vertex_data_size = 0xFFFFFFF0U;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
 /* ---- Activator: shader valid blob ---- */
 
 void test_activate_shader_valid_blob(void) {
@@ -733,7 +795,7 @@ void test_deactivate_mesh_clears_table(void) {
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 1;
     hdr->index_type = 1;
-    hdr->vertex_count = 3;
+    hdr->vertex_count = 1; /* 12 bytes of vertex data = 1 vertex at stride 12 */
     hdr->index_count = 3;
     hdr->vertex_data_size = vdata_size;
     hdr->index_data_size = idata_size;
@@ -1176,6 +1238,10 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
     RUN_TEST(test_gfx_pipeline_stride_255_boundary);
+    RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
+    RUN_TEST(test_activate_mesh_bad_version);
+    RUN_TEST(test_activate_mesh_rejects_size_mismatch);
+    RUN_TEST(test_activate_mesh_rejects_32bit_size_wrap);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_factor);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);

@@ -682,6 +682,23 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
 /* WebGL2 raises INVALID_OPERATION when an attribute offset or the stride is not a
  * multiple of the attribute's type size; desktop GL tolerates it, so without this
  * a bad layout only fails in the browser. Off hot path (pipelines are cached). */
+/* A location used twice (within a layout or across vertex/instance layouts) means
+ * glVertexAttribPointer runs twice on one slot -- last bind wins, silently wrong data. */
+static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
+    uint32_t seen[8] = {0}; /* 256 bits, one per possible location */
+    const nt_vertex_layout_t *layouts[2] = {a, b};
+    for (int l = 0; l < 2; l++) {
+        for (uint8_t i = 0; i < layouts[l]->attr_count; i++) {
+            uint8_t loc = layouts[l]->attrs[i].location;
+            if (seen[loc >> 5U] & (1U << (loc & 31U))) {
+                return false;
+            }
+            seen[loc >> 5U] |= 1U << (loc & 31U);
+        }
+    }
+    return true;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     for (uint8_t i = 0; i < layout->attr_count; i++) {
@@ -719,6 +736,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     /* After the attr_count bounds check -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     assert_layout_webgl2_rules(&desc->instance_layout);
+    NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
@@ -1856,40 +1874,69 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     return activate_texture_impl(data, size);
 }
 
-uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+/* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
+ * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
+static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtMeshAssetHeader)) {
         NT_LOG_ERROR("activate_mesh: blob too small");
-        return 0;
+        return false;
     }
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     if (hdr->magic != NT_MESH_MAGIC) {
         NT_LOG_ERROR("activate_mesh: bad magic");
-        return 0;
+        return false;
     }
-    NT_ASSERT(hdr->version == NT_MESH_VERSION && "activate_mesh: version mismatch -- rebuild packs");
+    if (hdr->version != NT_MESH_VERSION) {
+        NT_LOG_ERROR("activate_mesh: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_MESH_VERSION);
+        return false;
+    }
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
-        return 0;
+        return false;
     }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
         NT_LOG_ERROR("activate_mesh: invalid stream_count");
-        return 0;
+        return false;
     }
     uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
-    uint32_t required = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
+    uint64_t required = (uint64_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
     if (required > size) {
         NT_LOG_ERROR("activate_mesh: blob truncated");
+        return false;
+    }
+    /* Per-stream type/count are pack input feeding glVertexAttribPointer */
+    const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    uint32_t expected_stride = 0;
+    for (uint8_t i = 0; i < hdr->stream_count; i++) {
+        if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
+            return false;
+        }
+        expected_stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    }
+    if ((uint64_t)hdr->vertex_count * expected_stride != hdr->vertex_data_size) {
+        NT_LOG_ERROR("activate_mesh: vertex_data_size %u != vertex_count %u * stride %u", hdr->vertex_data_size, hdr->vertex_count, expected_stride);
+        return false;
+    }
+    static const uint32_t idx_elem_sizes[3] = {0, 2, 4};
+    uint32_t idx_elem = idx_elem_sizes[hdr->index_type];
+    if (hdr->index_type == 0 && hdr->index_count != 0) {
+        NT_LOG_ERROR("activate_mesh: index_count %u with index_type none", hdr->index_count);
+        return false;
+    }
+    if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
+        NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
+        return false;
+    }
+    return true;
+}
+
+uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+    if (!mesh_blob_valid(data, size)) {
         return 0;
     }
-    /* Per-stream type/count are pack input feeding glVertexAttribPointer -- safety-net them here
-     * (spec: runtime validates magic/version/type/sizes) instead of asserting at pipeline build. */
-    const NtStreamDesc *desc_check = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
-    for (uint8_t i = 0; i < hdr->stream_count; i++) {
-        if (nt_stream_type_size(desc_check[i].type) == 0 || desc_check[i].count < 1 || desc_check[i].count > 4) {
-            NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)desc_check[i].type, (uint32_t)desc_check[i].count);
-            return 0;
-        }
-    }
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
 
@@ -1967,7 +2014,10 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_shader: bad magic");
         return 0;
     }
-    NT_ASSERT(hdr->version == NT_SHADER_CODE_VERSION && "activate_shader: version mismatch -- rebuild packs");
+    if (hdr->version != NT_SHADER_CODE_VERSION) {
+        NT_LOG_ERROR("activate_shader: version %u != %u -- rebuild packs", (uint32_t)hdr->version, (uint32_t)NT_SHADER_CODE_VERSION);
+        return 0;
+    }
     if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
         NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;
