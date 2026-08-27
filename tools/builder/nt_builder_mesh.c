@@ -3,6 +3,8 @@
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "cgltf.h"
+#include "meshwire/nt_meshwire.h"
+#include "meshwire/nt_meshwire_encode.h"
 /* clang-format on */
 
 /* --- Stream layout validation (shared by add_mesh and scene mesh paths) --- */
@@ -280,6 +282,10 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
             return NT_BUILD_ERR_VALIDATION;
         }
 
+        if (acc->count > (cgltf_size)NT_BUILD_MAX_VERTICES) {
+            NT_LOG_ERROR("%s: attribute %s count %zu exceeds max %d", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", (size_t)acc->count, NT_BUILD_MAX_VERTICES);
+            return NT_BUILD_ERR_LIMIT;
+        }
         uint32_t count = (uint32_t)acc->count;
         if (!vertex_count_set) {
             vertex_count = count;
@@ -356,10 +362,123 @@ static void nt_clamp_aabb_to_position_count(const NtStreamLayout *layout, uint32
     }
 }
 
+nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, const char *label, uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t vertex_count) {
+    uint32_t *tmp = (uint32_t *)malloc((size_t)index_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(tmp && "index unpack alloc failed");
+    cgltf_size unpacked = cgltf_accessor_unpack_indices(acc, tmp, sizeof(uint32_t), index_count);
+    if (unpacked != index_count) {
+        free(tmp);
+        NT_LOG_ERROR("%s: unpacked %u of %u indices (sparse accessor or missing buffer view)", label, (uint32_t)unpacked, index_count);
+        return NT_BUILD_ERR_FORMAT;
+    }
+    /* Range-check HERE, not only at pack time: the scene path feeds these
+       indices to MikkTSpace callbacks before nt_builder_build_mesh_buffer's
+       final guard, and an out-of-range index would read/write OOB there.
+       index_type 1 implies vertex_count <= 65535, so the u16 narrow is safe. */
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (tmp[i] >= vertex_count) {
+            NT_LOG_ERROR("%s: index[%u] = %u out of range (vertex_count %u)", label, i, tmp[i], vertex_count);
+            free(tmp);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+    }
+    if (index_type == 1) {
+        uint16_t *dst16 = (uint16_t *)index_buf;
+        for (uint32_t i = 0; i < index_count; i++) {
+            dst16[i] = (uint16_t)tmp[i];
+        }
+    } else {
+        memcpy(index_buf, tmp, (size_t)index_count * sizeof(uint32_t));
+    }
+    free(tmp);
+    return NT_BUILD_OK;
+}
+
+/* --- Wire encode: SOA planes + meshopt index stream (decoded by nt_meshwire) --- */
+
+/* Permutes interleaved vertices into per-stream planes (the pinned SOA plane
+ * contract in nt_mesh_format.h: whole-attribute elements in desc order). */
+static void nt_deinterleave_to_planes(uint8_t *dst, const uint8_t *src, uint32_t vertex_count, const NtStreamLayout *layout, uint32_t stream_count, uint32_t stride) {
+    uint8_t *plane = dst;
+    uint32_t offset = 0;
+    for (uint32_t s = 0; s < stream_count; s++) {
+        uint32_t elem = nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            memcpy(plane + ((size_t)v * elem), src + ((size_t)v * stride) + offset, elem);
+        }
+        plane += (size_t)vertex_count * elem;
+        offset += elem;
+    }
+}
+
+/* Every index must be < vertex_count: encodeIndexBufferBound sizes its varints
+ * from vertex_count, so an out-of-range index overruns the encode buffer (and
+ * was a silent hole in the RAW path too). */
+static nt_build_result_t nt_validate_index_range(const uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t vertex_count) {
+    for (uint32_t i = 0; i < index_count; i++) {
+        uint32_t v = (index_type == 1) ? ((const uint16_t *)index_buf)[i] : ((const uint32_t *)index_buf)[i];
+        if (v >= vertex_count) {
+            NT_LOG_ERROR("mesh: index[%u] = %u out of range (vertex_count %u)", i, v, vertex_count);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+    }
+    return NT_BUILD_OK;
+}
+
+/* Encodes triangles with the meshopt index codec. Only when the encoded
+ * stream WINS (smaller than RAW) it is decoded back into index_buf: the
+ * canonical (rotation-normalized) form becomes the pack's ground truth, so
+ * the runtime decode is byte-exact against it. When RAW wins, index_buf is
+ * left untouched -- the source order (and its flat provoking vertex) ships.
+ * Returns the encoded buffer (caller frees) or NULL when encoding is not
+ * smaller than RAW; *out_encoded_size is valid only on non-NULL return. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT expansions dominate the count
+static uint8_t *nt_encode_indices_meshopt(uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t index_data_size, uint32_t vertex_count, uint32_t *out_encoded_size) {
+    /* meshopt encode input is strictly u32 -- widen the builder's u16 */
+    uint32_t *idx32 = (uint32_t *)malloc((size_t)index_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(idx32 && "index widen alloc failed");
+    if (index_type == 1) {
+        const uint16_t *src16 = (const uint16_t *)index_buf;
+        for (uint32_t i = 0; i < index_count; i++) {
+            idx32[i] = src16[i];
+        }
+    } else {
+        memcpy(idx32, index_buf, (size_t)index_count * sizeof(uint32_t));
+    }
+
+    uint32_t bound = nt_meshwire_encode_indices_bound(index_count, vertex_count);
+    NT_BUILD_ASSERT(bound > 0 && "index encode bound overflow");
+    uint8_t *enc = (uint8_t *)malloc(bound);
+    NT_BUILD_ASSERT(enc && "index encode alloc failed");
+    uint32_t enc_size = nt_meshwire_encode_indices(enc, bound, idx32, index_count);
+    free(idx32);
+    NT_BUILD_ASSERT(enc_size > 0 && "meshwire index encode failed");
+
+    if (enc_size >= index_data_size) {
+        free(enc); /* rare (tiny meshes): RAW wins, source order preserved */
+        return NULL;
+    }
+
+    uint32_t idx_elem = (index_type == 1) ? 2U : 4U;
+    bool decode_ok = nt_meshwire_decode_indices(index_buf, index_count, idx_elem, enc, enc_size, vertex_count);
+    NT_BUILD_ASSERT(decode_ok && "meshwire decode-back failed -- codec broken");
+
+    *out_encoded_size = enc_size;
+    return enc;
+}
+
 /* --- Shared: build binary mesh output buffer from mesh components --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT expansions dominate the count
 nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uint32_t stream_count, float *stream_floats[], uint32_t vertex_count, const cgltf_primitive *prim, uint8_t *index_buf,
                                                uint32_t index_count, uint8_t index_type, uint32_t index_data_size, uint8_t **out_data, uint32_t *out_size) {
+    /* GL draws meshes only as GL_TRIANGLES (the builder accepts only TRIANGLES
+       primitives): a count not divisible by 3 would silently drop the tail */
+    uint32_t draw_count = (index_count > 0) ? index_count : vertex_count;
+    if (draw_count % 3 != 0) {
+        NT_LOG_ERROR("mesh: %s count %u is not a multiple of 3 (TRIANGLES)", (index_count > 0) ? "index" : "vertex", draw_count);
+        return NT_BUILD_ERR_VALIDATION;
+    }
     uint32_t vertex_stride = 0;
     for (uint32_t s = 0; s < stream_count; s++) {
         vertex_stride += nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;
@@ -369,16 +488,46 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     uint8_t *vertex_buf = nt_interleave_vertices(layout, stream_count, stream_floats, vertex_count, vertex_stride, &vertex_data_size);
     NT_BUILD_ASSERT(vertex_buf && "interleave_vertices alloc failed");
 
+    if (index_buf && index_count > 0) {
+        nt_build_result_t idx_ret = nt_validate_index_range(index_buf, index_count, index_type, vertex_count);
+        if (idx_ret != NT_BUILD_OK) {
+            free(vertex_buf);
+            return idx_ret;
+        }
+    }
+
+    /* Automatic wire policy: vertices always SOA; indices meshopt iff smaller */
+    uint8_t index_wire = NT_MESH_WIRE_IDX_RAW;
+    uint8_t *encoded_idx = NULL;
+    uint32_t wire_index_size = index_data_size;
+    if (index_buf && index_type != 0 && index_count > 0 && index_count % 3 == 0) {
+        uint32_t encoded_size = 0;
+        encoded_idx = nt_encode_indices_meshopt(index_buf, index_count, index_type, index_data_size, vertex_count, &encoded_size);
+        if (encoded_idx) {
+            index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+            wire_index_size = encoded_size;
+        }
+    }
+    const uint8_t *wire_index = encoded_idx ? encoded_idx : index_buf;
+
+    uint8_t *soa_buf = (uint8_t *)malloc(vertex_data_size > 0 ? vertex_data_size : 1);
+    NT_BUILD_ASSERT(soa_buf && "SOA plane alloc failed");
+    nt_deinterleave_to_planes(soa_buf, vertex_buf, vertex_count, layout, stream_count, vertex_stride);
+    free(vertex_buf);
+    vertex_buf = soa_buf;
+
     NtMeshAssetHeader mesh_hdr;
     memset(&mesh_hdr, 0, sizeof(mesh_hdr));
     mesh_hdr.magic = NT_MESH_MAGIC;
     mesh_hdr.version = NT_MESH_VERSION;
     mesh_hdr.stream_count = (uint8_t)stream_count;
     mesh_hdr.index_type = index_type;
+    mesh_hdr.vertex_wire = NT_MESH_WIRE_VTX_SOA;
+    mesh_hdr.index_wire = index_wire;
     mesh_hdr.vertex_count = vertex_count;
     mesh_hdr.index_count = index_count;
     mesh_hdr.vertex_data_size = vertex_data_size;
-    mesh_hdr.index_data_size = index_data_size;
+    mesh_hdr.index_data_size = wire_index_size;
     if (prim) {
         nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
         nt_clamp_aabb_to_position_count(layout, stream_count, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
@@ -395,7 +544,7 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     }
 
     uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);
-    uint32_t total = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + index_data_size;
+    uint32_t total = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + wire_index_size;
 
     uint8_t *buf = (uint8_t *)malloc(total);
     NT_BUILD_ASSERT(buf && "mesh buffer alloc failed");
@@ -409,10 +558,11 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
         memcpy(buf + off, vertex_buf, vertex_data_size);
         off += vertex_data_size;
     }
-    if (index_data_size > 0 && index_buf) {
-        memcpy(buf + off, index_buf, index_data_size);
+    if (wire_index_size > 0 && wire_index) {
+        memcpy(buf + off, wire_index, wire_index_size);
     }
 
+    free(encoded_idx);
     free(vertex_buf);
     *out_data = buf;
     *out_size = total;
@@ -458,12 +608,21 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
         uint32_t index_data_size = 0;
 
         if (prim->indices != NULL) {
-            index_count = (uint32_t)prim->indices->count;
-            if (index_count > NT_BUILD_MAX_INDICES) {
-                NT_LOG_ERROR("%s: index count %u exceeds max %d", path, index_count, NT_BUILD_MAX_INDICES);
+            /* limit-check on cgltf_size BEFORE the u32 cast: a corrupt accessor
+               count like UINT32_MAX + 4 would otherwise truncate to 3 and pass */
+            if (prim->indices->count > (cgltf_size)NT_BUILD_MAX_INDICES) {
+                NT_LOG_ERROR("%s: index count %zu exceeds max %d", path, (size_t)prim->indices->count, NT_BUILD_MAX_INDICES);
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
+            /* an indexed primitive with an EMPTY accessor is malformed content,
+               not a non-indexed mesh -- reject instead of drawing all vertices */
+            if (prim->indices->count == 0) {
+                NT_LOG_ERROR("%s: index accessor is empty", path);
+                ret = NT_BUILD_ERR_VALIDATION;
+                goto cleanup_streams;
+            }
+            index_count = (uint32_t)prim->indices->count;
 
             if (vertex_count <= 65535) {
                 index_type = 1;
@@ -476,8 +635,11 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             NT_BUILD_ASSERT(index_buf && "index buffer alloc failed");
 
-            size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
-            cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
+            ret = nt_builder_unpack_indices(prim->indices, path, index_buf, index_count, index_type, vertex_count);
+            if (ret != NT_BUILD_OK) {
+                free(index_buf);
+                goto cleanup_streams;
+            }
         }
 
         ret = nt_builder_build_mesh_buffer(layout, stream_count, stream_floats, vertex_count, prim, index_buf, index_count, index_type, index_data_size, out_data, out_size);

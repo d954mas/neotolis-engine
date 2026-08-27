@@ -596,6 +596,11 @@ void nt_gfx_test_scissor_rect(int out[4]);
 /* Read back the cached viewport rect [x, y, w, h] from the last
  * nt_gfx_set_viewport call. Out-param must be a 4-element int array. */
 void nt_gfx_test_viewport_rect(int out[4]);
+/* Hash (nt_hash32) of the GPU-form bytes the last nt_gfx_activate_mesh
+ * uploaded -- pins that wire decode actually ran at the upload boundary.
+ * Index hash is 0 for a non-indexed mesh. */
+uint32_t nt_gfx_test_last_mesh_vertex_hash(void);
+uint32_t nt_gfx_test_last_mesh_index_hash(void);
 #endif
 // #endregion
 

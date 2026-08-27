@@ -1,6 +1,6 @@
 add_executable(atlas_bench main.c atlas_bench_cli.c ntpack_parse.c bench_json.c)
 # The executable selects the real logger; nt_builder keeps an interface-only dependency.
-target_link_libraries(atlas_bench PRIVATE nt_builder nt_log)
+target_link_libraries(atlas_bench PRIVATE nt_builder nt_log nt_meshwire)
 target_include_directories(atlas_bench PRIVATE
     ${CMAKE_SOURCE_DIR}/shared/include   # nt_atlas_format.h, nt_pack_format.h, nt_texture_format.h
     ${CMAKE_SOURCE_DIR}/tools/builder    # nt_builder.h
@@ -15,7 +15,7 @@ set_target_properties(atlas_bench PROPERTIES
 )
 
 add_executable(atlas_hull_visual_report hull_visual_main.c hull_visual_report.c ntpack_parse.c)
-target_link_libraries(atlas_hull_visual_report PRIVATE nt_builder nt_log cjson)
+target_link_libraries(atlas_hull_visual_report PRIVATE nt_builder nt_log cjson nt_meshwire)
 target_include_directories(atlas_hull_visual_report PRIVATE
     ${CMAKE_SOURCE_DIR}/shared/include
     ${CMAKE_SOURCE_DIR}/tools/builder

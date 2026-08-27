@@ -5,7 +5,7 @@
 
 /* Magic: ASCII "MESH" as uint32_t little-endian = 0x4853454D */
 #define NT_MESH_MAGIC 0x4853454D
-#define NT_MESH_VERSION 2
+#define NT_MESH_VERSION 3
 
 #define NT_MESH_MAX_STREAMS 8
 
@@ -42,38 +42,66 @@ typedef struct {
 
 _Static_assert(sizeof(NtStreamDesc) == 8, "NtStreamDesc must be 8 bytes");
 
+/* Vertex wire layout (nt_mesh_wire_vtx_t) */
+typedef enum {
+    NT_MESH_WIRE_VTX_RAW = 0, /* interleaved — identical to the GPU form */
+    NT_MESH_WIRE_VTX_SOA = 1, /* per-stream planes; decode = re-interleave */
+} nt_mesh_wire_vtx_t;
+
+/* Index wire layout (nt_mesh_wire_idx_t) */
+typedef enum {
+    NT_MESH_WIRE_IDX_RAW = 0,     /* plain u16/u32 array — identical to the GPU form */
+    NT_MESH_WIRE_IDX_MESHOPT = 1, /* meshopt index codec stream (version 1) */
+} nt_mesh_wire_idx_t;
+
 /*
  * NtMeshAssetHeader — binary header prepended to mesh data in ntpack.
  *
- * Layout (48 bytes):
+ * Layout (52 bytes):
  *   magic(4) + version(2) + stream_count(1) + index_type(1) +
+ *   vertex_wire(1) + index_wire(1) + _pad(2) +
  *   vertex_count(4) + index_count(4) +
  *   vertex_data_size(4) + index_data_size(4) +
  *   aabb_min(12) + aabb_max(12)
  *
- * After header: NtStreamDesc[stream_count], then vertex data, then index data.
+ * After header: NtStreamDesc[stream_count], then vertex WIRE data, then index
+ * WIRE data. Wire is what the pack stores; the GPU form is what nt_gfx uploads
+ * after decode.
  *
- * Vertex data is interleaved: each vertex contains attributes packed in stream
- * descriptor order. Stride = sum of type_size(type) * count for each stream.
+ * GPU vertex form is interleaved: each vertex contains attributes packed in
+ * stream descriptor order. Stride = sum of type_size(type) * count per stream.
+ * vertex_wire selects how the pack stores it:
+ *   RAW — already interleaved, uploaded as-is.
+ *   SOA — one plane per stream in NtStreamDesc order. Plane i element size =
+ *         nt_stream_type_size(type) * count (the WHOLE attribute, never split
+ *         per component); plane i starts at vertex_count * sum of previous
+ *         element sizes. A pure permutation: vertex_data_size is identical to
+ *         the interleaved size.
  *
- * Index data: uint16 or uint32 depending on index_type.
+ * GPU index form is a plain uint16/uint32 array per index_type. index_wire
+ * selects the stored form: RAW as-is, or a MESHOPT codec stream.
+ * index_data_size is always the WIRE size (encoded size when MESHOPT); the
+ * decoded size is index_count * element size.
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;            /* NT_MESH_MAGIC */
-    uint16_t version;          /* NT_MESH_VERSION */
-    uint8_t stream_count;      /* number of NtStreamDesc after header */
-    uint8_t index_type;        /* 0=none, 1=uint16, 2=uint32 */
+    uint32_t magic;       /* NT_MESH_MAGIC */
+    uint16_t version;     /* NT_MESH_VERSION */
+    uint8_t stream_count; /* number of NtStreamDesc after header */
+    uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 (GPU element width) */
+    uint8_t vertex_wire;  /* nt_mesh_wire_vtx_t */
+    uint8_t index_wire;   /* nt_mesh_wire_idx_t */
+    uint8_t _pad[2];
     uint32_t vertex_count;     /* number of vertices */
     uint32_t index_count;      /* number of indices (0 if index_type==0) */
-    uint32_t vertex_data_size; /* total vertex data in bytes */
-    uint32_t index_data_size;  /* total index data in bytes */
+    uint32_t vertex_data_size; /* vertex wire data in bytes (== GPU size; SOA is a permutation) */
+    uint32_t index_data_size;  /* index WIRE data in bytes (encoded size when MESHOPT) */
     float aabb_min[3];         /* axis-aligned bounding box minimum (x, y, z) */
     float aabb_max[3];         /* axis-aligned bounding box maximum (x, y, z) */
 } NtMeshAssetHeader;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtMeshAssetHeader) == 48, "NtMeshAssetHeader must be 48 bytes");
+_Static_assert(sizeof(NtMeshAssetHeader) == 52, "NtMeshAssetHeader must be 52 bytes");
 
 /* Byte size of one component of a given stream type */
 static inline uint32_t nt_stream_type_size(uint8_t type) {

@@ -10,9 +10,9 @@ target_link_libraries(rtt_showcase PRIVATE
 )
 target_include_directories(rtt_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)
-    target_link_libraries(rtt_showcase PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub)
+    target_link_libraries(rtt_showcase PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub)
 else()
-    target_link_libraries(rtt_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub)
+    target_link_libraries(rtt_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)
 endif()
 
 nt_set_warning_flags(rtt_showcase)
@@ -24,7 +24,7 @@ set_target_properties(rtt_showcase PROPERTIES
 
 if(NOT EMSCRIPTEN)
     add_executable(build_rtt_showcase_packs build_packs.c)
-    target_link_libraries(build_rtt_showcase_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_rtt_showcase_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_rtt_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_rtt_showcase_packs)
     nt_set_warning_flags(build_rtt_showcase_packs)

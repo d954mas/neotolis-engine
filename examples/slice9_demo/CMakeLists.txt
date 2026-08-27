@@ -15,10 +15,10 @@ target_include_directories(slice9_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gene
 
 # nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.
 if(EMSCRIPTEN)
-    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub)
+    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub)
 else()
     # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel.
-    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub)
+    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)
 endif()
 
 nt_set_warning_flags(slice9_demo)
@@ -30,7 +30,7 @@ set_target_properties(slice9_demo PROPERTIES
 
 if(NOT EMSCRIPTEN)
     add_executable(build_slice9_demo_packs build_packs.c)
-    target_link_libraries(build_slice9_demo_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_slice9_demo_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_slice9_demo_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_slice9_demo_packs)
     nt_set_warning_flags(build_slice9_demo_packs)

@@ -17,10 +17,10 @@ target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gene
 # nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the
 # real impl so Ctrl+C/X/V work in the Input tab. web = async cache-on-paste, native = glfw.
 if(EMSCRIPTEN)
-    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard nt_basisu_transcoder_stub)
+    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard nt_basisu_transcoder_stub nt_meshwire_stub)
 else()
     # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel.
-    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform nt_basisu_transcoder_stub)
+    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform nt_basisu_transcoder_stub nt_meshwire_stub)
 endif()
 
 nt_set_warning_flags(ui_showcase)
@@ -29,7 +29,7 @@ set_target_properties(ui_showcase PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${UI_SHOW
 
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
-    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
+    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log nt_meshwire)
     target_compile_definitions(build_ui_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_static_crt(build_ui_showcase_packs)
     nt_set_warning_flags(build_ui_showcase_packs)

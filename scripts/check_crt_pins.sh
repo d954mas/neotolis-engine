@@ -47,8 +47,19 @@ if [ -n "$TU_HITS" ]; then
     FAIL=1
 fi
 
+# deps/meshoptimizer is a TEST-ONLY byte-parity reference for the C port in
+# engine/meshwire -- shipping code must never compile or link it.
+MESHWIRE_TU_HITS="$(grep_cmake_files -e 'indexcodec\.cpp' |
+    grep -vE "$UPSTREAM_DEPS" |
+    grep -v '^\(\./\)\?tests/CMakeLists\.txt:' || true)"
+if [ -n "$MESHWIRE_TU_HITS" ]; then
+    echo "ERROR: indexcodec.cpp compiled outside tests/ (test-only parity reference):"
+    printf '%s\n' "$MESHWIRE_TU_HITS"
+    FAIL=1
+fi
+
 if [ "$FAIL" -ne 0 ]; then
     echo "check_crt_pins: FAILED"
     exit 1
 fi
-echo "check_crt_pins: passed (CRT pins centralized; single basisu transcoder TU)"
+echo "check_crt_pins: passed (CRT pins centralized; single basisu/meshopt codec TU)"

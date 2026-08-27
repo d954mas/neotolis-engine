@@ -28,5 +28,6 @@ target_link_libraries(submodule_test PRIVATE
     # trail every lib that references them (nt_resource -> nt_http/nt_fs -> nt_log).
     nt_http_stub
     nt_fs_stub
+    nt_meshwire_stub
     nt_log_stub
 )

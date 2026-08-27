@@ -312,6 +312,15 @@ void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t k
 struct cgltf_primitive;
 void nt_extract_aabb(const struct cgltf_primitive *prim, float out_min[3], float out_max[3]);
 
+/* Unpack a glTF index accessor into index_buf (u16 or u32 per index_type).
+ * Goes through a u32 temp: cgltf refuses to narrow a wider accessor (returns 0
+ * leaving the buffer zeroed), so a u32 accessor over a small mesh must be
+ * unpacked at source width and narrowed with validation. Every index is
+ * range-checked against vertex_count at unpack time -- the scene path hands
+ * indices to MikkTSpace before the pack-time guard runs. */
+struct cgltf_accessor;
+nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, const char *label, uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t vertex_count);
+
 /* Tangent computation (MikkTSpace wrapper) */
 nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
                                               float *out_tangents);

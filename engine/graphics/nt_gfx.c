@@ -7,9 +7,44 @@
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
+#include "meshwire/nt_meshwire.h"
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
+
+/* Shared mesh-decode staging, mirroring the backend's transcode buffer:
+ * grow-on-demand, reused across activations (VBO then IBO sequentially),
+ * freed after NT_MESH_STAGE_IDLE_FRAMES without use -- no per-activation
+ * heap traffic while a pack streams in. */
+#define NT_MESH_STAGE_IDLE_FRAMES 60 /* ~1s at 60fps */
+static uint8_t *s_mesh_stage_buf = NULL;
+static uint32_t s_mesh_stage_size = 0;
+static uint32_t s_mesh_stage_idle = 0;
+
+static uint8_t *mesh_stage_acquire(uint32_t size) {
+    if (size > s_mesh_stage_size) {
+        free(s_mesh_stage_buf);
+        s_mesh_stage_buf = (uint8_t *)malloc(size);
+        if (!s_mesh_stage_buf) {
+            s_mesh_stage_size = 0;
+            return NULL;
+        }
+        s_mesh_stage_size = size;
+    }
+    s_mesh_stage_idle = 0;
+    return s_mesh_stage_buf;
+}
+
+static void mesh_stage_frame_tick(void) {
+    if (s_mesh_stage_buf != NULL) {
+        s_mesh_stage_idle++;
+        if (s_mesh_stage_idle > NT_MESH_STAGE_IDLE_FRAMES) {
+            free(s_mesh_stage_buf);
+            s_mesh_stage_buf = NULL;
+            s_mesh_stage_size = 0;
+        }
+    }
+}
 
 /* Lazy transcoder initialization (one-time, at first v2 texture activation) */
 static bool s_transcoder_initialized = false;
@@ -225,6 +260,9 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
+    free(s_mesh_stage_buf);
+    s_mesh_stage_buf = NULL;
+    s_mesh_stage_size = 0;
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -500,6 +538,7 @@ void nt_gfx_begin_frame(void) {
 }
 
 void nt_gfx_end_frame(void) {
+    mesh_stage_frame_tick();
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -1915,6 +1954,34 @@ static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count
     return true;
 }
 
+/* MESHOPT wire sizing invariants -- everything that must hold BEFORE the
+ * decode allocation. 64-bit arithmetic throughout. */
+static bool mesh_meshopt_sizes_valid(const NtMeshAssetHeader *hdr, uint32_t idx_elem) {
+    if (hdr->index_type == 0 || hdr->index_count == 0 || hdr->index_count % 3 != 0) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT wire with index_type %u index_count %u", (uint32_t)hdr->index_type, hdr->index_count);
+        return false;
+    }
+    uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
+    /* Decoded size must fit a u32: it feeds malloc, and a wasm size_t wraps at 4 GB */
+    if (decoded_size > UINT32_MAX) {
+        NT_LOG_ERROR("activate_mesh: decoded index size overflow (index_count %u)", hdr->index_count);
+        return false;
+    }
+    if (hdr->index_data_size == 0 || hdr->index_data_size > decoded_size) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u vs decoded %u", hdr->index_data_size, (uint32_t)decoded_size);
+        return false;
+    }
+    /* codec minimum (header + 1 code byte per triangle + 16-byte tail):
+       without this a 17-byte stream could claim hundreds of millions of
+       indices and force a huge decode allocation before the decoder rejects */
+    uint64_t min_wire = 1ULL + (hdr->index_count / 3) + 16ULL;
+    if (hdr->index_data_size < min_wire) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u below codec minimum for %u indices", hdr->index_data_size, hdr->index_count);
+        return false;
+    }
+    return true;
+}
+
 /* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
  * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
 static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
@@ -1933,6 +2000,10 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
     }
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
+        return false;
+    }
+    if (hdr->vertex_wire > NT_MESH_WIRE_VTX_SOA || hdr->index_wire > NT_MESH_WIRE_IDX_MESHOPT) {
+        NT_LOG_ERROR("activate_mesh: invalid wire tags %u/%u", (uint32_t)hdr->vertex_wire, (uint32_t)hdr->index_wire);
         return false;
     }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
@@ -1961,8 +2032,72 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: index_count %u with index_type none", hdr->index_count);
         return false;
     }
-    if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
+    if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
+        if (!mesh_meshopt_sizes_valid(hdr, idx_elem)) {
+            return false;
+        }
+    } else if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {
         NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
+        return false;
+    }
+    /* GL draws meshes only as GL_TRIANGLES: a trailing partial triangle would
+       be silently dropped at draw -- reject in the safety net too. Non-indexed
+       meshes draw vertex_count, so it carries the same constraint. */
+    uint32_t draw_count = (hdr->index_count > 0) ? hdr->index_count : hdr->vertex_count;
+    if (draw_count % 3 != 0) {
+        NT_LOG_ERROR("activate_mesh: %s count %u is not a multiple of 3", (hdr->index_count > 0) ? "index" : "vertex", draw_count);
+        return false;
+    }
+    return true;
+}
+
+#ifdef NT_TEST_ACCESS
+static uint32_t s_test_last_mesh_vertex_hash;
+static uint32_t s_test_last_mesh_index_hash;
+uint32_t nt_gfx_test_last_mesh_vertex_hash(void) { return s_test_last_mesh_vertex_hash; }
+uint32_t nt_gfx_test_last_mesh_index_hash(void) { return s_test_last_mesh_index_hash; }
+#endif
+
+/* Uploads the IBO from the wire index block (decoding MESHOPT first).
+ * *out_ibo stays {0} for non-indexed meshes; returns false on failure
+ * (nothing left to clean up). */
+static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_data, nt_buffer_t *out_ibo) {
+    *out_ibo = (nt_buffer_t){0};
+#ifdef NT_TEST_ACCESS
+    s_test_last_mesh_index_hash = 0;
+#endif
+    if (hdr->index_type == 0 || hdr->index_count == 0) {
+        return true;
+    }
+    uint32_t idx_elem = (hdr->index_type == 1) ? 2U : 4U;
+    const uint8_t *gpu_index_data = index_data;
+    uint32_t gpu_index_size = hdr->index_data_size;
+    if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
+        gpu_index_size = hdr->index_count * idx_elem; /* fits u32 -- validated */
+        uint8_t *idx_tmp = mesh_stage_acquire(gpu_index_size);
+        if (!idx_tmp) {
+            NT_LOG_ERROR("activate_mesh: index decode alloc failed (%u bytes)", gpu_index_size);
+            return false;
+        }
+        if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size, hdr->vertex_count)) {
+            NT_LOG_ERROR("activate_mesh: index wire decode failed");
+            return false;
+        }
+        gpu_index_data = idx_tmp;
+    }
+#ifdef NT_TEST_ACCESS
+    s_test_last_mesh_index_hash = nt_hash32(gpu_index_data, gpu_index_size).value;
+#endif
+    *out_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = gpu_index_data,
+        .size = gpu_index_size,
+        .index_type = hdr->index_type,
+        .label = NULL,
+    });
+    if (out_ibo->id == 0) {
+        NT_LOG_ERROR("activate_mesh: IBO creation failed");
         return false;
     }
     return true;
@@ -1977,10 +2112,35 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
 
+    /* Wire → GPU decode through the shared staging buffer (activation is the
+       amortized load path; the same buffer then serves the index decode --
+       make_buffer has copied the vertices to the GPU by that point). */
+    const uint8_t *gpu_vertex_data = vertex_data;
+    if (hdr->vertex_wire == NT_MESH_WIRE_VTX_SOA && hdr->vertex_data_size > 0) {
+        uint8_t *soa_tmp = mesh_stage_acquire(hdr->vertex_data_size);
+        if (!soa_tmp) {
+            NT_LOG_ERROR("activate_mesh: SOA decode alloc failed (%u bytes)", hdr->vertex_data_size);
+            return 0;
+        }
+        const NtStreamDesc *streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+        uint32_t elem_sizes[NT_MESH_MAX_STREAMS];
+        for (uint8_t i = 0; i < hdr->stream_count; i++) {
+            elem_sizes[i] = nt_stream_type_size(streams[i].type) * streams[i].count;
+        }
+        if (!nt_meshwire_reinterleave(soa_tmp, vertex_data, hdr->vertex_count, elem_sizes, hdr->stream_count)) {
+            NT_LOG_ERROR("activate_mesh: SOA re-interleave failed");
+            return 0;
+        }
+        gpu_vertex_data = soa_tmp;
+    }
+
+#ifdef NT_TEST_ACCESS
+    s_test_last_mesh_vertex_hash = (hdr->vertex_data_size > 0) ? nt_hash32(gpu_vertex_data, hdr->vertex_data_size).value : 0;
+#endif
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_IMMUTABLE,
-        .data = vertex_data,
+        .data = gpu_vertex_data,
         .size = hdr->vertex_data_size,
         .label = NULL,
     });
@@ -1989,21 +2149,10 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    nt_buffer_t ibo = {0};
-    if (hdr->index_type != 0 && hdr->index_data_size > 0) {
-        ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_INDEX,
-            .usage = NT_USAGE_IMMUTABLE,
-            .data = index_data,
-            .size = hdr->index_data_size,
-            .index_type = hdr->index_type,
-            .label = NULL,
-        });
-        if (ibo.id == 0) {
-            NT_LOG_ERROR("activate_mesh: IBO creation failed");
-            nt_gfx_destroy_buffer(vbo);
-            return 0;
-        }
+    nt_buffer_t ibo;
+    if (!mesh_make_ibo(hdr, index_data, &ibo)) {
+        nt_gfx_destroy_buffer(vbo);
+        return 0;
     }
 
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
