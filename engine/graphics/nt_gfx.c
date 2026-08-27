@@ -12,6 +12,40 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
+/* Shared mesh-decode staging, mirroring the backend's transcode buffer:
+ * grow-on-demand, reused across activations (VBO then IBO sequentially),
+ * freed after NT_MESH_STAGE_IDLE_FRAMES without use -- no per-activation
+ * heap traffic while a pack streams in. */
+#define NT_MESH_STAGE_IDLE_FRAMES 60 /* ~1s at 60fps */
+static uint8_t *s_mesh_stage_buf = NULL;
+static uint32_t s_mesh_stage_size = 0;
+static uint32_t s_mesh_stage_idle = 0;
+
+static uint8_t *mesh_stage_acquire(uint32_t size) {
+    if (size > s_mesh_stage_size) {
+        free(s_mesh_stage_buf);
+        s_mesh_stage_buf = (uint8_t *)malloc(size);
+        if (!s_mesh_stage_buf) {
+            s_mesh_stage_size = 0;
+            return NULL;
+        }
+        s_mesh_stage_size = size;
+    }
+    s_mesh_stage_idle = 0;
+    return s_mesh_stage_buf;
+}
+
+static void mesh_stage_frame_tick(void) {
+    if (s_mesh_stage_buf != NULL) {
+        s_mesh_stage_idle++;
+        if (s_mesh_stage_idle > NT_MESH_STAGE_IDLE_FRAMES) {
+            free(s_mesh_stage_buf);
+            s_mesh_stage_buf = NULL;
+            s_mesh_stage_size = 0;
+        }
+    }
+}
+
 /* Lazy transcoder initialization (one-time, at first v2 texture activation) */
 static bool s_transcoder_initialized = false;
 
@@ -226,6 +260,9 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
+    free(s_mesh_stage_buf);
+    s_mesh_stage_buf = NULL;
+    s_mesh_stage_size = 0;
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -501,6 +538,7 @@ void nt_gfx_begin_frame(void) {
 }
 
 void nt_gfx_end_frame(void) {
+    mesh_stage_frame_tick();
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -2002,6 +2040,12 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: index_data_size %u != index_count %u * %u", hdr->index_data_size, hdr->index_count, idx_elem);
         return false;
     }
+    /* GL draws meshes only as GL_TRIANGLES: a trailing partial triangle would
+       be silently dropped at draw -- reject in the safety net too */
+    if (hdr->index_count % 3 != 0) {
+        NT_LOG_ERROR("activate_mesh: index_count %u is not a multiple of 3", hdr->index_count);
+        return false;
+    }
     return true;
 }
 
@@ -2026,17 +2070,15 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
     uint32_t idx_elem = (hdr->index_type == 1) ? 2U : 4U;
     const uint8_t *gpu_index_data = index_data;
     uint32_t gpu_index_size = hdr->index_data_size;
-    uint8_t *idx_tmp = NULL;
     if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
         gpu_index_size = hdr->index_count * idx_elem; /* fits u32 -- validated */
-        idx_tmp = malloc(gpu_index_size);
+        uint8_t *idx_tmp = mesh_stage_acquire(gpu_index_size);
         if (!idx_tmp) {
             NT_LOG_ERROR("activate_mesh: index decode alloc failed (%u bytes)", gpu_index_size);
             return false;
         }
         if (!nt_meshwire_decode_indices(idx_tmp, hdr->index_count, idx_elem, index_data, hdr->index_data_size, hdr->vertex_count)) {
             NT_LOG_ERROR("activate_mesh: index wire decode failed");
-            free(idx_tmp);
             return false;
         }
         gpu_index_data = idx_tmp;
@@ -2052,7 +2094,6 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
         .index_type = hdr->index_type,
         .label = NULL,
     });
-    free(idx_tmp);
     if (out_ibo->id == 0) {
         NT_LOG_ERROR("activate_mesh: IBO creation failed");
         return false;
@@ -2069,12 +2110,12 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
     const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
 
-    /* Wire → GPU decode into transient heap: load path, not hot path (frame
-       scratch rejected — packs mount mid-gameplay, 512 KB shared budget). */
+    /* Wire → GPU decode through the shared staging buffer (activation is the
+       amortized load path; the same buffer then serves the index decode --
+       make_buffer has copied the vertices to the GPU by that point). */
     const uint8_t *gpu_vertex_data = vertex_data;
-    uint8_t *soa_tmp = NULL;
     if (hdr->vertex_wire == NT_MESH_WIRE_VTX_SOA && hdr->vertex_data_size > 0) {
-        soa_tmp = malloc(hdr->vertex_data_size);
+        uint8_t *soa_tmp = mesh_stage_acquire(hdr->vertex_data_size);
         if (!soa_tmp) {
             NT_LOG_ERROR("activate_mesh: SOA decode alloc failed (%u bytes)", hdr->vertex_data_size);
             return 0;
@@ -2086,7 +2127,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         }
         if (!nt_meshwire_reinterleave(soa_tmp, vertex_data, hdr->vertex_count, elem_sizes, hdr->stream_count)) {
             NT_LOG_ERROR("activate_mesh: SOA re-interleave failed");
-            free(soa_tmp);
             return 0;
         }
         gpu_vertex_data = soa_tmp;
@@ -2102,7 +2142,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .size = hdr->vertex_data_size,
         .label = NULL,
     });
-    free(soa_tmp); /* make_buffer uploaded (IMMUTABLE copies at creation) */
     if (vbo.id == 0) {
         NT_LOG_ERROR("activate_mesh: VBO creation failed");
         return 0;

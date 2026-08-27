@@ -425,9 +425,11 @@ static nt_build_result_t nt_validate_index_range(const uint8_t *index_buf, uint3
     return NT_BUILD_OK;
 }
 
-/* Encodes triangles with the meshopt index codec, then decodes back and
- * REPLACES index_buf: the canonical (rotation-normalized) form is the pack's
- * ground truth, so the runtime decode is byte-exact against it.
+/* Encodes triangles with the meshopt index codec. Only when the encoded
+ * stream WINS (smaller than RAW) it is decoded back into index_buf: the
+ * canonical (rotation-normalized) form becomes the pack's ground truth, so
+ * the runtime decode is byte-exact against it. When RAW wins, index_buf is
+ * left untouched -- the source order (and its flat provoking vertex) ships.
  * Returns the encoded buffer (caller frees) or NULL when encoding is not
  * smaller than RAW; *out_encoded_size is valid only on non-NULL return. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT expansions dominate the count
@@ -452,14 +454,15 @@ static uint8_t *nt_encode_indices_meshopt(uint8_t *index_buf, uint32_t index_cou
     free(idx32);
     NT_BUILD_ASSERT(enc_size > 0 && "meshwire index encode failed");
 
+    if (enc_size >= index_data_size) {
+        free(enc); /* rare (tiny meshes): RAW wins, source order preserved */
+        return NULL;
+    }
+
     uint32_t idx_elem = (index_type == 1) ? 2U : 4U;
     bool decode_ok = nt_meshwire_decode_indices(index_buf, index_count, idx_elem, enc, enc_size, vertex_count);
     NT_BUILD_ASSERT(decode_ok && "meshwire decode-back failed -- codec broken");
 
-    if (enc_size >= index_data_size) {
-        free(enc); /* rare (tiny meshes): canonical RAW already in index_buf */
-        return NULL;
-    }
     *out_encoded_size = enc_size;
     return enc;
 }
@@ -610,6 +613,13 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
             if (prim->indices->count > (cgltf_size)NT_BUILD_MAX_INDICES) {
                 NT_LOG_ERROR("%s: index count %zu exceeds max %d", path, (size_t)prim->indices->count, NT_BUILD_MAX_INDICES);
                 ret = NT_BUILD_ERR_LIMIT;
+                goto cleanup_streams;
+            }
+            /* an indexed primitive with an EMPTY accessor is malformed content,
+               not a non-indexed mesh -- reject instead of drawing all vertices */
+            if (prim->indices->count == 0) {
+                NT_LOG_ERROR("%s: index accessor is empty", path);
+                ret = NT_BUILD_ERR_VALIDATION;
                 goto cleanup_streams;
             }
             index_count = (uint32_t)prim->indices->count;

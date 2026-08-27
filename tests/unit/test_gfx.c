@@ -1148,6 +1148,18 @@ void test_activate_mesh_rejects_bad_wire_tags(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
+void test_activate_mesh_rejects_raw_non_triangle_count(void) {
+    /* GL draws only GL_TRIANGLES -- the safety net must reject a partial
+     * trailing triangle even in RAW form */
+    uint8_t blob[MESH_BLOB_BYTES + 2];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_count = 4;
+    hdr->index_data_size = 8;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
 void test_activate_mesh_rejects_meshopt_without_indices(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
@@ -1657,6 +1669,7 @@ int main(void) {
     RUN_TEST(test_activate_mesh_meshopt_wire_decodes);
     RUN_TEST(test_activate_mesh_rejects_corrupt_meshopt_stream);
     RUN_TEST(test_activate_mesh_rejects_bad_wire_tags);
+    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_count);
     RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
     RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
     RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);

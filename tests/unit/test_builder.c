@@ -2119,8 +2119,8 @@ void test_mesh_u32_index_accessor_narrows_to_u16(void) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     TEST_ASSERT_EQUAL_UINT8(1, hdr->index_type); /* narrowed to u16 (3 vertices) */
     TEST_ASSERT_EQUAL_UINT32(3, hdr->index_count);
-    /* 1 triangle stays RAW; values must survive the u32 source (were zeroed
-     * before the unpack fix), canonical rotation keeps 0 first */
+    /* 1 triangle stays RAW in SOURCE order; values must survive the u32
+     * source (were zeroed before the unpack fix) */
     const uint16_t *idx = (const uint16_t *)(data + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + hdr->vertex_data_size);
     TEST_ASSERT_EQUAL_UINT16(0, idx[0]);
     TEST_ASSERT_EQUAL_UINT16(2, idx[1]);
@@ -2216,11 +2216,12 @@ void test_mesh_wire_roundtrip_cube(void) {
 /* --- Builder wire policy branches (direct choke-point calls) --- */
 
 void test_mesh_wire_tiny_mesh_stays_raw(void) {
-    /* 1 triangle: encoded stream (>= 17 B) cannot beat 6 B RAW */
+    /* 1 triangle: encoded stream (>= 17 B) cannot beat 6 B RAW. When RAW wins
+     * the SOURCE order must ship -- rotation would move the provoking vertex */
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     float *streams[1] = {pos};
-    uint16_t idx[3] = {0, 1, 2};
+    uint16_t idx[3] = {1, 2, 0}; /* deliberately NOT the canonical rotation */
     uint8_t *data = NULL;
     uint32_t size = 0;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 3, 1, 6, &data, &size));
@@ -2228,7 +2229,68 @@ void test_mesh_wire_tiny_mesh_stays_raw(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_RAW, hdr->index_wire);
     TEST_ASSERT_EQUAL_UINT32(6, hdr->index_data_size);
     TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_VTX_SOA, hdr->vertex_wire);
+    const uint16_t *stored = (const uint16_t *)(data + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + hdr->vertex_data_size);
+    TEST_ASSERT_EQUAL_UINT16(1, stored[0]);
+    TEST_ASSERT_EQUAL_UINT16(2, stored[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, stored[2]);
     free(data);
+}
+
+/* Triangle glb whose index accessor exists but has count 0 */
+static void write_test_glb_empty_indices(const char *path) {
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5123,\"count\":0,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":0}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":36}]"
+                           "}";
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    uint32_t bin_padded = (uint32_t)sizeof(positions);
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions, sizeof(positions), 1, f);
+    (void)fclose(f);
+}
+
+void test_mesh_rejects_empty_index_accessor(void) {
+    /* an indexed primitive with an empty accessor is malformed content, not a
+     * non-indexed mesh -- it must not fall through to drawing all vertices */
+    const char *glb_path = TMP_DIR "/empty_idx.glb";
+    write_test_glb_empty_indices(glb_path);
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_decode_mesh(glb_path, layout, 1, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size));
 }
 
 void test_mesh_wire_non_triangle_count_rejected(void) {
@@ -9167,6 +9229,7 @@ int main(void) {
     RUN_TEST(test_mesh_u32_index_accessor_narrows_to_u16);
     RUN_TEST(test_mesh_wire_roundtrip_cube);
     RUN_TEST(test_mesh_wire_tiny_mesh_stays_raw);
+    RUN_TEST(test_mesh_rejects_empty_index_accessor);
     RUN_TEST(test_mesh_wire_non_triangle_count_rejected);
     RUN_TEST(test_mesh_wire_non_triangle_vertex_count_rejected);
     RUN_TEST(test_mesh_wire_non_indexed_stays_raw);

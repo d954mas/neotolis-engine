@@ -105,10 +105,11 @@ rejected (`NT_BUILD_ERR_VALIDATION`), never packed. Before encoding, every
 index is validated
 `< vertex_count` (`NT_BUILD_ERR_VALIDATION` otherwise — the codec sizes its
 encode buffer from `vertex_count`, and this also closes the RAW path's silent
-out-of-range hole). The encoder pins `meshopt_encodeIndexVersion(1)` and then
-decodes its own stream back, storing the decoded (canonicalized) order as the
-pack ground truth; a decode-back failure is `NT_BUILD_ASSERT` (broken vendored
-codec, never a silent RAW fallback). MikkTSpace, AABB and vertex data are
+out-of-range hole). When the encoded stream wins, the encoder decodes it back and stores the
+decoded (canonicalized) order as the pack ground truth -- a decode-back
+failure is `NT_BUILD_ASSERT` (broken codec, never a silent RAW fallback).
+When RAW wins (tiny meshes), the SOURCE index order ships unchanged,
+provoking vertex included. MikkTSpace, AABB and vertex data are
 computed before canonicalization and are invariant under it.
 
 **Tangent model.** The layout expresses tangent presence (a TANGENT stream or not); `tangent_mode` only says where the data comes from: `AUTO` (glTF, else MikkTSpace), `COMPUTE` (always MikkTSpace), `REQUIRE` (glTF or build error). A mesh without normal mapping simply omits the TANGENT stream. Tangent computation exists only in the scene API; `add_mesh` reads TANGENT from the glTF and asserts on any mode other than `AUTO`.

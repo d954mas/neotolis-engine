@@ -342,6 +342,12 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
+            /* empty index accessor is malformed content, not a non-indexed mesh */
+            if (prim->indices->count == 0) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: index accessor is empty", mesh_index, primitive_index);
+                ret = NT_BUILD_ERR_VALIDATION;
+                goto cleanup_streams;
+            }
             index_count = (uint32_t)prim->indices->count;
 
             if (vertex_count <= 65535) {
