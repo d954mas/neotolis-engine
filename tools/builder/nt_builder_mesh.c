@@ -358,7 +358,7 @@ static void nt_clamp_aabb_to_position_count(const NtStreamLayout *layout, uint32
     }
 }
 
-nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, const char *label, uint8_t *index_buf, uint32_t index_count, uint8_t index_type) {
+nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, const char *label, uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t vertex_count) {
     uint32_t *tmp = (uint32_t *)malloc((size_t)index_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(tmp && "index unpack alloc failed");
     cgltf_size unpacked = cgltf_accessor_unpack_indices(acc, tmp, sizeof(uint32_t), index_count);
@@ -367,14 +367,20 @@ nt_build_result_t nt_builder_unpack_indices(const struct cgltf_accessor *acc, co
         NT_LOG_ERROR("%s: unpacked %u of %u indices (sparse accessor or missing buffer view)", label, (uint32_t)unpacked, index_count);
         return NT_BUILD_ERR_FORMAT;
     }
+    /* Range-check HERE, not only at pack time: the scene path feeds these
+       indices to MikkTSpace callbacks before nt_builder_build_mesh_buffer's
+       final guard, and an out-of-range index would read/write OOB there.
+       index_type 1 implies vertex_count <= 65535, so the u16 narrow is safe. */
+    for (uint32_t i = 0; i < index_count; i++) {
+        if (tmp[i] >= vertex_count) {
+            NT_LOG_ERROR("%s: index[%u] = %u out of range (vertex_count %u)", label, i, tmp[i], vertex_count);
+            free(tmp);
+            return NT_BUILD_ERR_VALIDATION;
+        }
+    }
     if (index_type == 1) {
         uint16_t *dst16 = (uint16_t *)index_buf;
         for (uint32_t i = 0; i < index_count; i++) {
-            if (tmp[i] > 65535U) {
-                NT_LOG_ERROR("%s: index[%u] = %u does not fit uint16 (mesh has <= 65535 vertices)", label, i, tmp[i]);
-                free(tmp);
-                return NT_BUILD_ERR_VALIDATION;
-            }
             dst16[i] = (uint16_t)tmp[i];
         }
     } else {
@@ -613,7 +619,7 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             NT_BUILD_ASSERT(index_buf && "index buffer alloc failed");
 
-            ret = nt_builder_unpack_indices(prim->indices, path, index_buf, index_count, index_type);
+            ret = nt_builder_unpack_indices(prim->indices, path, index_buf, index_count, index_type, vertex_count);
             if (ret != NT_BUILD_OK) {
                 free(index_buf);
                 goto cleanup_streams;

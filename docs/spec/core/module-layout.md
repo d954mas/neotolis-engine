@@ -100,8 +100,9 @@ picking an impl, not engine modules, so the no-real-impl gate does not apply.
 `nt_meshwire` follows the same size-motivated shape: the real impl is a C port
 of the meshopt index codec (stream format v1) plus the SoA re-interleave loop;
 the stub keeps an executable without builder-packed meshes free of the decoder.
-The encoder lives in a separate TU/target (`nt_meshwire_encoder`) that only the
-builder links, so runtime binaries carry no encode code structurally. The
+The encoder lives in a separate TU/target (`nt_meshwire_encoder`) linked by the
+builder and the codec tests; runtime binaries never link it, so they carry no
+encode code structurally. The
 vendored upstream C++ codec (`deps/meshoptimizer`) is a TEST-ONLY byte-parity
 reference compiled solely into `test_meshwire_diff`.
 

@@ -44,6 +44,17 @@ static void test_reinterleave_single_stream_is_identity(void) {
     TEST_ASSERT_EQUAL_MEMORY(soa, dst, sizeof(soa));
 }
 
+static void test_reinterleave_rejects_overlap(void) {
+    /* The permutation cannot run in place: overlapping buffers must be
+     * rejected, not silently corrupted */
+    uint8_t buf[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    const uint32_t elem_sizes[2] = {1, 1};
+    TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf, buf, 2, elem_sizes, 2));
+    TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf + 1, buf, 2, elem_sizes, 2));
+    /* disjoint halves of one array are fine */
+    TEST_ASSERT_TRUE(nt_meshwire_reinterleave(buf + 4, buf, 2, elem_sizes, 2));
+}
+
 static void test_reinterleave_rejects_bad_args(void) {
     uint32_t elem_sizes[2] = {4, 0}; /* zero element size */
     uint8_t buf[16] = {0};
@@ -98,6 +109,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_reinterleave_mixed_elem_sizes);
     RUN_TEST(test_reinterleave_single_stream_is_identity);
+    RUN_TEST(test_reinterleave_rejects_overlap);
     RUN_TEST(test_reinterleave_rejects_bad_args);
     RUN_TEST(test_decode_indices_rejects_out_of_range);
     RUN_TEST(test_decode_indices_rejects_u16_overflow);

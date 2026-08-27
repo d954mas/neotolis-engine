@@ -354,7 +354,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             NT_BUILD_ASSERT(index_buf && "scene mesh: index buffer alloc failed");
 
-            ret = nt_builder_unpack_indices(prim->indices, "scene mesh", index_buf, index_count, index_type);
+            ret = nt_builder_unpack_indices(prim->indices, "scene mesh", index_buf, index_count, index_type, vertex_count);
             if (ret != NT_BUILD_OK) {
                 free(index_buf);
                 goto cleanup_streams;

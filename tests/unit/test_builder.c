@@ -1451,7 +1451,7 @@ static void write_test_glb_color4(const char *path) {
 
 /* --- Write a glb with POSITION/NORMAL/TEXCOORD_0 + authored VEC4 TANGENT --- */
 
-static void write_test_glb_tangent4(const char *path) {
+static void write_test_glb_tangent4_indices(const char *path, const uint16_t idx_in[3]) {
     const char *json_str = "{"
                            "\"asset\":{\"version\":\"2.0\"},"
                            "\"scene\":0,"
@@ -1485,7 +1485,7 @@ static void write_test_glb_tangent4(const char *path) {
     float uvs[] = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F};
     /* authored tangents distinguishable from MikkTSpace output (1,0,0,+1) */
     float colors[] = {0.0F, 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F, -1.0F};
-    uint16_t indices[] = {0, 1, 2};
+    uint16_t indices[] = {idx_in[0], idx_in[1], idx_in[2]};
     uint16_t idx_pad = 0;
 
     uint32_t bin_data_size = (uint32_t)(sizeof(positions) + sizeof(normals) + sizeof(uvs) + sizeof(colors) + sizeof(indices) + sizeof(idx_pad));
@@ -1878,6 +1878,32 @@ void test_scene_mesh_tangent_require_absent_errors(void) {
     nt_build_result_t r = nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_REQUIRE, &data, &size);
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, r);
     TEST_ASSERT_NULL(data);
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+static void write_test_glb_tangent4(const char *path) {
+    static const uint16_t tri[3] = {0, 1, 2};
+    write_test_glb_tangent4_indices(path, tri);
+}
+
+void test_scene_mesh_tangent_rejects_out_of_range_index(void) {
+    /* The OOB index must be rejected at UNPACK time -- before MikkTSpace reads
+     * position/normal/uv through it (sanitizers would flag the OOB access) */
+    const char *glb_path = TMP_DIR "/scene_tan_oob.glb";
+    static const uint16_t tri[3] = {0, 1, 7};
+    write_test_glb_tangent4_indices(glb_path, tri);
+
+    nt_glb_scene_t scene = {0};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
+    };
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_COMPUTE, &data, &size));
 
     nt_builder_free_glb_scene(&scene);
 }
@@ -9153,6 +9179,7 @@ int main(void) {
     RUN_TEST(test_layout_rejects_null_gltf_name);
     RUN_TEST(test_scene_mesh_asserts_tangent_mode_without_stream);
     RUN_TEST(test_scene_mesh_tangent_require_absent_errors);
+    RUN_TEST(test_scene_mesh_tangent_rejects_out_of_range_index);
     RUN_TEST(test_scene_mesh_tangent_auto_prefers_gltf);
     RUN_TEST(test_scene_mesh_tangent_require_present_ok);
     RUN_TEST(test_scene_mesh_asserts_invalid_tangent_mode);

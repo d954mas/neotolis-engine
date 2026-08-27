@@ -25,8 +25,9 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
  * src holds one plane per stream in order; plane i element size =
  * stream_elem_sizes[i] (whole attribute), plane i starts at
  * vertex_count * sum of previous element sizes. dst and src are both
- * vertex_count * sum(stream_elem_sizes) bytes. Returns false on invalid
- * arguments (stream_count == 0 or a zero element size). */
+ * vertex_count * sum(stream_elem_sizes) bytes and must not overlap (the
+ * permutation cannot run in place). Returns false on invalid arguments
+ * (stream_count == 0, a zero element size, or overlapping buffers). */
 bool nt_meshwire_reinterleave(uint8_t *dst, const uint8_t *src, uint32_t vertex_count, const uint32_t *stream_elem_sizes, uint32_t stream_count);
 
 #ifdef __cplusplus

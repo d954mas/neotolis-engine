@@ -1,6 +1,7 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
@@ -1065,8 +1066,21 @@ void test_activate_mesh_soa_wire_decodes(void) {
     sd[1].type = NT_STREAM_UINT8;
     sd[1].count = 4;
     sd[1].normalized = 1;
+    /* Distinct plane bytes: position plane p0..p23, then color plane c0..c7 */
+    uint8_t *wire = blob + sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc));
+    for (uint32_t i = 0; i < VD; i++) {
+        wire[i] = (uint8_t)(0x10 + i);
+    }
     uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    /* The UPLOADED bytes must be the interleaved GPU form, not the planes:
+     * v0 = plane0[0..11] + plane1[0..3], v1 = plane0[12..23] + plane1[4..7] */
+    uint8_t expected[VD];
+    memcpy(expected, wire, 12);
+    memcpy(expected + 12, wire + 24, 4);
+    memcpy(expected + 16, wire + 12, 12);
+    memcpy(expected + 28, wire + 28, 4);
+    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected, VD).value, nt_gfx_test_last_mesh_vertex_hash());
     nt_gfx_deactivate_mesh(handle);
 }
 
@@ -1108,6 +1122,9 @@ void test_activate_mesh_meshopt_wire_decodes(void) {
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_EQUAL_UINT32(24, info->index_count);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, info->ibo.id);
+    /* The UPLOADED bytes must be the decoded canonical triangle list */
+    static const uint16_t expected_idx[24] = {0, 1, 5, 5, 1, 6, 6, 1, 2, 6, 2, 7, 7, 2, 3, 7, 3, 8, 8, 3, 4, 8, 4, 9};
+    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected_idx, sizeof(expected_idx)).value, nt_gfx_test_last_mesh_index_hash());
     nt_gfx_deactivate_mesh(handle);
 }
 

@@ -198,6 +198,12 @@ bool nt_meshwire_reinterleave(uint8_t *dst, const uint8_t *src, uint32_t vertex_
         }
         stride += stream_elem_sizes[s];
     }
+    /* In-place permutation is not supported: overlapping buffers would read
+       already-rewritten bytes */
+    uint64_t total = (uint64_t)vertex_count * stride;
+    if (dst < src + total && src < dst + total) {
+        return false;
+    }
     const uint8_t *plane = src;
     uint32_t offset = 0;
     for (uint32_t s = 0; s < stream_count; ++s) {
