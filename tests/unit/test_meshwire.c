@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "meshwire/nt_meshwire.h"
+#include "meshwire/nt_meshwire_encode.h"
 #include "unity.h"
 
 void setUp(void) {}
@@ -61,6 +62,25 @@ static void test_decode_indices_rejects_out_of_range(void) {
     TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 12, 2, wire, sizeof(wire), 100));
 }
 
+static void test_decode_indices_rejects_u16_overflow(void) {
+    /* index 70000 passes the vertex_count range gate but cannot fit a u16
+     * destination -- must reject instead of truncating to 4464 */
+    uint32_t idx[3] = {0, 70000, 1};
+    uint8_t wire[64];
+    uint32_t bound = nt_meshwire_encode_indices_bound(3, 70001);
+    TEST_ASSERT_TRUE(bound <= sizeof(wire));
+    uint32_t size = nt_meshwire_encode_indices(wire, bound, idx, 3);
+    TEST_ASSERT_TRUE(size > 0);
+    uint16_t dst16[3];
+    TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst16, 3, 2, wire, size, 70001));
+    /* the same stream is fine into a u32 destination */
+    uint32_t dst32[3];
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(dst32, 3, 4, wire, size, 70001));
+    TEST_ASSERT_EQUAL_UINT32(0, dst32[0]); /* a == next keeps the rotation identical */
+    TEST_ASSERT_EQUAL_UINT32(70000, dst32[1]);
+    TEST_ASSERT_EQUAL_UINT32(1, dst32[2]);
+}
+
 static void test_decode_indices_rejects_garbage(void) {
     /* No valid meshopt header byte -- the decoder must fail, not crash */
     const uint8_t garbage[16] = {0x00, 0xFF, 0x13, 0x37};
@@ -80,6 +100,7 @@ int main(void) {
     RUN_TEST(test_reinterleave_single_stream_is_identity);
     RUN_TEST(test_reinterleave_rejects_bad_args);
     RUN_TEST(test_decode_indices_rejects_out_of_range);
+    RUN_TEST(test_decode_indices_rejects_u16_overflow);
     RUN_TEST(test_decode_indices_rejects_garbage);
     RUN_TEST(test_decode_indices_rejects_bad_elem_size);
     return UNITY_END();

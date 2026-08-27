@@ -37,6 +37,10 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
         return false;
     }
 
+    /* A u16 destination cannot represent indices above 65535: cap the range
+       gate so a wide index is rejected instead of truncating in the write */
+    uint32_t index_limit = (elem_size == 2 && vertex_count > 0x10000U) ? 0x10000U : vertex_count;
+
     nt_mw_edge_fifo_t edgefifo;
     memset(edgefifo, -1, sizeof(edgefifo));
     nt_mw_vertex_fifo_t vertexfifo;
@@ -94,7 +98,7 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
             nt_mw_push_edge_fifo(edgefifo, c, b, &edgefifooffset);
             nt_mw_push_edge_fifo(edgefifo, a, c, &edgefifooffset);
 
-            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+            if (a >= index_limit || b >= index_limit || c >= index_limit) {
                 return false;
             }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);
@@ -119,7 +123,7 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
             uint32_t fec0 = (fec == 0) ? 1U : 0U;
             next += fec0;
 
-            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+            if (a >= index_limit || b >= index_limit || c >= index_limit) {
                 return false;
             }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);
@@ -164,7 +168,7 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
                 last = c = nt_mw_decode_index(&data, last);
             }
 
-            if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+            if (a >= index_limit || b >= index_limit || c >= index_limit) {
                 return false;
             }
             nt_mw_write_triangle(dst, tri++, elem_size, a, b, c);

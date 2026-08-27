@@ -1916,6 +1916,34 @@ static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count
     return true;
 }
 
+/* MESHOPT wire sizing invariants -- everything that must hold BEFORE the
+ * decode allocation. 64-bit arithmetic throughout. */
+static bool mesh_meshopt_sizes_valid(const NtMeshAssetHeader *hdr, uint32_t idx_elem) {
+    if (hdr->index_type == 0 || hdr->index_count == 0 || hdr->index_count % 3 != 0) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT wire with index_type %u index_count %u", (uint32_t)hdr->index_type, hdr->index_count);
+        return false;
+    }
+    uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
+    /* Decoded size must fit a u32: it feeds malloc, and a wasm size_t wraps at 4 GB */
+    if (decoded_size > UINT32_MAX) {
+        NT_LOG_ERROR("activate_mesh: decoded index size overflow (index_count %u)", hdr->index_count);
+        return false;
+    }
+    if (hdr->index_data_size == 0 || hdr->index_data_size > decoded_size) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u vs decoded %u", hdr->index_data_size, (uint32_t)decoded_size);
+        return false;
+    }
+    /* codec minimum (header + 1 code byte per triangle + 16-byte tail):
+       without this a 17-byte stream could claim hundreds of millions of
+       indices and force a huge decode allocation before the decoder rejects */
+    uint64_t min_wire = 1ULL + (hdr->index_count / 3) + 16ULL;
+    if (hdr->index_data_size < min_wire) {
+        NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u below codec minimum for %u indices", hdr->index_data_size, hdr->index_count);
+        return false;
+    }
+    return true;
+}
+
 /* Runtime safety net for pack mesh blobs (spec: runtime validates magic/version/type/sizes).
  * 64-bit sums so a corrupt size field cannot wrap a check into a pass. */
 static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
@@ -1967,18 +1995,7 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         return false;
     }
     if (hdr->index_wire == NT_MESH_WIRE_IDX_MESHOPT) {
-        if (hdr->index_type == 0 || hdr->index_count == 0 || hdr->index_count % 3 != 0) {
-            NT_LOG_ERROR("activate_mesh: MESHOPT wire with index_type %u index_count %u", (uint32_t)hdr->index_type, hdr->index_count);
-            return false;
-        }
-        uint64_t decoded_size = (uint64_t)hdr->index_count * idx_elem;
-        /* Decoded size must fit a u32: it feeds malloc, and a wasm size_t wraps at 4 GB */
-        if (decoded_size > UINT32_MAX) {
-            NT_LOG_ERROR("activate_mesh: decoded index size overflow (index_count %u)", hdr->index_count);
-            return false;
-        }
-        if (hdr->index_data_size == 0 || hdr->index_data_size > decoded_size) {
-            NT_LOG_ERROR("activate_mesh: MESHOPT index_data_size %u vs decoded %u", hdr->index_data_size, (uint32_t)decoded_size);
+        if (!mesh_meshopt_sizes_valid(hdr, idx_elem)) {
             return false;
         }
     } else if ((uint64_t)hdr->index_count * idx_elem != hdr->index_data_size) {

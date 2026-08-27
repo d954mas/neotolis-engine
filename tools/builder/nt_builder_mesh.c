@@ -459,6 +459,13 @@ static uint8_t *nt_encode_indices_meshopt(uint8_t *index_buf, uint32_t index_cou
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_BUILD_ASSERT expansions dominate the count
 nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uint32_t stream_count, float *stream_floats[], uint32_t vertex_count, const cgltf_primitive *prim, uint8_t *index_buf,
                                                uint32_t index_count, uint8_t index_type, uint32_t index_data_size, uint8_t **out_data, uint32_t *out_size) {
+    /* GL draws meshes only as GL_TRIANGLES (the builder accepts only TRIANGLES
+       primitives): a count not divisible by 3 would silently drop the tail */
+    uint32_t draw_count = (index_count > 0) ? index_count : vertex_count;
+    if (draw_count % 3 != 0) {
+        NT_LOG_ERROR("mesh: %s count %u is not a multiple of 3 (TRIANGLES)", (index_count > 0) ? "index" : "vertex", draw_count);
+        return NT_BUILD_ERR_VALIDATION;
+    }
     uint32_t vertex_stride = 0;
     for (uint32_t s = 0; s < stream_count; s++) {
         vertex_stride += nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;

@@ -99,7 +99,10 @@ one choke point for `add_mesh` and the scene API) emits the wire form of
 automatically — no knob. Vertices are always written as SOA planes. Indices
 are encoded with the meshopt index codec when `index_type != 0`,
 `index_count > 0` and `index_count % 3 == 0`, and the encoded stream is kept
-only if it is smaller than RAW. Before encoding, every index is validated
+only if it is smaller than RAW. The draw count (indices, else vertices) must be a
+multiple of 3 — GL draws only GL_TRIANGLES, so a partial trailing triangle is
+rejected (`NT_BUILD_ERR_VALIDATION`), never packed. Before encoding, every
+index is validated
 `< vertex_count` (`NT_BUILD_ERR_VALIDATION` otherwise — the codec sizes its
 encode buffer from `vertex_count`, and this also closes the RAW path's silent
 out-of-range hole). The encoder pins `meshopt_encodeIndexVersion(1)` and then

@@ -935,7 +935,7 @@ if(NOT EMSCRIPTEN)
 
     # --- meshwire real impl: SOA re-interleave + index-decode rejection ---
     add_executable(test_meshwire unit/test_meshwire.c)
-    target_link_libraries(test_meshwire PRIVATE nt_meshwire unity)
+    target_link_libraries(test_meshwire PRIVATE nt_meshwire nt_meshwire_encoder unity)
     nt_setup_test_target(test_meshwire)
 
     # --- meshwire byte-parity vs vendored upstream codec ---

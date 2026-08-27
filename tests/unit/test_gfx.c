@@ -1164,6 +1164,18 @@ void test_activate_mesh_rejects_meshopt_wire_larger_than_decoded(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
+void test_activate_mesh_rejects_meshopt_undersized_wire(void) {
+    /* a tiny wire block claiming thousands of indices must be rejected BEFORE
+     * the decoded-buffer allocation (codec minimum is 1 byte per triangle) */
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->index_wire = NT_MESH_WIRE_IDX_MESHOPT;
+    hdr->index_count = 3000; /* decoded 6000 B, wire 6 B < 1 + 1000 + 16 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
 void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
@@ -1631,6 +1643,7 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
     RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
     RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);
+    RUN_TEST(test_activate_mesh_rejects_meshopt_undersized_wire);
     RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);

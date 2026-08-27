@@ -2205,18 +2205,26 @@ void test_mesh_wire_tiny_mesh_stays_raw(void) {
     free(data);
 }
 
-void test_mesh_wire_non_triangle_count_stays_raw(void) {
+void test_mesh_wire_non_triangle_count_rejected(void) {
+    /* GL draws only GL_TRIANGLES: a trailing partial triangle would be
+     * silently dropped at draw, so the builder must reject it */
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
     float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     float *streams[1] = {pos};
-    uint16_t idx[4] = {0, 1, 2, 0}; /* not a multiple of 3 -- codec gate must skip */
+    uint16_t idx[4] = {0, 1, 2, 0};
     uint8_t *data = NULL;
     uint32_t size = 0;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 4, 1, 8, &data, &size));
-    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
-    TEST_ASSERT_EQUAL_UINT8(NT_MESH_WIRE_IDX_RAW, hdr->index_wire);
-    TEST_ASSERT_EQUAL_UINT32(8, hdr->index_data_size);
-    free(data);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_build_mesh_buffer(layout, 1, streams, 3, NULL, (uint8_t *)idx, 4, 1, 8, &data, &size));
+}
+
+void test_mesh_wire_non_triangle_vertex_count_rejected(void) {
+    /* non-indexed: vertex_count is the draw count and must also be triangles */
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0}};
+    float pos[12] = {0};
+    float *streams[1] = {pos};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_build_mesh_buffer(layout, 1, streams, 4, NULL, NULL, 0, 0, 0, &data, &size));
 }
 
 void test_mesh_wire_non_indexed_stays_raw(void) {
@@ -9133,7 +9141,8 @@ int main(void) {
     RUN_TEST(test_mesh_u32_index_accessor_narrows_to_u16);
     RUN_TEST(test_mesh_wire_roundtrip_cube);
     RUN_TEST(test_mesh_wire_tiny_mesh_stays_raw);
-    RUN_TEST(test_mesh_wire_non_triangle_count_stays_raw);
+    RUN_TEST(test_mesh_wire_non_triangle_count_rejected);
+    RUN_TEST(test_mesh_wire_non_triangle_vertex_count_rejected);
     RUN_TEST(test_mesh_wire_non_indexed_stays_raw);
     RUN_TEST(test_mesh_wire_rejects_out_of_range_index);
     RUN_TEST(test_mesh_narrow_requires_declaration);
