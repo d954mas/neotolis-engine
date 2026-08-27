@@ -2041,9 +2041,11 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
         return false;
     }
     /* GL draws meshes only as GL_TRIANGLES: a trailing partial triangle would
-       be silently dropped at draw -- reject in the safety net too */
-    if (hdr->index_count % 3 != 0) {
-        NT_LOG_ERROR("activate_mesh: index_count %u is not a multiple of 3", hdr->index_count);
+       be silently dropped at draw -- reject in the safety net too. Non-indexed
+       meshes draw vertex_count, so it carries the same constraint. */
+    uint32_t draw_count = (hdr->index_count > 0) ? hdr->index_count : hdr->vertex_count;
+    if (draw_count % 3 != 0) {
+        NT_LOG_ERROR("activate_mesh: %s count %u is not a multiple of 3", (hdr->index_count > 0) ? "index" : "vertex", draw_count);
         return false;
     }
     return true;

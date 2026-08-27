@@ -1047,8 +1047,8 @@ void test_mesh_info_fields(void) {
 /* ---- Mesh wire decode (v3): SOA vertices, MESHOPT indices ---- */
 
 void test_activate_mesh_soa_wire_decodes(void) {
-    /* 2 streams (f32x3 + u8x4), 2 vertices, no indices */
-    enum { VD = 32 };
+    /* 2 streams (f32x3 + u8x4), 3 vertices (one triangle), no indices */
+    enum { VD = 48 };
     uint8_t blob[sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + VD];
     memset(blob, 0, sizeof(blob));
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
@@ -1056,7 +1056,7 @@ void test_activate_mesh_soa_wire_decodes(void) {
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 2;
     hdr->vertex_wire = NT_MESH_WIRE_VTX_SOA;
-    hdr->vertex_count = 2;
+    hdr->vertex_count = 3;
     hdr->vertex_data_size = VD;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd[0].name_hash = 1;
@@ -1074,12 +1074,12 @@ void test_activate_mesh_soa_wire_decodes(void) {
     uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     /* The UPLOADED bytes must be the interleaved GPU form, not the planes:
-     * v0 = plane0[0..11] + plane1[0..3], v1 = plane0[12..23] + plane1[4..7] */
+     * v = plane0[v*12..] (36 B position plane) + plane1[v*4..] */
     uint8_t expected[VD];
-    memcpy(expected, wire, 12);
-    memcpy(expected + 12, wire + 24, 4);
-    memcpy(expected + 16, wire + 12, 12);
-    memcpy(expected + 28, wire + 28, 4);
+    for (uint32_t v = 0; v < 3; v++) {
+        memcpy(expected + ((size_t)v * 16), wire + ((size_t)v * 12), 12);
+        memcpy(expected + ((size_t)v * 16) + 12, wire + 36 + ((size_t)v * 4), 4);
+    }
     TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected, VD).value, nt_gfx_test_last_mesh_vertex_hash());
     nt_gfx_deactivate_mesh(handle);
 }
@@ -1157,6 +1157,24 @@ void test_activate_mesh_rejects_raw_non_triangle_count(void) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->index_count = 4;
     hdr->index_data_size = 8;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+}
+
+void test_activate_mesh_rejects_raw_non_triangle_vertex_count(void) {
+    /* non-indexed: vertex_count is the draw count -- 4 vertices would lose one */
+    enum { VD4 = 48 };
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + VD4];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->vertex_count = 4;
+    hdr->vertex_data_size = VD4;
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = 1;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -1670,6 +1688,7 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_corrupt_meshopt_stream);
     RUN_TEST(test_activate_mesh_rejects_bad_wire_tags);
     RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_count);
+    RUN_TEST(test_activate_mesh_rejects_raw_non_triangle_vertex_count);
     RUN_TEST(test_activate_mesh_rejects_meshopt_without_indices);
     RUN_TEST(test_activate_mesh_rejects_meshopt_non_triangle_count);
     RUN_TEST(test_activate_mesh_rejects_meshopt_wire_larger_than_decoded);
