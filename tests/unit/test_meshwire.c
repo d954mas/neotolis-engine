@@ -58,7 +58,11 @@ static void test_reinterleave_rejects_overlap(void) {
 static void test_reinterleave_rejects_bad_args(void) {
     uint32_t elem_sizes[2] = {4, 0}; /* zero element size */
     uint8_t buf[16] = {0};
-    TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf, buf, 2, elem_sizes, 2));
+    uint8_t buf2[16] = {0};
+    TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf, buf2, 2, elem_sizes, 2));
+    /* summed element sizes overflowing the u32 stride must be rejected */
+    uint32_t huge[2] = {0xFFFFFFFFU, 2};
+    TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf, buf2, 1, huge, 2));
     elem_sizes[1] = 4;
     TEST_ASSERT_FALSE(nt_meshwire_reinterleave(buf, buf, 2, elem_sizes, 0));
     TEST_ASSERT_FALSE(nt_meshwire_reinterleave(NULL, buf, 2, elem_sizes, 2));
@@ -71,6 +75,28 @@ static void test_decode_indices_rejects_out_of_range(void) {
     uint8_t wire[1 + 4 + 16] = {0xE1};
     uint16_t dst[12] = {0};
     TEST_ASSERT_FALSE(nt_meshwire_decode_indices(dst, 12, 2, wire, sizeof(wire), 100));
+}
+
+static void test_decode_indices_unaligned_dst(void) {
+    /* dst is a public byte span: an odd offset must produce correct bytes
+     * (typed stores would be misaligned UB -- UBSan flags them here) */
+    uint32_t idx[3] = {0, 2, 1};
+    uint8_t wire[64];
+    uint32_t bound = nt_meshwire_encode_indices_bound(3, 3);
+    uint32_t size = nt_meshwire_encode_indices(wire, bound, idx, 3);
+    TEST_ASSERT_TRUE(size > 0);
+    uint8_t buf16[1 + 6];
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(buf16 + 1, 3, 2, wire, size, 3));
+    uint16_t got16[3];
+    memcpy(got16, buf16 + 1, sizeof(got16));
+    TEST_ASSERT_EQUAL_UINT16(0, got16[0]);
+    TEST_ASSERT_EQUAL_UINT16(2, got16[1]);
+    TEST_ASSERT_EQUAL_UINT16(1, got16[2]);
+    uint8_t buf32[1 + 12];
+    TEST_ASSERT_TRUE(nt_meshwire_decode_indices(buf32 + 1, 3, 4, wire, size, 3));
+    uint32_t got32[3];
+    memcpy(got32, buf32 + 1, sizeof(got32));
+    TEST_ASSERT_EQUAL_UINT32(2, got32[1]);
 }
 
 static void test_decode_indices_rejects_u16_overflow(void) {
@@ -112,6 +138,7 @@ int main(void) {
     RUN_TEST(test_reinterleave_rejects_overlap);
     RUN_TEST(test_reinterleave_rejects_bad_args);
     RUN_TEST(test_decode_indices_rejects_out_of_range);
+    RUN_TEST(test_decode_indices_unaligned_dst);
     RUN_TEST(test_decode_indices_rejects_u16_overflow);
     RUN_TEST(test_decode_indices_rejects_garbage);
     RUN_TEST(test_decode_indices_rejects_bad_elem_size);

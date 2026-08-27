@@ -336,12 +336,13 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         uint32_t index_data_size = 0;
 
         if (prim->indices != NULL) {
-            index_count = (uint32_t)prim->indices->count;
-            if (index_count > NT_BUILD_MAX_INDICES) {
-                NT_LOG_ERROR("mesh[%u] prim[%u]: index count %u exceeds max %d", mesh_index, primitive_index, index_count, NT_BUILD_MAX_INDICES);
+            /* limit-check on cgltf_size BEFORE the u32 cast (truncation would bypass it) */
+            if (prim->indices->count > (cgltf_size)NT_BUILD_MAX_INDICES) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: index count %zu exceeds max %d", mesh_index, primitive_index, (size_t)prim->indices->count, NT_BUILD_MAX_INDICES);
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
+            index_count = (uint32_t)prim->indices->count;
 
             if (vertex_count <= 65535) {
                 index_type = 1;

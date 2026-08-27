@@ -8,16 +8,13 @@
    stub build traps instead of silently uploading plane-ordered bytes. */
 
 static void nt_mw_write_triangle(void *destination, uint32_t tri, uint32_t index_size, uint32_t a, uint32_t b, uint32_t c) {
+    /* memcpy, not typed stores: dst is a public byte span and may be unaligned */
     if (index_size == 2) {
-        uint16_t *dst = (uint16_t *)destination + ((size_t)tri * 3);
-        dst[0] = (uint16_t)a;
-        dst[1] = (uint16_t)b;
-        dst[2] = (uint16_t)c;
+        uint16_t tri16[3] = {(uint16_t)a, (uint16_t)b, (uint16_t)c};
+        memcpy((uint8_t *)destination + ((size_t)tri * 6), tri16, sizeof(tri16));
     } else {
-        uint32_t *dst = (uint32_t *)destination + ((size_t)tri * 3);
-        dst[0] = a;
-        dst[1] = b;
-        dst[2] = c;
+        uint32_t tri32[3] = {a, b, c};
+        memcpy((uint8_t *)destination + ((size_t)tri * 12), tri32, sizeof(tri32));
     }
 }
 
@@ -191,17 +188,24 @@ bool nt_meshwire_reinterleave(uint8_t *dst, const uint8_t *src, uint32_t vertex_
     if (dst == NULL || src == NULL || stream_elem_sizes == NULL || stream_count == 0) {
         return false;
     }
-    uint32_t stride = 0;
+    uint64_t stride64 = 0;
     for (uint32_t s = 0; s < stream_count; ++s) {
         if (stream_elem_sizes[s] == 0) {
             return false;
         }
-        stride += stream_elem_sizes[s];
+        stride64 += stream_elem_sizes[s];
     }
+    if (stride64 > UINT32_MAX) {
+        return false; /* summed element sizes overflow the format's u32 stride */
+    }
+    uint32_t stride = (uint32_t)stride64;
     /* In-place permutation is not supported: overlapping buffers would read
-       already-rewritten bytes */
+       already-rewritten bytes. Integer addresses -- ordered pointer comparison
+       across allocations is UB in C. */
     uint64_t total = (uint64_t)vertex_count * stride;
-    if (dst < src + total && src < dst + total) {
+    uint64_t dst_addr = (uint64_t)(uintptr_t)dst;
+    uint64_t src_addr = (uint64_t)(uintptr_t)src;
+    if (dst_addr < src_addr + total && src_addr < dst_addr + total) {
         return false;
     }
     const uint8_t *plane = src;

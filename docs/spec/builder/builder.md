@@ -195,6 +195,14 @@ Content-addressed encode cache. Opt-in via `nt_builder_set_cache_dir(ctx, path)`
 
 **Storage:** flat directory of `.bin` files named `{decoded_hash}_{opts_hash}.bin`. No index file, no subdirectories. Cached data is raw encoded asset bytes (post-encode, pre-pack-header).
 
+**Scope:** the cache pays off where encode is expensive at `finish_pack` time
+(textures/basis). Meshes are OUT of its scope by construction: `add_mesh`
+builds the final blob (extraction, tangents, wire encode) eagerly at add time,
+so the entry's decoded bytes already ARE the encoded result and repeat builds
+redo that work regardless of the cache. Mesh wire encode is milliseconds per
+mesh; if it ever grows expensive, the fix is moving it behind the cache, not
+widening this contract.
+
 **Pipeline order:** early dedup → cache lookup → encode → cache store. Dedup runs first so duplicates never hit cache. Cache stores only unique encoded results.
 
 **Invalidation:**

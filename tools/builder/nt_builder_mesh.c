@@ -282,6 +282,10 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
             return NT_BUILD_ERR_VALIDATION;
         }
 
+        if (acc->count > (cgltf_size)NT_BUILD_MAX_VERTICES) {
+            NT_LOG_ERROR("%s: attribute %s count %zu exceeds max %d", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", (size_t)acc->count, NT_BUILD_MAX_VERTICES);
+            return NT_BUILD_ERR_LIMIT;
+        }
         uint32_t count = (uint32_t)acc->count;
         if (!vertex_count_set) {
             vertex_count = count;
@@ -601,12 +605,14 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
         uint32_t index_data_size = 0;
 
         if (prim->indices != NULL) {
-            index_count = (uint32_t)prim->indices->count;
-            if (index_count > NT_BUILD_MAX_INDICES) {
-                NT_LOG_ERROR("%s: index count %u exceeds max %d", path, index_count, NT_BUILD_MAX_INDICES);
+            /* limit-check on cgltf_size BEFORE the u32 cast: a corrupt accessor
+               count like UINT32_MAX + 4 would otherwise truncate to 3 and pass */
+            if (prim->indices->count > (cgltf_size)NT_BUILD_MAX_INDICES) {
+                NT_LOG_ERROR("%s: index count %zu exceeds max %d", path, (size_t)prim->indices->count, NT_BUILD_MAX_INDICES);
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
+            index_count = (uint32_t)prim->indices->count;
 
             if (vertex_count <= 65535) {
                 index_type = 1;
