@@ -422,11 +422,12 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         // #region build draw list
+        uint32_t sprite_batch_key = nt_sprite_renderer_batch_key(s_sprite_material);
         for (uint32_t i = 0; i < s_bunny_count; i++) {
             s_items[i].sort_key = 0; /* unsorted in Bunnymark; renderer ignores */
             s_items[i].entity = s_entities[i].id;
             /* SpriteRenderer validates the actual atlas page while emitting. */
-            s_items[i].batch_key = nt_sprite_renderer_batch_key(s_sprite_material);
+            s_items[i].batch_key = sprite_batch_key;
         }
         nt_sprite_renderer_draw_list(s_items, s_bunny_count);
         // #endregion
