@@ -130,6 +130,35 @@ Two consumption models exist for asset types that derive state from pack bytes:
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 
+## GPU context loss recovery
+
+`nt_gfx_begin_frame()` detects a restored context and sets
+`g_nt_gfx.context_restored` for that frame. Resource readiness, resolved runtime
+handles, and render items computed before that call still describe the previous
+GPU context. The game must discard them and skip dependent draws for the restored
+frame.
+
+When `context_restored` is true, the game:
+
+1. discards render decisions and draw lists prepared before
+   `nt_gfx_begin_frame()`
+2. calls `nt_resource_invalidate()` for each file-backed GPU asset type that it
+   uses
+3. destroys and recreates game-owned GPU objects, freeing their logical handle
+   slots before replacement
+4. calls the restore entry point of every active renderer
+
+`nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
+through a virtual pack must be destroyed, recreated from game-owned source data,
+and published again with `nt_resource_register()`.
+
+The frame's `nt_resource_step()` has already run before
+`nt_gfx_begin_frame()` discovers the restore. File-backed assets therefore
+reactivate and republish no earlier than a later resource step. The game rebuilds
+resource-dependent render state after that publication instead of reusing the
+discarded list. Render targets are recreated by `nt_gfx` from retained
+descriptors, but their pixel contents must be redrawn.
+
 ## Pack lifetime (mount / unmount)
 
 Asset lifetime is **explicit pack-level mount/unmount, owned by the developer** —
