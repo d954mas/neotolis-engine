@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "render/nt_render_defs.h"
-#include "sort/nt_sort.h"
 
 /* ---- Sort (typed radix sort for render items, defined in nt_render_items.c) ---- */
 

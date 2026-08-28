@@ -7,6 +7,7 @@
 
 /* ---- Instantiate typed radix sort for render items ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- generated radix sort includes assert expansion
 NT_SORT_DEFINE(nt_sort_by_key, nt_render_item_t)
 
 static void sort_by_batch_key(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch) {

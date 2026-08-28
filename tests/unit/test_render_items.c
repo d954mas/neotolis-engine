@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdlib.h>
 
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -6,6 +7,7 @@
 #include "render/nt_render_defs.h"
 #include "render/nt_render_items.h"
 #include "render/nt_render_util.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
 
@@ -104,6 +106,15 @@ void test_sort_by_key_single(void) {
     nt_render_item_t scratch[1];
     nt_sort_by_key(&item, 1, scratch);
     TEST_ASSERT_EQUAL_UINT64(42, item.sort_key);
+}
+
+void test_sort_by_key_asserts_when_scratch_aliases_items(void) {
+    nt_render_item_t items[2] = {
+        {.sort_key = 2, .entity = 1},
+        {.sort_key = 1, .entity = 2},
+    };
+
+    NT_TEST_EXPECT_ASSERT(nt_sort_by_key(items, 2, items));
 }
 
 void test_sort_by_key_ignores_batch_key(void) {
@@ -319,6 +330,7 @@ int main(void) {
     RUN_TEST(test_sort_by_key_ascending);
     RUN_TEST(test_sort_by_key_empty);
     RUN_TEST(test_sort_by_key_single);
+    RUN_TEST(test_sort_by_key_asserts_when_scratch_aliases_items);
     RUN_TEST(test_sort_by_key_ignores_batch_key);
     RUN_TEST(test_sort_by_key_then_batch_lexicographic);
     RUN_TEST(test_sort_by_key_then_batch_primary_precedence_full_width);

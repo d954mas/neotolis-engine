@@ -375,8 +375,9 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_components COMMAND test_components)
 
     # --- Render items tests ---
-    add_executable(test_render_items unit/test_render_items.c)
+    add_executable(test_render_items unit/test_render_items.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_include_directories(test_render_items PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_render_items)
     nt_set_sanitizer_flags(test_render_items)
     set_target_properties(test_render_items PROPERTIES
