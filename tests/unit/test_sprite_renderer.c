@@ -24,6 +24,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
 /* clang-format on */
@@ -488,6 +489,13 @@ void test_sprite_renderer_init_shutdown(void) {
  * This runtime test mirrors the assertion in case the static check is ever
  * accidentally relaxed (it would still catch the breakage in CI). */
 void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_sprite_vertex_t)); }
+
+void test_sprite_renderer_draw_list_null_items_asserts_when_nonempty(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_draw_list(NULL, 1));
+}
 
 /* ---- Test: pipeline cache reuse + miss-creates-new ---- */
 
@@ -1107,6 +1115,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sprite_renderer_init_shutdown);
     RUN_TEST(test_sprite_renderer_vertex_size_assert);
+    RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);

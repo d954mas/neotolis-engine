@@ -965,13 +965,14 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_meshwire_stub_off)
 
     # --- Mesh renderer tests ---
-    add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
+    add_executable(test_mesh_renderer unit/test_mesh_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_mesh_renderer PRIVATE
         nt_mesh_renderer nt_render nt_gfx_stub nt_basisu_transcoder_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
         nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_include_directories(test_mesh_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_mesh_renderer)
     nt_set_sanitizer_flags(test_mesh_renderer)
     set_target_properties(test_mesh_renderer PROPERTIES
@@ -980,7 +981,7 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_mesh_renderer COMMAND test_mesh_renderer)
 
     # --- Sprite renderer tests ---
-    add_executable(test_sprite_renderer unit/test_sprite_renderer.c)
+    add_executable(test_sprite_renderer unit/test_sprite_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_renderer PRIVATE
         nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp
         nt_drawable_comp nt_material_comp nt_material nt_render
@@ -989,6 +990,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_sprite_renderer PRIVATE
         _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
     )
+    target_include_directories(test_sprite_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_sprite_renderer)
 
     # test_ui_radial registers in the nt_ui walker-test group below: it needs the

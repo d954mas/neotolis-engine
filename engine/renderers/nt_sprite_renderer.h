@@ -87,6 +87,7 @@ void nt_sprite_renderer_restore_gpu(void);
  *      them before draw_list; renderer does not touch UBOs.
  *   4. Entities, required components, and material bindings stay live and
  *      unchanged through draw_list. */
+/* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 /* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears

@@ -38,6 +38,7 @@ void nt_mesh_renderer_restore_gpu(void);
  * the items array. */
 /* batch_key must come from each item's current material/mesh bindings. Entities,
  * bindings, and referenced resources stay live and unchanged through this call. */
+/* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

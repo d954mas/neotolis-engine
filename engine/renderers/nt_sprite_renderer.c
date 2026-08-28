@@ -1246,6 +1246,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
     if (count == 0) {
         return;
     }
+    NT_ASSERT(items != NULL);
 
     s_sprite.last_draw_list_calls = 0;
     s_sprite.cur_custom_bytes = 0; /* ECS sprite path emits no custom attrs */

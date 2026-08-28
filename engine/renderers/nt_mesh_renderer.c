@@ -341,6 +341,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     if (!s_mesh_renderer.initialized || count == 0) {
         return;
     }
+    NT_ASSERT(items != NULL);
 
     /* Reset per-frame tracking */
     s_mesh_renderer.frame_draw_calls = 0;
