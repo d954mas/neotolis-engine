@@ -94,12 +94,15 @@ material and mesh bindings of that same `item.entity`; until
 alive, neither binding changes, and neither referenced live resource is
 destroyed or has its slot reused.
 
-`nt_sprite_renderer_batch_key(material)` returns material identity. The same
-entity/component/material lifetime rule applies through
-`nt_sprite_renderer_draw_list()`. SpriteRenderer separately resolves and checks
-the actual atlas page while emitting, so a page change inside one material run
-is supported and splits the command stream. Transform and drawable color may
-change after item construction because neither renderer's key encodes them.
+`nt_sprite_renderer_batch_key(material, page_resource)` packs the material's
+16-bit pool slot and the resolved atlas page resource's 16-bit slot. The page
+resource comes from the sprite component's resolved-region cache, so render-item
+construction does not search the atlas. The same bounded-lifetime rule applies
+through `nt_sprite_renderer_draw_list()`: the material binding and resolved page
+must not change. SpriteRenderer still checks the actual page while emitting, so
+a page mismatch inside a run splits safely; this does not relax the material-key
+contract. Transform and drawable color may change after item construction
+because neither renderer's key encodes them.
 
 ## Sorting Policy
 

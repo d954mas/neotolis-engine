@@ -4,8 +4,11 @@
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "material/nt_material.h"
+#include "pool/nt_pool.h"
 #include "render/nt_render_defs.h"
 #include "resource/nt_resource.h"
+
+_Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "sprite batch key requires 16-bit material slots");
 
 /* Staging buffers for one flush. uint16 indices cap MAX_VERTICES at 65536.
  * Default index ratio (9/4) sized for 8-vertex polygon worst case (18 idx /
@@ -67,11 +70,14 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     };
 }
 
-/* Material must match the item's current binding and stay live and unrebound
- * until draw_list returns. Atlas page compatibility is checked while emitting. */
-static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material) {
-    NT_ASSERT(material.id != 0);
-    return material.id;
+/* Handles must match the item's current bindings and stay live and unrebound
+ * until draw_list returns. Packing is exact for simultaneously live slots. */
+static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_resource_t page_resource) {
+    uint32_t material_slot = nt_pool_slot_index(material.id);
+    uint32_t page_slot = nt_resource_slot_index(page_resource);
+    NT_ASSERT(material_slot != 0);
+    NT_ASSERT(page_slot != 0);
+    return (material_slot << NT_POOL_SLOT_SHIFT) | page_slot;
 }
 
 /* ---- Lifecycle ---- */

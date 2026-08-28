@@ -56,8 +56,8 @@ module behind the handle is described in [Material System](material.md).
 
 The sprite component is a SoA module — there is no monolithic `SpriteComponent`
 struct. Each sprite-bearing entity contributes one row across parallel dense
-arrays (atlas handle, region hash, cached region index, cached atlas revision,
-effective origin, flag bits). The module owns those arrays directly and
+arrays (atlas handle, region hash, cached resolved region data, cached atlas
+revision, effective origin, flag bits). The module owns those arrays directly and
 exposes them via per-entity accessors and a bulk view (see header
 `engine/sprite_comp/nt_sprite_comp.h` for the full API).
 
@@ -69,6 +69,8 @@ That pair survives atlas republish, hot reload, and region renumbering.
 The runtime additionally caches:
 
 - **Resolved region index** — `uint16_t` index into the atlas region table.
+- **Resolved region data** — atlas geometry pointers and the actual page
+  resource used by the renderer and its batch key.
 - **Atlas revision snapshot** — `uint32_t`, used to detect republish.
 - **Effective origin** — `float[2]`, either authored from the region or
   overridden by the game.

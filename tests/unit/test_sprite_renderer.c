@@ -408,6 +408,14 @@ static nt_entity_t create_sprite_entity(nt_resource_t atlas, uint64_t region_has
     return e;
 }
 
+static uint32_t sprite_batch_key(nt_entity_t entity, nt_material_t material) {
+    nt_sprite_comp_view_t sprites = nt_sprite_comp_view();
+    uint16_t dense_idx = sprites.sparse_indices[nt_entity_index(entity)];
+    TEST_ASSERT_NOT_EQUAL_UINT16(UINT16_MAX, dense_idx);
+    TEST_ASSERT_BITS_HIGH(NT_SPRITE_FLAG_RESOLVED, sprites.flags[dense_idx]);
+    return nt_sprite_renderer_batch_key(material, sprites.resolved[dense_idx].page_resource);
+}
+
 /* ---- setUp / tearDown ---- */
 
 void setUp(void) {
@@ -490,6 +498,30 @@ void test_sprite_renderer_init_shutdown(void) {
  * accidentally relaxed (it would still catch the breakage in CI). */
 void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_sprite_vertex_t)); }
 
+void test_sprite_renderer_batch_key_packs_material_and_page_slots(void) {
+    nt_material_t material = {.id = 0xABCD1234U};
+    nt_resource_t page_resource = {.id = 0x43215678U};
+
+    TEST_ASSERT_EQUAL_HEX32(0x12345678U, nt_sprite_renderer_batch_key(material, page_resource));
+}
+
+void test_sprite_renderer_batch_key_ignores_handle_generations(void) {
+    nt_material_t material_a = {.id = 0x00011234U};
+    nt_material_t material_b = {.id = 0xFFFF1234U};
+    nt_resource_t page_a = {.id = 0x00015678U};
+    nt_resource_t page_b = {.id = 0xFFFF5678U};
+
+    TEST_ASSERT_EQUAL_HEX32(nt_sprite_renderer_batch_key(material_a, page_a), nt_sprite_renderer_batch_key(material_b, page_b));
+}
+
+void test_sprite_renderer_batch_key_distinguishes_page_slots(void) {
+    nt_material_t material = {.id = 0x00010001U};
+    nt_resource_t page_a = {.id = 0x00010001U};
+    nt_resource_t page_b = {.id = 0x00010002U};
+
+    TEST_ASSERT_NOT_EQUAL(nt_sprite_renderer_batch_key(material, page_a), nt_sprite_renderer_batch_key(material, page_b));
+}
+
 void test_sprite_renderer_draw_list_null_items_asserts_when_nonempty(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -512,10 +544,10 @@ void test_sprite_renderer_pipeline_cache(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat_a);
+    items[0].batch_key = sprite_batch_key(e0, mat_a);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_sprite_renderer_batch_key(mat_b);
+    items[1].batch_key = sprite_batch_key(e1, mat_b);
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
@@ -537,7 +569,7 @@ void test_sprite_renderer_forwards_material_blend_state(void) {
     s_atlas_res = register_test_atlas(0xB1ULL);
     nt_material_t mat = create_test_material_with_blend(blend);
     nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_sprite_renderer_batch_key(mat)};
+    nt_render_item_t item = {.entity = entity.id, .batch_key = sprite_batch_key(entity, mat)};
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
 
     nt_sprite_renderer_draw_list(&item, 1);
@@ -561,8 +593,8 @@ void test_sprite_renderer_batch_grouping(void) {
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_a);
     nt_entity_t e2 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_b);
 
-    uint32_t bk_a = nt_sprite_renderer_batch_key(mat_a);
-    uint32_t bk_b = nt_sprite_renderer_batch_key(mat_b);
+    uint32_t bk_a = sprite_batch_key(e0, mat_a);
+    uint32_t bk_b = sprite_batch_key(e2, mat_b);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -587,9 +619,9 @@ void test_sprite_renderer_explicit_batch_boundary(void) {
     s_atlas_res = register_test_atlas(0xA3ULL);
     nt_material_t mat = create_test_material();
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
+    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
 
-    uint32_t canonical_key = nt_sprite_renderer_batch_key(mat);
+    uint32_t canonical_key = sprite_batch_key(e0, mat);
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -617,7 +649,7 @@ void test_sprite_renderer_splits_run_on_actual_page_change(void) {
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
 
-    uint32_t coarse_key = nt_sprite_renderer_batch_key(mat);
+    uint32_t coarse_key = sprite_batch_key(e0, mat);
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -646,7 +678,7 @@ void test_sprite_renderer_polygon_emit(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
+    items[0].batch_key = sprite_batch_key(e, mat);
 
     nt_sprite_renderer_draw_list(items, 1);
 
@@ -766,7 +798,7 @@ void test_sprite_renderer_flip_mirrors_around_pivot(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
+    items[0].batch_key = sprite_batch_key(e, mat);
 
     /* Region r0: 64x64 source, origin (0.5, 0.5) → pivot at source (32, 32).
      * 4 verts at source-space (i*10, i*20) for i=0..3 = (0,0),(10,20),(20,40),(30,60).
@@ -824,7 +856,7 @@ void test_sprite_renderer_restore_gpu_cycle(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
+    items[0].batch_key = sprite_batch_key(e, mat);
 
     nt_sprite_renderer_draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
@@ -859,10 +891,10 @@ void test_sprite_renderer_pipeline_cache_capacity(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat_a);
+    items[0].batch_key = sprite_batch_key(e0, mat_a);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_sprite_renderer_batch_key(mat_b);
+    items[1].batch_key = sprite_batch_key(e1, mat_b);
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
@@ -935,10 +967,10 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e_a.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat_override);
+    items[0].batch_key = sprite_batch_key(e_a, mat_override);
     items[1].sort_key = 1;
     items[1].entity = e_b.id;
-    items[1].batch_key = nt_sprite_renderer_batch_key(mat_plain);
+    items[1].batch_key = sprite_batch_key(e_b, mat_plain);
 
     nt_gfx_stub_test_reset();
     nt_sprite_renderer_draw_list(items, 2);
@@ -1049,7 +1081,7 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
+    items[0].batch_key = sprite_batch_key(e, mat);
     nt_sprite_renderer_draw_list(items, 1);
 
     /* rs9: 100×100 src, slice9=16, origin (0,0) → local lxs[1] = 16 × scale = 32. */
@@ -1115,6 +1147,9 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sprite_renderer_init_shutdown);
     RUN_TEST(test_sprite_renderer_vertex_size_assert);
+    RUN_TEST(test_sprite_renderer_batch_key_packs_material_and_page_slots);
+    RUN_TEST(test_sprite_renderer_batch_key_ignores_handle_generations);
+    RUN_TEST(test_sprite_renderer_batch_key_distinguishes_page_slots);
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
