@@ -633,35 +633,10 @@ void test_sprite_renderer_batch_grouping(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: an explicit stronger batch boundary is honored ---- */
-void test_sprite_renderer_explicit_batch_boundary(void) {
-    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-
-    s_atlas_res = register_test_atlas(0xA3ULL);
-    nt_material_t mat = create_test_material();
-    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-
-    uint32_t canonical_key = sprite_batch_key(e0, mat);
-    nt_render_item_t items[2];
-    items[0].sort_key = 0;
-    items[0].entity = e0.id;
-    items[0].batch_key = canonical_key;
-    items[1].sort_key = 1;
-    items[1].entity = e1.id;
-    items[1].batch_key = canonical_key ^ 0x80000000U;
-
-    nt_sprite_renderer_draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
-}
-
-/* ---- Test: actual atlas page splits a coarse batch_key run ----
+/* ---- Defensive test: actual atlas page splits a malformed batch_key run ----
  *
- * The game-level batch_key is a compatibility hint, not the texture source of
- * truth. If two adjacent sprites share a key but resolve to different atlas
- * pages, the renderer must split the command stream before drawing the second
- * sprite. */
+ * This deliberately violates the caller contract by reusing page 0's key for a
+ * page 1 sprite. The renderer still splits commands to avoid a wrong texture. */
 void test_sprite_renderer_splits_run_on_actual_page_change(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -1177,7 +1152,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
-    RUN_TEST(test_sprite_renderer_explicit_batch_boundary);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);

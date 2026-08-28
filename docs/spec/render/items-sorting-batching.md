@@ -81,9 +81,9 @@ while (run_end < count && items[run_end].batch_key == items[run_start].batch_key
 
 Equality is authoritative: it allows the renderer to reuse state resolved from
 the run leader. Equal tokens for incompatible state violate the caller
-contract and may draw with the wrong state. Unequal tokens are always safe but
-may split compatible work. A game may therefore force a stronger boundary, but
-must not invent a weaker compatibility rule than the renderer helper.
+contract and may draw with the wrong state. Store renderer-helper tokens
+unchanged. To force a boundary between otherwise compatible items, split them
+across separate `draw_list()` calls.
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
 indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously

@@ -71,7 +71,8 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
 }
 
 /* Only RESOLVED, non-tombstoned sprites have a page_resource. Handles must
- * match current bindings and stay live and unrebound until draw_list returns. */
+ * match current bindings and stay live and unrebound until draw_list returns.
+ * Store the returned token unchanged; separate draw_list calls form barriers. */
 static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_resource_t page_resource) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
     uint32_t page_slot = nt_resource_slot_index(page_resource);

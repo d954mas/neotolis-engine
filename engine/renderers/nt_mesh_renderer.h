@@ -11,7 +11,8 @@
 _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "mesh batch key requires 16-bit pool slots");
 
 /* Handles must match the item's current bindings and stay live and unrebound
- * until draw_list returns. Packing is exact for simultaneously live slots. */
+ * until draw_list returns. Store the returned token unchanged; use separate
+ * draw_list calls for an explicit boundary. */
 static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mesh_t mesh) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
     uint32_t mesh_slot = nt_pool_slot_index(mesh.id);
