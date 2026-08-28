@@ -95,9 +95,6 @@ typedef struct {
     nt_resource_t page_resource;
 } nt_sprite_resolved_region_t;
 
-/* RESOLVED tombstones keep their stable region index but have no geometry. */
-static inline bool nt_sprite_resolved_region_has_geometry(const nt_sprite_resolved_region_t *resolved) { return resolved != NULL && resolved->region != NULL && resolved->region->vertex_count != 0; }
-
 /* Bulk SoA view — pointers stable for module lifetime; values shift on add/remove.
  * Reads of region_index/origin/resolved require flags[i] & RESOLVED. */
 

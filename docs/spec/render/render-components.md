@@ -97,13 +97,13 @@ Two ways to bind a sprite to a region, picked by what the game knows:
   atlas merge contract guarantees every region ever present keeps the same
   index for the atlas lifetime — removed regions are marked dead in place but
   keep their index and revive there if re-added — so the cached index never
-  moves; a dead region simply zero-draws.
+  moves; a dead region has zero geometry and no page resource.
 
 Game code is free to read back the cached region index for animation logic
 (e.g. cycle to the next frame). It is stable across atlas republish. A removed
 region remains `RESOLVED` at its tombstoned index so it can revive in place;
-`nt_sprite_resolved_region_has_geometry()` distinguishes it from a drawable
-resolved region.
+game-side render-item construction excludes it by checking
+`resolved.region->vertex_count != 0`.
 
 ### Origin override and flip
 

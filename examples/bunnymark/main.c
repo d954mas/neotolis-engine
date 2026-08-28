@@ -426,12 +426,16 @@ static void frame(void) {
         uint32_t item_count = 0;
         for (uint32_t i = 0; i < s_bunny_count; i++) {
             uint16_t sprite_idx = sprites.sparse_indices[nt_entity_index(s_entities[i])];
-            if (sprite_idx == UINT16_MAX || (sprites.flags[sprite_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || !nt_sprite_resolved_region_has_geometry(&sprites.resolved[sprite_idx])) {
+            if (sprite_idx == UINT16_MAX || (sprites.flags[sprite_idx] & NT_SPRITE_FLAG_RESOLVED) == 0) {
+                continue;
+            }
+            const nt_sprite_resolved_region_t *resolved = &sprites.resolved[sprite_idx];
+            if (resolved->region->vertex_count == 0) {
                 continue;
             }
             s_items[item_count].sort_key = 0; /* unsorted in Bunnymark; renderer ignores */
             s_items[item_count].entity = s_entities[i].id;
-            s_items[item_count].batch_key = nt_sprite_renderer_batch_key(s_sprite_material, sprites.resolved[sprite_idx].page_resource);
+            s_items[item_count].batch_key = nt_sprite_renderer_batch_key(s_sprite_material, resolved->page_resource);
             item_count++;
         }
         nt_sprite_renderer_draw_list(s_items, item_count);

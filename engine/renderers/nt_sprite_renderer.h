@@ -70,8 +70,8 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     };
 }
 
-/* Handles must match the item's current bindings and stay live and unrebound
- * until draw_list returns. Packing is exact for simultaneously live slots. */
+/* Only RESOLVED, non-tombstoned sprites have a page_resource. Handles must
+ * match current bindings and stay live and unrebound until draw_list returns. */
 static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_resource_t page_resource) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
     uint32_t page_slot = nt_resource_slot_index(page_resource);
@@ -88,7 +88,8 @@ void nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
  *   1. Atlas page texture binds to slot 0; material may override sampler.
- *   2. Caller pre-filters items by visibility; renderer draws every entry.
+ *   2. Caller pre-filters invisible, unresolved, and tombstoned sprites;
+ *      renderer draws every entry.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
  *      them before draw_list; renderer does not touch UBOs.
  *   4. Entities, required components, and material bindings stay live and

@@ -529,6 +529,28 @@ void test_sprite_renderer_draw_list_null_items_asserts_when_nonempty(void) {
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_draw_list(NULL, 1));
 }
 
+void test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA0ULL);
+    nt_material_t material = create_test_material();
+    nt_entity_t entity = nt_entity_create();
+    nt_transform_comp_add(entity);
+    nt_drawable_comp_add(entity);
+    nt_material_comp_add(entity);
+    nt_sprite_comp_add(entity);
+    *nt_material_comp_handle(entity) = material;
+
+    nt_resource_t page_resource = nt_atlas_get_page_resource(s_atlas_res, 0);
+    nt_render_item_t item = {
+        .entity = entity.id,
+        .batch_key = nt_sprite_renderer_batch_key(material, page_resource),
+    };
+
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_draw_list(&item, 1));
+}
+
 /* ---- Test: pipeline cache reuse + miss-creates-new ---- */
 
 void test_sprite_renderer_pipeline_cache(void) {
@@ -1151,6 +1173,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_key_ignores_handle_generations);
     RUN_TEST(test_sprite_renderer_batch_key_distinguishes_page_slots);
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
+    RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
