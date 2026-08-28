@@ -547,16 +547,19 @@ static void frame(void) {
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
+        item_count = 0;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
+        nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        nt_gfx_destroy_buffer(s_light_ubo);
         s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
