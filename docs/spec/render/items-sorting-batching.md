@@ -158,7 +158,7 @@ WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no e
 Sprite renderer: gather sorted sprite render items, resolve component SoA views
 once, pack sprite vertices into one dynamic vertex buffer per flush chunk, and
 draw recorded commands. The renderer owns atlas page correctness: `batch_key`
-is the renderer-defined material compatibility token, while SpriteRenderer
+is the renderer-defined material-and-page compatibility token, while SpriteRenderer
 verifies actual atlas page textures and splits commands when a run crosses
 pages.
 
