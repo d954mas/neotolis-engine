@@ -425,11 +425,8 @@ static void frame(void) {
         for (uint32_t i = 0; i < s_bunny_count; i++) {
             s_items[i].sort_key = 0; /* unsorted in Bunnymark; renderer ignores */
             s_items[i].entity = s_entities[i].id;
-            /* Coarse compatibility hint. The sprite renderer validates the
-             * actual atlas page while emitting and splits draw commands when a
-             * run crosses page textures, so the game no longer does per-bunny
-             * atlas/resource lookups just to build this key. */
-            s_items[i].batch_key = s_sprite_material.id;
+            /* SpriteRenderer validates the actual atlas page while emitting. */
+            s_items[i].batch_key = nt_sprite_renderer_batch_key(s_sprite_material);
         }
         nt_sprite_renderer_draw_list(s_items, s_bunny_count);
         // #endregion

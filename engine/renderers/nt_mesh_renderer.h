@@ -1,9 +1,24 @@
 #ifndef NT_MESH_RENDERER_H
 #define NT_MESH_RENDERER_H
 
+#include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "graphics/nt_gfx.h"
+#include "material/nt_material.h"
+#include "pool/nt_pool.h"
 #include "render/nt_render_defs.h"
+
+_Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "mesh batch key requires 16-bit pool slots");
+
+/* Handles must match the item's current bindings and stay live and unrebound
+ * until draw_list returns. Packing is exact for simultaneously live slots. */
+static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mesh_t mesh) {
+    uint32_t material_slot = nt_pool_slot_index(material.id);
+    uint32_t mesh_slot = nt_pool_slot_index(mesh.id);
+    NT_ASSERT(material_slot != 0);
+    NT_ASSERT(mesh_slot != 0);
+    return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
+}
 
 typedef struct {
     uint16_t max_instances; /* max per single instanced draw call, default: 4096 */
@@ -21,6 +36,8 @@ void nt_mesh_renderer_restore_gpu(void);
  * flag, color alpha, or entity-enabled state. Use nt_render_is_visible()
  * (engine/render/nt_render_util.h) as the canonical filter when building
  * the items array. */
+/* batch_key must come from each item's current material/mesh bindings. Entities,
+ * bindings, and referenced resources stay live and unchanged through this call. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

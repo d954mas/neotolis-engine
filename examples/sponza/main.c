@@ -523,12 +523,12 @@ static void frame(void) {
             }
 
             /* Update mesh component handle */
-            uint32_t mesh_id = nt_resource_get(s_mesh_handles[i]);
-            *nt_mesh_comp_handle(s_entities[i]) = (nt_mesh_t){.id = mesh_id};
+            nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handles[i])};
+            *nt_mesh_comp_handle(s_entities[i]) = mesh;
 
-            items[item_count].sort_key = nt_sort_key_opaque(s_materials[i].id, mesh_id);
+            items[item_count].sort_key = nt_sort_key_opaque(s_materials[i].id, mesh.id);
             items[item_count].entity = s_entities[i].id;
-            items[item_count].batch_key = nt_batch_key(s_materials[i].id, mesh_id);
+            items[item_count].batch_key = nt_mesh_renderer_batch_key(s_materials[i], mesh);
             item_count++;
         }
 

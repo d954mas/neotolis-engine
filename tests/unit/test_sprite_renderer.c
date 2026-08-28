@@ -504,10 +504,10 @@ void test_sprite_renderer_pipeline_cache(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_a.id, (uint32_t)FIXTURE_R0_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat_a);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_b.id, (uint32_t)FIXTURE_R0_HASH);
+    items[1].batch_key = nt_sprite_renderer_batch_key(mat_b);
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
@@ -529,7 +529,7 @@ void test_sprite_renderer_forwards_material_blend_state(void) {
     s_atlas_res = register_test_atlas(0xB1ULL);
     nt_material_t mat = create_test_material_with_blend(blend);
     nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH)};
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_sprite_renderer_batch_key(mat)};
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
 
     nt_sprite_renderer_draw_list(&item, 1);
@@ -553,8 +553,8 @@ void test_sprite_renderer_batch_grouping(void) {
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_a);
     nt_entity_t e2 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_b);
 
-    uint32_t bk_a = nt_batch_key(mat_a.id, (uint32_t)FIXTURE_R0_HASH);
-    uint32_t bk_b = nt_batch_key(mat_b.id, (uint32_t)FIXTURE_R0_HASH);
+    uint32_t bk_a = nt_sprite_renderer_batch_key(mat_a);
+    uint32_t bk_b = nt_sprite_renderer_batch_key(mat_b);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -571,12 +571,8 @@ void test_sprite_renderer_batch_grouping(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: batch_key-driven boundaries ----
- *
- * When the batch_key changes between consecutive items, a flush is triggered
- * even if the underlying material id matches — the renderer trusts batch_key
- * as the abstraction (atlas page id is folded in by the game). */
-void test_sprite_renderer_batch_key_atlas_change(void) {
+/* ---- Test: an explicit stronger batch boundary is honored ---- */
+void test_sprite_renderer_explicit_batch_boundary(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
@@ -585,16 +581,14 @@ void test_sprite_renderer_batch_key_atlas_change(void) {
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
 
-    /* Two distinct batch_keys (game encodes atlas page id into the key). The
-     * renderer flushes between groups, even though the cached pipeline is
-     * the same — exercising the batch_key boundary contract. */
+    uint32_t canonical_key = nt_sprite_renderer_batch_key(mat);
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat.id, 0xAAU);
+    items[0].batch_key = canonical_key;
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat.id, 0xBBU);
+    items[1].batch_key = canonical_key ^ 0x80000000U;
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
@@ -615,7 +609,7 @@ void test_sprite_renderer_splits_run_on_actual_page_change(void) {
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
 
-    uint32_t coarse_key = nt_batch_key(mat.id, 0xCAFEU);
+    uint32_t coarse_key = nt_sprite_renderer_batch_key(mat);
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -644,7 +638,7 @@ void test_sprite_renderer_polygon_emit(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_RPOLY_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
 
     nt_sprite_renderer_draw_list(items, 1);
 
@@ -764,7 +758,7 @@ void test_sprite_renderer_flip_mirrors_around_pivot(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
 
     /* Region r0: 64x64 source, origin (0.5, 0.5) → pivot at source (32, 32).
      * 4 verts at source-space (i*10, i*20) for i=0..3 = (0,0),(10,20),(20,40),(30,60).
@@ -822,7 +816,7 @@ void test_sprite_renderer_restore_gpu_cycle(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
 
     nt_sprite_renderer_draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
@@ -857,10 +851,10 @@ void test_sprite_renderer_pipeline_cache_capacity(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_a.id, (uint32_t)FIXTURE_R0_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat_a);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_b.id, (uint32_t)FIXTURE_R0_HASH);
+    items[1].batch_key = nt_sprite_renderer_batch_key(mat_b);
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
@@ -933,10 +927,10 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e_a.id;
-    items[0].batch_key = nt_batch_key(mat_override.id, (uint32_t)FIXTURE_R0_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat_override);
     items[1].sort_key = 1;
     items[1].entity = e_b.id;
-    items[1].batch_key = nt_batch_key(mat_plain.id, (uint32_t)FIXTURE_R0_HASH);
+    items[1].batch_key = nt_sprite_renderer_batch_key(mat_plain);
 
     nt_gfx_stub_test_reset();
     nt_sprite_renderer_draw_list(items, 2);
@@ -1047,7 +1041,7 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_RS9_HASH);
+    items[0].batch_key = nt_sprite_renderer_batch_key(mat);
     nt_sprite_renderer_draw_list(items, 1);
 
     /* rs9: 100×100 src, slice9=16, origin (0,0) → local lxs[1] = 16 × scale = 32. */
@@ -1116,7 +1110,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
-    RUN_TEST(test_sprite_renderer_batch_key_atlas_change);
+    RUN_TEST(test_sprite_renderer_explicit_batch_boundary);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);

@@ -16,6 +16,12 @@
  */
 void nt_sort_by_key(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch);
 
+/**
+ * Sort render items by (sort_key, batch_key), ascending and stable.
+ * Uses the same separate-scratch contract as nt_sort_by_key().
+ */
+void nt_sort_by_key_then_batch(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch);
+
 /* ---- Sort key helpers (inline, no component knowledge) ---- */
 
 static inline uint64_t nt_sort_key_opaque(uint32_t material_id, uint32_t mesh_id) { return ((uint64_t)material_id << 32) | (uint64_t)mesh_id; }
@@ -47,10 +53,6 @@ static inline uint64_t nt_sort_key_z(float z) {
     }
     return (uint64_t)bits << 32;
 }
-
-/* ---- Batch key helper (material+mesh → state compatibility) ---- */
-
-static inline uint32_t nt_batch_key(uint32_t material_id, uint32_t mesh_id) { return (material_id * 0x9E3779B9U) ^ mesh_id; }
 
 /* ---- Declared functions (implemented in nt_render_items.c) ---- */
 

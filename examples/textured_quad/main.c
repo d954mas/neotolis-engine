@@ -309,7 +309,7 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        uint32_t mesh_id = nt_resource_get(s_mesh_handle);
+        nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
 
         /* ---- Collect: build render items from entities ---- */
         nt_render_item_t items[NUM_CUBES];
@@ -317,11 +317,11 @@ static void frame(void) {
 
         for (int i = 0; i < NUM_CUBES; i++) {
             /* Update mesh handle (may change when resource resolves) */
-            *nt_mesh_comp_handle(s_cubes[i]) = (nt_mesh_t){.id = mesh_id};
+            *nt_mesh_comp_handle(s_cubes[i]) = mesh;
 
-            items[item_count].sort_key = nt_sort_key_opaque(s_cube_material.id, mesh_id);
+            items[item_count].sort_key = nt_sort_key_opaque(s_cube_material.id, mesh.id);
             items[item_count].entity = s_cubes[i].id;
-            items[item_count].batch_key = nt_batch_key(s_cube_material.id, mesh_id);
+            items[item_count].batch_key = nt_mesh_renderer_batch_key(s_cube_material, mesh);
             item_count++;
         }
 

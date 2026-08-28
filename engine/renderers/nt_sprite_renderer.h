@@ -1,6 +1,7 @@
 #ifndef NT_SPRITE_RENDERER_H
 #define NT_SPRITE_RENDERER_H
 
+#include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "material/nt_material.h"
 #include "render/nt_render_defs.h"
@@ -66,6 +67,13 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     };
 }
 
+/* Material must match the item's current binding and stay live and unrebound
+ * until draw_list returns. Atlas page compatibility is checked while emitting. */
+static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material) {
+    NT_ASSERT(material.id != 0);
+    return material.id;
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
@@ -76,7 +84,9 @@ void nt_sprite_renderer_restore_gpu(void);
  *   1. Atlas page texture binds to slot 0; material may override sampler.
  *   2. Caller pre-filters items by visibility; renderer draws every entry.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
- *      them before draw_list; renderer does not touch UBOs. */
+ *      them before draw_list; renderer does not touch UBOs.
+ *   4. Entities, required components, and material bindings stay live and
+ *      unchanged through draw_list. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 /* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears

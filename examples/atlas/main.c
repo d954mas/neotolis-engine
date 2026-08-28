@@ -171,13 +171,13 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        uint32_t mesh_id = nt_resource_get(s_mesh_handle);
-        *nt_mesh_comp_handle(s_cube) = (nt_mesh_t){.id = mesh_id};
+        nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
+        *nt_mesh_comp_handle(s_cube) = mesh;
 
         nt_render_item_t items[1];
-        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh_id);
+        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh.id);
         items[0].entity = s_cube.id;
-        items[0].batch_key = nt_batch_key(s_material.id, mesh_id);
+        items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
 
         nt_sort_by_key(items, 1, s_sort_scratch);
         nt_mesh_renderer_draw_list(items, 1);

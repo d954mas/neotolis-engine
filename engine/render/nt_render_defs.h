@@ -42,7 +42,7 @@ _Static_assert(NT_COLOR_MODE_FLOAT4 == 2, "update s_instance_layouts if enum gro
 typedef struct {
     uint64_t sort_key;
     uint32_t entity;    /* raw entity id (not nt_entity_t) */
-    uint32_t batch_key; /* state compatibility: same material+mesh = same key, game fills this */
+    uint32_t batch_key; /* renderer-defined compatibility token, game fills this */
 } nt_render_item_t;
 
 _Static_assert(sizeof(nt_render_item_t) == 16, "render item must be 16 bytes");
