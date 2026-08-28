@@ -651,7 +651,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 
     nt_resource_t atlas = sv->atlas[s_idx];
     const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
+    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || !nt_sprite_resolved_region_has_geometry(resolved)) {
         return; /* tombstone */
     }
     const nt_texture_region_t *r = resolved->region;

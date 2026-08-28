@@ -100,11 +100,10 @@ Two ways to bind a sprite to a region, picked by what the game knows:
   moves; a dead region simply zero-draws.
 
 Game code is free to read back the cached region index for animation logic
-(e.g. cycle to the next frame). It is stable across atlas republish for
-surviving regions;
-the only failure mode — tombstoning — is observable via
-`is_resolved()`
-    .
+(e.g. cycle to the next frame). It is stable across atlas republish. A removed
+region remains `RESOLVED` at its tombstoned index so it can revive in place;
+`nt_sprite_resolved_region_has_geometry()` distinguishes it from a drawable
+resolved region.
 
 ### Origin override and flip
 
@@ -141,7 +140,7 @@ Resolution is explicit, not renderer-driven magic:
 - sync iterates dense sprite rows when the resource publication epoch
   advanced or any sprite was bound by hash since the last call; per-row
   early-out via cached atlas revision keeps stable frames cheap
-- sprite render-item build skips unresolved sprites
+- sprite render-item build skips unresolved sprites and resolved tombstones
 
 ### Bulk iteration
 

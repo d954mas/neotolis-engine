@@ -518,6 +518,9 @@ void test_sprite_sync_keeps_resolved_when_region_removed(void) {
     nt_sprite_comp_sync_resources();
     TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
     const uint16_t r1_idx = *nt_sprite_comp_region_index(e);
+    nt_sprite_comp_view_t before = nt_sprite_comp_view();
+    uint16_t before_idx = before.sparse_indices[nt_entity_index(e)];
+    TEST_ASSERT_TRUE(nt_sprite_resolved_region_has_geometry(&before.resolved[before_idx]));
 
     uint8_t atlas_blob[1024];
     uint32_t atlas_blob_size = build_fixture_atlas_blob_r0_only(atlas_blob, sizeof(atlas_blob));
@@ -539,6 +542,9 @@ void test_sprite_sync_keeps_resolved_when_region_removed(void) {
     const nt_texture_region_t *region = nt_atlas_get_region(s_atlas_res, *nt_sprite_comp_region_index(e));
     TEST_ASSERT_NOT_NULL(region);
     TEST_ASSERT_EQUAL_UINT8(0, region->vertex_count); /* dead → zero-draw */
+    nt_sprite_comp_view_t after = nt_sprite_comp_view();
+    uint16_t after_idx = after.sparse_indices[nt_entity_index(e)];
+    TEST_ASSERT_FALSE(nt_sprite_resolved_region_has_geometry(&after.resolved[after_idx]));
 }
 
 /* ---- Test 13: set_flip sets bits correctly and isolates from other flags ---- */
