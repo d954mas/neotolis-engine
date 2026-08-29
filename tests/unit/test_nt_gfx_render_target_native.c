@@ -728,6 +728,75 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
+/* The load-bearing claim of the whole model: a pipeline binds ITS OWN
+ * program. Every other test puts both pipelines on one program, so pinning
+ * the wrong program_slot would leave them all green. */
+static void test_each_pipeline_binds_its_own_program(void) {
+    static const char *vertex_source = "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    static const char *red_source = "#ifdef GL_ES\n"
+                                    "precision mediump float;\n"
+                                    "#endif\n"
+                                    "out vec4 frag_color;\n"
+                                    "void main() { frag_color = vec4(1.0, 0.0, 0.0, 1.0); }\n";
+    static const char *blue_source = "#ifdef GL_ES\n"
+                                     "precision mediump float;\n"
+                                     "#endif\n"
+                                     "out vec4 frag_color;\n"
+                                     "void main() { frag_color = vec4(0.0, 0.0, 1.0, 1.0); }\n";
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t red_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = red_source});
+    nt_shader_t blue_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = blue_source});
+    nt_program_t red = nt_gfx_make_program(vs, red_fs);
+    nt_program_t blue = nt_gfx_make_program(vs, blue_fs);
+    nt_pipeline_t pip_red = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = red});
+    nt_pipeline_t pip_blue = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = blue});
+
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_BUFFER,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    uint8_t pixels[4 * 4 * 4] = {0};
+    nt_gfx_begin_frame();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip_red);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    assert_rgba(pixels, 16, 255, 0, 0, 255);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip_blue);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    assert_rgba(pixels, 16, 0, 0, 255, 255);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_pipeline(pip_blue);
+    nt_gfx_destroy_pipeline(pip_red);
+    nt_gfx_destroy_program(blue);
+    nt_gfx_destroy_program(red);
+    nt_gfx_destroy_shader(blue_fs);
+    nt_gfx_destroy_shader(red_fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
@@ -741,5 +810,6 @@ int main(void) {
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
+    RUN_TEST(test_each_pipeline_binds_its_own_program);
     return UNITY_END();
 }

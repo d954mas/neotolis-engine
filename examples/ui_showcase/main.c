@@ -3757,14 +3757,6 @@ static void frame(void) {
             nt_material_set_program(s_radial_image_material[m], NT_PROGRAM_INVALID);
         }
         nt_material_set_program(s_radial_image_packed_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_text_program);
-        nt_gfx_destroy_program(s_radial_program);
-        nt_gfx_destroy_program(s_radial_image_program);
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
-        s_radial_program = NT_PROGRAM_INVALID;
-        s_radial_image_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -3775,8 +3767,18 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Renderers first: destroy order is pipeline, then program. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_shape_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_text_program);
+        nt_gfx_destroy_program(s_radial_program);
+        nt_gfx_destroy_program(s_radial_image_program);
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
+        s_radial_program = NT_PROGRAM_INVALID;
+        s_radial_image_program = NT_PROGRAM_INVALID;
         /* Force a style re-init next frame so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
         s_font_bound = false;

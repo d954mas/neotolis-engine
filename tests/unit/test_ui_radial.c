@@ -37,8 +37,6 @@ static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
  * a_radial @ 0..3 + a_layout @ 4..7 (walker fills a_layout by name; placeholders here). */
 static const float k_radial_attrs[8] = {0.25F, 1.75F, 0.5F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
-static uint32_t s_vpack_counter;
-
 /* Radial material: shares the fixture's vs/fs role but declares a_radial @ loc 4 +
  * a_layout @ loc 7 (walker-filled by name) so build_sprite_layout produces the
  * extended 32 B custom block (distinct pipeline). */
@@ -66,7 +64,6 @@ static nt_material_t make_radial_material(void) {
 }
 
 void setUp(void) {
-    s_vpack_counter = 0;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }

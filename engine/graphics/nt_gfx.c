@@ -719,13 +719,18 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
         return NT_PROGRAM_INVALID;
     }
 
-    uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
-    NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
-
     uint32_t vs_backend = s_gfx.shader_backends[nt_pool_slot_index(vs.id)];
     uint32_t fs_backend = s_gfx.shader_backends[nt_pool_slot_index(fs.id)];
+    /* Named separately from the link assert: a stage whose GPU object died with
+     * the context reads as a link failure otherwise, pointing at the wrong bug. */
+    NT_ASSERT(vs_backend != 0 && "make_program: vertex stage has no GPU object");
+    NT_ASSERT(fs_backend != 0 && "make_program: fragment stage has no GPU object");
+
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
     NT_ASSERT(backend != 0 && "program link failed");
+
+    uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
+    NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
     s_gfx.programs_created++;
@@ -801,13 +806,18 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
      * one know exactly what happened. */
     nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
+    /* Live poll before the readiness assert: context loss is what zeroes the
+     * program backend, so without this every renderer would trap on it. */
+    if (nt_gfx_backend_is_context_lost()) {
+        return result;
+    }
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
     NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
     NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
-    /* After the attr_count bounds check -- the loops read attr_count entries. */
+    /* After the attr_count asserts -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     assert_layout_webgl2_rules(&desc->instance_layout);
     NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
@@ -1072,16 +1082,27 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
+    /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
+     * context loss and destroy them again at shutdown. Not an error. */
+    if (prog.id == 0) {
+        return;
+    }
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         NT_LOG_ERROR("destroy_program: invalid handle");
         return;
     }
     /* draw only checks bound_pipeline != 0, so a bind left pointing at a
-     * pipeline whose program just died would draw into a destroyed object. */
+     * pipeline whose program just died would draw into a destroyed object.
+     * Clearing the borrow record makes bind_pipeline reject it by value, not
+     * only through the generation assert. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        if (s_gfx.pipeline_programs[i] == prog.id && s_gfx.bound_pipeline == s_gfx.pipeline_backends[i]) {
+        if (s_gfx.pipeline_programs[i] != prog.id) {
+            continue;
+        }
+        if (s_gfx.bound_pipeline == s_gfx.pipeline_backends[i]) {
             s_gfx.bound_pipeline = 0;
         }
+        s_gfx.pipeline_programs[i] = 0;
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
     nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);

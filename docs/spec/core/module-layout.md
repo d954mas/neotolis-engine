@@ -123,9 +123,10 @@ The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
 must be disabled for the call. The helper does not change or restore caller
 state.
 Blur arguments and GPU readiness are caller preconditions and assert when
-violated, as is a link failure in the program the helper owns; the shader,
-program, pipeline, or buffer creation failures that remain reachable at init and
-context restore return a result.
+violated, as is a link failure in the program the helper owns. The helper checks
+readiness rather than distinguishing failure kinds: what still returns a result
+is a shader or buffer whose backend creation failed, and a program or pipeline
+that a lost context left unusable.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

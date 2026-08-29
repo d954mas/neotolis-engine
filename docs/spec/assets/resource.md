@@ -155,7 +155,14 @@ Programs come back over several frames, not in the restore frame: the shader
 stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
 activation budget. The game relinks once both stages resolve and assigns the new
 handle with `nt_material_set_program`. Until then materials are not `ready` and
-the renderers skip them on their existing not-ready branches.
+the ECS `draw_list` paths skip them on their existing not-ready branches; the
+immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material`
+entry points assert on a not-ready material instead, so a game must stop feeding
+them for the duration of the window.
+
+Skipping step 4 does not degrade: the material stays `ready` holding a dead
+program, and the failure surfaces as an assert inside `nt_gfx_bind_pipeline`,
+one module away from the mistake.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,

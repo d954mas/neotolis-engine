@@ -759,6 +759,11 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
+    /* A zeroed record (context loss, destroyed pipeline) would bind program 0
+     * and turn every following draw into a silent GL_INVALID_OPERATION. */
+    if (pip->program_slot == 0 || pip->program_slot > s_init_desc.max_programs) {
+        return;
+    }
 
     if (s_gl_cache.vao != pip->vao) {
         glBindVertexArray(pip->vao);

@@ -580,7 +580,6 @@ static void frame(void) {
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         item_count = 0;
-        drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -600,6 +599,7 @@ static void frame(void) {
             .label = "lighting",
         });
         nt_mesh_renderer_restore_gpu();
+        drop_programs(); /* GL objects are gone; this frees the pool slots too */
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){

@@ -75,7 +75,10 @@ and owns everything that follows from linking: uniform locations, uniform
 values, and global UBO block bindings. A pipeline is a VAO plus fixed-function
 state that *borrows* a program handle. Two pipelines on one program therefore
 share every uniform value, and binding one does not reset what the other set —
-each consumer sets every uniform it needs on every draw. The pipeline never
+each consumer sets every uniform it needs on every draw. A uniform a material
+does NOT declare is therefore inherited from whichever material last wrote it on
+that program; this holds for sampler units and material params alike, and the
+fix is a fixed per-program interface (#359), not per-consumer bookkeeping. The pipeline never
 owns the program: destroy order is pipeline, then program, then shader stages,
 and binding a pipeline whose program was destroyed asserts. The split continues
 in #355, where vertex-input state leaves the pipeline as well.

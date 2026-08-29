@@ -654,6 +654,10 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
 
 void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
+    /* Set before anything is created: the failure paths below route cleanup
+     * through shutdown(), which no-ops while this is false and would strand
+     * every shader and program allocated so far. shutdown() re-clears it. */
+    s_shape.initialized = true;
 
     /* Shaders */
     s_shape.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_shape_fs_src, .label = "shape_fs"});
@@ -729,7 +733,6 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_pip_active = s_shape.inst_pip_depth;
     s_shape.cap_inst_pip_active = s_shape.cap_inst_pip_depth;
     s_shape.line_pip_active = s_shape.line_pip_depth;
-    s_shape.initialized = true;
 }
 
 void nt_shape_renderer_shutdown(void) {

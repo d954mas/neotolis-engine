@@ -26,7 +26,6 @@
 /* Per-fixture counter so multiple ui_walker_fixture_make_material() calls
  * inside one test do not collide on virtual-pack ids. Reset to 0 by init
  * since tearDown destroys all materials and frees their packs. */
-static uint32_t s_vpack_counter;
 
 nt_material_t ui_walker_fixture_make_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
@@ -50,7 +49,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     NT_ASSERT(fx != NULL);
     NT_ASSERT(arena != NULL);
     memset(fx, 0, sizeof *fx);
-    s_vpack_counter = 0;
 
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_mem_scratch_init((size_t)64U * 1024U); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */

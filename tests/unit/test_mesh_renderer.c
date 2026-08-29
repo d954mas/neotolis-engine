@@ -25,8 +25,6 @@
 
 /* ---- Virtual pack counter (unique per test) ---- */
 
-static uint32_t s_vpack_counter;
-
 /* ---- Helper: build a minimal mesh blob and activate it via nt_gfx ---- */
 
 static nt_mesh_t create_test_mesh(void) {
@@ -172,8 +170,6 @@ void setUp(void) {
     /* Enter frame/pass so draw calls don't assert */
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    s_vpack_counter = 0;
 }
 
 void tearDown(void) {
@@ -406,6 +402,38 @@ void test_pipeline_cache_different_layouts(void) {
     nt_mesh_renderer_draw_list(items, 2);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
+/* Sampler units are program state, shared by every material on the program, so
+ * a declared slot must be written even when its texture has not resolved --
+ * otherwise the material inherits whatever unit the previous one set. */
+void test_declared_sampler_unit_written_without_texture(void) {
+    nt_mesh_t mesh = create_test_mesh();
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = create_test_program();
+    desc.textures[0].name = "u_unresolved";
+    desc.textures[0].resource = nt_resource_request(nt_hash64_str("never_registered"), NT_ASSET_TEXTURE);
+    desc.texture_count = 1;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map_count = 1;
+    desc.label = "unresolved_tex_material";
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_EQUAL_UINT32(0, info->resolved_tex[0]);
+
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_STRING("u_unresolved", nt_gfx_stub_test_uniform_int_name_at(0));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
 }
 
 /* A pipeline that failed to create must not enter the cache: the key would
@@ -729,6 +757,7 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_declared_sampler_unit_written_without_texture);
     RUN_TEST(test_pipeline_cache_skips_failed_pipeline);
     RUN_TEST(test_pipeline_cache_shared_program_collapses);
     RUN_TEST(test_pipeline_cache_different_material_attr_maps);

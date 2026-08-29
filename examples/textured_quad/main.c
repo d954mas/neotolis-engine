@@ -317,8 +317,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         can_render = false;
         nt_material_set_program(s_cube_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_cube_program); /* GL object is gone; this frees the pool slot */
-        s_cube_program = NT_PROGRAM_INVALID;
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -338,6 +336,8 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         nt_mesh_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_cube_program); /* GL object is gone; this frees the pool slot */
+        s_cube_program = NT_PROGRAM_INVALID;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});

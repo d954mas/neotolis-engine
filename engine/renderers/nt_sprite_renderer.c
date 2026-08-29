@@ -313,7 +313,11 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    NT_ASSERT(pip.id != 0);
+    /* Only a lost context gets here with an invalid handle. Caching it would
+     * pin the failure for the rest of the session; retry next frame instead. */
+    if (pip.id == 0) {
+        return pip;
+    }
 
     s_sprite.entries[s_sprite.count].key = key;
     s_sprite.entries[s_sprite.count].pipeline = pip;
@@ -1272,6 +1276,10 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
 
         /* Each batch_key boundary opens a fresh cmd. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+        if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
+            run_start = run_end;
+            continue;
+        }
         close_current_cmd();
         open_cmd(pip, mat_info, *mat);
 

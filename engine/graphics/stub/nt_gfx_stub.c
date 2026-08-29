@@ -19,6 +19,10 @@ static uint32_t s_stub_render_target_resize_count;
 static uint32_t s_stub_render_target_destroy_count;
 static uint32_t s_stub_texture_create_count;
 static uint32_t s_stub_program_create_count;
+#define NT_GFX_STUB_UNIFORM_NAMES 16
+static const char *s_stub_uniform_int_names[NT_GFX_STUB_UNIFORM_NAMES];
+static int s_stub_uniform_int_values[NT_GFX_STUB_UNIFORM_NAMES];
+static uint32_t s_stub_uniform_int_count;
 static uint32_t s_stub_update_texture_count;
 static uint32_t s_stub_backend_restore_count;
 static uint32_t s_stub_gpu_caps_probe_count;
@@ -58,6 +62,9 @@ uint32_t nt_gfx_stub_test_render_target_resize_count(void) { return s_stub_rende
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
 uint32_t nt_gfx_stub_test_texture_create_count(void) { return s_stub_texture_create_count; }
 uint32_t nt_gfx_stub_test_program_create_count(void) { return s_stub_program_create_count; }
+uint32_t nt_gfx_stub_test_uniform_int_count(void) { return s_stub_uniform_int_count; }
+const char *nt_gfx_stub_test_uniform_int_name_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_names[index] : NULL; }
+int nt_gfx_stub_test_uniform_int_value_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_values[index] : -1; }
 uint32_t nt_gfx_stub_test_update_texture_count(void) { return s_stub_update_texture_count; }
 uint32_t nt_gfx_stub_test_backend_restore_count(void) { return s_stub_backend_restore_count; }
 uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void) { return s_stub_gpu_caps_probe_count; }
@@ -90,6 +97,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_render_target_destroy_count = 0;
     s_stub_texture_create_count = 0;
     s_stub_program_create_count = 0;
+    s_stub_uniform_int_count = 0;
     s_stub_update_texture_count = 0;
     s_stub_backend_restore_count = 0;
     s_stub_gpu_caps_probe_count = 0;
@@ -446,6 +454,13 @@ void nt_gfx_backend_set_uniform_float(const char *name, float val) {
 }
 
 void nt_gfx_backend_set_uniform_int(const char *name, int val) {
+#ifdef NT_TEST_ACCESS
+    if (s_stub_uniform_int_count < NT_GFX_STUB_UNIFORM_NAMES) {
+        s_stub_uniform_int_names[s_stub_uniform_int_count] = name;
+        s_stub_uniform_int_values[s_stub_uniform_int_count] = val;
+    }
+    s_stub_uniform_int_count++;
+#endif
     (void)name;
     (void)val;
 }

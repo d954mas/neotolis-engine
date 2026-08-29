@@ -440,6 +440,9 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
 
 /* ---- Global UBO block registration ---- */
 
+/* Must be called before the FIRST nt_gfx_make_program -- blocks bind at link
+ * time, so a later registration silently misses every program already linked.
+ * Engine renderers link programs in their init, so register before those too. */
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 

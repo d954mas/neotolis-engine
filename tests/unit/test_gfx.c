@@ -564,6 +564,21 @@ void test_gfx_pipeline_asserts_bad_instance_layout(void) {
 
 void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(NULL)); }
 
+/* Context loss is what zeroes a program's backend, so it must not read as the
+ * developer error "program is not linked" -- the handle is still pool-valid. */
+void test_gfx_pipeline_context_lost_returns_invalid(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_gfx_stub_test_set_context_lost(false);
+
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_EQUAL_UINT32(0, pip.id);
+}
+
 void test_gfx_pipeline_asserts_too_many_attrs(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
@@ -1863,6 +1878,7 @@ int main(void) {
     RUN_TEST(test_gfx_register_global_block_after_program_asserts);
     RUN_TEST(test_gfx_global_block_counter_resets_on_init);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
+    RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);
     RUN_TEST(test_gfx_pipeline_asserts_too_many_attrs);
     RUN_TEST(test_gfx_pipeline_pool_full_asserts);
     RUN_TEST(test_gfx_pipeline_backend_failure_returns_invalid);

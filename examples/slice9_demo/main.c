@@ -417,10 +417,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
         nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_text_program);
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -433,6 +429,10 @@ static void frame(void) {
         });
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         s_atlas_bound = false;
         s_font_bound = false;
     }

@@ -183,8 +183,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         can_render = false;
         nt_material_set_program(s_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_program); /* GL object is gone; this frees the pool slot */
-        s_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -201,6 +199,8 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         nt_mesh_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_program); /* GL object is gone; this frees the pool slot */
+        s_program = NT_PROGRAM_INVALID;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});

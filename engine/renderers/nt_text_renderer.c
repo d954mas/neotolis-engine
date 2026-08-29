@@ -121,7 +121,7 @@ static void create_pipeline(void) {
     /* After the destroy, never before: a material whose program went away must
      * not keep drawing through the pipeline built on it. */
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    if (!info || !info->ready) {
+    if (!info || !info->ready || !nt_gfx_program_ready(info->program)) {
         return;
     }
 
@@ -682,7 +682,7 @@ void nt_text_renderer_flush(void) {
     /* Rebuild on any material version bump -- a new program included. */
     if (s_text.material.id != 0) {
         const nt_material_info_t *info = nt_material_get_info(s_text.material);
-        if (info && info->version != s_text.pipeline_material_version) {
+        if (info && (s_text.pipeline.id == 0 || info->version != s_text.pipeline_material_version)) {
             create_pipeline();
         }
     }

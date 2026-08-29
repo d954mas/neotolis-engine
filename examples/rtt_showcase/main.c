@@ -547,10 +547,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
         nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_text_program);
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
@@ -568,6 +564,10 @@ static void frame(void) {
         restored = s_frame_ubo.id != 0 && restored;
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         s_atlas_bound = false;
         s_font_bound = false;
         s_demo.render_resources_ready = restored && render_targets_ready();

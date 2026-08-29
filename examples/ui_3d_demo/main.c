@@ -886,12 +886,6 @@ static void frame(void) {
         nt_material_set_program(s_text_material_3d, NT_PROGRAM_INVALID);
         nt_material_set_program(s_inspector_sprite_material, NT_PROGRAM_INVALID);
         nt_material_set_program(s_inspector_text_material, NT_PROGRAM_INVALID);
-        nt_gfx_destroy_program(s_sprite_cutoff_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_sprite_program);
-        nt_gfx_destroy_program(s_text_program);
-        s_sprite_cutoff_program = NT_PROGRAM_INVALID;
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -905,6 +899,12 @@ static void frame(void) {
         nt_shape_renderer_restore_gpu();
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_gfx_destroy_program(s_sprite_cutoff_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_sprite_program);
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_cutoff_program = NT_PROGRAM_INVALID;
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         s_atlas_bound = false;
         s_font_bound = false;
     }
