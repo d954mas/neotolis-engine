@@ -64,6 +64,14 @@ per-stream type/count/normalized, duplicate name hashes, and misaligned
 offsets/strides before any pipeline exists. Pipelines are cached, so the
 asserts are off the hot path.
 
+**Pipeline cache identity.** Renderers key their pipeline caches on a 64-bit
+hash of the full pipeline signature — vertex layout, shader pair, render state
+— and treat that hash as identity: descriptors are never compared on a hit.
+The hashed population is distinct layouts and material states, tens of values
+in a real game, so a 64-bit collision is not a practical risk, and a fixed
+array with a linear scan stays cheaper than a hash map at that scale. Every
+`nt_pipeline_desc_t` field a renderer varies must be folded into its key.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a

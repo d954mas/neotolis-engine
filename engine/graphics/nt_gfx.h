@@ -77,7 +77,7 @@ typedef struct {
     uint8_t index_type;                        /* 0=none, 1=uint16, 2=uint32 */
     NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
     uint16_t stride;                           /* total vertex size in bytes */
-    uint32_t layout_hash;                      /* hash of stream descriptors for pipeline cache key */
+    uint64_t layout_hash;                      /* stream-descriptor hash; serves as pipeline-cache identity, hence 64-bit */
 } nt_gfx_mesh_info_t;
 
 /* ---- Enums ---- */

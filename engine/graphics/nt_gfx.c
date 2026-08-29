@@ -2185,7 +2185,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     s_gfx.mesh_table[slot].stride = stride;
 
     /* Compute layout_hash from stream descriptors for pipeline cache keying */
-    s_gfx.mesh_table[slot].layout_hash = nt_hash32(src_streams, (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc)).value;
+    s_gfx.mesh_table[slot].layout_hash = nt_hash64(src_streams, (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc)).value;
 
     return mesh_id;
 }

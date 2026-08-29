@@ -154,7 +154,9 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
 
-    /* Full pipeline signature: layout + shaders + render state. */
+    /* Full pipeline signature: layout + shaders + render state. The 64-bit hash
+     * IS the cache identity -- descriptors are never compared on a hit, so every
+     * nt_pipeline_desc_t field this renderer varies must be folded in here. */
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
