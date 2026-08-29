@@ -123,13 +123,9 @@ static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static uint8_t s_material_shader_types[MAX_SCENE_NODES];
 static nt_program_t s_programs[3]; /* indexed by SponzaShaderType */
+static bool s_programs_assigned;
 
-/* All three pairs come from the same pack, so they go ready together; linking
- * them eagerly keeps program assignment out of the draw path. */
-static void link_programs(void) {
-    if (s_programs[SPONZA_SHADER_DIFFUSE].id != 0) {
-        return;
-    }
+static void link_all_programs(void) {
     const nt_resource_t stages[3][2] = {
         [SPONZA_SHADER_DIFFUSE] = {s_vs_diffuse, s_fs_diffuse},
         [SPONZA_SHADER_ALPHA] = {s_vs_alpha, s_fs_alpha},
@@ -146,8 +142,21 @@ static void link_programs(void) {
     for (uint32_t t = 0; t < 3; t++) {
         s_programs[t] = nt_gfx_make_program((nt_shader_t){backends[t][0]}, (nt_shader_t){backends[t][1]});
     }
-    for (uint32_t i = 0; i < s_entity_count; i++) {
-        nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
+}
+
+/* All three pairs come from the same pack, so they go ready together; linking
+ * them eagerly keeps program assignment out of the draw path. Linking and
+ * assignment are separate steps because the manifest -- and with it every
+ * material -- can arrive on either side of the shader stages. */
+static void link_programs(void) {
+    if (s_programs[SPONZA_SHADER_DIFFUSE].id == 0) {
+        link_all_programs();
+    }
+    if (!s_programs_assigned && s_entity_count > 0 && s_programs[SPONZA_SHADER_DIFFUSE].id != 0) {
+        for (uint32_t i = 0; i < s_entity_count; i++) {
+            nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
+        }
+        s_programs_assigned = true;
     }
 }
 
@@ -159,6 +168,7 @@ static void drop_programs(void) {
         nt_gfx_destroy_program(s_programs[t]);
         s_programs[t] = NT_PROGRAM_INVALID;
     }
+    s_programs_assigned = false;
 }
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
