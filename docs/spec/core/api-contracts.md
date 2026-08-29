@@ -126,6 +126,32 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+### Program handles
+
+`nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:
+whoever called `nt_gfx_make_program`. Pipelines and materials store the handle
+without owning it, so the owner destroys pipelines first, then the program, then
+the shader stages. Destroying a shader stage does not affect a program already
+linked from it.
+
+Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
+whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
+whether the GL program behind it exists. A lost context clears readiness while
+handles stay valid, so the owner relinks and reassigns rather than reallocating
+handles. `nt_gfx_make_pipeline` requires readiness.
+
+A link failure is a developer error and asserts, alongside an invalid stage
+handle, an exhausted program pool, and registering a global UBO block after the
+first program is created (blocks bind at link time, so a later registration
+would silently miss every program already linked). A lost context is the only
+condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
+
+`nt_material_set_program` is the only way to change a material's program and
+bumps the material version so pipeline caches rebuild. Destroying a program does
+not touch materials: the owner assigns `NT_PROGRAM_INVALID` or a new handle to
+every material that held it, otherwise the material stays `ready` with a dead
+handle and the next bind asserts.
+
 ### Texture descriptors
 
 `nt_texture_desc_t.format` is required and names the real storage format.
@@ -187,7 +213,10 @@ values, and non-`NEAREST` depth filtering — comparison is sampler state and
 never reaches this descriptor. These cases, exhausted configured target
 capacity, stale handles, direct mutation of owned attachments, and
 render-target lifecycle calls inside an active pass are developer errors and
-assert. Backend allocation, framebuffer completeness,
+assert. `nt_gfx_make_pipeline` follows the same split: a NULL descriptor, an
+unready program, an attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride
+over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, leaving a
+lost context as the only source of an invalid pipeline handle. Backend allocation, framebuffer completeness,
 resize, and context-restore failures remain runtime failures reported through
 invalid handles, `false`, or readiness queries.
 

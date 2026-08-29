@@ -679,7 +679,7 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Recreate pipeline if missing or material version changed (shader invalidation) */
+    /* Rebuild on any material version bump -- a new program included. */
     if (s_text.material.id != 0) {
         const nt_material_info_t *info = nt_material_get_info(s_text.material);
         if (info && info->version != s_text.pipeline_material_version) {

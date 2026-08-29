@@ -2,7 +2,7 @@
 #include "graphics/nt_gfx_internal.h"
 
 /* No-op backend for headless builds and testing.
-   Create functions return 1 (nonzero) so make_shader/pipeline/buffer succeed. */
+   Create functions return 1 (nonzero) so make_shader/program/pipeline/buffer succeed. */
 
 #ifdef NT_TEST_ACCESS
 #define NT_GFX_STUB_MAX_SLOTS 16

@@ -8,8 +8,8 @@
  *
  * Each shader source (vertex or fragment) is stored as a separate asset
  * (NT_ASSET_SHADER_CODE). This allows reusing one vertex shader with
- * multiple fragment shaders. Combining VS + FS into a GPU program is
- * a runtime/material concern, not a pack concern.
+ * multiple fragment shaders. Linking a pair into a GPU program is the job of
+ * whoever calls nt_gfx_make_program at runtime, not of the pack.
  */
 
 /* Magic: ASCII "SHDC" as uint32_t little-endian = 0x43444853 */

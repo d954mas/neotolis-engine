@@ -7,6 +7,26 @@ params, and globals.
 
 Related: [Material System](material.md), [Runtime Formats](../assets/runtime-formats.md), [Rendering Architecture](architecture.md)
 
+## Runtime objects: ShaderCode, Program
+
+`NT_ASSET_SHADER_CODE` is the text of ONE stage; there is no program asset.
+`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs)` links
+a pair, from either an embedded source string or two resolved resources. The
+shader resource exists so the builder can compile each stage offline and reject
+a broken one at build time.
+
+The program has a single owner — whoever called `nt_gfx_make_program` — and the
+engine never dedupes: two calls with the same pair give two programs. A game
+that wants one program behind many materials links it once and passes the same
+handle to each, via `nt_material_set_program`. Materials, pipelines and pipeline
+caches all borrow the handle and never destroy it.
+
+A link failure is a developer error and traps (`NT_ASSERT`) rather than
+returning an invalid handle; the only invalid handle `nt_gfx_make_program`
+returns is on a lost context. Because the builder validates each stage
+separately and never links a pair, the trap is also where mismatched varyings
+and device limits surface — offline linking arrives with `ShaderAsset`.
+
 ## ShaderAsset purpose
 
 ShaderAsset defines interface, not values.

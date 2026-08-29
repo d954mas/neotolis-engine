@@ -146,7 +146,16 @@ When `context_restored` is true, the game:
    uses
 3. destroys and recreates game-owned GPU objects, freeing their logical handle
    slots before replacement
-4. calls the restore entry point of every active renderer
+4. clears every material's program with `nt_material_set_program(mat,
+   NT_PROGRAM_INVALID)` and destroys its own `nt_program_t` handles, which frees
+   the pool slots the dead GL programs still occupy
+5. calls the restore entry point of every active renderer
+
+Programs come back over several frames, not in the restore frame: the shader
+stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
+activation budget. The game relinks once both stages resolve and assigns the new
+handle with `nt_material_set_program`. Until then materials are not `ready` and
+the renderers skip them on their existing not-ready branches.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,

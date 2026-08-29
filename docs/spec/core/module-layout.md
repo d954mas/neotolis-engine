@@ -114,16 +114,18 @@ layer.
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows ready source, temp, and destination handles for each call; their
-dimensions must match. The helper owns its shader, pipeline, and fullscreen
-primitive, but it does not allocate, resize, destroy, or retain caller handles.
+dimensions must match. The helper owns its shader stages, program, pipeline, and
+fullscreen primitive, but it does not allocate, resize, destroy, or retain
+caller handles.
 The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
 `RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
 `dest` are distinct ready `RGBA8` targets matching the source size. Scissor
 must be disabled for the call. The helper does not change or restore caller
 state.
 Blur arguments and GPU readiness are caller preconditions and assert when
-violated; initialization and context-restore GPU allocation failures return a
-result.
+violated, as is a link failure in the program the helper owns; the shader,
+program, pipeline, or buffer creation failures that remain reachable at init and
+context restore return a result.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

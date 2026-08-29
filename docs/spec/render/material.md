@@ -27,8 +27,12 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > no `NT_ASSET_MATERIAL` activator and no pack-loadable material format yet.
 > The layout below describes the planned on-disk shape once material assets
 > become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
-> planned types; current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs
-> referenced by `nt_resource_t` directly.
+> planned types. A material does not reference shaders: it stores a borrowed
+> `nt_program_t` that the game links from `NT_ASSET_SHADER_CODE` stages or from
+> embedded sources. `nt_material_set_program` is the only way to change it, and
+> a material is `ready` once a program is assigned — which says nothing about
+> that program's GPU liveness (see [Shader System](shader.md)). The material
+> module never links, destroys, or inspects the program.
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented

@@ -18,7 +18,13 @@ Renderer backend and render primitives belong to engine. Render pipeline belongs
 - draw mesh primitive
 - draw sprite primitive
 - GPU resource creation and binding
+- shader-stage compilation and program linking
 - material/shader binding helpers
+
+The engine links programs; it never deduplicates them. `nt_gfx_make_program`
+always produces a new program, and the game reuses one handle across every
+material that wants that shader pair. A hidden cache would need a refcount and
+would make lifetime implicit; see [Shader System](shader.md).
 
 ### Game decides
 
@@ -64,9 +70,21 @@ per-stream type/count/normalized, duplicate name hashes, and misaligned
 offsets/strides before any pipeline exists. Pipelines are cached, so the
 asserts are off the hot path.
 
+**Program / pipeline split.** A program is the linked (vertex, fragment) pair
+and owns everything that follows from linking: uniform locations, uniform
+values, and global UBO block bindings. A pipeline is a VAO plus fixed-function
+state that *borrows* a program handle. Two pipelines on one program therefore
+share every uniform value, and binding one does not reset what the other set —
+each consumer sets every uniform it needs on every draw. The pipeline never
+owns the program: destroy order is pipeline, then program, then shader stages,
+and binding a pipeline whose program was destroyed asserts. The split continues
+in #355, where vertex-input state leaves the pipeline as well.
+
 **Pipeline cache identity.** Renderers key their pipeline caches on a 64-bit
-hash of the full pipeline signature — vertex layout, shader pair, render state
-— and treat that hash as identity: descriptors are never compared on a hit.
+hash of the full pipeline signature — vertex layout, program handle, render
+state — and treat that hash as identity: descriptors are never compared on a
+hit. The cached pipelines borrow programs the game owns, so a cache entry never
+extends a program's lifetime.
 The hashed population is distinct layouts and material states, tens of values
 in a real game, so a 64-bit collision is not a practical risk, and a fixed
 array with a linear scan stays cheaper than a hash map at that scale. Every
