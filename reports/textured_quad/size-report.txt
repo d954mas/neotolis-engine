@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 689c6bb
+# Commit: 1d3eb85
 
 ## WASM Section Sizes
 
@@ -7,17 +7,17 @@ Section                Size
 ---------------- ----------
 Type                 214 B
 Import               605 B
-Function             140 B
+Function             139 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  72 B
-Code               76419 B
+Code               76415 B
 Data               10666 B
-Custom              4931 B
+Custom              4919 B
 ---------------- ----------
-TOTAL              93150 B
+TOTAL              93133 B
 
 ## Top 30 Functions by Size
 
@@ -31,7 +31,7 @@ TOTAL              93150 B
  2358 B   nt_input_web_on_blur
  1849 B   __rem_pio2f
  1747 B   nt_hash64
- 1120 B   nt_hash32
+ 1136 B   nt_hash32_str
   819 B   nt_input_web_on_pointer_move
   779 B   nt_input_web_on_pointer_down
   710 B   nt_gfx_backend_create_texture
@@ -54,8 +54,8 @@ TOTAL              93150 B
   385 B   sinf
   377 B   nt_app_web_frame
 
-Total functions: 138
-Total code size: 76202 B
+Total functions: 137
+Total code size: 76199 B
 
 ## Built Engine Archives
 
@@ -79,8 +79,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                75324 B
-libnt_gfx_stub.a           48456 B
+libnt_gfx.a                75332 B
+libnt_gfx_stub.a           48464 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5921942 B
+TOTAL (archives)         5921958 B
 
 ## Data Segments Summary
 

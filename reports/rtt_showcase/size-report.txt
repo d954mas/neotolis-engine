@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 689c6bb
+# Commit: 1d3eb85
 
 ## WASM Section Sizes
 
@@ -79,8 +79,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415268 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                75324 B
-libnt_gfx_stub.a           48456 B
+libnt_gfx.a                75332 B
+libnt_gfx_stub.a           48464 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5921942 B
+TOTAL (archives)         5921958 B
 
 ## Data Segments Summary
 
