@@ -651,14 +651,14 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 
     nt_resource_t atlas = sv->atlas[s_idx];
     const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
-        return; /* tombstone */
-    }
+    uint8_t flags = sv->flags[s_idx];
+    NT_ASSERT((flags & NT_SPRITE_FLAG_RESOLVED) != 0 && "sprite render item: sprite is unresolved");
+    NT_ASSERT(resolved->region != NULL && "sprite render item: resolved region is NULL");
+    NT_ASSERT(resolved->region->vertex_count != 0 && "sprite render item: region is tombstoned");
     const nt_texture_region_t *r = resolved->region;
     NT_ASSERT(resolved->cached_pos != NULL && resolved->raw_vertices != NULL && resolved->indices != NULL);
     uint32_t page_tex = nt_resource_get(resolved->page_resource);
 
-    uint8_t flags = sv->flags[s_idx];
     const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
     const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
     const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
@@ -1246,6 +1246,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
     if (count == 0) {
         return;
     }
+    NT_ASSERT(items != NULL);
 
     s_sprite.last_draw_list_calls = 0;
     s_sprite.cur_custom_bytes = 0; /* ECS sprite path emits no custom attrs */

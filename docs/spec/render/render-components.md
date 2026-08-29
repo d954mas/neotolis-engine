@@ -56,8 +56,8 @@ module behind the handle is described in [Material System](material.md).
 
 The sprite component is a SoA module — there is no monolithic `SpriteComponent`
 struct. Each sprite-bearing entity contributes one row across parallel dense
-arrays (atlas handle, region hash, cached region index, cached atlas revision,
-effective origin, flag bits). The module owns those arrays directly and
+arrays (atlas handle, region hash, cached resolved region data, cached atlas
+revision, effective origin, flag bits). The module owns those arrays directly and
 exposes them via per-entity accessors and a bulk view (see header
 `engine/sprite_comp/nt_sprite_comp.h` for the full API).
 
@@ -69,6 +69,8 @@ That pair survives atlas republish, hot reload, and region renumbering.
 The runtime additionally caches:
 
 - **Resolved region index** — `uint16_t` index into the atlas region table.
+- **Resolved region data** — atlas geometry pointers and the actual page
+  resource used by the renderer and its batch key.
 - **Atlas revision snapshot** — `uint32_t`, used to detect republish.
 - **Effective origin** — `float[2]`, either authored from the region or
   overridden by the game.
@@ -95,14 +97,13 @@ Two ways to bind a sprite to a region, picked by what the game knows:
   atlas merge contract guarantees every region ever present keeps the same
   index for the atlas lifetime — removed regions are marked dead in place but
   keep their index and revive there if re-added — so the cached index never
-  moves; a dead region simply zero-draws.
+  moves; a dead region has zero geometry and no page resource.
 
 Game code is free to read back the cached region index for animation logic
-(e.g. cycle to the next frame). It is stable across atlas republish for
-surviving regions;
-the only failure mode — tombstoning — is observable via
-`is_resolved()`
-    .
+(e.g. cycle to the next frame). It is stable across atlas republish. A removed
+region remains `RESOLVED` at its tombstoned index so it can revive in place;
+game-side render-item construction excludes it by checking
+`resolved.region->vertex_count != 0`.
 
 ### Origin override and flip
 
@@ -139,7 +140,7 @@ Resolution is explicit, not renderer-driven magic:
 - sync iterates dense sprite rows when the resource publication epoch
   advanced or any sprite was bound by hash since the last call; per-row
   early-out via cached atlas revision keeps stable frames cheap
-- sprite render-item build skips unresolved sprites
+- sprite render-item build skips unresolved sprites and resolved tombstones
 
 ### Bulk iteration
 

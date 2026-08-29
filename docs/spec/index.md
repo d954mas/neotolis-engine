@@ -118,7 +118,7 @@ reverse direction, file → chapter):
 
 | Task | Entry points |
 |---|---|
-| Add/change a render item field | `engine/render/nt_render_defs.h` (16 B item, `_Static_assert`) → `nt_sort_by_key` → `nt_*_renderer_draw_list`. **The game builds items**, not the engine: reference `examples/bunnymark/main.c` |
+| Add/change a render item field | `engine/render/nt_render_defs.h` (16 B item, `_Static_assert`) → `nt_sort_by_key` / `nt_sort_by_key_then_batch` → renderer-owned batch-key helper → `nt_*_renderer_draw_list`. **The game builds items and chooses sort policy**, not the engine: reference `examples/bunnymark/main.c` |
 | Change UI text wrapping | Wrapping itself lives in vendored Clay (`deps/clay`, `CLAY_TEXT_WRAP_*`); the engine owns only the measure callback (`engine/ui/nt_ui.c` → `nt_font_measure_n`) and the wrap mode it passes. Rich text has its own solver: `engine/ui/nt_ui_rich_text.c` |
 | Touch the `.ntpack` format | Layout: `shared/include/nt_pack_format.h` (magic `NPAK`) → writer `nt_builder_finish_pack` (`tools/builder/nt_builder.c`) → reader `engine/resource/nt_resource.c` (header/version check) |
 | Add builder validation | Programmer/IO errors assert (`NT_BUILD_ASSERT`, e.g. `tools/builder/nt_builder_texture.c`); content errors of atlas sprites go to the graceful channel `nt_builder_get_errors` (`tools/builder/nt_builder_atlas.c`) |

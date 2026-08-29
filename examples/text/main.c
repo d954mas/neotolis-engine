@@ -288,13 +288,16 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
+    bool can_render = true;
     nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
+        can_render = false;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_FONT);
 
+        nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
@@ -309,32 +312,34 @@ static void frame(void) {
         .clear_depth = 1.0F,
     });
 
-    /* Upload and bind frame UBO (slot 0) */
-    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-    nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
     /* Step font system -- resolves pending resources, uploads GPU data */
     double t_font_step = nt_time_now();
     nt_font_step();
     t_font_step = (nt_time_now() - t_font_step) * 1000.0;
 
-    /* Draw text */
-    nt_text_renderer_set_material(s_text_material);
-    nt_text_renderer_set_font(s_font);
+    double t_draw = 0.0;
+    double t_flush = 0.0;
+    if (can_render) {
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-    double t_draw = nt_time_now();
-    draw_text_scene();
-    t_draw = (nt_time_now() - t_draw) * 1000.0;
+        nt_text_renderer_set_material(s_text_material);
+        nt_text_renderer_set_font(s_font);
+
+        t_draw = nt_time_now();
+        draw_text_scene();
+        t_draw = (nt_time_now() - t_draw) * 1000.0;
+
+        t_flush = nt_time_now();
+        nt_text_renderer_flush();
+        t_flush = (nt_time_now() - t_flush) * 1000.0;
+    }
 
     /* Track resize for trackball skip */
     if (resized) {
         s_prev_fb_w = g_nt_window.fb_width;
         s_prev_fb_h = g_nt_window.fb_height;
     }
-
-    double t_flush = nt_time_now();
-    nt_text_renderer_flush();
-    t_flush = (nt_time_now() - t_flush) * 1000.0;
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();

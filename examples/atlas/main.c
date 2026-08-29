@@ -56,6 +56,20 @@ static const uint8_t s_checker_4x4[4 * 4 * 4] = {
 static nt_texture_t s_fallback_texture;
 static nt_buffer_t s_frame_ubo;
 
+static nt_texture_t make_fallback_texture(void) {
+    return nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .data = s_checker_4x4,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+        .label = "fallback_checker",
+    });
+}
+
 /* ---- Resource handles ---- */
 
 static nt_hash32_t s_pack_id;
@@ -150,12 +164,16 @@ static void frame(void) {
     nt_gfx_begin_frame();
 
     if (g_nt_gfx.context_restored) {
+        can_render = false;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
+        nt_gfx_destroy_texture(s_fallback_texture);
+        s_fallback_texture = make_fallback_texture();
         nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
 
+        nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
@@ -171,13 +189,13 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        uint32_t mesh_id = nt_resource_get(s_mesh_handle);
-        *nt_mesh_comp_handle(s_cube) = (nt_mesh_t){.id = mesh_id};
+        nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
+        *nt_mesh_comp_handle(s_cube) = mesh;
 
         nt_render_item_t items[1];
-        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh_id);
+        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh.id);
         items[0].entity = s_cube.id;
-        items[0].batch_key = nt_batch_key(s_material.id, mesh_id);
+        items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
 
         nt_sort_by_key(items, 1, s_sort_scratch);
         nt_mesh_renderer_draw_list(items, 1);
@@ -275,17 +293,7 @@ int main(void) {
     });
 
     /* Fallback checkerboard */
-    s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .data = s_checker_4x4,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
-        .label = "fallback_checker",
-    });
+    s_fallback_texture = make_fallback_texture();
     nt_hash64_t checker_rid = nt_hash64_str("__fallback_checker__");
     nt_hash32_t checker_pid = nt_hash32_str("__fallback__");
     nt_resource_create_pack(checker_pid, 0);

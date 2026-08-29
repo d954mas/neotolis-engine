@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdlib.h>
 
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -6,6 +7,7 @@
 #include "render/nt_render_defs.h"
 #include "render/nt_render_items.h"
 #include "render/nt_render_util.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
 
@@ -104,6 +106,124 @@ void test_sort_by_key_single(void) {
     nt_render_item_t scratch[1];
     nt_sort_by_key(&item, 1, scratch);
     TEST_ASSERT_EQUAL_UINT64(42, item.sort_key);
+}
+
+void test_sort_by_key_asserts_when_scratch_aliases_items(void) {
+    nt_render_item_t items[2] = {
+        {.sort_key = 2, .entity = 1},
+        {.sort_key = 1, .entity = 2},
+    };
+
+    NT_TEST_EXPECT_ASSERT(nt_sort_by_key(items, 2, items));
+}
+
+void test_sort_by_key_ignores_batch_key(void) {
+    nt_render_item_t items[3] = {
+        {.sort_key = 7, .entity = 1, .batch_key = 30},
+        {.sort_key = 7, .entity = 2, .batch_key = 10},
+        {.sort_key = 7, .entity = 3, .batch_key = 20},
+    };
+    nt_render_item_t scratch[3];
+
+    nt_sort_by_key(items, 3, scratch);
+
+    TEST_ASSERT_EQUAL_UINT32(1, items[0].entity);
+    TEST_ASSERT_EQUAL_UINT32(2, items[1].entity);
+    TEST_ASSERT_EQUAL_UINT32(3, items[2].entity);
+}
+
+void test_sort_by_key_then_batch_lexicographic(void) {
+    nt_render_item_t items[6] = {
+        {.sort_key = 2, .entity = 1, .batch_key = 3}, {.sort_key = 1, .entity = 2, .batch_key = 3}, {.sort_key = 2, .entity = 3, .batch_key = 1},
+        {.sort_key = 1, .entity = 4, .batch_key = 2}, {.sort_key = 2, .entity = 5, .batch_key = 2}, {.sort_key = 1, .entity = 6, .batch_key = 1},
+    };
+    nt_render_item_t scratch[6];
+
+    nt_sort_by_key_then_batch(items, 6, scratch);
+
+    const uint32_t expected[] = {6, 4, 2, 3, 5, 1};
+    for (uint32_t i = 0; i < 6; ++i) {
+        TEST_ASSERT_EQUAL_UINT32(expected[i], items[i].entity);
+    }
+}
+
+void test_sort_by_key_then_batch_primary_precedence_full_width(void) {
+    nt_render_item_t items[4] = {
+        {.sort_key = UINT64_MAX, .entity = 1, .batch_key = 0},
+        {.sort_key = 1, .entity = 2, .batch_key = UINT32_MAX},
+        {.sort_key = UINT64_MAX, .entity = 3, .batch_key = UINT32_MAX},
+        {.sort_key = 1, .entity = 4, .batch_key = 0},
+    };
+    nt_render_item_t scratch[4];
+
+    nt_sort_by_key_then_batch(items, 4, scratch);
+
+    const uint32_t expected[] = {4, 2, 1, 3};
+    for (uint32_t i = 0; i < 4; ++i) {
+        TEST_ASSERT_EQUAL_UINT32(expected[i], items[i].entity);
+    }
+}
+
+void test_sort_by_key_then_batch_stable_for_equal_pairs(void) {
+    nt_render_item_t items[4] = {
+        {.sort_key = 5, .entity = 1, .batch_key = 9},
+        {.sort_key = 5, .entity = 2, .batch_key = 3},
+        {.sort_key = 5, .entity = 3, .batch_key = 9},
+        {.sort_key = 5, .entity = 4, .batch_key = 9},
+    };
+    nt_render_item_t scratch[4];
+
+    nt_sort_by_key_then_batch(items, 4, scratch);
+
+    const uint32_t expected[] = {2, 1, 3, 4};
+    for (uint32_t i = 0; i < 4; ++i) {
+        TEST_ASSERT_EQUAL_UINT32(expected[i], items[i].entity);
+    }
+}
+
+void test_sort_by_key_then_batch_secondary_pass_parity(void) {
+    nt_render_item_t uniform[3] = {
+        {.sort_key = 3, .entity = 1, .batch_key = 7},
+        {.sort_key = 1, .entity = 2, .batch_key = 7},
+        {.sort_key = 2, .entity = 3, .batch_key = 7},
+    };
+    nt_render_item_t one_byte[3] = {
+        {.sort_key = 1, .entity = 1, .batch_key = 3},
+        {.sort_key = 1, .entity = 2, .batch_key = 1},
+        {.sort_key = 1, .entity = 3, .batch_key = 2},
+    };
+    nt_render_item_t two_bytes[3] = {
+        {.sort_key = 1, .entity = 1, .batch_key = 0x0101},
+        {.sort_key = 1, .entity = 2, .batch_key = 0x0002},
+        {.sort_key = 1, .entity = 3, .batch_key = 0x0100},
+    };
+    nt_render_item_t scratch[3];
+
+    nt_sort_by_key_then_batch(uniform, 3, scratch);
+    TEST_ASSERT_EQUAL_UINT32(2, uniform[0].entity);
+    TEST_ASSERT_EQUAL_UINT32(3, uniform[1].entity);
+    TEST_ASSERT_EQUAL_UINT32(1, uniform[2].entity);
+
+    nt_sort_by_key_then_batch(one_byte, 3, scratch);
+    TEST_ASSERT_EQUAL_UINT32(2, one_byte[0].entity);
+    TEST_ASSERT_EQUAL_UINT32(3, one_byte[1].entity);
+    TEST_ASSERT_EQUAL_UINT32(1, one_byte[2].entity);
+
+    nt_sort_by_key_then_batch(two_bytes, 3, scratch);
+    TEST_ASSERT_EQUAL_UINT32(2, two_bytes[0].entity);
+    TEST_ASSERT_EQUAL_UINT32(3, two_bytes[1].entity);
+    TEST_ASSERT_EQUAL_UINT32(1, two_bytes[2].entity);
+}
+
+void test_sort_by_key_then_batch_empty_and_single(void) {
+    nt_render_item_t item = {.sort_key = 42, .entity = 1, .batch_key = 7};
+    nt_render_item_t scratch[1];
+
+    nt_sort_by_key_then_batch(NULL, 0, NULL);
+    nt_sort_by_key_then_batch(&item, 1, scratch);
+
+    TEST_ASSERT_EQUAL_UINT64(42, item.sort_key);
+    TEST_ASSERT_EQUAL_UINT32(7, item.batch_key);
 }
 
 /* ---- Calc view depth ---- */
@@ -210,6 +330,13 @@ int main(void) {
     RUN_TEST(test_sort_by_key_ascending);
     RUN_TEST(test_sort_by_key_empty);
     RUN_TEST(test_sort_by_key_single);
+    RUN_TEST(test_sort_by_key_asserts_when_scratch_aliases_items);
+    RUN_TEST(test_sort_by_key_ignores_batch_key);
+    RUN_TEST(test_sort_by_key_then_batch_lexicographic);
+    RUN_TEST(test_sort_by_key_then_batch_primary_precedence_full_width);
+    RUN_TEST(test_sort_by_key_then_batch_stable_for_equal_pairs);
+    RUN_TEST(test_sort_by_key_then_batch_secondary_pass_parity);
+    RUN_TEST(test_sort_by_key_then_batch_empty_and_single);
     /* View depth */
     RUN_TEST(test_calc_view_depth_positive);
     /* Visibility */

@@ -539,6 +539,9 @@ void test_sprite_sync_keeps_resolved_when_region_removed(void) {
     const nt_texture_region_t *region = nt_atlas_get_region(s_atlas_res, *nt_sprite_comp_region_index(e));
     TEST_ASSERT_NOT_NULL(region);
     TEST_ASSERT_EQUAL_UINT8(0, region->vertex_count); /* dead → zero-draw */
+    nt_sprite_comp_view_t after = nt_sprite_comp_view();
+    uint16_t after_idx = after.sparse_indices[nt_entity_index(e)];
+    TEST_ASSERT_EQUAL_UINT32(0, after.resolved[after_idx].page_resource.id);
 }
 
 /* ---- Test 13: set_flip sets bits correctly and isolates from other flags ---- */

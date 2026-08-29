@@ -523,12 +523,12 @@ static void frame(void) {
             }
 
             /* Update mesh component handle */
-            uint32_t mesh_id = nt_resource_get(s_mesh_handles[i]);
-            *nt_mesh_comp_handle(s_entities[i]) = (nt_mesh_t){.id = mesh_id};
+            nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handles[i])};
+            *nt_mesh_comp_handle(s_entities[i]) = mesh;
 
-            items[item_count].sort_key = nt_sort_key_opaque(s_materials[i].id, mesh_id);
+            items[item_count].sort_key = nt_sort_key_opaque(s_materials[i].id, mesh.id);
             items[item_count].entity = s_entities[i].id;
-            items[item_count].batch_key = nt_batch_key(s_materials[i].id, mesh_id);
+            items[item_count].batch_key = nt_mesh_renderer_batch_key(s_materials[i], mesh);
             item_count++;
         }
 
@@ -547,16 +547,19 @@ static void frame(void) {
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
+        item_count = 0;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
+        nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        nt_gfx_destroy_buffer(s_light_ubo);
         s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,

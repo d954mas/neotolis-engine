@@ -50,11 +50,14 @@ Minimal render item — sorted draw record, not a fat data carrier. Renderer rea
 typedef struct nt_render_item_t {
     uint64_t sort_key;  // 8 bytes — encodes material+mesh for opaque, depth for transparent
     uint32_t entity;    // 4 bytes — raw entity id
-    uint32_t batch_key; // 4 bytes — state compatibility (same material+mesh = same key)
+    uint32_t batch_key; // 4 bytes — renderer-defined compatibility token
 } nt_render_item_t;     // 16 bytes, naturally aligned
 ```
 
-**batch_key vs sort_key:** sort_key controls draw order (can be anything: material, depth, layer). batch_key controls instancing compatibility (same material+mesh). These are independent — depth-sorted items still batch by material+mesh.
+**batch_key vs sort_key:** `sort_key` controls draw order and is pass-defined.
+`batch_key` identifies compatibility as defined by the renderer consuming the
+item. The two policies are independent: a depth/layer key may control order
+while the renderer's token identifies reusable state.
 
 **Why no inline world_matrix:** Instance packing reads world_matrix + color from component arrays via entity lookup (scattered access). Inlining them in the render item (96B) would make packing sequential, and a wider element costs proportionally more per sort pass. `nt_sort_by_key` is already the typed radix sort (`engine/render/nt_render_items.h`), so the remaining lever at 10K+ is an indirect sort over indices.
 
@@ -69,19 +72,56 @@ Sort key determines item order in the final draw sequence for a pass. It is pass
 
 ### Batch key / run detection
 
-`batch_key` encodes state compatibility (same material+mesh = same key). `sort_key` controls draw order. These are independent concerns — sort order can be anything (material, depth, layer) without affecting batch detection.
-
-Game fills `batch_key` via `nt_batch_key(material_id, mesh_id)`. Renderer compares consecutive batch_keys to detect instancing runs:
+The game fills `batch_key` through the helper owned by the concrete renderer.
+Renderers compare consecutive tokens to detect runs:
 
 ```c
 while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) run_end++;
 ```
+
+Equality is authoritative: it allows the renderer to reuse state resolved from
+the run leader. Equal tokens for incompatible state violate the caller
+contract and may draw with the wrong state. Store renderer-helper tokens
+unchanged. To force a boundary between otherwise compatible items, split them
+across separate `draw_list()` calls.
+
+`nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
+indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously
+live handles without widening the render item. Generation bits are omitted
+because the list has a bounded lifetime: each key is built from the current
+material and mesh bindings of that same `item.entity`; until
+`nt_mesh_renderer_draw_list()` returns, the entity and required components stay
+alive, neither binding changes, and neither referenced live resource is
+destroyed or has its slot reused.
+
+`nt_sprite_renderer_batch_key(material, page_resource)` packs the material's
+16-bit pool slot and the resolved atlas page resource's 16-bit slot. The page
+resource comes from the sprite component's resolved-region cache, so render-item
+construction does not search the atlas. The game excludes unresolved sprites and
+resolved tombstones before calling the helper; tombstones have no page resource.
+The same bounded-lifetime rule applies through
+`nt_sprite_renderer_draw_list()`: the material binding and resolved page must not
+change. SpriteRenderer still checks the actual page while emitting, so a page
+mismatch inside a run splits safely; this does not relax the material-key
+contract. Transform and drawable color may change after item construction because
+neither renderer's key encodes them.
 
 ## Sorting Policy
 
 ### Sort policy is pass-controlled
 
 The game decides sort mode for each pass. Typical modes: sort by material/state, sort by depth, no sort, custom order + tie-break.
+
+`nt_sort_by_key(items, count, scratch)` sorts ascending and stably by
+`sort_key` only. It deliberately ignores `batch_key`, so equal primary keys
+preserve the game's input order.
+
+`nt_sort_by_key_then_batch(items, count, scratch)` is the opt-in stable
+lexicographic policy: `sort_key` is primary and `batch_key` is secondary. It is
+useful when the primary key deliberately creates coarse ties and reordering
+inside a tie is permitted. Do not use it for transparent, UI, or other passes
+whose equal-key input order is semantically significant. Both functions use
+caller-provided separate scratch storage and allocate no heap memory.
 
 ### Depth sorting
 
@@ -118,8 +158,9 @@ WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no e
 Sprite renderer: gather sorted sprite render items, resolve component SoA views
 once, pack sprite vertices into one dynamic vertex buffer per flush chunk, and
 draw recorded commands. The renderer owns atlas page correctness: `batch_key`
-is a compatibility hint from the game, while SpriteRenderer verifies actual
-atlas page textures and splits commands when a run crosses pages.
+is the renderer-defined material-and-page compatibility token, while SpriteRenderer
+verifies actual atlas page textures and splits commands when a run crosses
+pages.
 
 Rect and polygon sprites use the same generic dynamic IBO path. The renderer
 does not keep a separate static-quad fast path unless measurements show a clear

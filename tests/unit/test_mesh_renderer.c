@@ -17,6 +17,7 @@
 #include "render/nt_render_items.h"
 #include "render/nt_render_defs.h"
 #include "graphics/nt_gfx_internal.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -237,6 +238,42 @@ void test_draw_list_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
 }
 
+void test_draw_list_null_items_asserts_when_nonempty(void) { NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NULL, 1)); }
+
+void test_batch_key_packs_material_and_mesh_slots(void) {
+    nt_material_t material = {.id = 0x00010001U};
+    nt_mesh_t mesh = {.id = 0x00020001U};
+
+    TEST_ASSERT_EQUAL_HEX32(0x00010001U, nt_mesh_renderer_batch_key(material, mesh));
+}
+
+void test_batch_key_ignores_generation_bits(void) {
+    nt_material_t material_a = {.id = 0x00010001U};
+    nt_material_t material_b = {.id = 0xABCD0001U};
+    nt_mesh_t mesh_a = {.id = 0x00020002U};
+    nt_mesh_t mesh_b = {.id = 0xDCBA0002U};
+
+    TEST_ASSERT_EQUAL_HEX32(nt_mesh_renderer_batch_key(material_a, mesh_a), nt_mesh_renderer_batch_key(material_b, mesh_b));
+}
+
+void test_batch_key_distinguishes_old_hash_collision(void) {
+    nt_material_t material_a = {.id = 0x00010001U};
+    nt_mesh_t mesh_a = {.id = 0x00020001U};
+    nt_material_t material_b = {.id = 0x002D00CDU};
+    nt_mesh_t mesh_b = {.id = 0x0003009DU};
+
+    TEST_ASSERT_EQUAL_HEX32(0x00010001U, nt_mesh_renderer_batch_key(material_a, mesh_a));
+    TEST_ASSERT_EQUAL_HEX32(0x00CD009DU, nt_mesh_renderer_batch_key(material_b, mesh_b));
+    TEST_ASSERT_NOT_EQUAL(nt_mesh_renderer_batch_key(material_a, mesh_a), nt_mesh_renderer_batch_key(material_b, mesh_b));
+}
+
+void test_batch_key_supports_max_slots(void) {
+    nt_material_t material = {.id = 0x1234FFFFU};
+    nt_mesh_t mesh = {.id = 0x5678FFFFU};
+
+    TEST_ASSERT_EQUAL_HEX32(UINT32_MAX, nt_mesh_renderer_batch_key(material, mesh));
+}
+
 /* ---- Test 3: single item produces 1 draw call ---- */
 
 void test_draw_list_single_item(void) {
@@ -247,7 +284,7 @@ void test_draw_list_single_item(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     nt_mesh_renderer_draw_list(items, 1);
 
@@ -267,7 +304,7 @@ void test_mesh_renderer_forwards_material_blend_state(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_with_blend(blend);
     nt_entity_t e = create_test_entity(mesh, mat);
-    nt_render_item_t item = {.entity = e.id, .batch_key = nt_batch_key(mat.id, mesh.id)};
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
 
     nt_mesh_renderer_draw_list(&item, 1);
 
@@ -286,7 +323,7 @@ void test_draw_list_same_material_mesh_batching(void) {
     nt_entity_t e1 = create_test_entity(mesh, mat);
     nt_entity_t e2 = create_test_entity(mesh, mat);
 
-    uint32_t bk = nt_batch_key(mat.id, mesh.id);
+    uint32_t bk = nt_mesh_renderer_batch_key(mat, mesh);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -317,10 +354,10 @@ void test_draw_list_different_materials(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_a.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat_a, mesh);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_b.id, mesh.id);
+    items[1].batch_key = nt_mesh_renderer_batch_key(mat_b, mesh);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -339,8 +376,8 @@ void test_draw_list_alternating_materials(void) {
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_entity_t e2 = create_test_entity(mesh, mat_a);
 
-    uint32_t bk_a = nt_batch_key(mat_a.id, mesh.id);
-    uint32_t bk_b = nt_batch_key(mat_b.id, mesh.id);
+    uint32_t bk_a = nt_mesh_renderer_batch_key(mat_a, mesh);
+    uint32_t bk_b = nt_mesh_renderer_batch_key(mat_b, mesh);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
@@ -367,7 +404,7 @@ void test_pipeline_cache_reuse(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     /* First draw_list call */
     nt_mesh_renderer_draw_list(items, 1);
@@ -391,10 +428,10 @@ void test_pipeline_cache_different_layouts(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_a.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat_a, mesh);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_b.id, mesh.id);
+    items[1].batch_key = nt_mesh_renderer_batch_key(mat_b, mesh);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -409,8 +446,8 @@ void test_pipeline_cache_different_material_attr_maps(void) {
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
-        {.sort_key = 0, .entity = e0.id, .batch_key = nt_batch_key(mat_a.id, mesh.id)},
-        {.sort_key = 1, .entity = e1.id, .batch_key = nt_batch_key(mat_b.id, mesh.id)},
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
     };
 
     nt_mesh_renderer_draw_list(items, 2);
@@ -429,7 +466,7 @@ void test_restore_gpu(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     /* Draw to populate cache */
     nt_mesh_renderer_draw_list(items, 1);
@@ -477,7 +514,7 @@ void test_draw_list_color_mode_float4(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     nt_mesh_renderer_draw_list(items, 1);
 
@@ -495,7 +532,7 @@ void test_draw_list_color_mode_rgba8(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     nt_mesh_renderer_draw_list(items, 1);
 
@@ -516,10 +553,10 @@ void test_pipeline_cache_different_color_modes(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_none.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+    items[1].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -540,10 +577,10 @@ void test_draw_list_mixed_color_modes(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
-    items[0].batch_key = nt_batch_key(mat_none.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
-    items[1].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+    items[1].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -570,7 +607,7 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
         entities[idx] = create_test_entity(mesh, mat_none);
         items[idx].sort_key = idx;
         items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_batch_key(mat_none.id, mesh.id);
+        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
         idx++;
     }
     /* Run 1: 3x RGBA8 (stride 56) */
@@ -578,7 +615,7 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
         entities[idx] = create_test_entity(mesh, mat_rgba8);
         items[idx].sort_key = idx;
         items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_batch_key(mat_rgba8.id, mesh.id);
+        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_rgba8, mesh);
         idx++;
     }
     /* Run 2: 3x FLOAT4 (stride 64) */
@@ -586,7 +623,7 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
         entities[idx] = create_test_entity(mesh, mat_float4);
         items[idx].sort_key = idx;
         items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
         idx++;
     }
 
@@ -618,7 +655,7 @@ void test_ring_cursor_advances_and_wraps(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     nt_mesh_renderer_draw_list(items, 1);
     uint32_t delta = nt_mesh_renderer_test_ring_cursor();
@@ -652,7 +689,7 @@ void test_ring_upload_and_draw_base_agree(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
-    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
 
     nt_mesh_renderer_draw_list(items, 1);
     uint32_t upload1 = nt_gfx_stub_test_last_update_buffer_offset();
@@ -672,6 +709,11 @@ int main(void) {
 
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
+    RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
+    RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
+    RUN_TEST(test_batch_key_ignores_generation_bits);
+    RUN_TEST(test_batch_key_distinguishes_old_hash_collision);
+    RUN_TEST(test_batch_key_supports_max_slots);
     RUN_TEST(test_draw_list_single_item);
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
