@@ -103,12 +103,14 @@ typedef struct {
 
 static struct {
     nt_pool_t shader_pool;
+    nt_pool_t program_pool;
     nt_pool_t pipeline_pool;
     nt_pool_t buffer_pool;
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
 
     uint32_t *shader_backends; /* backend handles parallel to pool slots */
+    uint32_t *program_backends;
     uint32_t *pipeline_backends;
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
@@ -127,6 +129,9 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
+    /* Global blocks are bound at link time, so registering one after the first
+     * program would silently miss every program already linked. */
+    uint32_t programs_created;
     bool context_restore_retry;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -144,6 +149,7 @@ static struct {
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    NT_ASSERT(s_gfx.programs_created == 0 && "register global blocks before creating the first program");
     s_global_blocks[s_global_block_count].name = name;
     s_global_blocks[s_global_block_count].binding_slot = binding_slot;
     s_global_blocks[s_global_block_count].active = true;
@@ -163,6 +169,7 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_programs > 0 && "nt_gfx_desc_t.max_programs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_pipelines > 0 && "nt_gfx_desc_t.max_pipelines is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
@@ -173,12 +180,14 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
+    nt_pool_init(&s_gfx.program_pool, desc->max_programs);
     nt_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
     nt_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
     nt_pool_init(&s_gfx.texture_pool, desc->max_textures);
     nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
+    s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
@@ -245,6 +254,7 @@ void nt_gfx_shutdown(void) {
     nt_gfx_backend_shutdown();
 
     nt_pool_shutdown(&s_gfx.shader_pool);
+    nt_pool_shutdown(&s_gfx.program_pool);
     nt_pool_shutdown(&s_gfx.pipeline_pool);
     nt_pool_shutdown(&s_gfx.buffer_pool);
     nt_pool_shutdown(&s_gfx.texture_pool);
@@ -252,6 +262,7 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
+    free(s_gfx.program_backends);
     free(s_gfx.pipeline_backends);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
@@ -455,6 +466,9 @@ void nt_gfx_begin_frame(void) {
         /* First detection: wipe all backend handles */
         for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
             s_gfx.shader_backends[i] = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+            s_gfx.program_backends[i] = 0;
         }
         for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
             s_gfx.pipeline_backends[i] = 0;
@@ -688,6 +702,32 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     s_gfx.shader_backends[slot] = backend;
 
     result.id = id;
+    return result;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
+
+    /* Live poll, not g_nt_gfx.context_lost: that flag is only refreshed in
+     * begin_frame, and games create resources in update, before it runs. */
+    if (nt_gfx_backend_is_context_lost()) {
+        return NT_PROGRAM_INVALID;
+    }
+
+    uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
+    NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
+
+    uint32_t vs_backend = s_gfx.shader_backends[nt_pool_slot_index(vs.id)];
+    uint32_t fs_backend = s_gfx.shader_backends[nt_pool_slot_index(fs.id)];
+    uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
+    NT_ASSERT(backend != 0 && "program link failed");
+
+    s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
+    s_gfx.programs_created++;
+
+    nt_program_t result = {id};
     return result;
 }
 
@@ -1044,6 +1084,17 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     nt_pool_free(&s_gfx.shader_pool, shd.id);
 }
 
+void nt_gfx_destroy_program(nt_program_t prog) {
+    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        NT_LOG_ERROR("destroy_program: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(prog.id);
+    nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
+    s_gfx.program_backends[slot] = 0;
+    nt_pool_free(&s_gfx.program_pool, prog.id);
+}
+
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         NT_LOG_ERROR("destroy_pipeline: invalid handle");
@@ -1139,6 +1190,15 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt) {
         return false;
     }
     return s_gfx.render_target_metas[nt_pool_slot_index(rt.id)].complete;
+}
+
+bool nt_gfx_program_valid(nt_program_t prog) { return nt_pool_valid(&s_gfx.program_pool, prog.id); }
+
+bool nt_gfx_program_ready(nt_program_t prog) {
+    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        return false;
+    }
+    return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
 }
 
 bool nt_gfx_texture_ready(nt_texture_t tex) {

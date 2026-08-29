@@ -18,6 +18,13 @@ typedef struct {
     uint32_t id;
 } nt_shader_t;
 
+/* Linked (vertex, fragment) pair. Owned by whoever called nt_gfx_make_program;
+ * pipelines only borrow it, so destroy order is pipeline -> program -> shaders.
+ * No dedup: two calls with the same pair produce two programs. */
+typedef struct {
+    uint32_t id;
+} nt_program_t;
+
 typedef struct {
     uint32_t id;
 } nt_pipeline_t;
@@ -40,6 +47,7 @@ typedef struct {
 
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
+#define NT_PROGRAM_INVALID ((nt_program_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
  * itself. One texture can be sampled with different filters in different
@@ -288,6 +296,7 @@ typedef struct {
 
 typedef struct {
     uint16_t max_shaders;        /* default: 32 */
+    uint16_t max_programs;       /* default: 16 */
     uint16_t max_pipelines;      /* default: 16 */
     uint16_t max_buffers;        /* default: 128 */
     uint16_t max_textures;       /* default: 64 */
@@ -418,6 +427,7 @@ extern nt_gfx_t g_nt_gfx;
 static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
     return (nt_gfx_desc_t){
         .max_shaders = 32,
+        .max_programs = 16,
         .max_pipelines = 16,
         .max_buffers = 128,
         .max_textures = 64,
@@ -451,6 +461,9 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
+/* Links the pair. A link failure is a developer error and traps; the only
+ * invalid handle returned is on a lost context. Both stages must be valid. */
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
@@ -462,6 +475,9 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd);
+/* Pipelines built from this program become unusable; the owner is responsible
+ * for destroying them and for clearing every material that held the handle. */
+void nt_gfx_destroy_program(nt_program_t prog);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -478,6 +494,12 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
+/* Handle still refers to a live slot. Says nothing about the GPU object:
+ * after context loss handles stay valid while the GL program is gone. */
+bool nt_gfx_program_valid(nt_program_t prog);
+/* The GL program behind the handle exists — false after context loss until
+ * the owner relinks. nt_gfx_make_pipeline requires this. */
+bool nt_gfx_program_ready(nt_program_t prog);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
 /* Returns INVALID for invalid or stale handles. */

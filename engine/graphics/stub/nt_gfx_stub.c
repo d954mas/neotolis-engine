@@ -18,6 +18,7 @@ static uint32_t s_stub_render_target_create_count;
 static uint32_t s_stub_render_target_resize_count;
 static uint32_t s_stub_render_target_destroy_count;
 static uint32_t s_stub_texture_create_count;
+static uint32_t s_stub_program_create_count;
 static uint32_t s_stub_update_texture_count;
 static uint32_t s_stub_backend_restore_count;
 static uint32_t s_stub_gpu_caps_probe_count;
@@ -30,6 +31,7 @@ static uint32_t s_stub_next_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
 static bool s_stub_fail_next_texture_create;
+static bool s_stub_fail_next_program_create;
 static bool s_stub_fail_next_backend_restore;
 static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
@@ -54,6 +56,7 @@ uint32_t nt_gfx_stub_test_render_target_create_count(void) { return s_stub_rende
 uint32_t nt_gfx_stub_test_render_target_resize_count(void) { return s_stub_render_target_resize_count; }
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
 uint32_t nt_gfx_stub_test_texture_create_count(void) { return s_stub_texture_create_count; }
+uint32_t nt_gfx_stub_test_program_create_count(void) { return s_stub_program_create_count; }
 uint32_t nt_gfx_stub_test_update_texture_count(void) { return s_stub_update_texture_count; }
 uint32_t nt_gfx_stub_test_backend_restore_count(void) { return s_stub_backend_restore_count; }
 uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void) { return s_stub_gpu_caps_probe_count; }
@@ -65,6 +68,7 @@ uint32_t nt_gfx_stub_test_last_depth_texture_backend(void) { return s_stub_last_
 void nt_gfx_stub_test_fail_next_render_target_create(void) { s_stub_fail_next_render_target_create = true; }
 void nt_gfx_stub_test_fail_next_render_target_resize(void) { s_stub_fail_next_render_target_resize = true; }
 void nt_gfx_stub_test_fail_next_texture_create(void) { s_stub_fail_next_texture_create = true; }
+void nt_gfx_stub_test_fail_next_program_create(void) { s_stub_fail_next_program_create = true; }
 void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend_restore = true; }
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
@@ -83,6 +87,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_render_target_resize_count = 0;
     s_stub_render_target_destroy_count = 0;
     s_stub_texture_create_count = 0;
+    s_stub_program_create_count = 0;
     s_stub_update_texture_count = 0;
     s_stub_backend_restore_count = 0;
     s_stub_gpu_caps_probe_count = 0;
@@ -98,6 +103,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_next_texture_create = false;
+    s_stub_fail_next_program_create = false;
     s_stub_fail_next_backend_restore = false;
     s_stub_fail_next_render_target_create = false;
     s_stub_fail_next_render_target_resize = false;
@@ -181,6 +187,21 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 }
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
+
+uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
+    (void)vs_backend;
+    (void)fs_backend;
+#ifdef NT_TEST_ACCESS
+    if (s_stub_fail_next_program_create) {
+        s_stub_fail_next_program_create = false;
+        return 0;
+    }
+    s_stub_program_create_count++;
+#endif
+    return 1;
+}
+
+void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_handle; }
 
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
 #ifdef NT_TEST_ACCESS

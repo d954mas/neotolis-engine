@@ -100,6 +100,14 @@ typedef struct {
     uint8_t uniform_count;
 } nt_gfx_gl_pipeline_t;
 
+/* Uniform locations are per-program, so the cache lives here, not on the
+ * pipelines that borrow the program. */
+typedef struct {
+    GLuint program;
+    nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
+    uint8_t uniform_count;
+} nt_gfx_gl_program_t;
+
 typedef struct {
     GLuint fbo;
     GLuint depth_rbo;
@@ -112,6 +120,7 @@ typedef struct {
 static GLuint s_bound_program;         /* currently bound GL program (for uniforms) */
 static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
 
+static nt_gfx_gl_program_t *s_programs;   /* linked programs, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
@@ -407,6 +416,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     }
 
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
+    s_programs = (nt_gfx_gl_program_t *)calloc(s_init_desc.max_programs + 1, sizeof(nt_gfx_gl_program_t));
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
     s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
@@ -431,6 +441,7 @@ void nt_gfx_backend_shutdown(void) {
         s_timer_enabled = false;
     }
 
+    free(s_programs);
     free(s_pipelines);
     free(s_buffer_gl);
     free(s_buffer_targets);
@@ -438,6 +449,7 @@ void nt_gfx_backend_shutdown(void) {
     free(s_render_targets);
     free(s_transcode_buf);
 
+    s_programs = NULL;
     s_pipelines = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
@@ -944,8 +956,9 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     glDeleteShader(shader);
 }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
-    /* Link program */
+/* Links a stage pair and binds every registered global UBO block. Returns 0 on
+ * link failure, after logging both stages and the program log. */
+static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     GLuint program = glCreateProgram();
     glAttachShader(program, (GLuint)vs_backend);
     glAttachShader(program, (GLuint)fs_backend);
@@ -962,17 +975,85 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0;
     }
 
-    /* Auto-bind all registered global UBO blocks */
-    {
-        const nt_global_block_t *blocks;
-        uint32_t block_count;
-        nt_gfx_get_global_blocks(&blocks, &block_count);
-        for (uint32_t bi = 0; bi < block_count; bi++) {
-            GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
-            if (block_index != GL_INVALID_INDEX) {
-                glUniformBlockBinding(program, block_index, (GLuint)blocks[bi].binding_slot);
-            }
+    const nt_global_block_t *blocks;
+    uint32_t block_count;
+    nt_gfx_get_global_blocks(&blocks, &block_count);
+    for (uint32_t bi = 0; bi < block_count; bi++) {
+        GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
+        if (block_index != GL_INVALID_INDEX) {
+            glUniformBlockBinding(program, block_index, (GLuint)blocks[bi].binding_slot);
         }
+    }
+    return program;
+}
+
+/* Cache active uniform locations (avoids glGetUniformLocation per frame) */
+static void nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, uint8_t *out_count) {
+    *out_count = 0;
+    GLint active_uniforms = 0;
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    for (GLint ui = 0; ui < active_uniforms && *out_count < NT_MAX_CACHED_UNIFORMS; ui++) {
+        char uname[64];
+        GLsizei ulen = 0;
+        GLint usize = 0;
+        GLenum utype = 0;
+        glGetActiveUniform(program, (GLuint)ui, (GLsizei)sizeof(uname), &ulen, &usize, &utype, uname);
+        GLint loc = glGetUniformLocation(program, uname);
+        if (loc >= 0) {
+            out[*out_count].name_hash = nt_hash32_str(uname).value;
+            out[*out_count].location = loc;
+            (*out_count)++;
+        }
+    }
+}
+
+uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
+    GLuint program = nt_gfx_gl_link_program(vs_backend, fs_backend);
+    if (program == 0) {
+        return 0;
+    }
+
+    uint32_t slot = 0;
+    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
+        if (s_programs[i].program == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == 0) {
+        glDeleteProgram(program);
+        return 0; /* no free slots */
+    }
+
+    s_programs[slot].program = program;
+    nt_gfx_gl_cache_uniforms(program, s_programs[slot].uniforms, &s_programs[slot].uniform_count);
+    return slot;
+}
+
+void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_programs) {
+        return;
+    }
+    GLuint program = s_programs[backend_handle].program;
+    if (program == 0) {
+        return;
+    }
+    /* glDeleteProgram + glCreateProgram usually reuse the GL name, so a stale
+     * mirror would send the next uniform write into a different program. */
+    if (s_gl_cache.program == program) {
+        s_gl_cache.program = 0;
+    }
+    if (s_bound_program == program) {
+        s_bound_program = 0;
+    }
+    glDeleteProgram(program);
+    memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
+}
+
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
+    GLuint program = nt_gfx_gl_link_program(vs_backend, fs_backend);
+    if (program == 0) {
+        return 0;
     }
 
     /* Find free pipeline slot */
@@ -1028,23 +1109,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->layout = desc->layout;
     pip->instance_layout = desc->instance_layout;
 
-    /* Cache active uniform locations (avoids glGetUniformLocation per frame) */
-    pip->uniform_count = 0;
-    GLint active_uniforms = 0;
-    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
-    for (GLint ui = 0; ui < active_uniforms && pip->uniform_count < NT_MAX_CACHED_UNIFORMS; ui++) {
-        char uname[64];
-        GLsizei ulen = 0;
-        GLint usize = 0;
-        GLenum utype = 0;
-        glGetActiveUniform(program, (GLuint)ui, (GLsizei)sizeof(uname), &ulen, &usize, &utype, uname);
-        GLint loc = glGetUniformLocation(program, uname);
-        if (loc >= 0) {
-            pip->uniforms[pip->uniform_count].name_hash = nt_hash32_str(uname).value;
-            pip->uniforms[pip->uniform_count].location = loc;
-            pip->uniform_count++;
-        }
-    }
+    nt_gfx_gl_cache_uniforms(program, pip->uniforms, &pip->uniform_count);
 
     return slot;
 }
@@ -1832,6 +1897,9 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */
+    if (s_programs) {
+        memset(s_programs, 0, (s_init_desc.max_programs + 1) * sizeof(nt_gfx_gl_program_t));
+    }
     if (s_pipelines) {
         memset(s_pipelines, 0, (s_init_desc.max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
     }

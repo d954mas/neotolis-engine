@@ -50,7 +50,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 };
 
-void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16}); }
+void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
@@ -148,7 +148,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -188,7 +188,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -268,6 +268,156 @@ void test_gfx_pipeline_rejects_invalid_shaders(void) {
         .fragment_shader = {.id = 0},
     });
     TEST_ASSERT_EQUAL_UINT32(0, pip.id);
+}
+
+/* ---- Program: helpers ---- */
+
+static nt_shader_t make_test_vs(void) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"}); }
+
+static nt_shader_t make_test_fs(void) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"}); }
+
+/* ---- Program: no dedup — same pair links twice ---- */
+
+void test_gfx_make_program_does_not_dedup(void) {
+    nt_gfx_stub_test_reset();
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+
+    nt_program_t a = nt_gfx_make_program(vs, fs);
+    nt_program_t b = nt_gfx_make_program(vs, fs);
+
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, a.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
+    /* The backend counter is what proves it: equal handles alone would also
+     * come out of a hidden cache. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_program_create_count());
+
+    nt_gfx_destroy_program(a);
+    nt_gfx_destroy_program(b);
+}
+
+/* ---- Program: valid and ready after create ---- */
+
+void test_gfx_program_valid_and_ready(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_gfx_destroy_program(prog);
+}
+
+/* ---- Program: destroy invalidates, second destroy is a no-op ---- */
+
+void test_gfx_destroy_program_invalidates(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_gfx_destroy_program(prog);
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    nt_gfx_destroy_program(prog);
+}
+
+/* ---- Program: destroyed slot is reusable ---- */
+
+void test_gfx_program_slot_reused_after_destroy(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    for (int i = 0; i < 8; i++) { /* twice the pool capacity */
+        nt_program_t prog = nt_gfx_make_program(vs, fs);
+        TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+        nt_gfx_destroy_program(prog);
+    }
+}
+
+/* ---- Program: outlives its stages ---- */
+
+void test_gfx_program_survives_shader_destroy(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_gfx_destroy_program(prog);
+}
+
+/* ---- Program: exhausting the pool is a configuration error ---- */
+
+void test_gfx_program_pool_full_asserts(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    for (int i = 0; i < 4; i++) { /* setUp: max_programs = 4 */
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id);
+    }
+    EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
+}
+
+/* ---- Program: invalid stage handle asserts ---- */
+
+void test_gfx_make_program_asserts_invalid_shader(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    EXPECT_ASSERT(nt_gfx_make_program((nt_shader_t){0}, fs));
+    EXPECT_ASSERT(nt_gfx_make_program(vs, (nt_shader_t){0}));
+}
+
+/* ---- Program: link failure asserts ---- */
+
+void test_gfx_make_program_asserts_on_link_failure(void) {
+    nt_gfx_stub_test_reset();
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_gfx_stub_test_fail_next_program_create();
+    EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
+    nt_gfx_stub_test_reset();
+}
+
+/* ---- Program: a lost context yields an invalid handle, not an assert ---- */
+
+void test_gfx_make_program_context_lost_returns_invalid(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+
+    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so this
+     * pins the live backend poll rather than the cached flag. */
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_gfx_stub_test_set_context_lost(false);
+
+    TEST_ASSERT_EQUAL_UINT32(0, prog.id);
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
+}
+
+/* ---- Program: context loss clears readiness, handles stay valid ---- */
+
+void test_gfx_context_loss_keeps_handle_drops_ready(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+}
+
+/* ---- Global blocks: registering after the first program asserts ---- */
+
+void test_gfx_register_global_block_after_program_asserts(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    EXPECT_ASSERT(nt_gfx_register_global_block("Globals", 0));
+}
+
+/* ---- Global blocks: the program counter resets on init ---- */
+
+void test_gfx_global_block_counter_resets_on_init(void) {
+    nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_gfx_shutdown();
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
+    /* Must not assert: the previous session's programs are gone. */
+    nt_gfx_register_global_block("Globals", 0);
 }
 
 static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
@@ -1414,7 +1564,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);
@@ -1627,6 +1777,18 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_shader);
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
+    RUN_TEST(test_gfx_make_program_does_not_dedup);
+    RUN_TEST(test_gfx_program_valid_and_ready);
+    RUN_TEST(test_gfx_destroy_program_invalidates);
+    RUN_TEST(test_gfx_program_slot_reused_after_destroy);
+    RUN_TEST(test_gfx_program_survives_shader_destroy);
+    RUN_TEST(test_gfx_program_pool_full_asserts);
+    RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
+    RUN_TEST(test_gfx_make_program_asserts_on_link_failure);
+    RUN_TEST(test_gfx_make_program_context_lost_returns_invalid);
+    RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
+    RUN_TEST(test_gfx_register_global_block_after_program_asserts);
+    RUN_TEST(test_gfx_global_block_counter_resets_on_init);
     RUN_TEST(test_gfx_pipeline_stride_255_boundary);
     RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
     RUN_TEST(test_gfx_pipeline_asserts_normalized_float);

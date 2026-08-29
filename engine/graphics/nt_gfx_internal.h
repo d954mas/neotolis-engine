@@ -27,6 +27,10 @@ void nt_gfx_backend_end_pass(void);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
+/* Links the pair and caches its uniform locations. Returns 0 on link failure. */
+uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
+void nt_gfx_backend_destroy_program(uint32_t backend_handle);
+
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
@@ -121,6 +125,8 @@ uint32_t nt_gfx_stub_test_render_target_create_count(void);
 uint32_t nt_gfx_stub_test_render_target_resize_count(void);
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
 uint32_t nt_gfx_stub_test_texture_create_count(void);
+uint32_t nt_gfx_stub_test_program_create_count(void);
+void nt_gfx_stub_test_fail_next_program_create(void);
 uint16_t nt_gfx_stub_test_last_render_target_width(void);
 uint16_t nt_gfx_stub_test_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);

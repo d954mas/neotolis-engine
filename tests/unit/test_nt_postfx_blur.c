@@ -46,6 +46,7 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
+        .max_programs = 8,
         .max_pipelines = 8,
         .max_buffers = 8,
         .max_textures = 12,
