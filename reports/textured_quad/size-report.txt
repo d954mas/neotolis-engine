@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 24d98c4
+# Commit: 689c6bb
 
 ## WASM Section Sizes
 
@@ -7,24 +7,24 @@ Section                Size
 ---------------- ----------
 Type                 214 B
 Import               605 B
-Function             138 B
+Function             140 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  72 B
-Code               76164 B
+Code               76419 B
 Data               10666 B
-Custom              4890 B
+Custom              4931 B
 ---------------- ----------
-TOTAL              92852 B
+TOTAL              93150 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-26094 B   frame
- 6378 B   main
+25928 B   frame
+ 6382 B   main
  5339 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
  2606 B   printf_core
@@ -54,8 +54,8 @@ TOTAL              92852 B
   385 B   sinf
   377 B   nt_app_web_frame
 
-Total functions: 136
-Total code size: 75950 B
+Total functions: 138
+Total code size: 76202 B
 
 ## Built Engine Archives
 
@@ -94,7 +94,7 @@ libnt_material.a            4790 B
 libnt_material_comp.a       2302 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2164 B
-libnt_mesh_renderer.a       8006 B
+libnt_mesh_renderer.a       8010 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -102,7 +102,7 @@ libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
 libnt_postfx_blur.a         7226 B
-libnt_render.a              5436 B
+libnt_render.a              7674 B
 libnt_resource.a          188716 B
 libnt_shape_renderer.a   1141498 B
 libnt_sort.a                 470 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5919700 B
+TOTAL (archives)         5921942 B
 
 ## Data Segments Summary
 
