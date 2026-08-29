@@ -69,6 +69,24 @@ static bool s_grabbed;
 
 static nt_font_t s_font;
 static nt_material_t s_text_material;
+static nt_resource_t s_text_vs_handle;
+static nt_resource_t s_text_fs_handle;
+static nt_program_t s_text_program;
+
+/* Links once both stages are ready. The program is ours: the material only
+ * borrows the handle, and context loss forces a relink. */
+static void link_programs(void) {
+    if (s_text_program.id != 0) {
+        return;
+    }
+    uint32_t vs = nt_resource_get(s_text_vs_handle);
+    uint32_t fs = nt_resource_get(s_text_fs_handle);
+    if (vs == 0 || fs == 0) {
+        return;
+    }
+    s_text_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+    nt_material_set_program(s_text_material, s_text_program);
+}
 static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_base_pack_id;
@@ -224,6 +242,7 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     /* Progressive loading: start CJK pack after base pack is ready */
     if (!s_cjk_loading && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
@@ -294,6 +313,9 @@ static void frame(void) {
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         can_render = false;
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_text_program); /* GL object is gone; this frees the pool slot */
+        s_text_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_FONT);
 
@@ -465,13 +487,11 @@ int main(void) {
     /* CJK pack loaded progressively in frame() after base is ready */
 
     /* 12. Request shader resources */
-    nt_resource_t vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 13. Create text material (shader pair, alpha blend for Slug) */
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = vs,
-        .fs = fs,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = false,
@@ -512,6 +532,7 @@ int main(void) {
     nt_font_destroy(s_font);
     nt_font_shutdown();
     nt_material_destroy(s_text_material);
+    nt_gfx_destroy_program(s_text_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

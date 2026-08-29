@@ -75,15 +75,9 @@ static nt_mesh_t create_test_mesh(void) {
     return (nt_mesh_t){.id = handle};
 }
 
-/* ---- Helper: create a real GFX shader and register it as a resource, then create material ---- */
+/* ---- Helper: link a real GFX program, then create a material on it ---- */
 
-typedef struct {
-    nt_resource_t vs;
-    nt_resource_t fs;
-} test_shader_resources_t;
-
-static test_shader_resources_t create_test_shader_resources(void) {
-    /* Create actual GFX shader handles so pipeline creation validates them */
+static nt_program_t create_test_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,
         .source = "void main(){}",
@@ -94,37 +88,14 @@ static test_shader_resources_t create_test_shader_resources(void) {
         .source = "void main(){}",
         .label = "test_fs",
     });
-
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(vs_name, sizeof(vs_name), "test_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof(fs_name), "test_fs_%u", s_vpack_counter);
-
-    /* Create virtual pack and register shader resources with the real GFX handles */
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "mat_pack_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-
-    nt_resource_step(); /* resolve virtual packs immediately */
-
-    return (test_shader_resources_t){.vs = vs_res, .fs = fs_res};
+    return nt_gfx_make_program(vs, fs);
 }
 
-static nt_material_t create_test_material_with_attr(test_shader_resources_t shaders, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
+static nt_material_t create_test_material_with_attr(nt_program_t program, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = shaders.vs;
-    desc.fs = shaders.fs;
+    desc.program = program;
     desc.attr_map[0].stream_name = stream_name;
     desc.attr_map[0].location = location;
     desc.attr_map_count = 1;
@@ -136,17 +107,15 @@ static nt_material_t create_test_material_with_attr(test_shader_resources_t shad
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
-
-    nt_material_step(); /* resolve shaders */
-
+    nt_material_step();
     return mat;
 }
 
-static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_shader_resources(), color_mode, "position", 0, nt_blend_opaque()); }
+static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_program(), color_mode, "position", 0, nt_blend_opaque()); }
 
 static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
 
-static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_shader_resources(), NT_COLOR_MODE_NONE, "position", 0, blend); }
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "position", 0, blend); }
 
 /* ---- Helper: create a fully-equipped test entity ---- */
 
@@ -439,11 +408,30 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* Manual dedup is the whole point of an explicit program: two materials on one
+ * program, same layout and state, must collapse to a single pipeline. */
+void test_pipeline_cache_shared_program_collapses(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t shared = create_test_program();
+    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_entity_t e0 = create_test_entity(mesh, mat_a);
+    nt_entity_t e1 = create_test_entity(mesh, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
+    };
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
-    test_shader_resources_t shaders = create_test_shader_resources();
-    nt_material_t mat_a = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
+    nt_program_t shared = create_test_program();
+    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -722,6 +710,7 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_pipeline_cache_shared_program_collapses);
     RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_restore_gpu);
     /* Color mode tests */

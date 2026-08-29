@@ -18,7 +18,7 @@ typedef struct {
     float sigma; /* 0 derives from radius. */
 } nt_postfx_blur_pass_t;
 
-/* The module owns only shader, pipeline, and fullscreen primitive state. */
+/* The module owns only shader, program, pipeline, and fullscreen primitive state. */
 nt_result_t nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
 /* Rebuilds GPU resources after context restore. */

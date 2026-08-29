@@ -112,6 +112,7 @@ static struct {
     uint32_t *shader_backends; /* backend handles parallel to pool slots */
     uint32_t *program_backends;
     uint32_t *pipeline_backends;
+    uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
     uint32_t *render_target_backends;
@@ -189,6 +190,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
     s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
+    s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
     s_gfx.render_target_backends = (uint32_t *)calloc(max_render_targets + 1, sizeof(uint32_t));
@@ -264,6 +266,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.shader_backends);
     free(s_gfx.program_backends);
     free(s_gfx.pipeline_backends);
+    free(s_gfx.pipeline_programs);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.render_target_backends);
@@ -791,15 +794,13 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     nt_pipeline_t result = {0};
     if (!desc) {
         return result;
     }
-    if (!nt_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
-        NT_LOG_ERROR("pipeline creation failed: invalid shader handle");
-        return result;
-    }
+    NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
     if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
         NT_LOG_ERROR("pipeline creation failed: too many vertex attrs");
         return result;
@@ -826,12 +827,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         return result;
     }
 
-    uint32_t vs_slot = nt_pool_slot_index(desc->vertex_shader.id);
-    uint32_t fs_slot = nt_pool_slot_index(desc->fragment_shader.id);
-    uint32_t vs_backend = s_gfx.shader_backends[vs_slot];
-    uint32_t fs_backend = s_gfx.shader_backends[fs_slot];
-
-    uint32_t backend = nt_gfx_backend_create_pipeline(desc, vs_backend, fs_backend);
+    uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
+    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
         nt_pool_free(&s_gfx.pipeline_pool, id);
@@ -840,6 +837,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.pipeline_backends[slot] = backend;
+    s_gfx.pipeline_programs[slot] = desc->program.id;
 
     result.id = id;
     return result;
@@ -1089,6 +1087,13 @@ void nt_gfx_destroy_program(nt_program_t prog) {
         NT_LOG_ERROR("destroy_program: invalid handle");
         return;
     }
+    /* draw only checks bound_pipeline != 0, so a bind left pointing at a
+     * pipeline whose program just died would draw into a destroyed object. */
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        if (s_gfx.pipeline_programs[i] == prog.id && s_gfx.bound_pipeline == s_gfx.pipeline_backends[i]) {
+            s_gfx.bound_pipeline = 0;
+        }
+    }
     uint32_t slot = nt_pool_slot_index(prog.id);
     nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
     s_gfx.program_backends[slot] = 0;
@@ -1106,6 +1111,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     }
     nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[slot]);
     s_gfx.pipeline_backends[slot] = 0;
+    s_gfx.pipeline_programs[slot] = 0;
     nt_pool_free(&s_gfx.pipeline_pool, pip.id);
 }
 
@@ -1242,6 +1248,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
     NT_ASSERT(s_gfx.pipeline_backends[slot] != 0); /* stale pipeline after context loss — must recreate */
+    /* Without this a reused program slot silently swaps the program under the
+     * pipeline, with no GL error anywhere. */
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, s_gfx.pipeline_programs[slot]) && "bind_pipeline: the pipeline's program was destroyed");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }
@@ -1694,16 +1703,15 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
 }
 
-void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot) {
+void nt_gfx_set_uniform_block(nt_program_t prog, const char *block_name, uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        NT_LOG_ERROR("set_uniform_block: invalid pipeline handle");
+    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        NT_LOG_ERROR("set_uniform_block: invalid program handle");
         return;
     }
-    uint32_t idx = nt_pool_slot_index(pip.id);
-    nt_gfx_backend_set_uniform_block(s_gfx.pipeline_backends[idx], block_name, slot);
+    nt_gfx_backend_set_uniform_block(s_gfx.program_backends[nt_pool_slot_index(prog.id)], block_name, slot);
 }
 
 /* ---- Buffer update ---- */

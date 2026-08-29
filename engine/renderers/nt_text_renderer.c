@@ -113,13 +113,16 @@ static void generate_quad_indices(void) {
 
 // #region Pipeline creation
 static void create_pipeline(void) {
+    if (s_text.pipeline.id != 0) {
+        nt_gfx_destroy_pipeline(s_text.pipeline);
+        s_text.pipeline = (nt_pipeline_t){0};
+    }
+
+    /* After the destroy, never before: a material whose program went away must
+     * not keep drawing through the pipeline built on it. */
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     if (!info || !info->ready) {
         return;
-    }
-
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
     }
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
@@ -139,8 +142,7 @@ static void create_pipeline(void) {
 
     /* Read render state from material — same pattern as mesh_renderer */
     s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = (nt_shader_t){info->resolved_vs},
-        .fragment_shader = (nt_shader_t){info->resolved_fs},
+        .program = info->program,
         .layout = layout,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
@@ -149,9 +151,6 @@ static void create_pipeline(void) {
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     });
-
-    /* Bind global UBO slot */
-    nt_gfx_set_uniform_block(s_text.pipeline, "Globals", 0);
 
     s_text.pipeline_material_version = info->version;
 }

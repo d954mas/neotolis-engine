@@ -78,6 +78,28 @@ static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
 static nt_material_t s_sprite_material, s_text_material;
+static nt_program_t s_sprite_program, s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (s_sprite_program.id == 0) {
+        uint32_t vs = nt_resource_get(s_sprite_vs_handle);
+        uint32_t fs = nt_resource_get(s_sprite_fs_handle);
+        if (vs != 0 && fs != 0) {
+            s_sprite_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_sprite_material, s_sprite_program);
+        }
+    }
+    if (s_text_program.id == 0) {
+        uint32_t vs = nt_resource_get(s_text_vs_handle);
+        uint32_t fs = nt_resource_get(s_text_fs_handle);
+        if (vs != 0 && fs != 0) {
+            s_text_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_text_material, s_text_program);
+        }
+    }
+}
 static nt_font_t s_font;
 static nt_font_t s_rich_font[4]; /* R/B/I/BI faces for the rich block */
 
@@ -226,6 +248,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     s_state.time += g_nt_app.dt;
 
@@ -258,6 +281,12 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
+        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -432,8 +461,6 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -443,8 +470,6 @@ int main(int argc, char *argv[]) {
         .label = "browser_smoke_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -517,6 +542,8 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_gfx_destroy_program(s_sprite_program);
+    nt_gfx_destroy_program(s_text_program);
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();

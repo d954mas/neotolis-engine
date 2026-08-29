@@ -31,7 +31,7 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend);
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
@@ -75,7 +75,7 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
-void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot);
+void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix);
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec);

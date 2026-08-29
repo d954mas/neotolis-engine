@@ -82,6 +82,7 @@ static nt_resource_t s_atlas_tex_handle;
 /* ---- Material ---- */
 
 static nt_material_t s_material;
+static nt_program_t s_program;
 
 /* ---- Entity ---- */
 
@@ -91,6 +92,21 @@ static nt_render_item_t s_sort_scratch[1];
 /* ---- State ---- */
 
 static bool s_pack_dumped;
+
+/* Links once both stages are ready. The program is ours: the material only
+ * borrows the handle, and context loss forces a relink. */
+static void link_program(void) {
+    if (s_program.id != 0) {
+        return;
+    }
+    uint32_t vs = nt_resource_get(s_vs_handle);
+    uint32_t fs = nt_resource_get(s_fs_handle);
+    if (vs == 0 || fs == 0) {
+        return;
+    }
+    s_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+    nt_material_set_program(s_material, s_program);
+}
 
 /* ---- Frame callback ---- */
 
@@ -107,6 +123,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_program();
 
     /* Dump pack contents when ready */
     if (!s_pack_dumped && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
@@ -165,6 +182,9 @@ static void frame(void) {
 
     if (g_nt_gfx.context_restored) {
         can_render = false;
+        nt_material_set_program(s_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_program); /* GL object is gone; this frees the pool slot */
+        s_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -258,8 +278,6 @@ int main(void) {
 
     /* Create material with atlas page texture */
     s_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_vs_handle,
-        .fs = s_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
@@ -324,6 +342,7 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_material_destroy(s_material);
+    nt_gfx_destroy_program(s_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

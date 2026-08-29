@@ -179,11 +179,11 @@ static uint8_t ramp_at(const uint8_t *row, int column) { return row[(size_t)(uns
 static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, bool depth_write, const nt_vertex_layout_t *layout) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vs.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fs.id);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = vs,
-        .fragment_shader = fs,
+        .program = prog,
         .layout = *layout,
         .depth_test = depth_write,
         .depth_write = depth_write,
@@ -208,9 +208,9 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = vs,
-        .fragment_shader = fs,
+        .program = prog,
         .blend = blend,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
@@ -275,6 +275,7 @@ static void test_all_public_blend_enums_reach_gl(void) {
     };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
@@ -283,8 +284,7 @@ static void test_all_public_blend_enums_reach_gl(void) {
         blend.src_rgb = factor_cases[i].factor;
         blend.dst_rgb = NT_BLEND_ZERO;
         nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .vertex_shader = vs,
-            .fragment_shader = fs,
+            .program = prog,
             .blend = blend,
         });
         TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
@@ -298,8 +298,7 @@ static void test_all_public_blend_enums_reach_gl(void) {
         nt_blend_state_t blend = nt_blend_alpha();
         blend.op_rgb = op_cases[i].op;
         nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .vertex_shader = vs,
-            .fragment_shader = fs,
+            .program = prog,
             .blend = blend,
         });
         TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
@@ -328,9 +327,9 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = vs,
-        .fragment_shader = fs,
+        .program = prog,
         .layout = layout,
         .blend = nt_blend_multiply(),
     });
@@ -580,9 +579,9 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
 
     nt_shader_t vertex_shader = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fragment_shader = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vertex_shader, fragment_shader);
     nt_pipeline_t no_depth_write_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = vertex_shader,
-        .fragment_shader = fragment_shader,
+        .program = prog,
         .depth_write = false,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, no_depth_write_pipeline.id);
@@ -622,6 +621,113 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_destroy_shader(vertex_shader);
 }
 
+/* Global blocks are auto-bound at link time. The auto-bind moved from
+ * create_pipeline to create_program; if that move broke, every UBO silently
+ * unbinds and the whole scene shifts -- only real GL catches it. */
+static void test_global_block_registered_before_link_binds_in_the_program(void) {
+    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
+                                       "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(1.0); }\n";
+
+    nt_gfx_register_global_block("Globals", 3);
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+
+    /* Bind a pipeline so the program becomes current, then read the binding
+     * GL actually recorded for the block. */
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+
+    GLint current_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
+    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
+    TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
+    GLint binding = -1;
+    glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
+    TEST_ASSERT_EQUAL_INT(3, binding);
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+/* Uniform values live on the program, not the pipeline: two pipelines on one
+ * program see the same values, and binding the second does not reset them. */
+static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
+    /* Attribute-less full-screen triangle: the pipelines carry no layout. */
+    static const char *vertex_source = "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "uniform vec4 u_color;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = u_color; }\n";
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+
+    /* Two pipelines differing only in fixed-function state. */
+    nt_pipeline_t pip_a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = false});
+    nt_pipeline_t pip_b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true, .depth_func = NT_DEPTH_ALWAYS});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_a.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_b.id);
+
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_BUFFER,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    /* Value written while A is bound; the draw happens through B without
+     * setting it again. */
+    nt_gfx_bind_pipeline(pip_a);
+    const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
+    nt_gfx_set_uniform_vec4("u_color", green);
+    nt_gfx_bind_pipeline(pip_b);
+    nt_gfx_draw(0, 3);
+
+    uint8_t pixels[4 * 4 * 4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    assert_rgba(pixels, 16, 0, 255, 0, 255);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_pipeline(pip_b);
+    nt_gfx_destroy_pipeline(pip_a);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
@@ -633,5 +739,7 @@ int main(void) {
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
+    RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
+    RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     return UNITY_END();
 }

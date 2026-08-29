@@ -232,29 +232,9 @@ static nt_material_t create_test_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sprite_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "sprite_fs"});
 
-    char vs_name[64];
-    char fs_name[64];
-    char pack_name[64];
-    (void)snprintf(vs_name, sizeof(vs_name), "test_er_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof(fs_name), "test_er_fs_%u", s_vpack_counter);
-    (void)snprintf(pack_name, sizeof(pack_name), "mat_pack_%u", s_vpack_counter++);
-
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;

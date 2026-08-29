@@ -15,13 +15,7 @@ typedef struct {
     nt_material_info_t info;
 
     /* Creation-time resource handles (not in info) */
-    nt_resource_t vs_resource;
-    nt_resource_t fs_resource;
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
-
-    /* Change tracking */
-    uint32_t last_vs;
-    uint32_t last_fs;
 } nt_material_slot_t;
 
 /* ---- Module state ---- */
@@ -75,21 +69,6 @@ void nt_material_step(void) {
 
         nt_material_slot_t *mat = &s_mat.slots[i];
 
-        /* Resolve shaders */
-        uint32_t vs = nt_resource_get(mat->vs_resource);
-        uint32_t fs = nt_resource_get(mat->fs_resource);
-
-        /* Change detection (shaders only — texture changes don't affect pipeline) */
-        if (vs != mat->last_vs || fs != mat->last_fs) {
-            mat->info.version++;
-            mat->last_vs = vs;
-            mat->last_fs = fs;
-        }
-
-        mat->info.resolved_vs = vs;
-        mat->info.resolved_fs = fs;
-        mat->info.ready = (vs != 0 && fs != 0);
-
         /* Resolve textures */
         for (uint8_t t = 0; t < mat->info.tex_count; t++) {
             mat->info.resolved_tex[t] = nt_resource_get(mat->tex_resources[t]);
@@ -119,9 +98,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     /* Clear slot */
     memset(slot, 0, sizeof(*slot));
 
-    /* Store resource handles */
-    slot->vs_resource = desc->vs;
-    slot->fs_resource = desc->fs;
+    slot->info.program = desc->program;
+    slot->info.ready = (desc->program.id != 0);
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -213,6 +191,20 @@ static nt_material_info_t *get_mutable_info(nt_material_t mat) {
 }
 
 const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_mutable_info(mat); }
+
+void nt_material_set_program(nt_material_t mat, nt_program_t program) {
+    nt_material_info_t *info = get_mutable_info(mat);
+    if (!info) {
+        NT_LOG_ERROR("set_program: invalid material handle");
+        return;
+    }
+    if (info->program.id == program.id) {
+        return;
+    }
+    info->program = program;
+    info->ready = (program.id != 0);
+    info->version++;
+}
 
 /* ---- Runtime param mutation ---- */
 

@@ -287,8 +287,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
      * custom-attr material's extended layout never aliases the base 20 B
      * pipeline. */
     uint64_t key = nt_sprite_layout_hash(mat_info);
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
     /* Linear scan for cached entry */
@@ -304,8 +303,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vertex_shader = (nt_shader_t){.id = mat_info->resolved_vs};
-    desc.fragment_shader = (nt_shader_t){.id = mat_info->resolved_fs};
+    desc.program = mat_info->program;
     desc.layout = build_sprite_layout(mat_info);
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
@@ -458,7 +456,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     /* Validate BEFORE same-handle early return: stale handle (destroyed material,
      * bumped generation) must assert even if the id still matches the cached one. */
     const nt_material_info_t *mat_info = nt_material_get_info(mat);
-    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
+    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material not ready");
 
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
     if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
@@ -1265,7 +1263,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         nt_entity_t leader = {.id = items[run_start].entity};
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
-        if (mat_info == NULL || !mat_info->ready || mat_info->resolved_vs == 0 || mat_info->resolved_fs == 0) {
+        if (mat_info == NULL || !mat_info->ready || mat_info->program.id == 0) {
             /* Material not yet ready — skip the run silently (legitimate
              * runtime state, not a bug). */
             run_start = run_end;
@@ -1331,12 +1329,12 @@ void nt_sprite_renderer_flush(void) {
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
             bound_ibo_id = 0;
-            /* Sampler uniforms ("u_tex0" etc) are program-scoped — the new
-             * program has fresh uniform locations defaulting to 0. Reset the
-             * tex/sampler tracking so the inner loop forces rebind +
-             * set_uniform_int for every slot, even if the texture id matches. */
+            /* The new pipeline may sit on a different program, whose uniform
+             * values are its own. Reset every mirror so the inner loops rewrite
+             * params, sampler units and samplers even when the ids match. */
             memset(bound_tex_ids, 0, sizeof(bound_tex_ids));
             memset(bound_sampler_ids, 0, sizeof(bound_sampler_ids));
+            bound_mat_id = 0;
         }
 
         if (s_sprite.ibo.id != bound_ibo_id) {
@@ -1350,6 +1348,7 @@ void nt_sprite_renderer_flush(void) {
          * material was destroyed between draw_list capture and flush replay,
          * leave bound_mat_id unchanged so a later cmd with the same material
          * can re-attempt the lookup once it's resolvable again. */
+        uint32_t mat_id_before_cmd = bound_mat_id;
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
             if (mi != NULL) {
@@ -1363,11 +1362,14 @@ void nt_sprite_renderer_flush(void) {
         }
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
+            /* Written on every material change, not only when the texture bind
+             * changes: two materials can share both pipeline and textures yet
+             * map different names onto the unit. */
+            if (c->material.id != mat_id_before_cmd && c->tex_names[t] != NULL) {
+                nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
+            }
             if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {
                 nt_gfx_bind_texture((nt_texture_t){.id = c->resolved_tex[t]}, t);
-                if (c->tex_names[t] != NULL) {
-                    nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
-                }
                 bound_tex_ids[t] = c->resolved_tex[t];
                 /* bind_texture also bound the texture's default sampler. */
                 bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;

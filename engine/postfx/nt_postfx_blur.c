@@ -57,6 +57,7 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
 static struct {
     nt_shader_t vs;
     nt_shader_t fs;
+    nt_program_t program;
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
     bool initialized;
@@ -135,6 +136,9 @@ static void destroy_gpu_resources(void) {
     if (s_blur.pipeline.id != 0) {
         nt_gfx_destroy_pipeline(s_blur.pipeline);
     }
+    if (s_blur.program.id != 0) {
+        nt_gfx_destroy_program(s_blur.program);
+    }
     if (s_blur.fs.id != 0) {
         nt_gfx_destroy_shader(s_blur.fs);
     }
@@ -143,6 +147,7 @@ static void destroy_gpu_resources(void) {
     }
     s_blur.triangle_vbo = (nt_buffer_t){0};
     s_blur.pipeline = (nt_pipeline_t){0};
+    s_blur.program = NT_PROGRAM_INVALID;
     s_blur.fs = (nt_shader_t){0};
     s_blur.vs = (nt_shader_t){0};
 }
@@ -158,9 +163,12 @@ static bool make_gpu_resources(void) {
     if (s_blur.vs.id == 0 || s_blur.fs.id == 0) {
         return false;
     }
+    s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
+    if (!nt_gfx_program_ready(s_blur.program)) {
+        return false;
+    }
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = s_blur.vs,
-        .fragment_shader = s_blur.fs,
+        .program = s_blur.program,
         .layout =
             {
                 .stride = sizeof(nt_postfx_blur_vertex_t),

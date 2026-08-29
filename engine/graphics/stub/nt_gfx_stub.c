@@ -203,14 +203,13 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
 #ifdef NT_TEST_ACCESS
     s_stub_last_pipeline_blend = desc->blend;
 #else
     (void)desc;
 #endif
-    (void)vs_backend;
-    (void)fs_backend;
+    (void)program_backend;
     return 1;
 }
 
@@ -418,8 +417,8 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) 
     (void)slot;
 }
 
-void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot) {
-    (void)pipeline_backend;
+void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
+    (void)program_backend;
     (void)block_name;
     (void)slot;
 }

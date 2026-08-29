@@ -122,18 +122,8 @@ static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_hash32_t pack_id = nt_hash32_str("text_blend_pack");
-    nt_hash64_t vs_id = nt_hash64_str("text_blend_vs");
-    nt_hash64_t fs_id = nt_hash64_str("text_blend_fs");
-    nt_resource_create_pack(pack_id, 0);
-    nt_resource_register(pack_id, vs_id, NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pack_id, fs_id, NT_ASSET_SHADER_CODE, fs.id);
-    nt_resource_t vs_res = nt_resource_request(vs_id, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_id, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = vs_res,
-        .fs = fs_res,
+        .program = nt_gfx_make_program(vs, fs),
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
     });
@@ -316,6 +306,30 @@ void test_draw_newline_advances_to_next_line(void) {
 
     TEST_ASSERT_TRUE(first_x == second_x);
     TEST_ASSERT_TRUE(second_y < first_y);
+}
+
+/* Clearing the material's program must take the pipeline with it: the pipeline
+ * was built on that program, and drawing through it would run dead code. */
+void test_flush_stops_after_program_cleared(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(material);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
+
+    nt_material_set_program(material, NT_PROGRAM_INVALID);
+
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 /* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
@@ -761,6 +775,7 @@ int main(void) {
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
+    RUN_TEST(test_flush_stops_after_program_cleared);
     RUN_TEST(test_draw_n_matches_draw);
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);

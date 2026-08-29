@@ -91,6 +91,29 @@ static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+static nt_program_t s_sprite_program;
+static nt_program_t s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (s_sprite_program.id == 0) {
+        uint32_t vs = nt_resource_get(s_sprite_vs_handle);
+        uint32_t fs = nt_resource_get(s_sprite_fs_handle);
+        if (vs != 0 && fs != 0) {
+            s_sprite_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_sprite_material, s_sprite_program);
+        }
+    }
+    if (s_text_program.id == 0) {
+        uint32_t vs = nt_resource_get(s_text_vs_handle);
+        uint32_t fs = nt_resource_get(s_text_fs_handle);
+        if (vs != 0 && fs != 0) {
+            s_text_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_text_material, s_text_program);
+        }
+    }
+}
 static nt_font_t s_font;
 static nt_atlas_region_ref_t s_white_ref;
 static bool s_atlas_bound;
@@ -118,6 +141,7 @@ static struct {
     nt_texture_t white;
     nt_shader_t quad_vs;
     nt_shader_t quad_fs;
+    nt_program_t quad_program;
     nt_pipeline_t quad_pipeline;
     nt_buffer_t quad_vbo;
     uint16_t rt_width;
@@ -142,6 +166,9 @@ static void destroy_quad_resources(void) {
     if (s_demo.quad_pipeline.id != 0) {
         nt_gfx_destroy_pipeline(s_demo.quad_pipeline);
     }
+    if (s_demo.quad_program.id != 0) {
+        nt_gfx_destroy_program(s_demo.quad_program);
+    }
     if (s_demo.quad_fs.id != 0) {
         nt_gfx_destroy_shader(s_demo.quad_fs);
     }
@@ -153,6 +180,7 @@ static void destroy_quad_resources(void) {
     }
     s_demo.quad_vbo = (nt_buffer_t){0};
     s_demo.quad_pipeline = (nt_pipeline_t){0};
+    s_demo.quad_program = NT_PROGRAM_INVALID;
     s_demo.quad_fs = (nt_shader_t){0};
     s_demo.quad_vs = (nt_shader_t){0};
     s_demo.white = (nt_texture_t){0};
@@ -164,10 +192,13 @@ static bool make_quad_resources(void) {
     if (s_demo.quad_vs.id == 0 || s_demo.quad_fs.id == 0) {
         return false;
     }
+    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
+    if (!nt_gfx_program_ready(s_demo.quad_program)) {
+        return false;
+    }
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = s_demo.quad_vs,
-        .fragment_shader = s_demo.quad_fs,
+        .program = s_demo.quad_program,
         .layout =
             {
                 .stride = sizeof(rtt_quad_vertex_t),
@@ -505,6 +536,7 @@ static void frame(void) {
     }
     nt_resource_step();
     nt_material_step();
+    link_programs();
     try_bind_ui_resources();
 
     nt_gfx_begin_frame();
@@ -513,6 +545,12 @@ static void frame(void) {
         return;
     }
     if (g_nt_gfx.context_restored) {
+        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
@@ -632,8 +670,6 @@ int main(void) {
     init_ui_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -643,8 +679,6 @@ int main(void) {
         .label = "rtt_showcase_ui_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -700,6 +734,8 @@ int main(void) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_gfx_destroy_program(s_sprite_program);
+    nt_gfx_destroy_program(s_text_program);
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();

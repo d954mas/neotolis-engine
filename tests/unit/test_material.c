@@ -56,8 +56,7 @@ static nt_resource_t register_test_resource(const char *name, uint8_t asset_type
 static nt_material_create_desc_t make_test_desc(void) {
     nt_material_create_desc_t d;
     memset(&d, 0, sizeof(d));
-    d.vs = (nt_resource_t){.id = 1};
-    d.fs = (nt_resource_t){.id = 2};
+    d.program = (nt_program_t){.id = 1};
     d.textures[0].name = "u_albedo";
     d.textures[0].resource = (nt_resource_t){.id = 3};
     d.texture_count = 1;
@@ -359,119 +358,74 @@ void test_pool_full_returns_invalid(void) {
     }
 }
 
-/* ---- Test 15: step resolves shaders ---- */
+/* ---- Test 15: create stores the program handle ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_resolves_shaders(void) {
-    /* Use virtual packs to register resources with known runtime handles */
-    nt_resource_t vs_res = register_test_resource("test_vs", NT_ASSET_SHADER_CODE, 100);
-    nt_resource_t fs_res = register_test_resource("test_fs", NT_ASSET_SHADER_CODE, 200);
-    nt_resource_step();
-
-    /* Create material referencing those resource handles */
+void test_create_stores_program(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = (nt_program_t){.id = 77};
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(100, info->resolved_vs);
-    TEST_ASSERT_EQUAL_UINT32(200, info->resolved_fs);
+    TEST_ASSERT_EQUAL_UINT32(77, info->program.id);
 }
 
-/* ---- Test 16: ready true when both shaders resolved ---- */
+/* ---- Test 16: ready true once a program is assigned ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_ready_true_when_both_shaders(void) {
-    nt_resource_t vs_res = register_test_resource("ready_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("ready_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
+void test_ready_true_with_program(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = (nt_program_t){.id = 5};
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_TRUE(info->ready);
 }
 
-/* ---- Test 17: ready false when one shader missing ---- */
+/* ---- Test 17: ready false without a program ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_ready_false_when_missing_shader(void) {
-    /* VS is registered (will resolve to handle), FS is just a bare request (no pack entry) */
-    nt_resource_t vs_res = register_test_resource("miss_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = nt_resource_request(nt_hash64_str("miss_fs"), NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
+void test_ready_false_without_program(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = NT_PROGRAM_INVALID;
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_FALSE(info->ready);
+
+    /* Assigning one later flips ready -- the game links after the stages resolve. */
+    nt_material_set_program(mat, (nt_program_t){.id = 9});
+    TEST_ASSERT_TRUE(info->ready);
+    TEST_ASSERT_EQUAL_UINT32(9, info->program.id);
 }
 
-/* ---- Test 18: version increments on shader change ---- */
+/* ---- Test 18: set_program bumps version so pipeline caches rebuild ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_version_increments_on_change(void) {
-    nt_resource_t vs_res = register_test_resource("ver_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("ver_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
-    nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
-    nt_material_t mat = nt_material_create(&d);
-
-    /* First step: version goes from 0 to 1 (handles change from initial 0 to 10/20) */
-    nt_material_step();
+void test_set_program_increments_version(void) {
+    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 1}});
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     uint32_t v1 = info->version;
-    TEST_ASSERT_TRUE(v1 > 0);
 
-    /* Change the VS shader handle by re-registering with a different handle */
-    nt_hash32_t new_pid = nt_hash32_str("ver_vs_new");
-    nt_resource_create_pack(new_pid, 10); /* higher priority to override */
-    nt_resource_register(new_pid, nt_hash64_str("ver_vs"), NT_ASSET_SHADER_CODE, 99);
-    nt_resource_step();
-    nt_material_step();
-
+    nt_material_set_program(mat, (nt_program_t){.id = 2});
     TEST_ASSERT_TRUE(info->version > v1);
+
+    /* Clearing it is a change too: renderers must drop the stale pipeline. */
+    uint32_t v2 = info->version;
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    TEST_ASSERT_TRUE(info->version > v2);
+    TEST_ASSERT_FALSE(info->ready);
 }
 
-/* ---- Test 19: version stable when unchanged ---- */
+/* ---- Test 19: version stable when the program does not change ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_version_stable_when_unchanged(void) {
-    nt_resource_t vs_res = register_test_resource("stab_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("stab_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
-    nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
-    nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
+void test_version_stable_when_unchanged(void) {
+    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 3}});
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
     uint32_t v1 = info->version;
 
-    /* Step again without changing anything */
+    nt_material_set_program(mat, (nt_program_t){.id = 3});
     nt_material_step();
     TEST_ASSERT_EQUAL_UINT32(v1, info->version);
 }
@@ -657,11 +611,11 @@ int main(void) {
     RUN_TEST(test_pool_full_returns_invalid);
 
     /* Step: resolve + change detection */
-    RUN_TEST(test_step_resolves_shaders);
-    RUN_TEST(test_step_ready_true_when_both_shaders);
-    RUN_TEST(test_step_ready_false_when_missing_shader);
-    RUN_TEST(test_step_version_increments_on_change);
-    RUN_TEST(test_step_version_stable_when_unchanged);
+    RUN_TEST(test_create_stores_program);
+    RUN_TEST(test_ready_true_with_program);
+    RUN_TEST(test_ready_false_without_program);
+    RUN_TEST(test_set_program_increments_version);
+    RUN_TEST(test_version_stable_when_unchanged);
     RUN_TEST(test_step_resolves_textures);
 
     /* Query edge cases */

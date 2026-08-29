@@ -76,7 +76,6 @@ typedef struct {
 
 typedef struct {
     GLuint vao;
-    GLuint program;
     bool depth_test_enabled;
     bool depth_write_enabled;
     GLenum depth_func;
@@ -95,9 +94,7 @@ typedef struct {
     /* Store layouts for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
     nt_vertex_layout_t instance_layout;
-    /* Uniform location cache (filled at glLinkProgram time) */
-    nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
-    uint8_t uniform_count;
+    uint32_t program_slot; /* index into s_programs; the pipeline borrows it */
 } nt_gfx_gl_pipeline_t;
 
 /* Uniform locations are per-program, so the cache lives here, not on the
@@ -203,11 +200,15 @@ static GLint pipeline_get_uniform(const char *name) {
     if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
         return -1;
     }
-    const nt_gfx_gl_pipeline_t *pip = &s_pipelines[s_bound_pipeline_slot];
+    uint32_t program_slot = s_pipelines[s_bound_pipeline_slot].program_slot;
+    if (program_slot == 0 || program_slot > s_init_desc.max_programs) {
+        return -1;
+    }
+    const nt_gfx_gl_program_t *prog = &s_programs[program_slot];
     uint32_t h = nt_hash32_str(name).value;
-    for (uint8_t i = 0; i < pip->uniform_count; i++) {
-        if (pip->uniforms[i].name_hash == h) {
-            return pip->uniforms[i].location;
+    for (uint8_t i = 0; i < prog->uniform_count; i++) {
+        if (prog->uniforms[i].name_hash == h) {
+            return prog->uniforms[i].location;
         }
     }
     return -1;
@@ -763,11 +764,12 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         glBindVertexArray(pip->vao);
         s_gl_cache.vao = pip->vao;
     }
-    if (s_gl_cache.program != pip->program) {
-        glUseProgram(pip->program);
-        s_gl_cache.program = pip->program;
+    GLuint program = s_programs[pip->program_slot].program;
+    if (s_gl_cache.program != program) {
+        glUseProgram(program);
+        s_gl_cache.program = program;
     }
-    s_bound_program = pip->program;
+    s_bound_program = program;
     s_bound_pipeline_slot = backend_handle;
 
     /* Depth test */
@@ -1046,13 +1048,15 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     if (s_bound_program == program) {
         s_bound_program = 0;
     }
+    if (s_bound_pipeline_slot != 0 && s_pipelines[s_bound_pipeline_slot].program_slot == backend_handle) {
+        s_bound_pipeline_slot = 0;
+    }
     glDeleteProgram(program);
     memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
 }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend) {
-    GLuint program = nt_gfx_gl_link_program(vs_backend, fs_backend);
-    if (program == 0) {
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
+    if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
         return 0;
     }
 
@@ -1065,7 +1069,6 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         }
     }
     if (slot == 0) {
-        glDeleteProgram(program);
         return 0; /* no free slots */
     }
 
@@ -1090,7 +1093,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     /* Store pipeline data */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
     pip->vao = vao;
-    pip->program = program;
+    pip->program_slot = program_backend;
     pip->depth_test_enabled = desc->depth_test;
     pip->depth_write_enabled = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
@@ -1109,8 +1112,6 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->layout = desc->layout;
     pip->instance_layout = desc->instance_layout;
 
-    nt_gfx_gl_cache_uniforms(program, pip->uniforms, &pip->uniform_count);
-
     return slot;
 }
 
@@ -1119,18 +1120,16 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
-    /* Invalidate cache if this pipeline's GL objects are currently bound */
+    /* Invalidate cache if this pipeline's VAO is currently bound. The program
+     * is not ours to delete -- it outlives every pipeline built on it. */
     if (pip->vao && s_gl_cache.vao == pip->vao) {
         s_gl_cache.vao = 0;
-    }
-    if (pip->program && s_gl_cache.program == pip->program) {
-        s_gl_cache.program = 0;
     }
     if (pip->vao) {
         glDeleteVertexArrays(1, &pip->vao);
     }
-    if (pip->program) {
-        glDeleteProgram(pip->program);
+    if (s_bound_pipeline_slot == backend_handle) {
+        s_bound_pipeline_slot = 0;
     }
     memset(pip, 0, sizeof(*pip));
 }
@@ -1270,11 +1269,11 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) 
     glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
 }
 
-void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot) {
-    if (pipeline_backend == 0 || pipeline_backend > s_init_desc.max_pipelines) {
+void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
+    if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
         return;
     }
-    GLuint program = s_pipelines[pipeline_backend].program;
+    GLuint program = s_programs[program_backend].program;
     if (program == 0) {
         return;
     }

@@ -147,6 +147,39 @@ static nt_material_t s_text_material;
 static nt_material_t s_text_material_3d;          /* world-space text that writes + tests depth */
 static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials for the F2 inspector */
 static nt_material_t s_inspector_text_material;
+static nt_program_t s_sprite_cutoff_program;
+static nt_program_t s_sprite_program;
+static nt_program_t s_text_program; /* shared by the three text materials on this pair */
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    uint32_t sprite_vs = nt_resource_get(s_sprite_vs_handle);
+    uint32_t text_vs = nt_resource_get(s_text_vs_handle);
+    if (s_sprite_cutoff_program.id == 0) {
+        uint32_t fs = nt_resource_get(s_sprite_cutoff_fs_handle);
+        if (sprite_vs != 0 && fs != 0) {
+            s_sprite_cutoff_program = nt_gfx_make_program((nt_shader_t){sprite_vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_sprite_material, s_sprite_cutoff_program);
+        }
+    }
+    if (s_sprite_program.id == 0) {
+        uint32_t fs = nt_resource_get(s_sprite_fs_handle);
+        if (sprite_vs != 0 && fs != 0) {
+            s_sprite_program = nt_gfx_make_program((nt_shader_t){sprite_vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_inspector_sprite_material, s_sprite_program);
+        }
+    }
+    if (s_text_program.id == 0) {
+        uint32_t fs = nt_resource_get(s_text_fs_handle);
+        if (text_vs != 0 && fs != 0) {
+            s_text_program = nt_gfx_make_program((nt_shader_t){text_vs}, (nt_shader_t){fs});
+            nt_material_set_program(s_text_material, s_text_program);
+            nt_material_set_program(s_text_material_3d, s_text_program);
+            nt_material_set_program(s_inspector_text_material, s_text_program);
+        }
+    }
+}
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
@@ -810,6 +843,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
     try_bind_resources();
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
@@ -847,6 +881,17 @@ static void frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
+        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material_3d, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_inspector_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_inspector_text_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_sprite_cutoff_program); /* GL objects are gone; this frees the pool slots */
+        nt_gfx_destroy_program(s_sprite_program);
+        nt_gfx_destroy_program(s_text_program);
+        s_sprite_cutoff_program = NT_PROGRAM_INVALID;
+        s_sprite_program = NT_PROGRAM_INVALID;
+        s_text_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -1057,8 +1102,6 @@ int main(int argc, char *argv[]) {
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
      * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_cutoff_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -1070,8 +1113,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = false,
@@ -1081,8 +1122,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_text",
     });
     s_text_material_3d = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = true,
@@ -1099,8 +1138,6 @@ int main(int argc, char *argv[]) {
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -1110,8 +1147,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_inspector_sprite",
     });
     s_inspector_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -1156,6 +1191,9 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_text_material_3d);
     nt_material_destroy(s_inspector_sprite_material);
     nt_material_destroy(s_inspector_text_material);
+    nt_gfx_destroy_program(s_sprite_cutoff_program);
+    nt_gfx_destroy_program(s_sprite_program);
+    nt_gfx_destroy_program(s_text_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

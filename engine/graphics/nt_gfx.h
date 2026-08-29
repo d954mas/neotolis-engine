@@ -316,8 +316,8 @@ typedef struct {
 } nt_shader_desc_t;
 
 typedef struct {
-    nt_shader_t vertex_shader;
-    nt_shader_t fragment_shader;
+    /* Borrowed, not owned: the pipeline must not outlive the program. */
+    nt_program_t program;
     nt_vertex_layout_t layout;
     bool depth_test;
     bool depth_write;
@@ -568,7 +568,7 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
-void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
+void nt_gfx_set_uniform_block(nt_program_t prog, const char *block_name, uint32_t slot);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint

@@ -97,6 +97,22 @@ static nt_resource_t s_lenna_handle;
 /* ---- Material ---- */
 
 static nt_material_t s_cube_material;
+static nt_program_t s_cube_program;
+
+/* Links once both stages are ready. The program is ours: the material only
+ * borrows the handle, and context loss forces a relink. */
+static void link_programs(void) {
+    if (s_cube_program.id != 0) {
+        return;
+    }
+    uint32_t vs = nt_resource_get(s_vs_handle);
+    uint32_t fs = nt_resource_get(s_fs_handle);
+    if (vs == 0 || fs == 0) {
+        return;
+    }
+    s_cube_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
+    nt_material_set_program(s_cube_material, s_cube_program);
+}
 
 static int16_t s_pixel_prio = 10;
 static int16_t s_hires_prio = 20;
@@ -216,6 +232,7 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     /* Dump pack contents when they become READY */
     if (!s_base_dumped && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
@@ -299,6 +316,9 @@ static void frame(void) {
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         can_render = false;
+        nt_material_set_program(s_cube_material, NT_PROGRAM_INVALID);
+        nt_gfx_destroy_program(s_cube_program); /* GL object is gone; this frees the pool slot */
+        s_cube_program = NT_PROGRAM_INVALID;
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -424,8 +444,6 @@ int main(void) {
 
     /* Create material from resource handles */
     s_cube_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_vs_handle,
-        .fs = s_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_lenna_handle}},
         .texture_count = 1,
         .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
@@ -508,6 +526,7 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_material_destroy(s_cube_material);
+    nt_gfx_destroy_program(s_cube_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

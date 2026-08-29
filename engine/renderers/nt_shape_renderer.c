@@ -171,6 +171,7 @@ static struct {
 
     /* CPU batch for non-instanced shapes (triangle, capsule, mesh) */
     nt_shader_t batch_vs;
+    nt_program_t batch_prog;
     nt_pipeline_t batch_pip_depth;
     nt_pipeline_t batch_pip_overlay;
     nt_pipeline_t batch_pip_active;
@@ -183,6 +184,7 @@ static struct {
 
     /* Instanced shapes (rect, cube, circle, sphere, cylinder) */
     nt_shader_t inst_vs;
+    nt_program_t inst_prog;
     nt_pipeline_t inst_pip_depth;
     nt_pipeline_t inst_pip_overlay;
     nt_pipeline_t inst_pip_active;
@@ -194,12 +196,14 @@ static struct {
 
     /* Capsule instancing (separate pipeline: vec4 template + hemisphere-tagged shader) */
     nt_shader_t cap_inst_vs;
+    nt_program_t cap_inst_prog;
     nt_pipeline_t cap_inst_pip_depth;
     nt_pipeline_t cap_inst_pip_overlay;
     nt_pipeline_t cap_inst_pip_active;
 
     /* Instanced lines */
     nt_shader_t line_vs;
+    nt_program_t line_prog;
     nt_pipeline_t line_pip_depth;
     nt_pipeline_t line_pip_overlay;
     nt_pipeline_t line_pip_active;
@@ -234,8 +238,7 @@ static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabl
 
 static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.batch_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.batch_prog,
         .layout =
             {
                 .attr_count = 2,
@@ -260,8 +263,7 @@ static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
 
 static nt_pipeline_t make_line_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.line_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.line_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -293,8 +295,7 @@ static nt_pipeline_t make_line_pipeline(bool depth) {
 
 static nt_pipeline_t make_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.inst_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.inst_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -330,8 +331,7 @@ static nt_pipeline_t make_inst_pipeline(bool depth) {
 
 static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.cap_inst_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.cap_inst_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -662,6 +662,23 @@ void nt_shape_renderer_init(void) {
     s_shape.cap_inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_cap_inst_vs_src, .label = "shape_cap_inst_vs"});
     s_shape.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
 
+    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id) {
+        NT_LOG_ERROR("init failed -- shader creation error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
+
+    /* Programs -- one per vertex shader, shared by the depth and overlay pipelines */
+    s_shape.batch_prog = nt_gfx_make_program(s_shape.batch_vs, s_shape.fs);
+    s_shape.inst_prog = nt_gfx_make_program(s_shape.inst_vs, s_shape.fs);
+    s_shape.cap_inst_prog = nt_gfx_make_program(s_shape.cap_inst_vs, s_shape.fs);
+    s_shape.line_prog = nt_gfx_make_program(s_shape.line_vs, s_shape.fs);
+    if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog)) {
+        NT_LOG_ERROR("init failed -- program link error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
+
     /* Pipelines */
     s_shape.batch_pip_depth = make_batch_pipeline(true, true);
     s_shape.batch_pip_overlay = make_batch_pipeline(false, false);
@@ -737,6 +754,10 @@ void nt_shape_renderer_shutdown(void) {
     nt_gfx_destroy_pipeline(s_shape.inst_pip_depth);
     nt_gfx_destroy_pipeline(s_shape.batch_pip_overlay);
     nt_gfx_destroy_pipeline(s_shape.batch_pip_depth);
+    nt_gfx_destroy_program(s_shape.line_prog);
+    nt_gfx_destroy_program(s_shape.cap_inst_prog);
+    nt_gfx_destroy_program(s_shape.inst_prog);
+    nt_gfx_destroy_program(s_shape.batch_prog);
     nt_gfx_destroy_shader(s_shape.line_vs);
     nt_gfx_destroy_shader(s_shape.cap_inst_vs);
     nt_gfx_destroy_shader(s_shape.inst_vs);

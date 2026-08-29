@@ -121,6 +121,45 @@ static nt_material_t s_materials[MAX_SCENE_NODES];
 static nt_entity_t s_entities[MAX_SCENE_NODES];
 static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
+static uint8_t s_material_shader_types[MAX_SCENE_NODES];
+static nt_program_t s_programs[3]; /* indexed by SponzaShaderType */
+
+/* All three pairs come from the same pack, so they go ready together; linking
+ * them eagerly keeps program assignment out of the draw path. */
+static void link_programs(void) {
+    if (s_programs[SPONZA_SHADER_DIFFUSE].id != 0) {
+        return;
+    }
+    const nt_resource_t stages[3][2] = {
+        [SPONZA_SHADER_DIFFUSE] = {s_vs_diffuse, s_fs_diffuse},
+        [SPONZA_SHADER_ALPHA] = {s_vs_alpha, s_fs_alpha},
+        [SPONZA_SHADER_FULL] = {s_vs_full, s_fs_full},
+    };
+    uint32_t backends[3][2];
+    for (uint32_t t = 0; t < 3; t++) {
+        backends[t][0] = nt_resource_get(stages[t][0]);
+        backends[t][1] = nt_resource_get(stages[t][1]);
+        if (backends[t][0] == 0 || backends[t][1] == 0) {
+            return;
+        }
+    }
+    for (uint32_t t = 0; t < 3; t++) {
+        s_programs[t] = nt_gfx_make_program((nt_shader_t){backends[t][0]}, (nt_shader_t){backends[t][1]});
+    }
+    for (uint32_t i = 0; i < s_entity_count; i++) {
+        nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
+    }
+}
+
+static void drop_programs(void) {
+    for (uint32_t i = 0; i < s_entity_count; i++) {
+        nt_material_set_program(s_materials[i], NT_PROGRAM_INVALID);
+    }
+    for (uint32_t t = 0; t < 3; t++) {
+        nt_gfx_destroy_program(s_programs[t]);
+        s_programs[t] = NT_PROGRAM_INVALID;
+    }
+}
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
 static bool s_geo_loading;   /* true = geo pack download started */
@@ -244,29 +283,11 @@ static void load_scene_from_manifest(void) {
             s_tex_handles[tex_base + 2] = nt_resource_request((nt_hash64_t){.value = mn->specular_rid}, NT_ASSET_TEXTURE);
         }
 
-        /* Select shader pair based on shader_type */
-        nt_resource_t vs_handle;
-        nt_resource_t fs_handle;
-
-        switch (mn->shader_type) {
-        case SPONZA_SHADER_FULL:
-            vs_handle = s_vs_full;
-            fs_handle = s_fs_full;
-            break;
-        case SPONZA_SHADER_ALPHA:
-            vs_handle = s_vs_alpha;
-            fs_handle = s_fs_alpha;
-            break;
-        default: /* SPONZA_SHADER_DIFFUSE */
-            vs_handle = s_vs_diffuse;
-            fs_handle = s_fs_diffuse;
-            break;
-        }
+        /* The program is assigned by link_programs once the stages resolve. */
+        s_material_shader_types[i] = (mn->shader_type < 3) ? mn->shader_type : (uint8_t)SPONZA_SHADER_DIFFUSE;
 
         /* Create material descriptor */
         nt_material_create_desc_t mat_desc = {
-            .vs = vs_handle,
-            .fs = fs_handle,
             .depth_test = true,
             .depth_write = true,
             .cull_mode = NT_CULL_BACK,
@@ -395,6 +416,7 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     /* Sequential loading chain: core -> geo -> tex -> full */
 
@@ -548,6 +570,7 @@ static void frame(void) {
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         item_count = 0;
+        drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -743,6 +766,9 @@ int main(void) {
         nt_material_destroy(s_materials[i]);
     }
     nt_material_shutdown();
+    for (uint32_t t = 0; t < 3; t++) {
+        nt_gfx_destroy_program(s_programs[t]);
+    }
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

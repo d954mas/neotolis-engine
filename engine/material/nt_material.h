@@ -55,8 +55,8 @@ typedef struct {
 /* ---- Creation descriptor ---- */
 
 typedef struct {
-    nt_resource_t vs;
-    nt_resource_t fs;
+    /* Borrowed: the material never links, destroys or checks the program. */
+    nt_program_t program;
     nt_material_texture_desc_t textures[NT_MATERIAL_MAX_TEXTURES];
     uint8_t texture_count;
     nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
@@ -90,8 +90,7 @@ static inline nt_material_desc_t nt_material_desc_defaults(void) {
 /* ---- Material info (read-only query for render module) ---- */
 
 typedef struct {
-    uint32_t resolved_vs;
-    uint32_t resolved_fs;
+    nt_program_t program;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
     const char *tex_names[NT_MATERIAL_MAX_TEXTURES];         /* sampler uniform names (static storage) */
@@ -113,7 +112,7 @@ typedef struct {
     nt_color_mode_t color_mode;
     uint64_t render_state_hash;
     uint32_t version;
-    bool ready;
+    bool ready;        /* a program is assigned -- says nothing about its GPU liveness */
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
@@ -128,6 +127,9 @@ void nt_material_step(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
+/* The only way to change the program. Bumps version so pipeline caches rebuild.
+ * Pass NT_PROGRAM_INVALID before destroying the program the material holds. */
+void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
 /* ---- Runtime param mutation ---- */
