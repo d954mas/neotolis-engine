@@ -126,6 +126,7 @@ uint32_t nt_gfx_stub_test_render_target_resize_count(void);
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
 uint32_t nt_gfx_stub_test_texture_create_count(void);
 uint32_t nt_gfx_stub_test_program_create_count(void);
+uint32_t nt_gfx_stub_test_pipeline_create_count(void);
 uint32_t nt_gfx_stub_test_uniform_int_count(void);
 const char *nt_gfx_stub_test_uniform_int_name_at(uint32_t index);
 int nt_gfx_stub_test_uniform_int_value_at(uint32_t index);

@@ -42,9 +42,16 @@ typedef struct {
     float oblique;          /* synthetic-oblique shear folded into the model in draw_n (faux-italic lean); 0 = upright */
 } nt_text_deco_t;
 
+typedef struct {
+    uint64_t key; /* material id folded with its version */
+    nt_pipeline_t pipeline;
+} nt_text_pipeline_entry_t;
+
 static struct {
     /* GPU resources */
-    nt_pipeline_t pipeline;
+    nt_pipeline_t pipeline; /* the entry selected for the bound material */
+    nt_text_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
+    uint8_t pipeline_count;
     nt_buffer_t vbo; /* dynamic vertex buffer */
     nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
 
@@ -61,9 +68,6 @@ static struct {
     float glyph_depth_bias;
     /* Per-run decoration axes (weight/outline/shadow/underline/strike/oblique); reset as one unit. */
     nt_text_deco_t deco;
-
-    /* Cached pipeline state */
-    uint32_t pipeline_material_version; /* version when pipeline was last created */
 
     bool initialized;
 
@@ -111,22 +115,29 @@ static void generate_quad_indices(void) {
 }
 // #endregion
 
-// #region Pipeline creation
-static void create_pipeline(void) {
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
-        s_text.pipeline = (nt_pipeline_t){0};
-    }
-
-    /* After the destroy, never before: a material whose program went away must
-     * not keep drawing through the pipeline built on it. */
+// #region Pipeline cache
+/* Resolve the bound material's pipeline, building it on a miss. The version is
+ * folded into the key, so a material that loses its program never selects the
+ * entry built on the old one. Returns an invalid handle while the material has
+ * no usable program -- flush discards the glyphs and retries next frame. */
+static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     if (!info || !info->ready) {
-        return;
+        return (nt_pipeline_t){0};
     }
     /* Nothing relinks an existing handle, so a ready material holding a program
      * without a GPU object never recovers -- clear the program instead. */
     NT_ASSERT(nt_gfx_program_ready(info->program) && "text material holds a program that will never link");
+
+    const uint64_t key = ((uint64_t)s_text.material.id << 32) | info->version;
+    for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
+        if (s_text.pipelines[i].key == key) {
+            return s_text.pipelines[i].pipeline;
+        }
+    }
+
+    /* Cache full is a configuration bug, not a runtime recovery case. */
+    NT_ASSERT(s_text.pipeline_count < NT_TEXT_RENDERER_MAX_PIPELINES && "text pipeline cache exhausted; raise NT_TEXT_RENDERER_MAX_PIPELINES");
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
@@ -144,7 +155,7 @@ static void create_pipeline(void) {
     };
 
     /* Read render state from material — same pattern as mesh_renderer */
-    s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = info->program,
         .layout = layout,
         .depth_test = info->depth_test,
@@ -154,14 +165,22 @@ static void create_pipeline(void) {
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     });
+    /* Invalid means a lost context or a failed backend allocation. Caching it
+     * would pin the failure for the rest of the session; retry next frame. */
+    if (pip.id == 0) {
+        return pip;
+    }
 
-    s_text.pipeline_material_version = info->version;
+    s_text.pipelines[s_text.pipeline_count].key = key;
+    s_text.pipelines[s_text.pipeline_count].pipeline = pip;
+    s_text.pipeline_count++;
+    return pip;
 }
 // #endregion
 
 // #region Lifecycle
-/* GPU resources only — the pipeline is created lazily in flush, so this owns just the buffers + index
- * pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
+/* GPU resources only — pipelines are built lazily on a cache miss, so this owns just the buffers +
+ * index pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
 static void create_gpu_resources(void) {
     generate_quad_indices();
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -181,10 +200,12 @@ static void create_gpu_resources(void) {
 }
 
 static void destroy_gpu_resources(void) {
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
-        s_text.pipeline = (nt_pipeline_t){0};
+    for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
+        nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
+        s_text.pipelines[i] = (nt_text_pipeline_entry_t){0};
     }
+    s_text.pipeline_count = 0;
+    s_text.pipeline = (nt_pipeline_t){0};
     nt_gfx_destroy_buffer(s_text.vbo);
     nt_gfx_destroy_buffer(s_text.ibo);
     s_text.vbo = (nt_buffer_t){0};
@@ -222,8 +243,7 @@ void nt_text_renderer_restore_gpu(void) {
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
-    s_text.glyph_count = 0;
-    s_text.pipeline_material_version = 0; /* pipeline destroyed above → flush rebuilds it lazily */
+    s_text.glyph_count = 0;  /* pipeline cache went with destroy_gpu_resources → flush rebuilds lazily */
 }
 // #endregion
 
@@ -248,8 +268,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     }
 
     s_text.material = mat;
-    s_text.pipeline_material_version = 0;
-    create_pipeline();
+    s_text.pipeline = find_or_create_pipeline();
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
@@ -682,12 +701,10 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Rebuild on any material version bump -- a new program included. */
+    /* Re-resolve rather than trust the handle set_material picked: a version bump
+     * between the two (a new program) selects a different entry. Normally a hit. */
     if (s_text.material.id != 0) {
-        const nt_material_info_t *info = nt_material_get_info(s_text.material);
-        if (info && (s_text.pipeline.id == 0 || info->version != s_text.pipeline_material_version)) {
-            create_pipeline();
-        }
+        s_text.pipeline = find_or_create_pipeline();
     }
     if (s_text.pipeline.id == 0) {
         NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);

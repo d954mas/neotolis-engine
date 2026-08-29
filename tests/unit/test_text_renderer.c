@@ -333,6 +333,43 @@ void test_flush_stops_after_program_cleared(void) {
     nt_gfx_end_frame();
 }
 
+/* UI text alternates between a context default and per-style overrides, so a
+ * single pipeline slot rebuilt a VAO on every switch (#378). */
+void test_switching_back_to_a_material_reuses_its_pipeline(void) {
+    nt_material_t a = create_test_material_with_blend(nt_blend_alpha());
+    nt_material_t b = create_test_material_with_blend(nt_blend_opaque());
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(a);
+    nt_text_renderer_set_material(b);
+    nt_text_renderer_set_material(a);
+
+    /* Three switches, two distinct materials: the third must be a cache hit. */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
+}
+
+/* A new program means a new pipeline even though the material handle is the
+ * same -- the version is what makes the key differ. */
+void test_a_new_program_does_not_reuse_the_old_pipeline(void) {
+    nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(mat);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
+
+    nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
+}
+
 /* A ready material pointing at a destroyed program is the mistake the spec says
  * must trap; discarding the glyphs instead would hide it behind a warning. */
 void test_flush_traps_on_a_destroyed_program(void) {
@@ -801,6 +838,8 @@ int main(void) {
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
     RUN_TEST(test_flush_traps_on_a_destroyed_program);
+    RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
+    RUN_TEST(test_a_new_program_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);
