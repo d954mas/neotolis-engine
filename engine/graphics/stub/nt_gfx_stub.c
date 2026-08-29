@@ -32,6 +32,7 @@ static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
 static bool s_stub_fail_next_texture_create;
 static bool s_stub_fail_next_program_create;
+static bool s_stub_fail_next_pipeline_create;
 static bool s_stub_fail_next_backend_restore;
 static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
@@ -69,6 +70,7 @@ void nt_gfx_stub_test_fail_next_render_target_create(void) { s_stub_fail_next_re
 void nt_gfx_stub_test_fail_next_render_target_resize(void) { s_stub_fail_next_render_target_resize = true; }
 void nt_gfx_stub_test_fail_next_texture_create(void) { s_stub_fail_next_texture_create = true; }
 void nt_gfx_stub_test_fail_next_program_create(void) { s_stub_fail_next_program_create = true; }
+void nt_gfx_stub_test_fail_next_pipeline_create(void) { s_stub_fail_next_pipeline_create = true; }
 void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend_restore = true; }
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
@@ -104,6 +106,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_backend_missing = false;
     s_stub_fail_next_texture_create = false;
     s_stub_fail_next_program_create = false;
+    s_stub_fail_next_pipeline_create = false;
     s_stub_fail_next_backend_restore = false;
     s_stub_fail_next_render_target_create = false;
     s_stub_fail_next_render_target_resize = false;
@@ -205,6 +208,10 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_han
 
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
 #ifdef NT_TEST_ACCESS
+    if (s_stub_fail_next_pipeline_create) {
+        s_stub_fail_next_pipeline_create = false;
+        return 0;
+    }
     s_stub_last_pipeline_blend = desc->blend;
 #else
     (void)desc;

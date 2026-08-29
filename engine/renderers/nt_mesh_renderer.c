@@ -224,6 +224,11 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
+    /* Only a lost context gets here with an invalid handle. Caching it would
+     * pin the failure for the rest of the session; retry next frame instead. */
+    if (pip.id == 0) {
+        return pip;
+    }
 
     /* Store in cache -- full cache is a configuration bug, not a runtime recovery case */
     NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
@@ -445,6 +450,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             /* Bind pipeline (if material or mesh changed) */
             if (run_mat.id != prev_mat.id || run_mesh.id != prev_mesh.id) {
                 nt_pipeline_t pip = find_or_create_pipeline(mat_info, mesh_info);
+                if (pip.id == 0) {
+                    draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+                    run_start = run_end;
+                    continue;
+                }
                 nt_gfx_bind_pipeline(pip);
 
                 /* Sampler units are program state shared with every other

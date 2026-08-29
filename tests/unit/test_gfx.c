@@ -562,6 +562,47 @@ void test_gfx_pipeline_asserts_bad_instance_layout(void) {
     nt_gfx_destroy_shader(fs);
 }
 
+void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(NULL)); }
+
+void test_gfx_pipeline_asserts_too_many_attrs(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = prog,
+        .layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4},
+    }));
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = prog,
+        .instance_layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4},
+    }));
+}
+
+void test_gfx_pipeline_pool_full_asserts(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    for (int i = 0; i < 4; i++) { /* setUp: max_pipelines = 4 */
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}).id);
+    }
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}));
+}
+
+/* A backend failure is not a developer error: it stays an invalid handle so
+ * callers can retry on a later frame. */
+void test_gfx_pipeline_backend_failure_returns_invalid(void) {
+    nt_gfx_stub_test_reset();
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_gfx_stub_test_fail_next_pipeline_create();
+
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_EQUAL_UINT32(0, pip.id);
+
+    /* The pool slot went back, so the retry succeeds. */
+    nt_pipeline_t retry = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, retry.id);
+    nt_gfx_destroy_pipeline(retry);
+    nt_gfx_stub_test_reset();
+}
+
 void test_gfx_pipeline_stride_255_boundary(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
@@ -575,11 +616,10 @@ void test_gfx_pipeline_stride_255_boundary(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, ok.id);
     nt_gfx_destroy_pipeline(ok);
 
-    nt_pipeline_t bad = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
         .layout = {.attr_count = 1, .stride = 256, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, bad.id);
+    }));
 
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
@@ -1822,6 +1862,10 @@ int main(void) {
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
     RUN_TEST(test_gfx_register_global_block_after_program_asserts);
     RUN_TEST(test_gfx_global_block_counter_resets_on_init);
+    RUN_TEST(test_gfx_pipeline_asserts_null_desc);
+    RUN_TEST(test_gfx_pipeline_asserts_too_many_attrs);
+    RUN_TEST(test_gfx_pipeline_pool_full_asserts);
+    RUN_TEST(test_gfx_pipeline_backend_failure_returns_invalid);
     RUN_TEST(test_gfx_pipeline_stride_255_boundary);
     RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
     RUN_TEST(test_gfx_pipeline_asserts_normalized_float);

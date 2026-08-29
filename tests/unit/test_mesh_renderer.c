@@ -408,6 +408,25 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* A pipeline that failed to create must not enter the cache: the key would
+ * pin the invalid handle for the rest of the session (#362). */
+void test_pipeline_cache_skips_failed_pipeline(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+
+    /* Next frame retries and succeeds. */
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+}
+
 /* Manual dedup is the whole point of an explicit program: two materials on one
  * program, same layout and state, must collapse to a single pipeline. */
 void test_pipeline_cache_shared_program_collapses(void) {
@@ -710,6 +729,7 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_pipeline_cache_skips_failed_pipeline);
     RUN_TEST(test_pipeline_cache_shared_program_collapses);
     RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_restore_gpu);

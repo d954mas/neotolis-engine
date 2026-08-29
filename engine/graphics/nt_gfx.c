@@ -796,25 +796,17 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
+    /* Everything a caller controls is a developer error and traps. A lost
+     * context is the only way out with an invalid handle, so callers that see
+     * one know exactly what happened. */
     nt_pipeline_t result = {0};
-    if (!desc) {
-        return result;
-    }
+    NT_ASSERT(desc != NULL);
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
-    if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        NT_LOG_ERROR("pipeline creation failed: too many vertex attrs");
-        return result;
-    }
-    if (desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
-        return result;
-    }
+    NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
+    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
-    if (desc->layout.stride > 255 || desc->instance_layout.stride > 255) {
-        NT_LOG_ERROR("pipeline creation failed: stride %u exceeds WebGL2 max 255", (uint32_t)((desc->layout.stride > 255) ? desc->layout.stride : desc->instance_layout.stride));
-        return result;
-    }
+    NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
     /* After the attr_count bounds check -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     assert_layout_webgl2_rules(&desc->instance_layout);
@@ -822,10 +814,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("pipeline pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
     uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend);
