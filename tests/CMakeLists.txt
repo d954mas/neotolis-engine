@@ -292,6 +292,13 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_postfx_blur PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_postfx_blur WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Real GL: the stub never links, so this is the only link coverage the
+    # helper's embedded shader pair has.
+    add_executable(test_nt_postfx_blur_native unit/test_nt_postfx_blur_native.c)
+    target_link_libraries(test_nt_postfx_blur_native PRIVATE nt_postfx_blur nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_postfx_blur_native)
+    set_tests_properties(test_nt_postfx_blur_native PROPERTIES LABELS "native")
+
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)
     target_link_libraries(test_base64 PRIVATE nt_base64 unity)
