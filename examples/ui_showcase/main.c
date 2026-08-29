@@ -1991,8 +1991,10 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
-    /* The radial material(s) load with the pack; until ready, skip the tab body (no-art early-out). */
-    if (s_radial_material.id == 0U) {
+    /* The radial program links on its own frame, so readiness -- not just the
+     * handle -- gates the body: the walker asserts on a not-ready material. */
+    const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
+    if (!radial_info || !radial_info->ready) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
     }

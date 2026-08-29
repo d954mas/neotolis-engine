@@ -732,11 +732,13 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(vs_backend != 0 && "make_program: vertex stage has no GPU object");
     NT_ASSERT(fs_backend != 0 && "make_program: fragment stage has no GPU object");
 
-    uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    NT_ASSERT(backend != 0 && "program link failed");
-
+    /* Before the link, not after: the GL backend's program table has the same
+     * capacity, so linking first makes exhaustion surface as a link failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
+
+    uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
+    NT_ASSERT(backend != 0 && "program link failed");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
 
@@ -806,9 +808,9 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
-    /* Everything a caller controls is a developer error and traps. A lost
-     * context is the only way out with an invalid handle, so callers that see
-     * one know exactly what happened. */
+    /* Everything a caller controls is a developer error and traps. What is left
+     * -- a lost context, a failed backend allocation -- returns an invalid handle
+     * the caller retries on a later frame. */
     nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
     /* Live poll before the readiness assert: context loss is what zeroes the
@@ -1076,6 +1078,9 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
+    if (shd.id == 0) {
+        return; /* invalid-zero is a first-class value, as for programs */
+    }
     if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
         NT_LOG_ERROR("destroy_shader: invalid handle");
         return;
@@ -1116,6 +1121,9 @@ void nt_gfx_destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
+    if (pip.id == 0) {
+        return; /* invalid-zero is a first-class value, as for programs */
+    }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         NT_LOG_ERROR("destroy_pipeline: invalid handle");
         return;
@@ -1131,6 +1139,9 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+    if (buf.id == 0) {
+        return; /* invalid-zero is a first-class value, as for programs */
+    }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("destroy_buffer: invalid handle");
         return;

@@ -977,7 +977,13 @@ static void frame(void) {
         nt_text_renderer_flush();
     }
 
-    if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
+    /* The inspector's materials sit on a different program from the UI's, and the
+     * two link on different frames -- ui_can_render does not cover them. */
+    const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
+    const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
+    const bool inspector_can_render = insp_sprite && insp_sprite->ready && insp_text && insp_text->ready;
+
+    if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho). */
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);

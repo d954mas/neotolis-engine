@@ -797,6 +797,63 @@ static void test_each_pipeline_binds_its_own_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
+/* Destroying a pipeline must not touch the program it borrows. With two
+ * pipelines on one program, deleting it with the first would leave the second
+ * calling glUseProgram on a dead name: GL_INVALID_VALUE, an empty frame, and no
+ * assert anywhere -- the failure class this whole object model exists to stop. */
+static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
+    static const char *vertex_source = "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pip_a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = false});
+    nt_pipeline_t pip_b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_a.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip_b.id);
+
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_BUFFER,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+
+    nt_gfx_destroy_pipeline(pip_a);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+
+    uint8_t pixels[4 * 4 * 4] = {0};
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    assert_rgba(pixels, 16, 0, 255, 0, 255);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_pipeline(pip_b);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 /* Registration is retroactive: blocks bind at link time, so without the
  * registry reaching back into existing programs a late registration would
  * silently miss every one of them -- including those engine renderers link
@@ -856,5 +913,6 @@ int main(void) {
     RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
+    RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);
     return UNITY_END();
 }

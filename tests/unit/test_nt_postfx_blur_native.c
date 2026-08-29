@@ -4,7 +4,11 @@
  * so a pair that compiles stage-by-stage and fails only at link went unnoticed
  * until an example aborted. The builder has the same blind spot: it validates
  * each stage separately and never links a pair. This test is the only thing
- * that links these two shaders. */
+ * that links these two shaders.
+ *
+ * It only bites on drivers that fold branches before checking array bounds --
+ * NVIDIA does, Mesa/llvmpipe (what CI runs under xvfb) accepts the rejected
+ * form. A green CI run is therefore not proof that the shaders are portable. */
 
 #include "graphics/nt_gfx.h"
 #include "postfx/nt_postfx_blur.h"

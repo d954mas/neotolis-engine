@@ -316,7 +316,7 @@ typedef struct {
 } nt_shader_desc_t;
 
 typedef struct {
-    /* Borrowed, not owned: the pipeline must not outlive the program. */
+    /* Borrowed, not owned. Outliving the program is caught at bind, not silently. */
     nt_program_t program;
     nt_vertex_layout_t layout;
     bool depth_test;
@@ -478,8 +478,9 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd);
-/* Pipelines built from this program become unusable; the owner is responsible
- * for destroying them and for clearing every material that held the handle. */
+/* Pipelines built from this program become unusable. The owner destroys the ones
+ * it created and clears every material that held the handle; pipelines a renderer
+ * cached for itself go with that renderer's restore entry point. */
 void nt_gfx_destroy_program(nt_program_t prog);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);

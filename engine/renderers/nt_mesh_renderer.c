@@ -224,8 +224,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    /* Only a lost context gets here with an invalid handle. Caching it would
-     * pin the failure for the rest of the session; retry next frame instead. */
+    /* Invalid here means a lost context or a failed backend allocation. Caching
+     * it would pin the failure for the rest of the session; retry next frame. */
     if (pip.id == 0) {
         return pip;
     }

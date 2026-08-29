@@ -454,6 +454,23 @@ void test_gfx_bind_pipeline_asserts_destroyed_program(void) {
     nt_gfx_end_frame();
 }
 
+/* The bind-time check is not enough on its own: the program can die while its
+ * pipeline is already bound, and draw only looks at bound_pipeline. */
+void test_gfx_draw_asserts_when_bound_program_is_destroyed(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+    EXPECT_ASSERT(nt_gfx_draw(0, 3));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
@@ -1867,6 +1884,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_asserts_unready_program);
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
     RUN_TEST(test_gfx_bind_pipeline_asserts_destroyed_program);
+    RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
     RUN_TEST(test_gfx_program_valid_and_ready);
     RUN_TEST(test_gfx_destroy_program_invalidates);

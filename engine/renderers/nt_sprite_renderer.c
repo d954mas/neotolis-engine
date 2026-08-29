@@ -282,7 +282,7 @@ static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
-    /* Pipeline signature: layout discriminator + vs/fs handles + render-state
+    /* Pipeline signature: layout discriminator + program handle + render-state
      * bits. The layout is folded UNCONDITIONALLY (base=0, custom=distinct) so a
      * custom-attr material's extended layout never aliases the base 20 B
      * pipeline. */
@@ -313,8 +313,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    /* Only a lost context gets here with an invalid handle. Caching it would
-     * pin the failure for the rest of the session; retry next frame instead. */
+    /* Invalid here means a lost context or a failed backend allocation. Caching
+     * it would pin the failure for the rest of the session; retry next frame. */
     if (pip.id == 0) {
         return pip;
     }
@@ -1343,11 +1343,10 @@ void nt_sprite_renderer_flush(void) {
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
             bound_ibo_id = 0;
-            /* The new pipeline may sit on a different program, whose uniform
-             * values are its own. Reset every mirror so the inner loops rewrite
-             * params, sampler units and samplers even when the ids match. */
-            memset(bound_tex_ids, 0, sizeof(bound_tex_ids));
-            memset(bound_sampler_ids, 0, sizeof(bound_sampler_ids));
+            /* Uniform values belong to the program, so the new pipeline may sit
+             * on one that never saw this material's params or sampler units.
+             * Texture units are context state -- glUseProgram does not touch
+             * them, so their mirrors survive the switch. */
             bound_mat_id = 0;
         }
 
@@ -1358,11 +1357,11 @@ void nt_sprite_renderer_flush(void) {
 
         /* Apply material params on material change. Most cmds in a flush share
          * the same material (atlas page split / sampler split don't change it),
-         * so the lookup + uniform set runs only at run boundaries. If the
-         * material was destroyed between draw_list capture and flush replay,
-         * leave bound_mat_id unchanged so a later cmd with the same material
-         * can re-attempt the lookup once it's resolvable again. */
-        uint32_t mat_id_before_cmd = bound_mat_id;
+         * so the lookup + uniform set runs only at run boundaries. A material
+         * destroyed between draw_list capture and flush replay leaves
+         * bound_mat_id alone, so a later cmd on it retries once it resolves --
+         * and applies neither its params nor its sampler units meanwhile. */
+        bool material_applied = false;
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
             if (mi != NULL) {
@@ -1372,6 +1371,7 @@ void nt_sprite_renderer_flush(void) {
                     }
                 }
                 bound_mat_id = c->material.id;
+                material_applied = true;
             }
         }
 
@@ -1379,7 +1379,7 @@ void nt_sprite_renderer_flush(void) {
             /* Written on every material change, not only when the texture bind
              * changes: two materials can share both pipeline and textures yet
              * map different names onto the unit. */
-            if (c->material.id != mat_id_before_cmd && c->tex_names[t] != NULL) {
+            if (material_applied && c->tex_names[t] != NULL) {
                 nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
             }
             if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {

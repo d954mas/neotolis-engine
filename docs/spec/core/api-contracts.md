@@ -137,8 +137,9 @@ linked from it.
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
 whether the GL program behind it exists. A lost context clears readiness while
-handles stay valid, so the owner relinks and reassigns rather than reallocating
-handles. `nt_gfx_make_pipeline` requires readiness.
+handles stay valid, and nothing relinks an existing handle: the owner destroys
+the dead one, links a new pair, and reassigns. A valid handle that is not ready
+never becomes ready again. `nt_gfx_make_pipeline` requires readiness.
 
 A link failure is a developer error and asserts, alongside an invalid stage
 handle, and an exhausted program pool.
@@ -152,7 +153,9 @@ inside their own init, before the game runs. There is no per-program override. A
 condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
 
 `nt_material_set_program` is the only way to change a material's program and
-bumps the material version so pipeline caches rebuild. Destroying a program does
+bumps the material version, so a renderer keyed on it builds a pipeline for the
+new program on the next draw. Caches do not evict the old entry -- programs are
+replaced through a renderer's restore entry point, which drops the cache whole. Destroying a program does
 not touch materials: the owner assigns `NT_PROGRAM_INVALID` or a new handle to
 every material that held it, otherwise the material stays `ready` with a dead
 handle and the next bind asserts.

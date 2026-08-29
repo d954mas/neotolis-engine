@@ -158,15 +158,20 @@ the cached pipelines built on them.
 Programs come back over several frames, not in the restore frame: the shader
 stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
 activation budget. The game relinks once both stages resolve and assigns the new
-handle with `nt_material_set_program`. Until then materials are not `ready` and
-the ECS `draw_list` paths skip them on their existing not-ready branches; the
-immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material`
-entry points assert on a not-ready material instead, so a game must stop feeding
-them for the duration of the window.
+handle with `nt_material_set_program`. Until then materials are not `ready`.
+`nt_sprite_renderer_draw_list` skips a not-ready run silently;
+`nt_mesh_renderer_draw_list` asserts, so the game filters those entities out
+before it builds render items. The immediate-mode
+`nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
+assert too, so a game must stop feeding them for the duration of the window.
+A game whose materials sit on several programs gates on every one of them: the
+programs link on different frames, and one not-ready material is enough to trap.
 
 Skipping step 5 does not degrade: the material stays `ready` holding a dead
-program, and the failure surfaces as an assert inside `nt_gfx_bind_pipeline`,
-one module away from the mistake.
+program, and the failure surfaces as an assert inside `nt_gfx_make_pipeline`
+("program is not linked") -- the restore dropped the pipeline caches, so the
+first draw rebuilds rather than binds. `nt_gfx_bind_pipeline` is the path only
+for a pipeline the game owns and kept.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,

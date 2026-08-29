@@ -124,12 +124,9 @@ static void create_pipeline(void) {
     if (!info || !info->ready) {
         return;
     }
-    /* A destroyed program left in a ready material is a developer error; a valid
-     * one that is not linked yet is the normal multi-frame context restore. */
-    NT_ASSERT(nt_gfx_program_valid(info->program) && "text material holds a destroyed program");
-    if (!nt_gfx_program_ready(info->program)) {
-        return;
-    }
+    /* Nothing relinks an existing handle, so a ready material holding a program
+     * without a GPU object never recovers -- clear the program instead. */
+    NT_ASSERT(nt_gfx_program_ready(info->program) && "text material holds a program that will never link");
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {

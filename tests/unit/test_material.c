@@ -639,6 +639,25 @@ void test_set_param_invalid_handle(void) {
     TEST_PASS();
 }
 
+/* ---- Test: set_program with a stale handle fires NT_ASSERT ---- */
+
+/* A stale handle silently doing nothing is how a material ends up with no
+ * program and nobody noticing until the screen is black. */
+void test_set_program_on_a_destroyed_material_asserts(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    nt_material_destroy(mat);
+
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) == 0) {
+        nt_material_set_program(mat, (nt_program_t){.id = 1});
+        nt_assert_handler = NULL;
+        TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire for a destroyed material");
+    }
+    nt_assert_handler = NULL;
+    TEST_PASS();
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -685,6 +704,7 @@ int main(void) {
     RUN_TEST(test_warns_once_when_program_never_arrives);
     RUN_TEST(test_not_ready_warning_rearms_after_ready);
     RUN_TEST(test_warns_when_destroyed_without_ever_being_ready);
+    RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
     RUN_TEST(test_step_resolves_textures);
 
     /* Query edge cases */

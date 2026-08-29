@@ -784,6 +784,9 @@ void nt_shape_renderer_restore_gpu(void) {
 
     /* Full re-init: recreates shaders, pipelines, buffers, template meshes, trig LUT */
     nt_shape_renderer_init();
+    if (!s_shape.initialized) {
+        return; /* init already logged the cause; writing state now would hide it */
+    }
 
     /* Restore saved settings */
     memcpy(s_shape.vp, saved_vp, sizeof(s_shape.vp));
@@ -797,6 +800,12 @@ void nt_shape_renderer_restore_gpu(void) {
 }
 
 void nt_shape_renderer_flush(void) {
+    /* Init has failure paths now, and every emit funnels through here -- without
+     * this a failed init would upload into zero buffer handles. */
+    if (!s_shape.initialized) {
+        return;
+    }
+
     /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
         uint32_t cnt = s_shape.inst_counts[t];

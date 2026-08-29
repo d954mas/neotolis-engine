@@ -258,7 +258,12 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     info->ready = (program.id != 0);
     info->version++;
     if (program.id != 0) {
-        s_mat.slots[nt_pool_slot_index(mat.id)].ever_ready = true;
+        /* Re-arm here too, not only in step: a program that arrives and goes
+         * again between two steps must still warn on the second loss. */
+        nt_material_slot_t *slot = &s_mat.slots[nt_pool_slot_index(mat.id)];
+        slot->ever_ready = true;
+        slot->not_ready_steps = 0;
+        slot->warned_not_ready = false;
     }
 }
 
