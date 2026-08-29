@@ -21,6 +21,14 @@ that wants one program behind many materials links it once and passes the same
 handle to each, via `nt_material_set_program`. Materials, pipelines and pipeline
 caches all borrow the handle and never destroy it.
 
+Uniform block bindings are program state, not material state: a program is
+shared by many materials, so a material-declared binding would be
+last-writer-wins across them. The engine keeps one global name -> slot registry
+instead, and `nt_gfx_register_global_block` applies it to every program,
+existing and future. A block declared by a single shader needs no special case
+-- the bind skips programs that do not declare it. What varies per draw is the
+buffer, via `nt_gfx_bind_uniform_buffer`.
+
 A link failure is a developer error and traps (`NT_ASSERT`) rather than
 returning an invalid handle; the only invalid handle `nt_gfx_make_program`
 returns is on a lost context. Because the builder validates each stage

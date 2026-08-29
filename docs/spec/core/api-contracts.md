@@ -141,9 +141,14 @@ handles stay valid, so the owner relinks and reassigns rather than reallocating
 handles. `nt_gfx_make_pipeline` requires readiness.
 
 A link failure is a developer error and asserts, alongside an invalid stage
-handle, an exhausted program pool, and registering a global UBO block after the
-first program is created (blocks bind at link time, so a later registration
-would silently miss every program already linked). A lost context is the only
+handle, and an exhausted program pool.
+
+`nt_gfx_register_global_block` is the single source of truth for a block's
+name -> binding slot, and registration order does not matter: the block is bound
+in every program linked so far and in every program linked afterwards. Blocks
+bind at link time, so without the retroactive half a late registration would
+silently miss every existing program -- including those engine renderers link
+inside their own init, before the game runs. There is no per-program override. A lost context is the only
 condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
 
 `nt_material_set_program` is the only way to change a material's program and

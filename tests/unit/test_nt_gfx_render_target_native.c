@@ -797,6 +797,50 @@ static void test_each_pipeline_binds_its_own_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
+/* Registration is retroactive: blocks bind at link time, so without the
+ * registry reaching back into existing programs a late registration would
+ * silently miss every one of them -- including those engine renderers link
+ * during their own init, before a game gets to register anything. */
+static void test_global_block_registered_after_link_binds_in_that_program(void) {
+    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
+                                       "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(1.0); }\n";
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+
+    /* Link FIRST, register afterwards -- the reverse of the other block test. */
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_gfx_register_global_block("Globals", 5);
+
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+
+    GLint current_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
+    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
+    TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
+    GLint binding = -1;
+    glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
+    TEST_ASSERT_EQUAL_INT(5, binding);
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
@@ -809,6 +853,7 @@ int main(void) {
     RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
+    RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     return UNITY_END();

@@ -440,9 +440,9 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
 
 /* ---- Global UBO block registration ---- */
 
-/* Must be called before the FIRST nt_gfx_make_program -- blocks bind at link
- * time, so a later registration silently misses every program already linked.
- * Engine renderers link programs in their init, so register before those too. */
+/* The registry is the single source of truth for block name -> binding slot.
+ * Registration order does not matter: a block binds in every program linked so
+ * far and in every program linked afterwards. */
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
@@ -571,7 +571,6 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
-void nt_gfx_set_uniform_block(nt_program_t prog, const char *block_name, uint32_t slot);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint

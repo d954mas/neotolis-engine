@@ -130,9 +130,6 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
-    /* Global blocks are bound at link time, so registering one after the first
-     * program would silently miss every program already linked. */
-    uint32_t programs_created;
     bool context_restore_retry;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -150,11 +147,20 @@ static struct {
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
-    NT_ASSERT(s_gfx.programs_created == 0 && "register global blocks before creating the first program");
     s_global_blocks[s_global_block_count].name = name;
     s_global_blocks[s_global_block_count].binding_slot = binding_slot;
     s_global_blocks[s_global_block_count].active = true;
     s_global_block_count++;
+
+    /* The registry is the single truth for name -> slot, so it applies to
+     * programs already linked as well as to future ones. Without this, blocks
+     * bind at link time only and a late registration would silently miss every
+     * existing program -- including the ones engine renderers link in init. */
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        if (s_gfx.program_backends[i] != 0) {
+            nt_gfx_backend_set_uniform_block(s_gfx.program_backends[i], name, binding_slot);
+        }
+    }
 }
 
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
@@ -733,7 +739,6 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
-    s_gfx.programs_created++;
 
     nt_program_t result = {id};
     return result;
@@ -1711,17 +1716,6 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         return;
     }
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
-}
-
-void nt_gfx_set_uniform_block(nt_program_t prog, const char *block_name, uint32_t slot) {
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
-    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
-        NT_LOG_ERROR("set_uniform_block: invalid program handle");
-        return;
-    }
-    nt_gfx_backend_set_uniform_block(s_gfx.program_backends[nt_pool_slot_index(prog.id)], block_name, slot);
 }
 
 /* ---- Buffer update ---- */

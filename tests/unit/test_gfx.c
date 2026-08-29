@@ -396,22 +396,24 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
 }
 
-/* ---- Global blocks: registering after the first program asserts ---- */
+/* ---- Global blocks: registration order does not matter ---- */
 
-void test_gfx_register_global_block_after_program_asserts(void) {
+/* The registry is the single truth for name -> slot, so it must reach programs
+ * that already exist. Engine renderers link in their init, which would
+ * otherwise close the window before a game gets to register anything. */
+void test_gfx_register_global_block_after_program_is_allowed(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
-    EXPECT_ASSERT(nt_gfx_register_global_block("Globals", 0));
-}
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
 
-/* ---- Global blocks: the program counter resets on init ---- */
-
-void test_gfx_global_block_counter_resets_on_init(void) {
-    nt_gfx_make_program(make_test_vs(), make_test_fs());
-    nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16});
-    /* Must not assert: the previous session's programs are gone. */
     nt_gfx_register_global_block("Globals", 0);
+
+    const nt_global_block_t *blocks = NULL;
+    uint32_t count = 0;
+    nt_gfx_get_global_blocks(&blocks, &count);
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    TEST_ASSERT_EQUAL_STRING("Globals", blocks[0].name);
+    /* The GL-side effect on the existing program is pinned by the real-GL test
+     * test_global_block_registered_after_link_binds_in_that_program. */
 }
 
 /* ---- Program: pipelines borrow it, they never link ---- */
@@ -1875,8 +1877,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_program_asserts_on_link_failure);
     RUN_TEST(test_gfx_make_program_context_lost_returns_invalid);
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
-    RUN_TEST(test_gfx_register_global_block_after_program_asserts);
-    RUN_TEST(test_gfx_global_block_counter_resets_on_init);
+    RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
     RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);
     RUN_TEST(test_gfx_pipeline_asserts_too_many_attrs);
