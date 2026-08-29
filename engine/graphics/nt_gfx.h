@@ -20,7 +20,11 @@ typedef struct {
 
 /* Linked (vertex, fragment) pair. Owned by whoever called nt_gfx_make_program;
  * pipelines only borrow it, so destroy order is pipeline -> program -> shaders.
- * No dedup: two calls with the same pair produce two programs. */
+ * No dedup: two calls with the same pair produce two programs.
+ *
+ * Immutable: nothing relinks or edits a program after nt_gfx_make_program
+ * returns, and no handle ever regains readiness once it loses it. A context
+ * restore destroys the old program and links a new one under a new handle. */
 typedef struct {
     uint32_t id;
 } nt_program_t;
@@ -480,7 +484,10 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 void nt_gfx_destroy_shader(nt_shader_t shd);
 /* Pipelines built from this program become unusable. The owner destroys the ones
  * it created and clears every material that held the handle; pipelines a renderer
- * cached for itself go with that renderer's restore entry point. */
+ * cached for itself go with that renderer's restore entry point.
+ *
+ * NT_PROGRAM_INVALID is the one accepted no-op — a stale non-zero handle asserts,
+ * so clear the handle to NT_PROGRAM_INVALID at the point you destroy it. */
 void nt_gfx_destroy_program(nt_program_t prog);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
@@ -501,8 +508,9 @@ bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Handle still refers to a live slot. Says nothing about the GPU object:
  * after context loss handles stay valid while the GL program is gone. */
 bool nt_gfx_program_valid(nt_program_t prog);
-/* The GL program behind the handle exists — false after context loss until
- * the owner relinks. nt_gfx_make_pipeline requires this. */
+/* The GL program behind the handle exists. A lost context clears it for good:
+ * no API relinks an existing handle, so false here is terminal for that handle.
+ * nt_gfx_make_pipeline requires this. */
 bool nt_gfx_program_ready(nt_program_t prog);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);

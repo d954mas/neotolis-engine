@@ -348,9 +348,10 @@ void test_switching_back_to_a_material_reuses_its_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
 }
 
-/* A new program means a new pipeline even though the material handle is the
- * same -- the version is what makes the key differ. */
-void test_a_new_program_does_not_reuse_the_old_pipeline(void) {
+/* Swapping a material's program is legal only across a reset, and the reset must
+ * leave nothing behind: the next draw builds a pipeline for the new program
+ * rather than reusing the entry built on the old one. */
+void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
@@ -359,7 +360,12 @@ void test_a_new_program_does_not_reuse_the_old_pipeline(void) {
     nt_text_renderer_set_material(mat);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
 
+    /* The full ordering: reset, clear, assign. */
+    nt_text_renderer_restore_gpu();
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
     nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
+
+    nt_text_renderer_set_material(mat);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -839,7 +845,7 @@ int main(void) {
     RUN_TEST(test_flush_stops_after_program_cleared);
     RUN_TEST(test_flush_traps_on_a_destroyed_program);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
-    RUN_TEST(test_a_new_program_does_not_reuse_the_old_pipeline);
+    RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);

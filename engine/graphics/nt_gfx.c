@@ -1097,8 +1097,10 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     if (prog.id == 0) {
         return;
     }
+    /* A stale non-zero handle means the owner lost track of which programs it
+     * still holds -- the one mistake this ownership model cannot absorb. */
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
-        NT_LOG_ERROR("destroy_program: invalid handle");
         return;
     }
     /* draw only checks bound_pipeline != 0, so a bind left pointing at a

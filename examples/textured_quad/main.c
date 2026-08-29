@@ -316,9 +316,7 @@ static void frame(void) {
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         can_render = false;
-        nt_material_set_program(s_cube_material, NT_PROGRAM_INVALID);
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
@@ -335,9 +333,14 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Restore order: reset the renderers (drops queued commands and pipeline
+         * caches), clear the materials, destroy the programs, then invalidate the
+         * stages. Anything else leaves a command or a cache entry on a dead program. */
         nt_mesh_renderer_restore_gpu();
+        nt_material_set_program(s_cube_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_cube_program); /* GL object is gone; this frees the pool slot */
         s_cube_program = NT_PROGRAM_INVALID;
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});

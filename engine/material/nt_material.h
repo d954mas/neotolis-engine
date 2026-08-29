@@ -127,8 +127,18 @@ void nt_material_step(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
-/* The only way to change the program. Bumps version so pipeline caches rebuild.
- * Pass NT_PROGRAM_INVALID before destroying the program the material holds. */
+/* The only way to change the program, and it bumps the material version.
+ *
+ * Legal transitions:
+ *   NT_PROGRAM_INVALID -> program   any time (first async assignment, or after a restore)
+ *   program -> NT_PROGRAM_INVALID   only after every renderer that draws this
+ *                                   material has been reset (queued commands
+ *                                   dropped, pipeline caches cleared)
+ *   program A -> program B          rejected; go A -> INVALID -> B across a reset
+ *
+ * A -> B asserts. The material cannot see the renderers holding commands and
+ * pipelines built on A, so the ordering is the caller's to honour; this assert
+ * only catches the step that is locally visible. */
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 

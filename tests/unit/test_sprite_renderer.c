@@ -542,6 +542,28 @@ void test_sprite_renderer_pipeline_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
+/* The reset a material's program change requires: nothing built on the old
+ * program may outlive it, and the renderer holds both a queued command and a
+ * cached pipeline that borrow it. */
+void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat); /* opens a cmd and caches a pipeline */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+
+    nt_sprite_renderer_restore_gpu();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+
+    /* Only now may the material let go of the program it was drawn with. */
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+}
+
 void test_sprite_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.constant_color[1] = 0.5F;
@@ -1099,6 +1121,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
+    RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);

@@ -17,6 +17,11 @@ a broken one at build time. That validation needs a GL context: a headless build
 host logs a skip and packs the stage unchecked, so the runtime compile stays the
 backstop.
 
+A program is immutable: nothing relinks or edits it after
+`nt_gfx_make_program` returns. A context restore destroys the old program and
+links a new one under a new handle, so a handle's GPU object never changes
+underneath it, and readiness once lost is lost for good.
+
 The program has a single owner — whoever called `nt_gfx_make_program` — and the
 engine never dedupes: two calls with the same pair give two programs. A game
 that wants one program behind many materials links it once and passes the same

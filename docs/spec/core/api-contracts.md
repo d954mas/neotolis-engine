@@ -134,12 +134,24 @@ without owning it, so the owner destroys pipelines first, then the program, then
 the shader stages. Destroying a shader stage does not affect a program already
 linked from it.
 
+A program is immutable. Nothing relinks or edits it after
+`nt_gfx_make_program` returns, so its identity and its GPU object are the same
+thing for the handle's whole life. A context restore does not repair a program;
+it destroys the old one and links a new one under a new handle.
+
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
 whether the GL program behind it exists. A lost context clears readiness while
-handles stay valid, and nothing relinks an existing handle: the owner destroys
-the dead one, links a new pair, and reassigns. A valid handle that is not ready
-never becomes ready again. `nt_gfx_make_pipeline` requires readiness.
+handles stay valid, and because no API relinks, a valid handle that is not ready
+never becomes ready again -- that state is terminal, not transitional.
+`nt_gfx_make_pipeline` requires readiness.
+
+`nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op, because games
+clear their handles on context loss and destroy them again at shutdown. Every
+other handle it does not recognise asserts: a stale non-zero handle means the
+owner lost track of what it still holds, which is the one mistake single
+ownership cannot absorb. Clear the handle variable to `NT_PROGRAM_INVALID` at
+the point you destroy it.
 
 A link failure is a developer error and asserts, alongside an invalid stage
 handle, and an exhausted program pool.
@@ -155,7 +167,23 @@ condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
 `nt_material_set_program` is the only way to change a material's program and
 bumps the material version, so a renderer keyed on it builds a pipeline for the
 new program on the next draw. Caches do not evict the old entry -- programs are
-replaced through a renderer's restore entry point, which drops the cache whole. Destroying a program does
+replaced through a renderer's restore entry point, which drops the cache whole.
+
+A material's borrowed program moves only between renderer cache epochs. The
+legal transitions are:
+
+| From | To | When |
+|---|---|---|
+| `NT_PROGRAM_INVALID` | a program | any time -- the first async assignment, or the one after a restore |
+| a program | `NT_PROGRAM_INVALID` | only after every renderer that draws this material has been reset |
+| program A | program B | never; go A -> `NT_PROGRAM_INVALID` -> B, with the reset in between |
+
+A -> B asserts. It would strand queued draw commands and cached pipelines built
+on A with nothing left pointing at them, and the material module cannot see the
+renderers holding them, so the reset ordering stays the caller's to honour --
+the assert only catches the step that is locally visible. The reset is the
+renderer's restore entry point, which drops queued commands and pipeline caches
+together. Destroying a program does
 not touch materials: the owner assigns `NT_PROGRAM_INVALID` or a new handle to
 every material that held it, otherwise the material stays `ready` with a dead
 handle and the next bind asserts.

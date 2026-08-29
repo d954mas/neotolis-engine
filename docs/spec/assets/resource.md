@@ -138,22 +138,35 @@ handles, and render items computed before that call still describe the previous
 GPU context. The game must discard them and skip dependent draws for the restored
 frame.
 
-When `context_restored` is true, the game:
+When `context_restored` is true, the game runs these steps IN ORDER. The order is
+the contract, not a suggestion: each step removes the last reference a later step
+would otherwise orphan.
 
-1. discards render decisions and draw lists prepared before
-   `nt_gfx_begin_frame()`
-2. calls `nt_resource_invalidate()` for each file-backed GPU asset type that it
-   uses
-3. destroys and recreates game-owned GPU objects, freeing their logical handle
-   slots before replacement
-4. calls the restore entry point of every active renderer
-5. clears every material's program with `nt_material_set_program(mat,
-   NT_PROGRAM_INVALID)` and destroys its own `nt_program_t` handles, which frees
-   the pool slots the dead GL programs still occupy
+1. stops submitting — discards render decisions and draw lists prepared before
+   `nt_gfx_begin_frame()`, and draws nothing for the restored frame
+2. drops queued draw commands and
+3. clears pipeline caches — both by calling the restore entry point of every
+   active renderer, which does the two together
+4. clears every material's program with `nt_material_set_program(mat,
+   NT_PROGRAM_INVALID)`
+5. destroys its own `nt_program_t` handles, freeing the pool slots the dead GL
+   programs still occupy, and sets each handle variable to `NT_PROGRAM_INVALID`
+6. calls `nt_resource_invalidate()` for the shader-code asset type and for every
+   other file-backed GPU asset type it uses, and destroys and recreates
+   game-owned GPU objects
 
-Programs are destroyed after the renderers restore, not before: a renderer's
-pipeline cache borrows those handles, and its restore entry point is what drops
-the cached pipelines built on them.
+Then, over the following frames:
+
+7. links a new program once both stages resolve — never relinking an existing
+   handle, which no API supports
+8. assigns it with `nt_material_set_program`
+
+Why this order. Steps 2 and 3 come first because a queued command and a cached
+pipeline both borrow a program that step 5 is about to destroy, and nothing links
+a material back to the renderers holding them. Step 4 precedes step 5 so no
+material is left holding a destroyed handle. Step 6 comes last because a linked
+program does not depend on its stages, so destroying stages earlier only obscures
+which object died first.
 
 Programs come back over several frames, not in the restore frame: the shader
 stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
@@ -166,7 +179,7 @@ stop feeding them for the duration of the window.
 A game whose materials sit on several programs gates on every one of them: the
 programs link on different frames, and one not-ready material is enough to trap.
 
-Skipping step 5 does not degrade: the material stays `ready` holding a dead
+Skipping step 4 does not degrade: the material stays `ready` holding a dead
 program, and the failure surfaces as an assert inside `nt_gfx_make_pipeline`
 ("program is not linked") -- the restore dropped the pipeline caches, so the
 first draw rebuilds rather than binds. `nt_gfx_bind_pipeline` is the path only

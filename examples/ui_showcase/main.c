@@ -3752,14 +3752,6 @@ static void frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_radial_material, NT_PROGRAM_INVALID);
-        for (int m = 0; m < 4; ++m) {
-            nt_material_set_program(s_radial_image_material[m], NT_PROGRAM_INVALID);
-        }
-        nt_material_set_program(s_radial_image_packed_material, NT_PROGRAM_INVALID);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -3770,9 +3762,19 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Renderers first: destroy order is pipeline, then program. */
+        /* Restore order: reset the renderers (drops queued commands and pipeline
+         * caches), clear the materials, destroy the programs, then invalidate the
+         * stages. Anything else leaves a command or a cache entry on a dead program. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
         nt_shape_renderer_restore_gpu();
+        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_radial_material, NT_PROGRAM_INVALID);
+        for (int m = 0; m < 4; ++m) {
+            nt_material_set_program(s_radial_image_material[m], NT_PROGRAM_INVALID);
+        }
+        nt_material_set_program(s_radial_image_packed_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_text_program);
         nt_gfx_destroy_program(s_radial_program);
@@ -3781,6 +3783,7 @@ static void frame(void) {
         s_text_program = NT_PROGRAM_INVALID;
         s_radial_program = NT_PROGRAM_INVALID;
         s_radial_image_program = NT_PROGRAM_INVALID;
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init next frame so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
         s_font_bound = false;

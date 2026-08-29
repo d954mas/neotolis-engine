@@ -33,6 +33,12 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > a material is `ready` once a program is assigned — which says nothing about
 > that program's GPU liveness (see [Shader System](shader.md)). The material
 > module never links, destroys, or inspects the program.
+>
+> The borrowed handle moves only between renderer cache epochs:
+> `NT_PROGRAM_INVALID` to a program is free, a program back to
+> `NT_PROGRAM_INVALID` requires the renderers to have been reset first, and
+> program A straight to program B asserts. The transition table and the reason
+> live in [API Contracts](../core/api-contracts.md).
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented

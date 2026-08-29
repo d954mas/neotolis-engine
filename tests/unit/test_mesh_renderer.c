@@ -334,6 +334,23 @@ void test_draw_list_skips_a_not_ready_run_and_offsets_the_next(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + NT_INSTANCE_STRIDE_NONE, nt_gfx_stub_test_last_instance_offset());
 }
 
+/* Same reset contract as the sprite renderer: a cached pipeline borrows the
+ * material's program, so it must not survive into the next epoch. */
+void test_reset_drops_cached_pipelines(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+
+    nt_mesh_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+}
+
 /* ---- Test 5: 2 items with different materials -> 2 draw calls ---- */
 
 void test_draw_list_different_materials(void) {
@@ -781,6 +798,7 @@ int main(void) {
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_skips_a_not_ready_run_and_offsets_the_next);
+    RUN_TEST(test_reset_drops_cached_pipelines);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);

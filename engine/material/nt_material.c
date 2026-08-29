@@ -254,6 +254,11 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     if (info->program.id == program.id) {
         return;
     }
+    /* A -> B in one step would strand queued draw commands and cached pipelines
+     * built on A: nothing links a material back to the renderers holding them.
+     * Reset the renderers, clear to NT_PROGRAM_INVALID, then assign B. */
+    NT_ASSERT((info->program.id == 0 || program.id == 0) && "material program A -> B: reset the renderers and clear to NT_PROGRAM_INVALID first");
+
     info->program = program;
     info->ready = (program.id != 0);
     info->version++;

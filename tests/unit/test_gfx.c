@@ -307,7 +307,8 @@ void test_gfx_destroy_program_invalidates(void) {
     nt_gfx_destroy_program(prog);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
-    nt_gfx_destroy_program(prog);
+    /* Destroying it again is a stale handle now, not a tolerated no-op --
+     * test_gfx_destroy_program_asserts_on_a_stale_handle covers that. */
 }
 
 /* ---- Program: destroyed slot is reusable ---- */
@@ -431,6 +432,45 @@ void test_gfx_two_pipelines_share_one_program(void) {
     nt_gfx_destroy_pipeline(a);
     nt_gfx_destroy_pipeline(b);
     nt_gfx_destroy_program(prog);
+}
+
+/* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
+
+/* Games clear their handles on context loss and destroy them again at shutdown,
+ * so the invalid value has to pass through untouched. */
+void test_gfx_destroy_program_accepts_invalid(void) {
+    nt_gfx_destroy_program(NT_PROGRAM_INVALID);
+    TEST_PASS();
+}
+
+/* A stale non-zero handle means the owner lost track of what it still holds --
+ * the one mistake single ownership cannot absorb. */
+void test_gfx_destroy_program_asserts_on_a_stale_handle(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_gfx_destroy_program(prog);
+
+    EXPECT_ASSERT(nt_gfx_destroy_program(prog));
+}
+
+/* A program is immutable: a lost context does not repair one, so recovery is a
+ * new handle from a new link, never the old handle coming back to life. */
+void test_gfx_context_restore_yields_a_new_program_handle(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t old = nt_gfx_make_program(vs, fs);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(old));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(old));
+
+    nt_gfx_destroy_program(old);
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+
+    TEST_ASSERT_NOT_EQUAL_UINT32(old.id, fresh.id); /* generation moved on */
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(old));
 }
 
 /* ---- Program: a pipeline whose program was destroyed must not bind ---- */
@@ -1883,6 +1923,9 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_asserts_unready_program);
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
+    RUN_TEST(test_gfx_destroy_program_accepts_invalid);
+    RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
+    RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
     RUN_TEST(test_gfx_bind_pipeline_asserts_destroyed_program);
     RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);

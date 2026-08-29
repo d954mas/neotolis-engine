@@ -85,6 +85,10 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
 
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
+/* Full reset: drops every queued draw command and every cached pipeline, then
+ * rebuilds the GPU-side buffers. This is the reset a material's program change
+ * requires -- run it before clearing a material to NT_PROGRAM_INVALID, so no
+ * command or cache entry outlives the program it was built on. */
 void nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
@@ -195,6 +199,8 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
  * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
+/* Draw commands staged but not yet flushed — a reset must leave none. */
+uint32_t nt_sprite_renderer_test_cmd_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);
 /* Current staging vertex_count (resets on flush). */

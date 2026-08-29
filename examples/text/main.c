@@ -307,14 +307,16 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    bool can_render = true;
+    /* The program links only once both shader stages resolve, and the immediate-mode
+     * set_material asserts on a material without one -- so gate on readiness, not
+     * just on the restore flag. */
+    const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
+    bool can_render = text_info != NULL && text_info->ready;
     nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         can_render = false;
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_FONT);
 
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -324,9 +326,14 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Restore order: reset the renderers (drops queued commands and pipeline
+         * caches), clear the materials, destroy the programs, then invalidate the
+         * stages. Anything else leaves a command or a cache entry on a dead program. */
         nt_text_renderer_restore_gpu();
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_text_program); /* GL object is gone; this frees the pool slot */
         s_text_program = NT_PROGRAM_INVALID;
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){

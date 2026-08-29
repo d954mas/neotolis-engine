@@ -415,9 +415,6 @@ static void frame(void) {
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -427,12 +424,18 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Restore order: reset the renderers (drops queued commands and pipeline
+         * caches), clear the materials, destroy the programs, then invalidate the
+         * stages. Anything else leaves a command or a cache entry on a dead program. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
+        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_text_program);
         s_sprite_program = NT_PROGRAM_INVALID;
         s_text_program = NT_PROGRAM_INVALID;
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         s_font_bound = false;
     }

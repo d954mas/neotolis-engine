@@ -75,6 +75,17 @@ static nt_material_create_desc_t make_test_desc(void) {
     return d;
 }
 
+/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
+}
+
 static void assert_blend_rgb(nt_blend_state_t blend, nt_blend_factor_t src, nt_blend_factor_t dst, nt_blend_op_t op) {
     TEST_ASSERT_TRUE(blend.enabled);
     TEST_ASSERT_EQUAL(src, blend.src_rgb);
@@ -407,14 +418,64 @@ void test_set_program_increments_version(void) {
     TEST_ASSERT_NOT_NULL(info);
     uint32_t v1 = info->version;
 
-    nt_material_set_program(mat, (nt_program_t){.id = 2});
-    TEST_ASSERT_TRUE(info->version > v1);
-
     /* Clearing it is a change too: renderers must drop the stale pipeline. */
-    uint32_t v2 = info->version;
     nt_material_set_program(mat, NT_PROGRAM_INVALID);
-    TEST_ASSERT_TRUE(info->version > v2);
+    TEST_ASSERT_TRUE(info->version > v1);
     TEST_ASSERT_FALSE(info->ready);
+
+    uint32_t v2 = info->version;
+    nt_material_set_program(mat, (nt_program_t){.id = 2});
+    TEST_ASSERT_TRUE(info->version > v2);
+}
+
+/* ---- Program transitions: only across a renderer reset ---- */
+
+/* The whole point of the contract: a material may pick up a program at any
+ * time, because before that no command or pipeline can have been built on it. */
+void test_set_program_allows_invalid_to_program(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = NT_PROGRAM_INVALID;
+    nt_material_t mat = nt_material_create(&d);
+
+    nt_material_set_program(mat, (nt_program_t){.id = 7});
+
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_EQUAL_UINT32(7, info->program.id);
+    TEST_ASSERT_TRUE(info->ready);
+}
+
+/* A -> B in one step would strand queued commands and cached pipelines built on
+ * A, and nothing links a material back to the renderers holding them. */
+void test_set_program_rejects_a_to_b(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = (nt_program_t){.id = 1};
+    nt_material_t mat = nt_material_create(&d);
+
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) == 0) {
+        nt_material_set_program(mat, (nt_program_t){.id = 2});
+        nt_assert_handler = NULL;
+        TEST_FAIL_MESSAGE("Expected NT_ASSERT on a direct program A -> B");
+    }
+    nt_assert_handler = NULL;
+
+    /* Rejected, so the material still holds A. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_get_info(mat)->program.id);
+}
+
+/* The supported route for the same move: reset the renderers, clear, reassign. */
+void test_set_program_allows_a_invalid_b(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = (nt_program_t){.id = 1};
+    nt_material_t mat = nt_material_create(&d);
+    const nt_material_info_t *info = nt_material_get_info(mat);
+
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    TEST_ASSERT_FALSE(info->ready);
+    nt_material_set_program(mat, (nt_program_t){.id = 2});
+
+    TEST_ASSERT_EQUAL_UINT32(2, info->program.id);
+    TEST_ASSERT_TRUE(info->ready);
 }
 
 /* ---- Test 19: version stable when the program does not change ---- */
@@ -614,17 +675,6 @@ void test_set_param_component_updates_one(void) {
     }
 }
 
-/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
-
-static jmp_buf s_assert_jmp;
-
-static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
-    (void)file;
-    (void)line;
-    longjmp(s_assert_jmp, 1);
-}
-
 /* ---- Test: set_param with invalid handle fires NT_ASSERT ---- */
 
 void test_set_param_invalid_handle(void) {
@@ -700,6 +750,9 @@ int main(void) {
     RUN_TEST(test_ready_true_with_program);
     RUN_TEST(test_ready_false_without_program);
     RUN_TEST(test_set_program_increments_version);
+    RUN_TEST(test_set_program_allows_invalid_to_program);
+    RUN_TEST(test_set_program_rejects_a_to_b);
+    RUN_TEST(test_set_program_allows_a_invalid_b);
     RUN_TEST(test_version_stable_when_unchanged);
     RUN_TEST(test_warns_once_when_program_never_arrives);
     RUN_TEST(test_not_ready_warning_rearms_after_ready);
