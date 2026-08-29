@@ -159,11 +159,10 @@ Programs come back over several frames, not in the restore frame: the shader
 stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
 activation budget. The game relinks once both stages resolve and assigns the new
 handle with `nt_material_set_program`. Until then materials are not `ready`.
-`nt_sprite_renderer_draw_list` skips a not-ready run silently;
-`nt_mesh_renderer_draw_list` asserts, so the game filters those entities out
-before it builds render items. The immediate-mode
-`nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
-assert too, so a game must stop feeding them for the duration of the window.
+Both ECS `draw_list` paths skip a not-ready run silently -- it is normal runtime
+state, not a caller error. The immediate-mode `nt_sprite_renderer_set_material`
+/ `nt_text_renderer_set_material` entry points assert instead, so a game must
+stop feeding them for the duration of the window.
 A game whose materials sit on several programs gates on every one of them: the
 programs link on different frames, and one not-ready material is enough to trap.
 
