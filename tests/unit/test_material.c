@@ -430,6 +430,66 @@ void test_version_stable_when_unchanged(void) {
     TEST_ASSERT_EQUAL_UINT32(v1, info->version);
 }
 
+/* ---- Diagnostics: a material that never gets a program ---- */
+
+static void step_n(uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        nt_material_step();
+    }
+}
+
+/* The renderers cannot catch this: the game filters not-ready materials out
+ * before draw_list, so their asserts never see one. */
+void test_warns_once_when_program_never_arrives(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = NT_PROGRAM_INVALID;
+    nt_material_t mat = nt_material_create(&d);
+
+    step_n(nt_material_test_not_ready_warn_steps() - 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_material_test_not_ready_warn_count());
+
+    step_n(1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
+
+    /* One-shot: a stuck material must not warn every frame. */
+    step_n(nt_material_test_not_ready_warn_steps());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
+
+    nt_material_set_program(mat, (nt_program_t){.id = 1});
+    step_n(1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
+}
+
+/* Re-armed on the way back to ready, so a failed relink after context loss
+ * warns again instead of hiding behind the first one. */
+void test_not_ready_warning_rearms_after_ready(void) {
+    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 1}, .label = "rearm"});
+
+    step_n(nt_material_test_not_ready_warn_steps() + 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_material_test_not_ready_warn_count());
+
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    step_n(nt_material_test_not_ready_warn_steps());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
+}
+
+/* No threshold, no false positive from a slow load: it is gone and never drew. */
+void test_warns_when_destroyed_without_ever_being_ready(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = NT_PROGRAM_INVALID;
+    nt_material_t never = nt_material_create(&d);
+    nt_material_destroy(never);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
+
+    /* A material that was ready at some point is not reported, even if its
+     * program was cleared before shutdown. */
+    nt_material_t was_ready = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 2}});
+    nt_material_step();
+    nt_material_set_program(was_ready, NT_PROGRAM_INVALID);
+    nt_material_destroy(was_ready);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
+}
+
 /* ---- Test 20: step resolves textures ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -616,6 +676,9 @@ int main(void) {
     RUN_TEST(test_ready_false_without_program);
     RUN_TEST(test_set_program_increments_version);
     RUN_TEST(test_version_stable_when_unchanged);
+    RUN_TEST(test_warns_once_when_program_never_arrives);
+    RUN_TEST(test_not_ready_warning_rearms_after_ready);
+    RUN_TEST(test_warns_when_destroyed_without_ever_being_ready);
     RUN_TEST(test_step_resolves_textures);
 
     /* Query edge cases */

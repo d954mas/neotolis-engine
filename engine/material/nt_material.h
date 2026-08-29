@@ -143,4 +143,11 @@ bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash);
 void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]);
 void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value);
 
+#ifdef NT_TEST_ACCESS
+/* Diagnostics for the "never got a program" warnings (see nt_material.c). */
+uint32_t nt_material_test_not_ready_warn_count(void);
+uint32_t nt_material_test_never_ready_destroy_count(void);
+uint32_t nt_material_test_not_ready_warn_steps(void);
+#endif
+
 #endif /* NT_MATERIAL_H */

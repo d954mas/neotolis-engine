@@ -10,12 +10,22 @@
 
 /* ---- Internal slot struct ---- */
 
+/* A material that never gets a program renders nothing, and the renderers'
+ * not-ready branches skip it in silence -- the game filters it out before the
+ * engine ever sees it, so no assert can fire. Only the module that owns `ready`
+ * can notice. Steps, not seconds: a slow pack legitimately delays readiness. */
+#define NT_MATERIAL_NOT_READY_WARN_STEPS 600
+
 typedef struct {
     /* Read-only query data -- MUST be first member so nt_material_info_t* can alias */
     nt_material_info_t info;
 
     /* Creation-time resource handles (not in info) */
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
+
+    uint16_t not_ready_steps; /* consecutive steps without a program */
+    bool warned_not_ready;    /* one-shot latch, re-armed when the material goes ready */
+    bool ever_ready;          /* cleared only at creation; drives the destroy-time warn */
 } nt_material_slot_t;
 
 /* ---- Module state ---- */
@@ -24,7 +34,19 @@ static struct {
     nt_pool_t pool;
     nt_material_slot_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
+#ifdef NT_TEST_ACCESS
+    uint32_t not_ready_warn_count;
+    uint32_t never_ready_destroy_count;
+#endif
 } s_mat;
+
+static const char *material_label(const nt_material_info_t *info) { return info->label != NULL ? info->label : "(unlabeled)"; }
+
+#ifdef NT_TEST_ACCESS
+uint32_t nt_material_test_not_ready_warn_count(void) { return s_mat.not_ready_warn_count; }
+uint32_t nt_material_test_never_ready_destroy_count(void) { return s_mat.never_ready_destroy_count; }
+uint32_t nt_material_test_not_ready_warn_steps(void) { return NT_MATERIAL_NOT_READY_WARN_STEPS; }
+#endif
 
 /* ---- Lifecycle ---- */
 
@@ -68,6 +90,23 @@ void nt_material_step(void) {
         }
 
         nt_material_slot_t *mat = &s_mat.slots[i];
+
+        if (mat->info.ready) {
+            mat->ever_ready = true;
+            mat->not_ready_steps = 0;
+            mat->warned_not_ready = false; /* re-arm: a later loss warns again */
+        } else {
+            if (mat->not_ready_steps < NT_MATERIAL_NOT_READY_WARN_STEPS) {
+                mat->not_ready_steps++;
+            }
+            if (!mat->warned_not_ready && mat->not_ready_steps >= NT_MATERIAL_NOT_READY_WARN_STEPS) {
+                NT_LOG_WARN("material '%s' has had no program for %u steps -- call nt_material_set_program()", material_label(&mat->info), (uint32_t)mat->not_ready_steps);
+                mat->warned_not_ready = true;
+#ifdef NT_TEST_ACCESS
+                s_mat.not_ready_warn_count++;
+#endif
+            }
+        }
 
         /* Resolve textures */
         for (uint8_t t = 0; t < mat->info.tex_count; t++) {
@@ -167,6 +206,17 @@ void nt_material_destroy(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized); /* destroy before init */
     if (mat.id == 0 || !s_mat.initialized) {
         return;
+    }
+    /* No threshold to tune and no false positive from a slow load: the material
+     * is gone and never once rendered. */
+    if (nt_pool_valid(&s_mat.pool, mat.id)) {
+        nt_material_slot_t *slot = &s_mat.slots[nt_pool_slot_index(mat.id)];
+        if (!slot->ever_ready) {
+            NT_LOG_WARN("material '%s' destroyed without ever receiving a program", material_label(&slot->info));
+#ifdef NT_TEST_ACCESS
+            s_mat.never_ready_destroy_count++;
+#endif
+        }
     }
     nt_pool_free(&s_mat.pool, mat.id);
 }
