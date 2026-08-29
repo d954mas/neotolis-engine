@@ -9,6 +9,10 @@
 
 #ifndef NT_TEXT_RENDERER_MAX_GLYPHS
 #define NT_TEXT_RENDERER_MAX_GLYPHS 4096
+/* One entry per (material, version) the frame draws through. UI text switches
+ * between a context default and per-style overrides, so a single slot would
+ * rebuild a VAO on every switch. */
+#define NT_TEXT_RENDERER_MAX_PIPELINES 4
 #endif
 
 #define NT_TEXT_RENDERER_MAX_VERTICES (NT_TEXT_RENDERER_MAX_GLYPHS * 4)

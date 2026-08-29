@@ -19,6 +19,7 @@ static uint32_t s_stub_render_target_resize_count;
 static uint32_t s_stub_render_target_destroy_count;
 static uint32_t s_stub_texture_create_count;
 static uint32_t s_stub_program_create_count;
+static uint32_t s_stub_pipeline_create_count;
 #define NT_GFX_STUB_UNIFORM_NAMES 16
 static const char *s_stub_uniform_int_names[NT_GFX_STUB_UNIFORM_NAMES];
 static int s_stub_uniform_int_values[NT_GFX_STUB_UNIFORM_NAMES];
@@ -62,6 +63,7 @@ uint32_t nt_gfx_stub_test_render_target_resize_count(void) { return s_stub_rende
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
 uint32_t nt_gfx_stub_test_texture_create_count(void) { return s_stub_texture_create_count; }
 uint32_t nt_gfx_stub_test_program_create_count(void) { return s_stub_program_create_count; }
+uint32_t nt_gfx_stub_test_pipeline_create_count(void) { return s_stub_pipeline_create_count; }
 uint32_t nt_gfx_stub_test_uniform_int_count(void) { return s_stub_uniform_int_count; }
 const char *nt_gfx_stub_test_uniform_int_name_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_names[index] : NULL; }
 int nt_gfx_stub_test_uniform_int_value_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_values[index] : -1; }
@@ -97,6 +99,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_render_target_destroy_count = 0;
     s_stub_texture_create_count = 0;
     s_stub_program_create_count = 0;
+    s_stub_pipeline_create_count = 0;
     s_stub_uniform_int_count = 0;
     s_stub_update_texture_count = 0;
     s_stub_backend_restore_count = 0;
@@ -220,6 +223,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         s_stub_fail_next_pipeline_create = false;
         return 0;
     }
+    s_stub_pipeline_create_count++;
     s_stub_last_pipeline_blend = desc->blend;
 #else
     (void)desc;
