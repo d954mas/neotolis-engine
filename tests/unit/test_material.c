@@ -482,11 +482,17 @@ void test_warns_when_destroyed_without_ever_being_ready(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
 
     /* A material that was ready at some point is not reported, even if its
-     * program was cleared before shutdown. */
+     * program was cleared before shutdown. Readiness latches on assignment, so
+     * no step has to run in between. */
     nt_material_t was_ready = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 2}});
-    nt_material_step();
     nt_material_set_program(was_ready, NT_PROGRAM_INVALID);
     nt_material_destroy(was_ready);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
+
+    /* Same latch through set_program: created without one, given one, gone. */
+    nt_material_t late = nt_material_create(&d);
+    nt_material_set_program(late, (nt_program_t){.id = 3});
+    nt_material_destroy(late);
     TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
 }
 

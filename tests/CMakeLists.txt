@@ -424,8 +424,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_ui_3d_bench)
 
     # --- Text renderer module tests ---
-    add_executable(test_text_renderer unit/test_text_renderer.c)
+    # nt_assert_trap.c backs the dead-program death-test; needs unit/ on the include
+    # path so it resolves "test_helpers/nt_assert_trap.h".
+    add_executable(test_text_renderer unit/test_text_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
+    target_include_directories(test_text_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_text_renderer)
 

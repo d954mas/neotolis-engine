@@ -1328,6 +1328,12 @@ void nt_sprite_renderer_flush(void) {
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
+        /* set_material opens a cmd even when the context died mid-frame and left
+         * it without a pipeline; drawing it would replay the previous cmd's. */
+        if (c->pipeline.id == 0) {
+            continue;
+        }
+
         if (c->pipeline.id != bound_pipeline_id) {
             /* GL ordering: each pipeline owns a VAO, and GL_ELEMENT_ARRAY_BUFFER
              * is part of VAO state. So pipeline → VBO (re-applies attribs into

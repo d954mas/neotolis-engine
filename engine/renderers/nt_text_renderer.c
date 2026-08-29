@@ -121,7 +121,13 @@ static void create_pipeline(void) {
     /* After the destroy, never before: a material whose program went away must
      * not keep drawing through the pipeline built on it. */
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    if (!info || !info->ready || !nt_gfx_program_ready(info->program)) {
+    if (!info || !info->ready) {
+        return;
+    }
+    /* A destroyed program left in a ready material is a developer error; a valid
+     * one that is not linked yet is the normal multi-frame context restore. */
+    NT_ASSERT(nt_gfx_program_valid(info->program) && "text material holds a destroyed program");
+    if (!nt_gfx_program_ready(info->program)) {
         return;
     }
 

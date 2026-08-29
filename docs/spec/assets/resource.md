@@ -146,10 +146,14 @@ When `context_restored` is true, the game:
    uses
 3. destroys and recreates game-owned GPU objects, freeing their logical handle
    slots before replacement
-4. clears every material's program with `nt_material_set_program(mat,
+4. calls the restore entry point of every active renderer
+5. clears every material's program with `nt_material_set_program(mat,
    NT_PROGRAM_INVALID)` and destroys its own `nt_program_t` handles, which frees
    the pool slots the dead GL programs still occupy
-5. calls the restore entry point of every active renderer
+
+Programs are destroyed after the renderers restore, not before: a renderer's
+pipeline cache borrows those handles, and its restore entry point is what drops
+the cached pipelines built on them.
 
 Programs come back over several frames, not in the restore frame: the shader
 stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
@@ -160,7 +164,7 @@ immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_materia
 entry points assert on a not-ready material instead, so a game must stop feeding
 them for the duration of the window.
 
-Skipping step 4 does not degrade: the material stays `ready` holding a dead
+Skipping step 5 does not degrade: the material stays `ready` holding a dead
 program, and the failure surfaces as an assert inside `nt_gfx_bind_pipeline`,
 one module away from the mistake.
 

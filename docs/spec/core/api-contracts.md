@@ -220,10 +220,12 @@ capacity, stale handles, direct mutation of owned attachments, and
 render-target lifecycle calls inside an active pass are developer errors and
 assert. `nt_gfx_make_pipeline` follows the same split: a NULL descriptor, an
 unready program, an attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride
-over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, leaving a
-lost context as the only source of an invalid pipeline handle. Backend allocation, framebuffer completeness,
-resize, and context-restore failures remain runtime failures reported through
-invalid handles, `false`, or readiness queries.
+over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, so a
+returned invalid pipeline handle means a lost context or a failed backend
+allocation — the two recoverable outcomes, both retried on a later frame.
+Backend allocation, framebuffer completeness, resize, and context-restore
+failures remain runtime failures reported through invalid handles, `false`, or
+readiness queries.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
 Callers check readiness before beginning work that depends on restored GPU

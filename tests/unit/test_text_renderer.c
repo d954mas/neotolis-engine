@@ -15,6 +15,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "time/nt_time.h"
 #include "unity.h"
 /* clang-format on */
@@ -327,6 +328,29 @@ void test_flush_stops_after_program_cleared(void) {
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* A ready material pointing at a destroyed program is the mistake the spec says
+ * must trap; discarding the glyphs instead would hide it behind a warning. */
+void test_flush_traps_on_a_destroyed_program(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    const nt_program_t dead = nt_material_get_info(material)->program;
+    nt_text_renderer_set_material(material);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    /* Clear first so the re-assignment below bumps the version and forces the
+     * rebuild -- a game that stashed the old handle across a context loss. */
+    nt_material_set_program(material, NT_PROGRAM_INVALID);
+    nt_gfx_destroy_program(dead);
+    nt_material_set_program(material, dead);
+
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -776,6 +800,7 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
+    RUN_TEST(test_flush_traps_on_a_destroyed_program);
     RUN_TEST(test_draw_n_matches_draw);
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);

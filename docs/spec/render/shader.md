@@ -13,7 +13,9 @@ Related: [Material System](material.md), [Runtime Formats](../assets/runtime-for
 `nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs)` links
 a pair, from either an embedded source string or two resolved resources. The
 shader resource exists so the builder can compile each stage offline and reject
-a broken one at build time.
+a broken one at build time. That validation needs a GL context: a headless build
+host logs a skip and packs the stage unchecked, so the runtime compile stays the
+backstop.
 
 The program has a single owner — whoever called `nt_gfx_make_program` — and the
 engine never dedupes: two calls with the same pair give two programs. A game

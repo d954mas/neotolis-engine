@@ -139,6 +139,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
     slot->info.program = desc->program;
     slot->info.ready = (desc->program.id != 0);
+    /* Latched on assignment, not in step: a material created ready and destroyed
+     * before the next step did receive a program. */
+    slot->ever_ready = slot->info.ready;
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -244,8 +247,8 @@ const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_m
 
 void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     nt_material_info_t *info = get_mutable_info(mat);
+    NT_ASSERT(info && "set_program on invalid material handle");
     if (!info) {
-        NT_LOG_ERROR("set_program: invalid material handle");
         return;
     }
     if (info->program.id == program.id) {
@@ -254,6 +257,9 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     info->program = program;
     info->ready = (program.id != 0);
     info->version++;
+    if (program.id != 0) {
+        s_mat.slots[nt_pool_slot_index(mat.id)].ever_ready = true;
+    }
 }
 
 /* ---- Runtime param mutation ---- */
