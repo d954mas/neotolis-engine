@@ -438,7 +438,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
             const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
-            NT_ASSERT(mat_info && mat_info->ready && mesh_info); /* caller must filter not-ready items */
+            /* Not ready is legitimate runtime state, not a bug: async activation
+             * and the context-restore window both produce it. Skip like the
+             * sprite path does -- the material diagnostics report a material
+             * that never gets a program. */
             if (!mat_info || !mat_info->ready || !mesh_info) {
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;

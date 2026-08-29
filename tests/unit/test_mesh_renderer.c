@@ -307,6 +307,33 @@ void test_draw_list_same_material_mesh_batching(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_instance_total());
 }
 
+/* A material with no program yet is normal during async activation and the
+ * context-restore window, so the run is skipped, not asserted (#381). The ready
+ * run after it must still land at the right instance offset -- dropping the
+ * advance would draw it with the skipped run's instance data. */
+void test_draw_list_skips_a_not_ready_run_and_offsets_the_next(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t not_ready = create_test_material();
+    nt_material_t ready = create_test_material();
+    nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
+
+    nt_entity_t e0 = create_test_entity(mesh, not_ready);
+    nt_entity_t e1 = create_test_entity(mesh, ready);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = nt_mesh_renderer_batch_key(not_ready, mesh);
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = nt_mesh_renderer_batch_key(ready, mesh);
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + NT_INSTANCE_STRIDE_NONE, nt_gfx_stub_test_last_instance_offset());
+}
+
 /* ---- Test 5: 2 items with different materials -> 2 draw calls ---- */
 
 void test_draw_list_different_materials(void) {
@@ -753,6 +780,7 @@ int main(void) {
     RUN_TEST(test_draw_list_single_item);
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
+    RUN_TEST(test_draw_list_skips_a_not_ready_run_and_offsets_the_next);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
