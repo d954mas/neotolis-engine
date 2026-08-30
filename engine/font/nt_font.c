@@ -1637,6 +1637,12 @@ void nt_font_step(void) {
             if (nt_gfx_texture_ready(slot->curve_texture) && nt_gfx_texture_ready(slot->band_texture)) {
                 continue;
             }
+            /* Never had textures at all: creation failed at nt_font_create, which
+             * a rebuild cannot fix. Retrying every frame would churn GL and the
+             * glyph cache for the rest of the session. */
+            if (slot->curve_texture.id == 0 && slot->band_texture.id == 0) {
+                continue;
+            }
 
             nt_gfx_destroy_texture(slot->curve_texture);
             nt_gfx_destroy_texture(slot->band_texture);

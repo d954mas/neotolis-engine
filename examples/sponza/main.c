@@ -116,22 +116,26 @@ static nt_entity_t s_entities[MAX_SCENE_NODES];
 static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static uint8_t s_material_shader_types[MAX_SCENE_NODES];
-static nt_program_ref_t s_programs[3]; /* indexed by SponzaShaderType */
+static nt_program_ref_t s_programs[3];    /* indexed by SponzaShaderType */
+static uint32_t s_program_assigned_count; /* entities link_programs has already assigned */
 
-/* All three pairs come from the same pack, so they go ready together. Idempotent
- * by construction: update() is free once linked and assigning the handle a
- * material already holds is a no-op, so this runs every frame without a latch --
- * the manifest and the shader stages may arrive in either order. */
+/* Safe to call every frame: update() is free once linked. The manifest and the
+ * shader stages arrive in either order, so both a fresh link and a freshly
+ * built scene have to reach the materials. */
 static void link_programs(void) {
+    bool linked_any = false;
     for (uint32_t t = 0; t < 3; t++) {
-        (void)nt_program_ref_update(&s_programs[t]);
+        linked_any = nt_program_ref_update(&s_programs[t]) || linked_any;
     }
-    if (s_programs[SPONZA_SHADER_DIFFUSE].program.id == 0) {
-        return;
-    }
-    for (uint32_t i = 0; i < s_entity_count; i++) {
+    /* A fresh link re-assigns every material; otherwise only the ones the scene
+     * added since the last sweep. The scene is built well after the stages
+     * resolve, so both cases are real -- but without the watermark this walked
+     * all 256 materials every frame for the life of the run. */
+    const uint32_t first = linked_any ? 0U : s_program_assigned_count;
+    for (uint32_t i = first; i < s_entity_count; i++) {
         nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]].program);
     }
+    s_program_assigned_count = s_entity_count;
 }
 
 static void drop_programs(void) {

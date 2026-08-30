@@ -753,22 +753,34 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 /* ---- Pipeline bind ---- */
 
+/* Nothing is bound after a rejected bind: no pipeline slot, no program, no VAO.
+ * Every re-apply path keys off one of the three. */
+static void unbind_pipeline_state(void) {
+    s_bound_pipeline_slot = 0;
+    s_bound_program = 0;
+    if (s_gl_cache.vao != 0) {
+        glBindVertexArray(0);
+        s_gl_cache.vao = 0;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    /* Both rejections clear the slot mirrors: bind_vertex_buffer re-applies
-     * attribs from s_bound_pipeline_slot, so a stale one would push the old
-     * pipeline's layout into the old VAO for the new buffer. */
+    /* Both rejections unbind everything: bind_vertex_buffer re-applies attribs
+     * from s_bound_pipeline_slot, so a stale one would push the old pipeline's
+     * layout into the old VAO for the new buffer. The VAO has to go too --
+     * bind_index_buffer is not gated on the slot, so leaving it current would
+     * rewrite the previous pipeline's recorded GL_ELEMENT_ARRAY_BUFFER, and
+     * re-binding that pipeline could not repair it. */
     if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
-        s_bound_pipeline_slot = 0;
-        s_bound_program = 0;
+        unbind_pipeline_state();
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
     /* A zeroed record (context loss, destroyed pipeline) would bind program 0
      * and turn every following draw into a silent GL_INVALID_OPERATION. */
     if (pip->program_slot == 0 || pip->program_slot > s_init_desc.max_programs) {
-        s_bound_pipeline_slot = 0;
-        s_bound_program = 0;
+        unbind_pipeline_state();
         return;
     }
 

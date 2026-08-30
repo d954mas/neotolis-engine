@@ -3736,7 +3736,6 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Renderers first: destroy order is pipeline, then program. */
         /* Order does not matter here: nothing draws between these calls, and the
          * materials keep their handles -- a destroyed program reads as not ready,
          * so every renderer skips until the gate below relinks and re-assigns. */

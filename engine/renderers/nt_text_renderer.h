@@ -39,9 +39,10 @@ void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
 /* Material must use the slug_text vs/fs, a blend compatible with its premultiplied output, and cull NONE. u_alpha_cutoff is an opt-in param:
- * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard; omit it and
- * the unset uniform reads 0 → no discard (the renderer binds only declared params). Both setters
- * auto-flush staging on change. */
+ * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard. Declare it on
+ * EVERY material sharing one program, or on none: uniforms live on the program, so a material that omits
+ * it inherits whatever the last material on that program wrote (docs/spec/render/architecture.md). Both
+ * setters auto-flush staging on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 

@@ -198,12 +198,8 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     if (!info) {
         return;
     }
-    /* Same handle is a no-op, so a per-frame gate can call this unconditionally
-     * and needs no latch of its own. */
-    if (info->program.id == program.id) {
-        return;
-    }
-
+    /* A plain store: assigning the handle the material already holds changes
+     * nothing, so a per-frame gate can call this unconditionally. */
     info->program = program;
 }
 

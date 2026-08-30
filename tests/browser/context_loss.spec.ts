@@ -48,6 +48,15 @@ test('context loss: rendering stops, then the game relinks and resumes', async (
   // are not ready -- the material still names a handle whose GPU object is dead.
   await page.waitForFunction(() => window.__nt!.programs_ready() === false, null, { timeout: 10_000 });
 
+  // And drawing actually stopped -- readiness going false proves nothing on its
+  // own. Phrased as "no draws while no program is ready" rather than a flat
+  // equality, so the relink completing mid-sample is not a flake.
+  const stalled = await page.evaluate(() => window.__nt!.drawn_frames());
+  await frame();
+  await frame();
+  const resumed = await page.evaluate(() => ({ n: window.__nt!.drawn_frames(), ready: window.__nt!.programs_ready() }));
+  expect(resumed.n === stalled || resumed.ready, 'frames were drawn while no program was ready').toBeTruthy();
+
   // Recovery is the game's own build gate running again: it relinks from the
   // re-activated stages and re-assigns. Nothing in the engine does this by itself.
   await page.waitForFunction(() => window.__nt!.programs_ready() === true, null, { timeout: 30_000 });

@@ -813,6 +813,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
      * the caller retries on a later frame. */
     nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
+    if (desc == NULL) {
+        return result; /* real branch: the derefs below outlive the assert under OFF */
+    }
     /* Live poll before the readiness assert: context loss is what zeroes the
      * program backend, so without this every renderer would trap on it. */
     if (nt_gfx_backend_is_context_lost()) {
@@ -821,6 +824,11 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
     NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
+    /* Hard guard, not just the asserts: both loops below and the backend read
+     * attr_count entries out of a fixed attrs[NT_GFX_MAX_VERTEX_ATTRS]. */
+    if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS || desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
+        return result;
+    }
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
     NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
@@ -1598,14 +1606,17 @@ void nt_gfx_set_uniform_int(const char *name, int val) {
 
 /* ---- Draw calls ---- */
 
+/* Everything a draw is built from -- resolved handles, render items, the
+ * caller's own readiness decisions -- was computed before begin_frame and
+ * describes the dead context. Rebuild this frame, submit the next one.
+ * Clearing through begin_pass stays legal; only geometry is refused. */
+static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md"); }
+
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* Everything a draw is built from -- resolved handles, render items, the
-     * caller's own readiness decisions -- was computed before begin_frame and
-     * describes the dead context. Rebuild this frame, submit the next one. */
-    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1627,10 +1638,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* Everything a draw is built from -- resolved handles, render items, the
-     * caller's own readiness decisions -- was computed before begin_frame and
-     * describes the dead context. Rebuild this frame, submit the next one. */
-    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1654,10 +1662,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* Everything a draw is built from -- resolved handles, render items, the
-     * caller's own readiness decisions -- was computed before begin_frame and
-     * describes the dead context. Rebuild this frame, submit the next one. */
-    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1680,10 +1685,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* Everything a draw is built from -- resolved handles, render items, the
-     * caller's own readiness decisions -- was computed before begin_frame and
-     * describes the dead context. Rebuild this frame, submit the next one. */
-    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {

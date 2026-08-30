@@ -286,6 +286,9 @@ void nt_text_renderer_set_material(nt_material_t mat) {
      * already dead here, and trapping on that would crash a recoverable event.
      * make_pipeline polls the lost context and hands back an invalid pipeline. */
     NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
+    if (info == NULL) {
+        return; /* real branch: the derefs below outlive the assert under OFF */
+    }
 
     /* Programs too, not just the handle: a flat replace keeps the material id, so
      * comparing ids alone would let glyphs staged under the old program flush

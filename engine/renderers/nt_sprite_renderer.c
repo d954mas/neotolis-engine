@@ -19,6 +19,7 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "render/nt_render_defs.h"
+#include "renderers/nt_renderer_shared.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "transform_comp/nt_transform_comp.h"
 
@@ -295,17 +296,6 @@ static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-/* One-shot: a game that never assigns a program would otherwise get a black
- * screen and no explanation. Re-armed when a pipeline is built. */
-static void warn_program_not_ready(const nt_material_info_t *mat_info) {
-    if (s_sprite.warned_program_not_ready) {
-        return;
-    }
-    NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",
-                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
-    s_sprite.warned_program_not_ready = true;
-}
-
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* One query covers every state: no program yet, a program that died with the
      * context, and a program its owner destroyed. Without it the restore window
@@ -339,8 +329,10 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     /* Miss — create. Cache full is a configuration bug, not a runtime
      * recovery case. */
     NT_ASSERT(s_sprite.count < s_sprite.max_pipelines && "sprite pipeline cache exhausted; raise NT_SPRITE_RENDERER_MAX_PIPELINES or desc.max_pipelines");
-    /* Hard guard, not just the assert: NT_ASSERT_MODE=OFF would write past
-     * entries[]. Before make_pipeline so OFF does not create-then-destroy. */
+    /* Hard guard, not just the assert: entries[] is sized to the hardcap and
+     * max_pipelines is the soft cap, so OFF writes past the array only at
+     * max_pipelines == HARDCAP -- below it, this holds the configured bound.
+     * Before make_pipeline so OFF does not create-then-destroy. */
     if (s_sprite.count >= s_sprite.max_pipelines) {
         NT_LOG_ERROR("sprite pipeline cache full -- raise desc.max_pipelines");
         return (nt_pipeline_t){0};
@@ -1322,7 +1314,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
         if (mat_info == NULL || !nt_gfx_program_ready(mat_info->program)) {
             /* Legitimate runtime state during load and restore: skip the run. */
-            warn_program_not_ready(mat_info);
+            nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
             run_start = run_end;
             continue;
         }
@@ -1389,6 +1381,7 @@ void nt_sprite_renderer_flush(void) {
             continue;
         }
 
+        bool pipeline_changed = false;
         if (c->pipeline.id != bound_pipeline_id) {
             /* GL ordering: each pipeline owns a VAO, and GL_ELEMENT_ARRAY_BUFFER
              * is part of VAO state. So pipeline → VBO (re-applies attribs into
@@ -1403,6 +1396,7 @@ void nt_sprite_renderer_flush(void) {
              * Texture units are context state -- glUseProgram does not touch
              * them, so their mirrors survive the switch. */
             bound_mat_id = 0;
+            pipeline_changed = true;
         }
 
         if (s_sprite.ibo.id != bound_ibo_id) {
@@ -1415,7 +1409,7 @@ void nt_sprite_renderer_flush(void) {
          * so the lookup + uniform set runs only at run boundaries. A material
          * destroyed between draw_list capture and flush replay leaves
          * bound_mat_id alone, so a later cmd on it retries once it resolves --
-         * and applies neither its params nor its sampler units meanwhile. */
+         * and applies none of its params meanwhile. */
         bool material_applied = false;
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
@@ -1433,8 +1427,11 @@ void nt_sprite_renderer_flush(void) {
         for (uint8_t t = 0; t < c->tex_count; t++) {
             /* Written on every material change, not only when the texture bind
              * changes: two materials can share both pipeline and textures yet
-             * map different names onto the unit. */
-            if (material_applied && c->tex_names[t] != NULL) {
+             * map different names onto the unit. On a pipeline change it goes
+             * out even if the material lookup failed -- the new program's
+             * sampler uniforms all default to unit 0, so skipping this would
+             * sample the wrong texture rather than draw nothing. */
+            if ((material_applied || pipeline_changed) && c->tex_names[t] != NULL) {
                 nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
             }
             if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {

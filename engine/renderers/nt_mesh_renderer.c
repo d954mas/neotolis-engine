@@ -7,6 +7,7 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
+#include "renderers/nt_renderer_shared.h"
 #include "transform_comp/nt_transform_comp.h"
 
 #include <stdlib.h>
@@ -154,17 +155,6 @@ nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) {
 static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_stream_type_size(s->type) * s->count); }
 
 /* ---- Pipeline cache lookup/create ---- */
-
-/* One-shot: a game that never assigns a program would otherwise get a black
- * screen and no explanation. Re-armed when a pipeline is built. */
-static void warn_program_not_ready(const nt_material_info_t *mat_info) {
-    if (s_mesh_renderer.warned_program_not_ready) {
-        return;
-    }
-    NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",
-                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
-    s_mesh_renderer.warned_program_not_ready = true;
-}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
@@ -480,7 +470,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
             if (!mat_info || !mesh_info || !program_ready) {
                 if (!program_ready) {
-                    warn_program_not_ready(mat_info);
+                    nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
                 }
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
