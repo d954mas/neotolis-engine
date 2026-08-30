@@ -182,12 +182,13 @@ dies the program is already dead, and `nt_gfx_make_pipeline` polls the lost
 context before its own readiness assert, so the run skips instead of trapping.
 
 Pipeline caches key on the program handle, so the entry built on the previous
-program is never selected again. It is also never evicted, and it keeps a GPU
-pipeline alive until the owning renderer is reset. Replacement is therefore free
-inside a context restore -- which resets every renderer anyway -- and costs one
-cache slot outside one; enough replacements without a reset exhaust a renderer's
-cache. Destroying a program does not touch materials, and does not need to: the
-material reports not ready from the stale handle, and the next assignment
+program is never selected again. Destroying the replaced program reclaims what
+it left behind: a pipeline outlives its program only as a corpse, so
+`nt_gfx_destroy_program` destroys the pipelines built on it, and each renderer
+drops the now-dead cache entry the next time it scans. A program kept alive but
+no longer assigned keeps its pipelines alive too -- that is the owner's choice,
+not a leak. Destroying a program does not touch materials, and does not need to:
+the material reports not ready from the stale handle, and the next assignment
 overwrites it.
 
 ### Texture descriptors

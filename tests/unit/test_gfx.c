@@ -473,23 +473,40 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid(old));
 }
 
-/* ---- Program: a pipeline whose program was destroyed must not bind ---- */
+/* ---- Program: destroying one reclaims the pipelines built on it ---- */
 
-void test_gfx_bind_pipeline_asserts_destroyed_program(void) {
+/* A pipeline outlives its program only as a corpse -- no cache key can select it
+ * again -- so the destroy takes them with it instead of leaving pool slots and
+ * VAOs pinned until the owning renderer is reset. */
+void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_pipeline_t a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_pipeline_t b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+
+    nt_program_t keep = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t untouched = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = keep});
 
     nt_gfx_destroy_program(prog);
-    /* A fresh program takes the freed slot; without the generation check the
-     * pipeline would silently bind someone else's program. */
-    nt_program_t other = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(other));
 
+    /* The slots come back: a fresh pipeline reuses one of them. */
+    nt_pipeline_t reborn = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = keep});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, reborn.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(a.id, reborn.id); /* generation moved on */
+    TEST_ASSERT_NOT_EQUAL_UINT32(b.id, reborn.id);
+
+    /* A pipeline on a different program is untouched. */
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
+    nt_gfx_bind_pipeline(untouched);
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
+    /* The dead ones bind to nothing, so the next draw has no pipeline at all. */
+    nt_gfx_bind_pipeline(a);
+    EXPECT_ASSERT(nt_gfx_draw(0, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -1961,7 +1978,7 @@ int main(void) {
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
-    RUN_TEST(test_gfx_bind_pipeline_asserts_destroyed_program);
+    RUN_TEST(test_gfx_destroy_program_destroys_its_pipelines);
     RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
     RUN_TEST(test_gfx_program_valid_and_ready);

@@ -508,6 +508,10 @@ bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Handle still refers to a live slot. Says nothing about the GPU object:
  * after context loss handles stay valid while the GL program is gone. */
 bool nt_gfx_program_valid(nt_program_t prog);
+/* Handle still refers to a live pipeline. False once its program was destroyed,
+ * which destroys the pipelines built on it -- lets a renderer drop the cache
+ * entry instead of keeping a slot pinned on a corpse. */
+bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
 /* The GL program behind the handle exists. A lost context clears it for good:
  * no API relinks an existing handle, so false here is terminal for that handle.
  * nt_gfx_make_pipeline requires this. */

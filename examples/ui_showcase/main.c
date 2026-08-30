@@ -3768,9 +3768,6 @@ static void frame(void) {
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
         nt_shape_renderer_restore_gpu();
-        for (int m = 0; m < 4; ++m) {
-            nt_material_set_program(s_radial_image_material[m], NT_PROGRAM_INVALID);
-        }
         nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_text_program);
         nt_gfx_destroy_program(s_radial_program);

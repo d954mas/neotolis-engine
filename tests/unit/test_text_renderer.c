@@ -397,7 +397,9 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_text_renderer_test_pipeline_cache_count());
+    /* One entry, not two: destroying the program destroyed the pipeline built on
+     * it, and the scan swap-removed the dead entry instead of pinning a slot. */
+    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* UI text alternates between a context default and per-style overrides, so a

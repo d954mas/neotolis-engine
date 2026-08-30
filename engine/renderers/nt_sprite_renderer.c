@@ -301,10 +301,17 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
     /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_sprite.count; i++) {
+    for (uint16_t i = 0; i < s_sprite.count;) {
+        /* Destroying a program destroys its pipelines, so an entry can go dead
+         * under us; swap-remove it rather than pin a slot on a corpse. */
+        if (!nt_gfx_pipeline_valid(s_sprite.entries[i].pipeline)) {
+            s_sprite.entries[i] = s_sprite.entries[--s_sprite.count];
+            continue;
+        }
         if (s_sprite.entries[i].key == key) {
             return s_sprite.entries[i].pipeline;
         }
+        i++;
     }
 
     /* Miss — create. Cache full is a configuration bug, not a runtime
@@ -370,7 +377,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     c->pipeline = pip;
     c->material = mat;
     s_sprite.current_mat = mat;
-    s_sprite.current_program = (mi != NULL) ? mi->program : NT_PROGRAM_INVALID;
+    s_sprite.current_program = mi->program;
     /* Expected custom-attr bytes for the bound material (one FLOAT4 per declared
      * attr) — bake asserts the caller's set_custom_attrs block matches. Set here
      * (not in set_material) so the ECS draw_list path, which calls open_cmd

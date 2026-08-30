@@ -1103,18 +1103,15 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         return;
     }
-    /* draw only checks bound_pipeline != 0, so a bind left pointing at a
-     * pipeline whose program just died would draw into a destroyed object.
-     * Clearing the borrow record makes bind_pipeline reject it by value, not
-     * only through the generation assert. */
+    /* A pipeline outlives its program only as a corpse: bind rejects it and no
+     * cache key can select it again, since every key folds the program handle.
+     * So destroying the program destroys them -- otherwise each one holds a pool
+     * slot and a GL VAO until the owning renderer is reset. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (s_gfx.pipeline_programs[i] != prog.id) {
             continue;
         }
-        if (s_gfx.bound_pipeline == s_gfx.pipeline_backends[i]) {
-            s_gfx.bound_pipeline = 0;
-        }
-        s_gfx.pipeline_programs[i] = 0;
+        nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
     nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
@@ -1227,6 +1224,8 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt) {
 }
 
 bool nt_gfx_program_valid(nt_program_t prog) { return nt_pool_valid(&s_gfx.program_pool, prog.id); }
+
+bool nt_gfx_pipeline_valid(nt_pipeline_t pip) { return nt_pool_valid(&s_gfx.pipeline_pool, pip.id); }
 
 bool nt_gfx_program_ready(nt_program_t prog) {
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {

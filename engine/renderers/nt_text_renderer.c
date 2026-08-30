@@ -62,6 +62,9 @@ static struct {
 
     /* Current state */
     nt_material_t material;
+    /* The program the staged glyphs were bound under; a flat replace keeps the
+     * material handle, so the set_material fence must compare programs too. */
+    nt_program_t material_program;
     nt_font_t font;
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
@@ -132,10 +135,17 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     }
 
     const uint64_t key = ((uint64_t)info->program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
-    for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
+    for (uint8_t i = 0; i < s_text.pipeline_count;) {
+        /* Destroying a program destroys its pipelines, so an entry can go dead
+         * under us; swap-remove it rather than pin a slot on a corpse. */
+        if (!nt_gfx_pipeline_valid(s_text.pipelines[i].pipeline)) {
+            s_text.pipelines[i] = s_text.pipelines[--s_text.pipeline_count];
+            continue;
+        }
         if (s_text.pipelines[i].key == key) {
             return s_text.pipelines[i].pipeline;
         }
+        i++;
     }
 
     /* Cache full is a configuration bug, not a runtime recovery case. */
@@ -270,7 +280,10 @@ void nt_text_renderer_set_material(nt_material_t mat) {
      * make_pipeline polls the lost context and hands back an invalid pipeline. */
     NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
 
-    if (s_text.material.id == mat.id) {
+    /* Programs too, not just the handle: a flat replace keeps the material id, so
+     * comparing ids alone would let glyphs staged under the old program flush
+     * through the new one. Same fence as the sprite renderer's. */
+    if (s_text.material.id == mat.id && info->program.id == s_text.material_program.id) {
         return;
     }
 
@@ -279,6 +292,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     }
 
     s_text.material = mat;
+    s_text.material_program = info->program;
     s_text.pipeline = find_or_create_pipeline();
 }
 

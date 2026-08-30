@@ -66,9 +66,6 @@ void nt_material_shutdown(void) {
     for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_mat.pool, i) && !s_mat.slots[i].ever_ready) {
             NT_LOG_WARN("material '%s' never received a program", material_label(&s_mat.slots[i].info));
-#ifdef NT_TEST_ACCESS
-            s_mat.never_ready_destroy_count++;
-#endif
         }
     }
     free(s_mat.slots);

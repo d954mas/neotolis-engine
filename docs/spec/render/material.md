@@ -44,11 +44,11 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > handle a material holds is the same kind of survivor as a render target's:
 > the logical handle outlives a context loss, the GPU object behind it does not.
 >
-> Replacing program A with B strands the pipeline entries renderers cached on A.
-> They are keyed out by the new handle and never selected again, but nothing
-> evicts them — only a renderer's restore entry point reclaims them. That makes
-> replacement free inside a context restore, which resets every renderer anyway,
-> and one cache slot per replacement outside one.
+> Replacing program A with B keys out every pipeline entry cached on A: the new
+> handle never selects them again. Destroying A then reclaims them — the
+> pipelines go with the program, and each renderer drops the dead entry on its
+> next cache scan — so a replace-then-destroy costs nothing permanent, inside a
+> context restore or outside one.
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented

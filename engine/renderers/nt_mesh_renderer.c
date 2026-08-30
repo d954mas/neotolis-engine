@@ -167,10 +167,17 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     }
 
     /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
+    for (uint16_t i = 0; i < s_mesh_renderer.count;) {
+        /* Destroying a program destroys its pipelines, so an entry can go dead
+         * under us; swap-remove it rather than pin a slot on a corpse. */
+        if (!nt_gfx_pipeline_valid(s_mesh_renderer.entries[i].pipeline)) {
+            s_mesh_renderer.entries[i] = s_mesh_renderer.entries[--s_mesh_renderer.count];
+            continue;
+        }
         if (s_mesh_renderer.entries[i].key == key) {
             return s_mesh_renderer.entries[i].pipeline;
         }
+        i++;
     }
 
     /* Build vertex layout from mesh streams + material attr_map */
