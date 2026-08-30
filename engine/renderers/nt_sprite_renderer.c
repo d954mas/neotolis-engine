@@ -217,7 +217,11 @@ void nt_sprite_renderer_restore_gpu(void) {
     uint32_t saved_custom_v = s_sprite.custom_max_vertices;
     nt_sprite_renderer_shutdown();
     nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip, .max_vertices = saved_max_v, .max_indices = saved_max_i, .custom_max_vertices = saved_custom_v};
-    NT_ASSERT(nt_sprite_renderer_init(&desc) == NT_OK);
+    /* Outside the assert: NT_ASSERT does not evaluate its expression under OFF,
+     * which would leave the renderer shut down after every context restore. */
+    const nt_result_t res = nt_sprite_renderer_init(&desc);
+    NT_ASSERT(res == NT_OK);
+    (void)res;
 }
 // #endregion
 

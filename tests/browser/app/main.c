@@ -130,8 +130,9 @@ static void try_bind_resources(void) {
 
 // #region web test hooks (window.__nt) -- web build only; the native build compiles without them.
 #if defined(__EMSCRIPTEN__)
-static int s_nt_ready;         /* set after the first rendered frame */
-static float s_nt_field_css_x; /* Cyrillic field center, CSS px (canvas-relative) */
+static int s_nt_ready;                 /* set after the first rendered frame */
+static unsigned int s_nt_drawn_frames; /* frames that reached the draw path */
+static float s_nt_field_css_x;         /* Cyrillic field center, CSS px (canvas-relative) */
 static float s_nt_field_css_y;
 static int s_nt_field_visible; /* the field was laid out this frame */
 
@@ -145,6 +146,13 @@ static float s_nt_rich_link_css_w;
 static float s_nt_rich_link_css_h;
 
 EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
+/* Counts frames that reached the draw path. A context loss stalls it; a correct
+ * recovery makes it climb again, which is the whole restore contract observed
+ * from outside. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
+/* Both game programs linked and assigned -- false through the whole window
+ * between the loss and the relink. */
+EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
@@ -167,6 +175,8 @@ EM_JS(void, nt_test_install_hooks, (void), {
         get ready() { return _nt_test_ready() !== 0; },
         input_buffer: function() { return UTF8ToString(_nt_test_input_buffer()); },
         walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
+        drawn_frames: function() { return _nt_test_drawn_frames() >>> 0; },
+        programs_ready: function() { return _nt_test_programs_ready() !== 0; },
         field_visible: function() { return _nt_test_field_visible() !== 0; },
         field_css: function() {
             return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
@@ -288,8 +298,10 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
-        s_rich_font_bound = false;
+        /* The fonts keep their sources: nt_font_add asserts on a duplicate and
+         * offers no way to drop one, so re-binding here would trap. Invalidating
+         * NT_ASSET_FONT is enough -- nt_font_step re-resolves and rebuilds the
+         * curve and band textures on its own. */
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -364,6 +376,9 @@ static void frame(void) {
 #endif /* __EMSCRIPTEN__ */
 
         nt_text_renderer_flush();
+#ifdef __EMSCRIPTEN__
+        s_nt_drawn_frames++;
+#endif
     }
 
     nt_gfx_end_pass();

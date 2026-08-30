@@ -991,6 +991,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_mesh_renderer COMMAND test_mesh_renderer)
 
+    # --- Sprite renderer: pipeline-cache guard under NT_ASSERT_MODE=0 ---
+    # Recompiles the renderer with asserts off; nothing else reaches that branch.
+    add_executable(test_sprite_renderer_assert_off unit/test_sprite_renderer_assert_off.c unit/test_helpers/nt_sprite_renderer_assert_off_tu.c)
+    target_link_libraries(test_sprite_renderer_assert_off PRIVATE
+        nt_atlas nt_sprite_comp nt_transform_comp
+        nt_drawable_comp nt_material_comp nt_material nt_render
+        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub nt_basisu_transcoder_stub nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_meshwire_stub)
+    target_compile_definitions(test_sprite_renderer_assert_off PRIVATE
+        NT_LOG_DOMAIN="sprite_renderer" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
+    )
+    target_include_directories(test_sprite_renderer_assert_off PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit" "${CMAKE_SOURCE_DIR}/engine" "${CMAKE_SOURCE_DIR}/shared/include")
+    nt_setup_test_target(test_sprite_renderer_assert_off)
+
     # --- Sprite renderer tests ---
     add_executable(test_sprite_renderer unit/test_sprite_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_renderer PRIVATE
