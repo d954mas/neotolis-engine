@@ -884,6 +884,12 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         s_font_bound = false;
+        /* Everything decided before begin_frame described the dead context, so
+         * this frame draws nothing -- the next one is built from scratch. */
+        nt_gfx_end_segment();
+        nt_gfx_end_frame();
+        nt_window_swap_buffers();
+        return;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});

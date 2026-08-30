@@ -475,6 +475,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
              * and the context-restore window both produce it. Skip like the
              * sprite path does. The NULL check stays a real branch -- the code
              * below dereferences mat_info, and asserts vanish under OFF. */
+            /* The header contract says bindings and resources stay live through
+             * this call, so a missing one is the caller's bug, not runtime state.
+             * The branch stays real because asserts vanish under OFF. */
+            NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
             const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
             if (!mat_info || !mesh_info || !program_ready) {
                 if (!program_ready) {

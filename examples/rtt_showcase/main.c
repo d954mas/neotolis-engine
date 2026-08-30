@@ -560,6 +560,11 @@ static void frame(void) {
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
         }
+        /* Everything decided before begin_frame described the dead context, so
+         * this frame draws nothing -- the next one is built from scratch. */
+        nt_gfx_end_frame();
+        nt_window_swap_buffers();
+        return;
     }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
         nt_gfx_end_frame();

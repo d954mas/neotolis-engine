@@ -377,7 +377,11 @@ static void frame(void) {
 
         nt_text_renderer_flush();
 #ifdef __EMSCRIPTEN__
-        s_nt_drawn_frames++;
+        /* Count frames that actually submitted geometry: reaching the draw path
+         * proves nothing if every renderer skipped. */
+        if (nt_gfx_get_frame_draw_calls() > 0U) {
+            s_nt_drawn_frames++;
+        }
 #endif
     }
 

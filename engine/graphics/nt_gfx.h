@@ -19,7 +19,8 @@ typedef struct {
 } nt_shader_t;
 
 /* Linked (vertex, fragment) pair. Owned by whoever called nt_gfx_make_program;
- * pipelines only borrow it, so destroy order is pipeline -> program -> shaders.
+ * pipelines only borrow it: destroying the program destroys them too, and the
+ * shader stages can go after that.
  * No dedup: two calls with the same pair produce two programs.
  *
  * Immutable: nothing relinks or edits a program after nt_gfx_make_program

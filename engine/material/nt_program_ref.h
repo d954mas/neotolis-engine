@@ -5,27 +5,13 @@
 #include "graphics/nt_gfx.h"
 #include "resource/nt_resource.h"
 
-/*
- * A program linked from two pack-loaded shader stages.
+/* Links a program from two pack-loaded shader stages once both resolve, and owns
+ * it on the game's behalf. Stores the resource handles, not the compiled stages:
+ * only the handles survive a context loss. Rationale and the recovery contract
+ * live in docs/spec/render/shader.md.
  *
- * Deliberately NOT a source file of the nt_material target: it is game-side glue
- * over two public APIs, and the material module still never links, destroys or
- * inspects a program. It lives here because material is the only module that
- * already reaches both nt_resource and nt_gfx.
- *
- * The stages arrive asynchronously, so the game cannot link at startup; it holds
- * this and calls update() every frame until the link happens. The ref stores the
- * resource handles rather than the compiled stages or the source text, because
- * only the handles survive a context loss: nt_resource_invalidate() puts the
- * assets back to REGISTERED, the next resource step recompiles them from the
- * resident blob, and update() links again with nothing else to remember.
- *
- * The program is the game's, as always -- it sits in the game's own struct and
- * the game destroys it with drop(). Materials only borrow the handle.
- *
- * A shader embedded as a source string needs none of this: nt_gfx_make_shader
- * plus nt_gfx_make_program at init, with nothing to wait for.
- */
+ * Not a source of the nt_material target -- game-side glue over two public APIs;
+ * the material module still never links, destroys or inspects a program. */
 typedef struct {
     nt_resource_t vs; /* set once by the game */
     nt_resource_t fs;
