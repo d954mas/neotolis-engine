@@ -555,7 +555,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
         s_demo.render_resources_ready = restored && render_targets_ready();
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");

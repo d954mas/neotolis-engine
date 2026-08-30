@@ -170,6 +170,14 @@ holding; destroying the program bumps that pool slot's generation, so
 skips it. Material handles never change across a restore, so ECS components, the
 UI context, and game-side structures need no re-binding.
 
+Objects that own GPU state split the same way, and the split decides what a game
+must redo. A font keeps its sources -- the `nt_font_add` list is plain resource
+handles -- while its curve and band textures die; `nt_font_step` rebuilds those
+itself once the asset re-activates, so re-adding a source after a restore is not
+just unnecessary but asserts on the duplicate. An atlas keeps its parsed regions
+and needs its page texture resolved again. The rule generalises: re-create what
+lived on the GPU, keep what merely referenced it.
+
 Programs come back over the following frames, not in the restored frame: the
 shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
 activation budget, and the frame's `nt_resource_step()` has already run by the

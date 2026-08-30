@@ -121,6 +121,10 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
+/* Adds a source. Call it once per source and never again: a duplicate asserts,
+ * and a context loss is not a reason to re-add. A font's sources outlive the GPU
+ * context -- only its curve and band textures die, and nt_font_step rebuilds
+ * those itself once nt_resource_invalidate(NT_ASSET_FONT) re-activates the data. */
 void nt_font_add(nt_font_t font, nt_resource_t resource);
 
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);
