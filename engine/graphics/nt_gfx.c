@@ -1223,6 +1223,13 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt) {
     return s_gfx.render_target_metas[nt_pool_slot_index(rt.id)].complete;
 }
 
+bool nt_gfx_shader_ready(nt_shader_t shd) {
+    if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
+        return false;
+    }
+    return s_gfx.shader_backends[nt_pool_slot_index(shd.id)] != 0;
+}
+
 bool nt_gfx_program_valid(nt_program_t prog) { return nt_pool_valid(&s_gfx.program_pool, prog.id); }
 
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip) { return nt_pool_valid(&s_gfx.pipeline_pool, pip.id); }

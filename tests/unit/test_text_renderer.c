@@ -11,6 +11,7 @@
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_text_renderer.h"
@@ -140,6 +141,56 @@ static void draw_and_flush(void) {
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+}
+
+/* ---- nt_program_ref: the async link gate ---- */
+
+static nt_resource_t publish_stage(const char *name, uint32_t shader_id) {
+    nt_hash32_t pid = nt_hash32_str(name);
+    nt_hash64_t rid = nt_hash64_str(name);
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_SHADER_CODE, shader_id);
+    return nt_resource_request(rid, NT_ASSET_SHADER_CODE);
+}
+
+static void republish_stage(const char *name, uint32_t shader_id) { nt_resource_register(nt_hash32_str(name), nt_hash64_str(name), NT_ASSET_SHADER_CODE, shader_id); }
+
+static nt_shader_t make_stage(nt_shader_type_t type) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = type, .source = "void main(){}"}); }
+
+/* A ref never hands out a program whose GPU object died, and never links from a
+ * stage in the same state -- so a game that forgets drop() in its restore branch
+ * loses a frame rather than the session. */
+void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
+    nt_program_ref_t ref = {0};
+    ref.vs = publish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
+    ref.fs = publish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    nt_resource_step();
+
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    const nt_program_t first = ref.program;
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref)); /* idempotent once linked */
+
+    /* Context dies: handles stay valid, GPU objects do not. */
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+
+    /* No drop() anywhere. The stages are dead too, so the ref waits instead of
+     * relinking from corpses -- and must not keep handing out the old program. */
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(first));
+
+    /* Stages come back the way the resource step brings them back. */
+    republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
+    republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    nt_resource_step();
+
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+
+    nt_program_ref_drop(&ref);
 }
 
 /* ---- Unity setUp / tearDown ---- */
@@ -1018,6 +1069,7 @@ int main(void) {
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
+    RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_flush_uses_the_program_the_glyphs_were_staged_under);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
     RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);

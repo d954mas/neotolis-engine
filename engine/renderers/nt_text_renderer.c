@@ -72,6 +72,9 @@ static struct {
     nt_text_deco_t deco;
 
     bool initialized;
+    /* One-shot so a load-time discard does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_no_pipeline;
 
 #ifdef NT_TEST_ACCESS
     /* Count every set_material / set_font entry regardless of early-out so
@@ -189,6 +192,7 @@ static nt_pipeline_t find_or_create_pipeline(void) {
         return pip;
     }
 
+    s_text.warned_no_pipeline = false;
     s_text.pipelines[s_text.pipeline_count].key = key;
     s_text.pipelines[s_text.pipeline_count].pipeline = pip;
     s_text.pipeline_count++;
@@ -747,7 +751,10 @@ void nt_text_renderer_flush(void) {
         pipeline = (mi != NULL && mi->program.id == s_text.material_program.id) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
     if (pipeline.id == 0) {
-        NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
+        if (!s_text.warned_no_pipeline) {
+            NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs; the material's program is not ready", s_text.glyph_count);
+            s_text.warned_no_pipeline = true;
+        }
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
         return;
