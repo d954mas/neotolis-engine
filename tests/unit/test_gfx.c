@@ -1852,6 +1852,41 @@ void test_gfx_update_texture_invalid_handle(void) {
 
 /* ---- Per-frame draw call counter ---- */
 
+void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
+    /* A rejected bind must not leave the previous pipeline live: draw only gates
+     * on bound_pipeline, so the new pipeline's vertices would go through it. */
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_pipeline_desc_t desc = {
+        .program = prog,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    };
+    nt_pipeline_t live = nt_gfx_make_pipeline(&desc);
+    nt_pipeline_t dead = nt_gfx_make_pipeline(&desc);
+    nt_gfx_destroy_pipeline(dead); /* handle keeps its id, generation goes stale */
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    nt_gfx_bind_pipeline(live);
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_bind_pipeline(dead); /* rejected: stale handle */
+    EXPECT_ASSERT(nt_gfx_draw(0, 0));
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_pipeline(live);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 void test_gfx_frame_draw_calls(void) {
     /* Separate draw-call counter for nt_debug_overlay consumption.
      * Verifies counter starts at 0, increments by 1 per draw API, resets on begin_frame. */
@@ -2039,6 +2074,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_valid);
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
+    RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     return UNITY_END();
 }

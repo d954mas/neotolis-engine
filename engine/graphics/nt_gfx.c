@@ -1271,6 +1271,12 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        /* draw only gates on bound_pipeline != 0, so leaving the previous bind
+         * live here would draw this pipeline's vertices through it. The backend
+         * needs the same news: bind_vertex_buffer re-applies attribs from its
+         * slot mirror, which would still name the old pipeline's VAO. */
+        s_gfx.bound_pipeline = 0;
+        nt_gfx_backend_bind_pipeline(0);
         NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
