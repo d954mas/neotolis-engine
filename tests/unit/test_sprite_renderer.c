@@ -582,6 +582,31 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
 }
 
+/* Queued work outlives the program it was built on when the owner destroys it
+ * mid-frame. Flush drops those cmds: binding a destroyed pipeline leaves nothing
+ * bound, and the draw would then trap pointing at the wrong cause. */
+void test_sprite_renderer_flush_drops_cmds_whose_program_died(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xC7ULL);
+    nt_material_t mat = create_test_material();
+    const nt_program_t dead = nt_material_get_info(mat)->program;
+
+    /* Immediate mode: draw_list flushes on exit, so only this path can leave a
+     * cmd queued across the destroy. */
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0.0F, 0.0F, 0xFFFFFFFFU, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
+
+    nt_gfx_destroy_program(dead); /* takes the queued cmd's pipeline with it */
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+}
+
 void test_sprite_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.constant_color[1] = 0.5F;
@@ -1141,6 +1166,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
     RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
+    RUN_TEST(test_sprite_renderer_flush_drops_cmds_whose_program_died);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);

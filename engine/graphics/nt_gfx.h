@@ -482,9 +482,10 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd);
-/* Pipelines built from this program become unusable. The owner destroys the ones
- * it created and clears every material that held the handle; pipelines a renderer
- * cached for itself go with that renderer's restore entry point.
+/* Destroys the pipelines built from this program too: they could never be bound
+ * or selected again, so leaving them would pin a pool slot and a VAO. A renderer
+ * drops the dead cache entry on its next scan. Materials are untouched and keep
+ * the handle, which now reports not ready.
  *
  * NT_PROGRAM_INVALID is the one accepted no-op — a stale non-zero handle asserts,
  * so clear the handle to NT_PROGRAM_INVALID at the point you destroy it. */

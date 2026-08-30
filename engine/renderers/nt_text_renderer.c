@@ -128,13 +128,14 @@ static void generate_quad_indices(void) {
  * the material has no usable program -- flush discards the glyphs and retries. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
+    const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
     /* One query covers every state: no program yet, a program that died with the
      * context, and a program its owner destroyed. */
-    if (!info || !nt_gfx_program_ready(info->program)) {
+    if (!info || !nt_gfx_program_ready(program)) {
         return (nt_pipeline_t){0};
     }
 
-    const uint64_t key = ((uint64_t)info->program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
+    const uint64_t key = ((uint64_t)program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
     for (uint8_t i = 0; i < s_text.pipeline_count;) {
         /* Destroying a program destroys its pipelines, so an entry can go dead
          * under us; swap-remove it rather than pin a slot on a corpse. */
@@ -174,7 +175,7 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 
     /* Read render state from material — same pattern as mesh_renderer */
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = info->program,
+        .program = program,
         .layout = layout,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
@@ -219,7 +220,11 @@ static void create_gpu_resources(void) {
 
 static void destroy_gpu_resources(void) {
     for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
-        nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
+        /* A destroyed program already took its pipelines; destroying the stale
+         * handle again would log a false invalid-handle error. */
+        if (nt_gfx_pipeline_valid(s_text.pipelines[i].pipeline)) {
+            nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
+        }
         s_text.pipelines[i] = (nt_text_pipeline_entry_t){0};
     }
     s_text.pipeline_count = 0;
@@ -588,6 +593,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (len == 0U || utf8 == NULL) {
         return;
     }
+    /* Batch start: record which program these glyphs are being laid out for, so
+     * flush can tell a batch that is still current from one whose program was
+     * replaced under it. A mid-batch replace leaves the two disagreeing, which
+     * is exactly the case flush must drop. */
+    if (s_text.glyph_count == 0 && s_text.material.id != 0) {
+        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
+        s_text.material_program = (mi != NULL) ? mi->program : NT_PROGRAM_INVALID;
+    }
     NT_ASSERT(s_text.font.id != 0 && "nt_text_renderer_draw_n: call set_font before draw");
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
@@ -729,7 +742,11 @@ void nt_text_renderer_flush(void) {
     /* Re-resolve rather than trust the handle set_material picked: a program
      * assigned between the two selects a different entry. Normally a hit. */
     if (s_text.material.id != 0) {
-        s_text.pipeline = find_or_create_pipeline();
+        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
+        /* The staged glyphs belong to the program they were laid out under. A
+         * replace between draw and flush invalidates them -- drawing them
+         * through a program they never targeted is worse than dropping them. */
+        s_text.pipeline = (mi != NULL && mi->program.id == s_text.material_program.id) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
     if (s_text.pipeline.id == 0) {
         NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);

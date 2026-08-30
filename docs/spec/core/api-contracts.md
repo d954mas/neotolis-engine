@@ -130,9 +130,10 @@ runtime object represented by that handle.
 
 `nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:
 whoever called `nt_gfx_make_program`. Pipelines and materials store the handle
-without owning it, so the owner destroys pipelines first, then the program, then
-the shader stages. Destroying a shader stage does not affect a program already
-linked from it.
+without owning it. Destroying the program destroys the pipelines built from it --
+they could never be bound or selected again -- so the owner destroys the program,
+then the shader stages, and never has to walk the pipelines itself. Destroying a
+shader stage does not affect a program already linked from it.
 
 A program is immutable. Nothing relinks or edits it after
 `nt_gfx_make_program` returns, so its identity and its GPU object are the same

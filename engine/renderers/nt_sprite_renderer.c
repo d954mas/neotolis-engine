@@ -191,7 +191,11 @@ void nt_sprite_renderer_shutdown(void) {
     s_sprite.indices = NULL;
     /* Destroy pipelines in cache */
     for (uint16_t i = 0; i < s_sprite.count; i++) {
-        nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
+        /* A destroyed program already took its pipelines; destroying the stale
+         * handle again would log a false invalid-handle error. */
+        if (nt_gfx_pipeline_valid(s_sprite.entries[i].pipeline)) {
+            nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
+        }
         s_sprite.entries[i] = (nt_sprite_pipeline_entry_t){0};
     }
     s_sprite.count = 0;
@@ -1358,9 +1362,11 @@ void nt_sprite_renderer_flush(void) {
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
-        /* set_material opens a cmd even when the context died mid-frame and left
-         * it without a pipeline; drawing it would replay the previous cmd's. */
-        if (c->pipeline.id == 0) {
+        /* Zero: set_material opened a cmd while the context was dead. Stale: the
+         * owner destroyed the program under queued work, which destroys its
+         * pipelines. Both drop the cmd -- binding it would leave no pipeline
+         * bound and trap the draw with a message pointing at the wrong thing. */
+        if (!nt_gfx_pipeline_valid(c->pipeline)) {
             continue;
         }
 

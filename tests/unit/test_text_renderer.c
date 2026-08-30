@@ -402,6 +402,32 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
+/* Glyphs belong to the program they were staged under. A replace between draw
+ * and flush must not push them through a program they were never laid out for:
+ * flush resolves for the staged program, so the batch keeps its own pipeline. */
+void test_flush_uses_the_program_the_glyphs_were_staged_under(void) {
+    nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(mat);
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+
+    /* The game swaps the program after the glyphs are already staged. */
+    nt_program_t other = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                             nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+    nt_material_set_program(mat, other);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* The staged program's entry was already cached, so nothing new is built --
+     * resolving for the new program would have created a second pipeline. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_stub_test_pipeline_create_count());
+}
+
 /* UI text alternates between a context default and per-style overrides, so a
  * single pipeline slot rebuilt a VAO on every switch. */
 void test_switching_back_to_a_material_reuses_its_pipeline(void) {
@@ -975,6 +1001,7 @@ int main(void) {
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
+    RUN_TEST(test_flush_uses_the_program_the_glyphs_were_staged_under);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
     RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);

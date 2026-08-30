@@ -322,7 +322,11 @@ void nt_mesh_renderer_shutdown(void) {
 
     /* Destroy all cached pipelines */
     for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
-        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
+        /* A destroyed program already took its pipelines; destroying the stale
+         * handle again would log a false invalid-handle error. */
+        if (nt_gfx_pipeline_valid(s_mesh_renderer.entries[i].pipeline)) {
+            nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
+        }
     }
 
     /* Free pipeline cache */
