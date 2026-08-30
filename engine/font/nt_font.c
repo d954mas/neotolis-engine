@@ -1961,7 +1961,8 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     nt_font_slot_t *slot = get_slot(font);
     NT_ASSERT(slot->resource_count < NT_FONT_MAX_SOURCES_PER_FONT);
     for (uint8_t i = 0; i < slot->resource_count; i++) {
-        NT_ASSERT(slot->resources[i].id != resource.id); /* duplicate resource */
+        NT_ASSERT(slot->resources[i].id != resource.id &&
+                  "nt_font_add: this resource is already a source of this font -- a context loss is not a reason to re-add one, only the textures die and nt_font_step rebuilds them");
     }
 
     slot->resources[slot->resource_count] = resource;
