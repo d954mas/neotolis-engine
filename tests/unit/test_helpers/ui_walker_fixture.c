@@ -23,10 +23,6 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-/* Per-fixture counter so multiple ui_walker_fixture_make_material() calls
- * inside one test do not collide on virtual-pack ids. Reset to 0 by init
- * since tearDown destroys all materials and frees their packs. */
-
 nt_material_t ui_walker_fixture_make_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});

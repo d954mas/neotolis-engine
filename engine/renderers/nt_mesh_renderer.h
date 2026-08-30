@@ -31,9 +31,7 @@ static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { ret
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
 /* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. This is the reset a material's program change
- * requires -- run it before clearing a material to NT_PROGRAM_INVALID, so no
- * command or cache entry outlives the program it was built on. */
+ * rebuilds the GPU-side buffers. */
 void nt_mesh_renderer_restore_gpu(void);
 
 /* Contract: caller must pre-filter `items` by visibility — the renderer draws

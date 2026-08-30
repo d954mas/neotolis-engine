@@ -86,9 +86,7 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
 /* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. This is the reset a material's program change
- * requires -- run it before clearing a material to NT_PROGRAM_INVALID, so no
- * command or cache entry outlives the program it was built on. */
+ * rebuilds the GPU-side buffers. */
 void nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:

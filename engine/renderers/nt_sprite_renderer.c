@@ -89,6 +89,9 @@ static struct {
 
     /* Material of the most recently opened cmd; reset on flush. */
     nt_material_t current_mat;
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_program_not_ready;
     /* The open cmd's pipeline was built on this program. A flat replace keeps the
      * material handle, so the fence below must compare programs too. */
     nt_program_t current_program;
@@ -288,6 +291,16 @@ static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* One-shot: a game that never assigns a program would otherwise get a black
+ * screen and no explanation. Re-armed when a pipeline is built. */
+static void warn_program_not_ready(const nt_material_info_t *mat_info) {
+    if (s_sprite.warned_program_not_ready) {
+        return;
+    }
+    NT_LOG_WARN("skipping '%s': its program is not ready -- link one and assign it with nt_material_set_program", (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
+    s_sprite.warned_program_not_ready = true;
+}
+
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* One query covers every state: no program yet, a program that died with the
      * context, and a program its owner destroyed. Without it the restore window
@@ -349,6 +362,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     s_sprite.entries[s_sprite.count].key = key;
     s_sprite.entries[s_sprite.count].pipeline = pip;
     s_sprite.count++;
+    s_sprite.warned_program_not_ready = false;
     return pip;
 }
 // #endregion
@@ -1302,8 +1316,8 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
         if (mat_info == NULL || !nt_gfx_program_ready(mat_info->program)) {
-            /* Material not yet ready — skip the run silently (legitimate
-             * runtime state, not a bug). */
+            /* Legitimate runtime state during load and restore: skip the run. */
+            warn_program_not_ready(mat_info);
             run_start = run_end;
             continue;
         }

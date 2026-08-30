@@ -32,6 +32,10 @@ static struct {
     uint16_t max_instances;
     uint32_t ring_cursor; /* next free byte in instance_buf; disjoint writes avoid driver copies of in-flight data */
 
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_program_not_ready;
+
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
     uint32_t frame_instance_total;
@@ -154,6 +158,13 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
 
+    /* One query covers every state: no program yet, a program that died with the
+     * context, and a program its owner destroyed. Inside the function so any
+     * caller is safe, as in the sprite and text renderers. */
+    if (!nt_gfx_program_ready(mat_info->program)) {
+        return (nt_pipeline_t){0};
+    }
+
     /* Full pipeline signature: layout + program + render state. The 64-bit hash
      * IS the cache identity -- descriptors are never compared on a hit, so every
      * nt_pipeline_desc_t field this renderer varies must be folded in here. */
@@ -249,6 +260,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
     s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
     s_mesh_renderer.count++;
+    s_mesh_renderer.warned_program_not_ready = false;
     return pip;
 }
 
@@ -454,6 +466,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
              * sprite path does. The NULL check stays a real branch -- the code
              * below dereferences mat_info, and asserts vanish under OFF. */
             if (!mat_info || !mesh_info || !nt_gfx_program_ready(mat_info->program)) {
+                if (!s_mesh_renderer.warned_program_not_ready) {
+                    NT_LOG_WARN("skipping '%s': its program is not ready -- link one and assign it with nt_material_set_program",
+                                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
+                    s_mesh_renderer.warned_program_not_ready = true;
+                }
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
                 draw_byte_offset += instance_count * s_instance_layouts[cm].stride;

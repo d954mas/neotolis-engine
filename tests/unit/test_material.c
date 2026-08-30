@@ -419,33 +419,6 @@ void test_set_program_clears_to_invalid(void) {
     TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
 }
 
-/* ---- Diagnostics: a material that never gets a program ---- */
-
-/* The renderers cannot catch this: they skip a material with no usable program
- * silently, so nothing downstream ever reports it. No threshold and no false
- * positive from a slow load -- the material is gone and never drew. */
-void test_warns_when_destroyed_without_ever_being_ready(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.program = NT_PROGRAM_INVALID;
-    nt_material_t never = nt_material_create(&d);
-    nt_material_destroy(never);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
-
-    /* A material that was ready at some point is not reported, even if its
-     * program was cleared before shutdown. Readiness latches on assignment, so
-     * no step has to run in between. */
-    nt_material_t was_ready = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 2}});
-    nt_material_set_program(was_ready, NT_PROGRAM_INVALID);
-    nt_material_destroy(was_ready);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
-
-    /* Same latch through set_program: created without one, given one, gone. */
-    nt_material_t late = nt_material_create(&d);
-    nt_material_set_program(late, (nt_program_t){.id = 3});
-    nt_material_destroy(late);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_never_ready_destroy_count());
-}
-
 /* ---- Test 20: step resolves textures ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -639,7 +612,6 @@ int main(void) {
     RUN_TEST(test_set_program_assigns_from_invalid);
     RUN_TEST(test_set_program_replaces_a_with_b);
     RUN_TEST(test_set_program_clears_to_invalid);
-    RUN_TEST(test_warns_when_destroyed_without_ever_being_ready);
     RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
     RUN_TEST(test_step_resolves_textures);
 

@@ -132,6 +132,16 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     return material;
 }
 
+/* Pipelines are resolved at flush, so a test that wants one built must draw. */
+static void draw_and_flush(void) {
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 /* ---- Unity setUp / tearDown ---- */
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
@@ -197,6 +207,7 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_material_t material = create_test_material_with_blend(blend);
 
     nt_text_renderer_set_material(material);
+    draw_and_flush();
 
     nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
@@ -345,7 +356,9 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(a);
+    draw_and_flush();
     nt_text_renderer_set_material(b);
+    draw_and_flush();
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
@@ -362,7 +375,9 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(opaque_mat);
+    draw_and_flush();
     nt_text_renderer_set_material(blended);
+    draw_and_flush();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT8(2U, nt_text_renderer_test_pipeline_cache_count());
@@ -378,6 +393,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(mat);
+    draw_and_flush();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
 
     nt_gfx_destroy_program(dead);
@@ -436,16 +452,18 @@ void test_switching_back_to_a_material_reuses_its_pipeline(void) {
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(a);
+    draw_and_flush();
     nt_text_renderer_set_material(b);
+    draw_and_flush();
     nt_text_renderer_set_material(a);
+    draw_and_flush();
 
     /* Three switches, two distinct materials: the third must be a cache hit. */
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
 }
 
-/* Swapping a material's program is legal only across a reset, and the reset must
- * leave nothing behind: the next draw builds a pipeline for the new program
- * rather than reusing the entry built on the old one. */
+/* A reset leaves nothing behind: the next draw builds a pipeline for the new
+ * program rather than reusing the entry built on the old one. */
 void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
@@ -453,11 +471,10 @@ void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(mat);
+    draw_and_flush();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
 
-    /* The full ordering: reset, clear, assign. */
     nt_text_renderer_restore_gpu();
-    nt_material_set_program(mat, NT_PROGRAM_INVALID);
     nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
 
     nt_text_renderer_set_material(mat);

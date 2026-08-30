@@ -35,9 +35,7 @@ _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPH
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 /* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. Cache entries are keyed out by a new program
- * but never evicted, so this is also what reclaims the ones a program change
- * left behind. */
+ * rebuilds the GPU-side buffers. */
 void nt_text_renderer_restore_gpu(void);
 
 /* Material must use the slug_text vs/fs, a blend compatible with its premultiplied output, and cull NONE. u_alpha_cutoff is an opt-in param:

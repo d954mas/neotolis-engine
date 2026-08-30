@@ -134,12 +134,7 @@ bool nt_material_valid(nt_material_t mat);
  * no-op, so a per-frame gate may call this unconditionally and needs no latch.
  *
  * A material has no readiness of its own -- ask
- * nt_gfx_program_ready(nt_material_get_info(mat)->program).
- *
- * Replacing A with B strands the pipeline entries renderers cached on A: keyed
- * out by the new handle, never selected again, but reclaimed only by a
- * renderer's restore entry point. Free inside a context restore, which resets
- * every renderer anyway; one cache slot per replacement outside one. */
+ * nt_gfx_program_ready(nt_material_get_info(mat)->program). */
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
@@ -153,10 +148,5 @@ void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_
 bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash);
 void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]);
 void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value);
-
-#ifdef NT_TEST_ACCESS
-/* Counts the "destroyed without ever receiving a program" warning. */
-uint32_t nt_material_test_never_ready_destroy_count(void);
-#endif
 
 #endif /* NT_MATERIAL_H */

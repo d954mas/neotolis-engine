@@ -1281,9 +1281,6 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
     NT_ASSERT(s_gfx.pipeline_backends[slot] != 0); /* stale pipeline after context loss — must recreate */
-    /* Without this a reused program slot silently swaps the program under the
-     * pipeline, with no GL error anywhere. */
-    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, s_gfx.pipeline_programs[slot]) && "bind_pipeline: the pipeline's program was destroyed");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }

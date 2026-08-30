@@ -17,7 +17,6 @@ typedef struct {
     /* Creation-time resource handles (not in info) */
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
 
-    bool ever_ready; /* cleared only at creation; drives the destroy-time warn */
 } nt_material_slot_t;
 
 /* ---- Module state ---- */
@@ -26,16 +25,7 @@ static struct {
     nt_pool_t pool;
     nt_material_slot_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
-#ifdef NT_TEST_ACCESS
-    uint32_t never_ready_destroy_count;
-#endif
 } s_mat;
-
-static const char *material_label(const nt_material_info_t *info) { return info->label != NULL ? info->label : "(unlabeled)"; }
-
-#ifdef NT_TEST_ACCESS
-uint32_t nt_material_test_never_ready_destroy_count(void) { return s_mat.never_ready_destroy_count; }
-#endif
 
 /* ---- Lifecycle ---- */
 
@@ -60,13 +50,6 @@ nt_result_t nt_material_init(const nt_material_desc_t *desc) {
 void nt_material_shutdown(void) {
     if (!s_mat.initialized) {
         return;
-    }
-    /* Most games never destroy their materials, so the destroy-time warn alone
-     * would never fire for the case it exists to catch. */
-    for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
-        if (nt_pool_slot_alive(&s_mat.pool, i) && !s_mat.slots[i].ever_ready) {
-            NT_LOG_WARN("material '%s' never received a program", material_label(&s_mat.slots[i].info));
-        }
     }
     free(s_mat.slots);
     nt_pool_shutdown(&s_mat.pool);
@@ -117,9 +100,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     memset(slot, 0, sizeof(*slot));
 
     slot->info.program = desc->program;
-    /* Latched on assignment, not in step: a material created with a program and
-     * destroyed before the next step did receive one. */
-    slot->ever_ready = (desc->program.id != 0);
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -188,17 +168,6 @@ void nt_material_destroy(nt_material_t mat) {
     if (mat.id == 0 || !s_mat.initialized) {
         return;
     }
-    /* No threshold to tune and no false positive from a slow load: the material
-     * is gone and never once rendered. */
-    if (nt_pool_valid(&s_mat.pool, mat.id)) {
-        nt_material_slot_t *slot = &s_mat.slots[nt_pool_slot_index(mat.id)];
-        if (!slot->ever_ready) {
-            NT_LOG_WARN("material '%s' destroyed without ever receiving a program", material_label(&slot->info));
-#ifdef NT_TEST_ACCESS
-            s_mat.never_ready_destroy_count++;
-#endif
-        }
-    }
     nt_pool_free(&s_mat.pool, mat.id);
 }
 
@@ -236,11 +205,6 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     }
 
     info->program = program;
-    if (program.id != 0) {
-        /* Latched on assignment, not in step, so a material assigned and
-         * destroyed between two steps still counts as having had a program. */
-        s_mat.slots[nt_pool_slot_index(mat.id)].ever_ready = true;
-    }
 }
 
 /* ---- Runtime param mutation ---- */

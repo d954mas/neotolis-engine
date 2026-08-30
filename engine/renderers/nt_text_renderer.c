@@ -49,7 +49,6 @@ typedef struct {
 
 static struct {
     /* GPU resources */
-    nt_pipeline_t pipeline; /* the entry selected for the bound material */
     nt_text_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
     uint8_t pipeline_count;
     nt_buffer_t vbo; /* dynamic vertex buffer */
@@ -228,7 +227,6 @@ static void destroy_gpu_resources(void) {
         s_text.pipelines[i] = (nt_text_pipeline_entry_t){0};
     }
     s_text.pipeline_count = 0;
-    s_text.pipeline = (nt_pipeline_t){0};
     nt_gfx_destroy_buffer(s_text.vbo);
     nt_gfx_destroy_buffer(s_text.ibo);
     s_text.vbo = (nt_buffer_t){0};
@@ -298,7 +296,6 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 
     s_text.material = mat;
     s_text.material_program = info->program;
-    s_text.pipeline = find_or_create_pipeline();
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
@@ -739,16 +736,17 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Re-resolve rather than trust the handle set_material picked: a program
-     * assigned between the two selects a different entry. Normally a hit. */
+    /* Flush is the only place a pipeline is resolved: set_material just records
+     * the material, so there is one path and no stale handle to keep in sync. */
+    nt_pipeline_t pipeline = {0};
     if (s_text.material.id != 0) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         /* The staged glyphs belong to the program they were laid out under. A
          * replace between draw and flush invalidates them -- drawing them
          * through a program they never targeted is worse than dropping them. */
-        s_text.pipeline = (mi != NULL && mi->program.id == s_text.material_program.id) ? find_or_create_pipeline() : (nt_pipeline_t){0};
+        pipeline = (mi != NULL && mi->program.id == s_text.material_program.id) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
-    if (s_text.pipeline.id == 0) {
+    if (pipeline.id == 0) {
         NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
@@ -760,7 +758,7 @@ void nt_text_renderer_flush(void) {
      * stalling on the previous frame's draw of the same VBO. */
     nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
-    nt_gfx_bind_pipeline(s_text.pipeline);
+    nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_buffer(s_text.vbo);
     nt_gfx_bind_index_buffer(s_text.ibo);
 

@@ -13,7 +13,7 @@ if(NOT EMSCRIPTEN)
     add_compile_definitions(NT_TEST_ACCESS)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
-        nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay nt_material
+        nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
     )
