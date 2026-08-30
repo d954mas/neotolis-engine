@@ -28,6 +28,17 @@ that wants one program behind many materials links it once and passes the same
 handle to each, via `nt_material_set_program`. Materials, pipelines and pipeline
 caches all borrow the handle and never destroy it.
 
+Pack priority does not reach a material's program. A material stores a linked
+`nt_program_t`, not the `NT_ASSET_SHADER_CODE` stages behind it, so a
+higher-priority pack republishing a stage changes only what `nt_resource_get`
+returns: nothing relinks, and no material changes. A game that wants the new
+stage links a second program and assigns it with `nt_material_set_program` --
+a supported flat replace, and the only runtime shader replacement there is.
+What it costs is the pipeline entries renderers cached on the old program: keyed
+out, never evicted, reclaimed only by a renderer's restore entry point. Free
+across a context restore, bounded elsewhere -- enough replacements without a
+reset exhaust a renderer's cache.
+
 Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
 last-writer-wins across them. The engine keeps one global name -> slot registry

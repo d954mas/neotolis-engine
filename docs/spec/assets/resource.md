@@ -138,52 +138,56 @@ handles, and render items computed before that call still describe the previous
 GPU context. The game must discard them and skip dependent draws for the restored
 frame.
 
-When `context_restored` is true, the game runs these steps IN ORDER. The order is
-the contract, not a suggestion: each step removes the last reference a later step
-would otherwise orphan.
+When `context_restored` is true, the game does three things in the restored
+frame, all of them before it submits anything:
 
-1. stops submitting — discards render decisions and draw lists prepared before
-   `nt_gfx_begin_frame()`, and draws nothing for the restored frame
-2. drops queued draw commands and
-3. clears pipeline caches — both by calling the restore entry point of every
-   active renderer, which does the two together
-4. clears every material's program with `nt_material_set_program(mat,
-   NT_PROGRAM_INVALID)`
-5. destroys its own `nt_program_t` handles, freeing the pool slots the dead GL
-   programs still occupy, and sets each handle variable to `NT_PROGRAM_INVALID`
-6. calls `nt_resource_invalidate()` for the shader-code asset type and for every
-   other file-backed GPU asset type it uses, and destroys and recreates
-   game-owned GPU objects
+- discards render decisions and draw lists prepared before
+  `nt_gfx_begin_frame()`, and draws nothing for this frame
+- destroys its own `nt_program_t` handles and sets each handle variable to
+  `NT_PROGRAM_INVALID`. A stale non-zero handle asserts on the next destroy --
+  the one mistake single ownership cannot absorb
+- calls the restore entry point of every active renderer, and destroys and
+  recreates its own GPU objects, then calls `nt_resource_invalidate()` for the
+  shader-code asset type and every other file-backed GPU asset type it uses
 
-Then, over the following frames:
+Their order among themselves does not matter, because nothing draws between
+them. Destroying a program clears the borrow record of every pipeline built on
+it, destroying a pipeline never consults its program, and no restore entry point
+flushes. What is load-bearing is that all three precede the frame's first draw.
 
-7. links a new program once both stages resolve — never relinking an existing
-   handle, which no API supports
-8. assigns it with `nt_material_set_program`
+Two kinds of renderer answer that third bullet differently. One that owns its
+own program -- `nt_shape_renderer`, `nt_postfx_blur`, both linking from embedded
+sources -- relinks inside its restore entry point and needs nothing from the
+game. One that borrows a game material's program -- `nt_mesh_renderer`,
+`nt_sprite_renderer`, `nt_text_renderer` -- drops its queued commands and its
+pipeline cache there and waits for the game to relink.
 
-Why this order. Steps 2 and 3 come first because a queued command and a cached
-pipeline both borrow a program that step 5 is about to destroy, and nothing links
-a material back to the renderers holding them. Step 4 precedes step 5 so no
-material is left holding a destroyed handle. Step 6 comes last because a linked
-program does not depend on its stages, so destroying stages earlier only obscures
-which object died first.
+Materials are not part of the teardown. A material keeps the handle it was
+holding; destroying the program bumps that pool slot's generation, so
+`nt_gfx_program_ready(info->program)` reports false for it and every renderer
+skips it. Material handles never change across a restore, so ECS components, the
+UI context, and game-side structures need no re-binding.
 
-Programs come back over several frames, not in the restore frame: the shader
-stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
-activation budget. The game relinks once both stages resolve and assigns the new
-handle with `nt_material_set_program`. Until then materials are not `ready`.
-Both ECS `draw_list` paths skip a not-ready run silently -- it is normal runtime
-state, not a caller error. The immediate-mode `nt_sprite_renderer_set_material`
-/ `nt_text_renderer_set_material` entry points assert instead, so a game must
-stop feeding them for the duration of the window.
-A game whose materials sit on several programs gates on every one of them: the
-programs link on different frames, and one not-ready material is enough to trap.
+Programs come back over the following frames, not in the restored frame: the
+shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
+activation budget, and the frame's `nt_resource_step()` has already run by the
+time `context_restored` is seen. The game links a new program once both stages
+resolve -- never relinking an existing handle, which no API supports -- and
+assigns it with `nt_material_set_program`. Because assignment is a flat replace
+with a same-handle early-out, that gate is written to run every frame and carries
+no "already assigned" latch; a game whose materials sit on several programs gates
+each material on its own program. A blob-resident pack (the default,
+`NT_BLOB_KEEP`) re-activates on the next step; an evicted one re-downloads first,
+and the same gate simply waits longer.
 
-Skipping step 4 does not degrade: the material stays `ready` holding a dead
-program, and the failure surfaces as an assert inside `nt_gfx_make_pipeline`
-("program is not linked") -- the restore dropped the pipeline caches, so the
-first draw rebuilds rather than binds. `nt_gfx_bind_pipeline` is the path only
-for a pipeline the game owns and kept.
+Both ECS `draw_list` paths skip a material whose program is not ready silently --
+it is normal runtime state, not a caller error. The immediate-mode
+`nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
+assert only that a program was assigned, not that it is live, so they survive the
+frame the context dies on; a game still stops feeding them once its own gate goes
+false. That includes the UI walk: once a widget is declared, `nt_ui` calls those
+setters unconditionally, so the gate belongs around the declaration, not around
+the draw.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,

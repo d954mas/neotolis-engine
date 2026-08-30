@@ -93,6 +93,15 @@ in a real game, so a 64-bit collision is not a practical risk, and a fixed
 array with a linear scan stays cheaper than a hash map at that scale. Every
 `nt_pipeline_desc_t` field a renderer varies must be folded into its key.
 
+A renderer whose descriptor is constant except for the program and the
+material's render state keys on those two alone — `nt_text_renderer` folds
+`program.id` with `nt_material_info_t.render_state_hash`. The invariant that
+keeps such a key complete is that its vertex layout, depth function and label
+stay compile-time literals; folding a constant in would discriminate nothing.
+Keying on material identity instead is not equivalent: one program behind two
+materials would then build two pipelines, and a material that replaces its
+program would keep its key.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a

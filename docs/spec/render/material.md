@@ -30,15 +30,25 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > planned types. A material does not reference shaders: it stores a borrowed
 > `nt_program_t` that the game links from `NT_ASSET_SHADER_CODE` stages or from
 > embedded sources. `nt_material_set_program` is the only way to change it, and
-> a material is `ready` once a program is assigned — which says nothing about
-> that program's GPU liveness (see [Shader System](shader.md)). The material
+> it is a flat replace: the first assignment, clearing to `NT_PROGRAM_INVALID`,
+> and swapping one live program for another are one operation under one rule.
+> Assigning the handle the material already holds is a no-op, so a per-frame
+> gate may call it unconditionally and needs no latch of its own. The material
 > module never links, destroys, or inspects the program.
 >
-> The borrowed handle moves only between renderer cache epochs:
-> `NT_PROGRAM_INVALID` to a program is free, a program back to
-> `NT_PROGRAM_INVALID` requires the renderers to have been reset first, and
-> program A straight to program B asserts. The transition table and the reason
-> live in [API Contracts](../core/api-contracts.md).
+> A material has no readiness of its own. Whether it can draw is
+> `nt_gfx_program_ready(info->program)` — false before the first assignment,
+> false once the program died with the context or its owner destroyed it, true
+> when a pipeline can be built. One query covers every state, so there is no
+> cached readiness flag and no material version to keep in sync with one. The
+> handle a material holds is the same kind of survivor as a render target's:
+> the logical handle outlives a context loss, the GPU object behind it does not.
+>
+> Replacing program A with B strands the pipeline entries renderers cached on A.
+> They are keyed out by the new handle and never selected again, but nothing
+> evicts them — only a renderer's restore entry point reclaims them. That makes
+> replacement free inside a context restore, which resets every renderer anyway,
+> and one cache slot per replacement outside one.
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
@@ -87,7 +97,7 @@ No duplicated material data. Material is created once (either from code via desc
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
 
-Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame; no version bump is needed. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
+Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
 ## Render state and material
 

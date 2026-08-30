@@ -164,29 +164,31 @@ silently miss every existing program -- including those engine renderers link
 inside their own init, before the game runs. There is no per-program override. A lost context is the only
 condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
 
-`nt_material_set_program` is the only way to change a material's program and
-bumps the material version, so a renderer keyed on it builds a pipeline for the
-new program on the next draw. Caches do not evict the old entry -- programs are
-replaced through a renderer's restore entry point, which drops the cache whole.
+`nt_material_set_program` is the only way to change a material's program, and it
+is a flat replace: `NT_PROGRAM_INVALID` over a program, a program over
+`NT_PROGRAM_INVALID`, and program A over program B are one operation under one
+rule. Assigning the handle the material already holds returns without touching
+anything, so a per-frame gate may call it unconditionally and needs no latch.
 
-A material's borrowed program moves only between renderer cache epochs. The
-legal transitions are:
+A material carries no readiness field. Callers derive readiness with
+`nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
+the first assignment and false once the program died with the context or was
+destroyed -- a destroyed program's slot generation is stale, so the query answers
+from the handle alone. The ECS `draw_list` paths gate their draws on it silently;
+the immediate-mode `nt_sprite_renderer_set_material` /
+`nt_text_renderer_set_material` entry points assert only that a program was
+assigned. Liveness is deliberately not their question: on the frame the context
+dies the program is already dead, and `nt_gfx_make_pipeline` polls the lost
+context before its own readiness assert, so the run skips instead of trapping.
 
-| From | To | When |
-|---|---|---|
-| `NT_PROGRAM_INVALID` | a program | any time -- the first async assignment, or the one after a restore |
-| a program | `NT_PROGRAM_INVALID` | only after every renderer that draws this material has been reset |
-| program A | program B | never; go A -> `NT_PROGRAM_INVALID` -> B, with the reset in between |
-
-A -> B asserts. It would strand queued draw commands and cached pipelines built
-on A with nothing left pointing at them, and the material module cannot see the
-renderers holding them, so the reset ordering stays the caller's to honour --
-the assert only catches the step that is locally visible. The reset is the
-renderer's restore entry point, which drops queued commands and pipeline caches
-together. Destroying a program does
-not touch materials: the owner assigns `NT_PROGRAM_INVALID` or a new handle to
-every material that held it, otherwise the material stays `ready` with a dead
-handle and the next bind asserts.
+Pipeline caches key on the program handle, so the entry built on the previous
+program is never selected again. It is also never evicted, and it keeps a GPU
+pipeline alive until the owning renderer is reset. Replacement is therefore free
+inside a context restore -- which resets every renderer anyway -- and costs one
+cache slot outside one; enough replacements without a reset exhaust a renderer's
+cache. Destroying a program does not touch materials, and does not need to: the
+material reports not ready from the stale handle, and the next assignment
+overwrites it.
 
 ### Texture descriptors
 
