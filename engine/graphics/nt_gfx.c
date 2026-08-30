@@ -142,6 +142,47 @@ static struct {
     int viewport_rect[4]; /* GL bottom-left x,y,w,h */
 } s_gfx;
 
+#ifdef NT_TEST_ACCESS
+static nt_gfx_test_draw_t s_test_draws[128];
+static nt_pipeline_t s_test_bound_pipeline;
+static uint32_t s_test_draw_count;
+static bool s_test_draw_enabled;
+static bool s_test_draw_overflow;
+
+void nt_gfx_test_draw_trace_reset(bool enabled) {
+    s_test_draw_count = 0;
+    s_test_draw_overflow = false;
+    s_test_draw_enabled = enabled;
+}
+
+uint32_t nt_gfx_test_draw_trace_count(void) { return s_test_draw_count; }
+bool nt_gfx_test_draw_trace_overflowed(void) { return s_test_draw_overflow; }
+
+nt_gfx_test_draw_t nt_gfx_test_draw_trace_at(uint32_t index) {
+    NT_ASSERT(index < s_test_draw_count);
+    return s_test_draws[index];
+}
+
+static void test_record_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    if (!s_test_draw_enabled) {
+        return;
+    }
+    if (s_test_draw_count == sizeof(s_test_draws) / sizeof(s_test_draws[0])) {
+        s_test_draw_overflow = true;
+        return;
+    }
+    s_test_draws[s_test_draw_count++] = (nt_gfx_test_draw_t){
+        .pipeline = s_test_bound_pipeline,
+        .program = {s_gfx.pipeline_programs[nt_pool_slot_index(s_test_bound_pipeline.id)]},
+        .first_vertex = first_vertex,
+        .num_vertices = num_vertices,
+        .first_index = first_index,
+        .num_indices = num_indices,
+        .instance_count = instance_count,
+    };
+}
+#endif
+
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
@@ -174,6 +215,9 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
+#ifdef NT_TEST_ACCESS
+    nt_gfx_test_draw_trace_reset(false);
+#endif
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_programs > 0 && "nt_gfx_desc_t.max_programs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
@@ -738,6 +782,10 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
+    if (backend == 0 && nt_gfx_backend_is_context_lost()) {
+        nt_pool_free(&s_gfx.program_pool, id);
+        return NT_PROGRAM_INVALID;
+    }
     NT_ASSERT(backend != 0 && "program link failed");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
@@ -1298,6 +1346,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     NT_ASSERT(s_gfx.pipeline_backends[slot] != 0 &&
               "bind_pipeline: this pipeline outlived a context loss -- call the owning renderer's restore entry point (nt_*_renderer_restore_gpu) in the restored frame");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
+#ifdef NT_TEST_ACCESS
+    s_test_bound_pipeline = pip;
+#endif
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }
 
@@ -1631,6 +1682,9 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(first_vertex, num_vertices, 0, 0, 1);
+#endif
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
@@ -1655,6 +1709,9 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(first_vertex, num_vertices, 0, 0, instance_count);
+#endif
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
 }
 
@@ -1678,6 +1735,9 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(0, num_vertices, first_index, num_indices, 1);
+#endif
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
 }
 
@@ -1703,6 +1763,9 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(0, num_vertices, first_index, num_indices, instance_count);
+#endif
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }
 

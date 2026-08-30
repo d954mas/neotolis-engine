@@ -114,7 +114,6 @@ typedef struct {
 
 /* ---- File-scope state ---- */
 
-static GLuint s_bound_program;         /* currently bound GL program (for uniforms) */
 static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
 
 static nt_gfx_gl_program_t *s_programs;   /* linked programs, indexed by slot */
@@ -424,7 +423,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_targets = (nt_gfx_gl_render_target_t *)calloc(s_init_desc.max_render_targets + 1, sizeof(nt_gfx_gl_render_target_t));
 
-    s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_reset();
@@ -459,7 +457,6 @@ void nt_gfx_backend_shutdown(void) {
     s_transcode_buf = NULL;
     s_transcode_buf_size = 0;
 
-    s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     s_bound_framebuffer = 0;
 
@@ -567,7 +564,6 @@ void nt_gfx_backend_begin_frame(void) {
      * may change GL state without going through nt_gfx API, leaving
      * the cache stale. */
     nt_gfx_gl_cache_reset();
-    s_bound_program = 0;
     s_bound_pipeline_slot = 0;
 
     /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
@@ -753,11 +749,10 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 /* ---- Pipeline bind ---- */
 
-/* Nothing is bound after a rejected bind: no pipeline slot, no program, no VAO.
- * Every re-apply path keys off one of the three. */
+/* Clear pipeline/VAO selection so later binds cannot mutate a stale VAO.
+ * The program cache still describes the actual GL binding. */
 static void unbind_pipeline_state(void) {
     s_bound_pipeline_slot = 0;
-    s_bound_program = 0;
     if (s_gl_cache.vao != 0) {
         glBindVertexArray(0);
         s_gl_cache.vao = 0;
@@ -793,7 +788,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         glUseProgram(program);
         s_gl_cache.program = program;
     }
-    s_bound_program = program;
     s_bound_pipeline_slot = backend_handle;
 
     /* Depth test */
@@ -1068,9 +1062,6 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
      * mirror would send the next uniform write into a different program. */
     if (s_gl_cache.program == program) {
         s_gl_cache.program = 0;
-    }
-    if (s_bound_program == program) {
-        s_bound_program = 0;
     }
     if (s_bound_pipeline_slot != 0 && s_pipelines[s_bound_pipeline_slot].program_slot == backend_handle) {
         s_bound_pipeline_slot = 0;
@@ -1938,7 +1929,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_render_targets) {
         memset(s_render_targets, 0, (s_init_desc.max_render_targets + 1) * sizeof(nt_gfx_gl_render_target_t));
     }
-    s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_reset();

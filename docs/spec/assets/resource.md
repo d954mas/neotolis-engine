@@ -190,8 +190,9 @@ each material on its own program. A blob-resident pack (the default,
 `NT_BLOB_KEEP`) re-activates on the next step; an evicted one re-downloads first,
 and the same gate simply waits longer.
 
-Both ECS `draw_list` paths skip a material whose program is not ready silently --
-it is normal runtime state, not a caller error. The immediate-mode
+Both ECS `draw_list` paths skip a material whose program is not ready and warn
+once until a pipeline is built again. The skip is normal runtime state, not a
+caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
 assert only that a program was assigned, not that it is live, so they survive the
 frame the context dies on; a game still stops feeding them once its own gate goes

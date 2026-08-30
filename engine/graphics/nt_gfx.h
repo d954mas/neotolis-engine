@@ -634,6 +634,21 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
+typedef struct {
+    nt_pipeline_t pipeline;
+    nt_program_t program;
+    uint32_t first_vertex;
+    uint32_t num_vertices;
+    uint32_t first_index;
+    uint32_t num_indices;
+    uint32_t instance_count;
+} nt_gfx_test_draw_t;
+
+void nt_gfx_test_draw_trace_reset(bool enabled);
+uint32_t nt_gfx_test_draw_trace_count(void);
+nt_gfx_test_draw_t nt_gfx_test_draw_trace_at(uint32_t index);
+bool nt_gfx_test_draw_trace_overflowed(void);
+
 /* Read back the cached scissor rect [x, y, w, h] from the last
  * nt_gfx_set_scissor call. Out-param must be a 4-element int array. */
 void nt_gfx_test_scissor_rect(int out[4]);

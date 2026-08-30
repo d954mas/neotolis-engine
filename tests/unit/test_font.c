@@ -11,7 +11,9 @@
 #include "font/nt_font.h"
 #include "font/nt_font_hot.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
@@ -222,6 +224,17 @@ static nt_font_create_desc_t test_font_desc(void) {
 
 /* ---- Unity setUp / tearDown ---- */
 
+static uint32_t s_error_count;
+
+static void capture_errors(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)msg;
+    (void)user;
+    if (level == NT_LOG_LEVEL_ERROR) {
+        s_error_count++;
+    }
+}
+
 static void test_assert_handler(const char *expr, const char *file, int line) {
     (void)fprintf(stderr, "ASSERT FAILED: %s at %s:%d\n", expr, file, line);
     (void)fflush(stderr);
@@ -229,6 +242,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
+    nt_gfx_stub_test_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8, .max_render_targets = 16});
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
@@ -236,6 +250,7 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+    nt_log_remove_sink(capture_errors, NULL);
     nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
     nt_resource_shutdown();
     nt_hash_shutdown();
@@ -288,6 +303,171 @@ void test_font_create_destroy_valid(void) {
 
     nt_font_destroy(font);
     TEST_ASSERT_FALSE(nt_font_valid(font));
+}
+
+void test_font_retries_initial_texture_failure(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_gfx_stub_test_fail_texture_creates(3U);
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_TRUE(nt_font_valid(font));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_curve_texture(font).id);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_band_texture(font).id);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    nt_font_add(font, register_font_resource("font_retry", blob, blob_size));
+    nt_resource_step();
+    nt_gfx_stub_test_fail_texture_creates(3U);
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
+
+    nt_log_add_sink(capture_errors, NULL);
+    s_error_count = 0;
+    nt_gfx_stub_test_fail_texture_creates(0U);
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_band_texture(font)));
+    const uint32_t uploads = nt_gfx_stub_test_update_texture_count();
+    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(glyph);
+    TEST_ASSERT_FALSE(glyph->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
+    TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_stub_test_update_texture_count());
+    const uint32_t creates = nt_gfx_stub_test_texture_create_count();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_stub_test_texture_create_count());
+    nt_font_destroy(font);
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertion macros inflate the metric
+void test_font_unready_pair_keeps_cpu_queries_gpu_free(void) {
+    nt_log_add_sink(capture_errors, NULL);
+    for (uint8_t mask = 1U; mask <= 3U; mask++) {
+        nt_font_create_desc_t desc = test_font_desc();
+        s_error_count = 0;
+        nt_gfx_stub_test_fail_texture_creates(mask);
+        nt_font_t font = nt_font_create(&desc);
+        TEST_ASSERT_GREATER_THAN_UINT32(0U, s_error_count);
+        const nt_texture_t original_curve = nt_font_get_curve_texture(font);
+        const nt_texture_t original_band = nt_font_get_band_texture(font);
+        TEST_ASSERT_EQUAL((mask & 1U) == 0U, nt_gfx_texture_ready(original_curve));
+        TEST_ASSERT_EQUAL((mask & 2U) == 0U, nt_gfx_texture_ready(original_band));
+        uint32_t blob_size = 0;
+        uint8_t *blob = build_test_font_blob(&blob_size);
+        nt_font_add(font, register_font_resource("font_unready", blob, blob_size));
+        nt_resource_step();
+        nt_gfx_stub_test_fail_texture_creates(mask);
+        nt_font_step();
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(original_curve));
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(original_band));
+
+        s_error_count = 0;
+        const uint32_t uploads = nt_gfx_stub_test_update_texture_count();
+        TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
+        const nt_glyph_metrics_t glyph = nt_font_lookup_metrics(font, 'A');
+        TEST_ASSERT_TRUE(glyph.found);
+        TEST_ASSERT_EQUAL_INT16(500, glyph.advance);
+        const nt_text_size_t size = nt_font_measure(font, "ABC", 32.0F, 0.0F);
+        TEST_ASSERT_EQUAL_INT32(48, (int32_t)size.width);
+        TEST_ASSERT_EQUAL_INT32(32, (int32_t)size.height);
+        TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_stub_test_update_texture_count());
+        TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
+
+        const nt_texture_t partial_curve = nt_font_get_curve_texture(font);
+        const nt_texture_t partial_band = nt_font_get_band_texture(font);
+        const uint32_t generation = nt_font_get_cache_generation(font);
+        nt_gfx_stub_test_fail_texture_creates(3U);
+        nt_font_step();
+        TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_curve_texture(font).id);
+        TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_band_texture(font).id);
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(partial_curve));
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(partial_band));
+        TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(font));
+        nt_gfx_stub_test_fail_texture_creates(mask);
+        nt_font_step();
+        TEST_ASSERT_EQUAL((mask & 1U) == 0U, nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
+        TEST_ASSERT_EQUAL((mask & 2U) == 0U, nt_gfx_texture_ready(nt_font_get_band_texture(font)));
+
+        nt_gfx_stub_test_fail_texture_creates(0U);
+        nt_font_step();
+        TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
+        TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_band_texture(font)));
+        const nt_glyph_cache_entry_t *restored = nt_font_lookup_glyph(font, 'A');
+        TEST_ASSERT_NOT_NULL(restored);
+        TEST_ASSERT_FALSE(restored->is_tofu);
+        TEST_ASSERT_EQUAL_UINT32('A', restored->codepoint);
+        TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_stub_test_update_texture_count());
+        TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph_offset(nt_font_get_slot(font), 'A', 40));
+        nt_font_destroy(font);
+        free(blob);
+    }
+}
+
+void test_font_destroy_frees_partial_texture_pairs(void) {
+    nt_log_add_sink(capture_errors, NULL);
+    for (uint32_t i = 0; i < 40U; i++) {
+        const uint8_t mask = (uint8_t)(1U + (i % 3U));
+        nt_gfx_stub_test_fail_texture_creates(mask);
+        nt_font_create_desc_t desc = test_font_desc();
+        nt_font_t font = nt_font_create(&desc);
+        const nt_texture_t curve = nt_font_get_curve_texture(font);
+        const nt_texture_t band = nt_font_get_band_texture(font);
+        TEST_ASSERT_EQUAL((mask & 1U) == 0U, nt_gfx_texture_ready(curve));
+        TEST_ASSERT_EQUAL((mask & 2U) == 0U, nt_gfx_texture_ready(band));
+        s_error_count = 0;
+        if ((i & 1U) == 0U) {
+            nt_font_destroy(font);
+        } else {
+            nt_font_shutdown();
+            nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
+        }
+        TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
+        TEST_ASSERT_FALSE(nt_font_valid(font));
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(curve));
+        TEST_ASSERT_FALSE(nt_gfx_texture_ready(band));
+    }
+}
+
+void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    nt_font_add(font, register_font_resource("font_cached_restore", blob, blob_size));
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph(font, 'A'));
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached);
+    const uint32_t generation = nt_font_get_cache_generation(font);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached);
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_gfx_end_frame();
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    nt_gfx_stub_test_fail_texture_creates(2U);
+    nt_font_step();
+    TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(font));
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
+    TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
+    nt_font_step();
+    const uint32_t uploads = nt_gfx_stub_test_update_texture_count();
+    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(glyph);
+    TEST_ASSERT_FALSE(glyph->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
+    TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_stub_test_update_texture_count());
+    nt_gfx_end_frame();
+    nt_font_destroy(font);
+    free(blob);
 }
 
 /* ---- Test 3: Add resource (FONT-04) ---- */
@@ -2530,6 +2710,10 @@ int main(void) {
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_init_shutdown);
     RUN_TEST(test_font_create_destroy_valid);
+    RUN_TEST(test_font_retries_initial_texture_failure);
+    RUN_TEST(test_font_unready_pair_keeps_cpu_queries_gpu_free);
+    RUN_TEST(test_font_destroy_frees_partial_texture_pairs);
+    RUN_TEST(test_font_cached_glyph_waits_for_rebuilt_textures);
     RUN_TEST(test_font_add_resource);
     RUN_TEST(test_font_get_metrics);
     RUN_TEST(test_font_lookup_glyph_hit);

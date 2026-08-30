@@ -749,14 +749,6 @@ void nt_shape_renderer_shutdown(void) {
     }
     nt_gfx_destroy_buffer(s_shape.batch_ibo);
     nt_gfx_destroy_buffer(s_shape.batch_vbo);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.inst_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.inst_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.batch_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.batch_pip_depth);
     nt_gfx_destroy_program(s_shape.line_prog);
     nt_gfx_destroy_program(s_shape.cap_inst_prog);
     nt_gfx_destroy_program(s_shape.inst_prog);
@@ -784,15 +776,15 @@ void nt_shape_renderer_restore_gpu(void) {
 
     /* Full re-init: recreates shaders, pipelines, buffers, template meshes, trig LUT */
     nt_shape_renderer_init();
-    if (!s_shape.initialized) {
-        return; /* init already logged the cause; writing state now would hide it */
-    }
 
     /* Restore saved settings */
     memcpy(s_shape.vp, saved_vp, sizeof(s_shape.vp));
     memcpy(s_shape.cam_pos, saved_cam_pos, sizeof(s_shape.cam_pos));
     s_shape.line_width = saved_line_width;
     s_shape.depth_enabled = saved_depth;
+    if (!s_shape.initialized) {
+        return;
+    }
     s_shape.batch_pip_active = saved_depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
     s_shape.inst_pip_active = saved_depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
     s_shape.cap_inst_pip_active = saved_depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
@@ -800,9 +792,12 @@ void nt_shape_renderer_restore_gpu(void) {
 }
 
 void nt_shape_renderer_flush(void) {
-    /* Init has failure paths now, and every emit funnels through here -- without
-     * this a failed init would upload into zero buffer handles. */
+    /* A skipped flush must free CPU staging for the next emit. */
     if (!s_shape.initialized) {
+        memset(s_shape.inst_counts, 0, sizeof(s_shape.inst_counts));
+        s_shape.vertex_count = 0;
+        s_shape.index_count = 0;
+        s_shape.line_count = 0;
         return;
     }
 
@@ -1475,6 +1470,8 @@ uint32_t nt_shape_renderer_test_instance_capacity(void) { return NT_SHAPE_RENDER
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
 uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
 uint32_t nt_shape_renderer_test_line_count(void) { return s_shape.line_count; }
+const float *nt_shape_renderer_test_vp(void) { return s_shape.vp; }
 const float *nt_shape_renderer_test_cam_pos(void) { return s_shape.cam_pos; }
 float nt_shape_renderer_test_line_width(void) { return s_shape.line_width; }
+bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }
 bool nt_shape_renderer_test_initialized(void) { return s_shape.initialized; }

@@ -582,6 +582,54 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
 }
 
+void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.max_vertices = 16;
+    desc.max_indices = 24;
+    desc.custom_max_vertices = 16;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xC8ULL);
+    nt_material_t mat = create_test_material();
+    nt_material_t other = create_test_material();
+    nt_program_t program_a = nt_material_get_info(mat)->program;
+    nt_program_t program_b = nt_material_get_info(other)->program;
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    nt_sprite_renderer_set_material(other);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    nt_gfx_test_draw_trace_reset(true);
+
+    nt_sprite_renderer_set_material(mat);
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    }
+    nt_material_set_program(mat, program_b);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    nt_gfx_test_draw_t first = nt_gfx_test_draw_trace_at(0);
+    nt_gfx_test_draw_t second = nt_gfx_test_draw_trace_at(1);
+    nt_gfx_test_draw_t third = nt_gfx_test_draw_trace_at(2);
+    TEST_ASSERT_EQUAL_UINT32(program_a.id, first.program.id);
+    TEST_ASSERT_EQUAL_UINT32(program_a.id, second.program.id);
+    TEST_ASSERT_EQUAL_UINT32(program_b.id, third.program.id);
+    TEST_ASSERT_EQUAL_UINT32(first.pipeline.id, second.pipeline.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(second.pipeline.id, third.pipeline.id);
+    for (uint32_t i = 0; i < 3; i++) {
+        nt_gfx_test_draw_t draw = nt_gfx_test_draw_trace_at(i);
+        TEST_ASSERT_EQUAL_UINT32(i == 0 ? 24 : 6, draw.num_indices);
+        TEST_ASSERT_EQUAL_UINT32(i == 0 ? 16 : 4, draw.num_vertices);
+    }
+}
+
 /* Queued work outlives the program it was built on when the owner destroys it
  * mid-frame. Flush drops those cmds: binding a destroyed pipeline leaves nothing
  * bound, and the draw would then trap pointing at the wrong cause. */
@@ -601,10 +649,21 @@ void test_sprite_renderer_flush_drops_cmds_whose_program_died(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
 
+    nt_program_t replacement = nt_material_get_info(create_test_material())->program;
+    nt_material_set_program(mat, replacement);
+    nt_gfx_test_draw_trace_reset(true);
     nt_gfx_destroy_program(dead); /* takes the queued cmd's pipeline with it */
     nt_sprite_renderer_flush();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_draw_trace_count());
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_test_draw_trace_at(0).num_indices);
+    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
 }
 
 void test_sprite_renderer_forwards_material_blend_state(void) {
@@ -1166,6 +1225,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
     RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
+    RUN_TEST(test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter);
     RUN_TEST(test_sprite_renderer_flush_drops_cmds_whose_program_died);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);

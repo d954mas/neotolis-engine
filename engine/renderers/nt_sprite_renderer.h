@@ -100,22 +100,16 @@ void nt_sprite_renderer_restore_gpu(void);
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
-/* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
- * staging. If you intend to keep emitting sprites with the same cmd state
- * (material, textures, samplers) after the flush, snapshot the currently
- * open cmd FIRST and restore via open_cmd_from_snapshot AFTER. See the
- * capacity-overflow path in emit_one for the canonical pattern. Calling
- * flush() without preservation either trips the "no open cmd" assert on
- * the next emit or silently drops the state binding. */
+/* Ends queued commands and clears staging; call set_material before emitting again.
+ * Internal capacity flushes preserve the command's pipeline and bindings. */
 void nt_sprite_renderer_flush(void);
 
-/* ---- Non-ECS public emit surface ----
- *
- * Bind material for subsequent emit_region calls. Auto-flushes staging
- * on change to a different .id (mirrors nt_text_renderer_set_material).
- * Same-handle reentry is a no-op. Asserts the material resolves and carries a
- * program; a program that is merely dead (context loss, owner destroyed it)
- * opens a cmd with no pipeline, which flush skips. */
+/* ---- Non-ECS public emit surface ---- */
+
+/* Binds material and rechecks its program, including same-handle calls; may flush the open command.
+ * Requires a resolved material with an assigned program; a dead program opens a command that flush
+ * skips.
+ * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Set the custom per-vertex attr block baked into every vertex of the next emit

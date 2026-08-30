@@ -1565,6 +1565,38 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
 
 /* ---- Lifecycle ---- */
 
+static void create_font_textures(nt_font_slot_t *slot) {
+    slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = slot->curve_tex_width,
+        .height = slot->curve_tex_height,
+        .format = NT_TEXTURE_FORMAT_RGBA16F,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = "font_curve",
+    });
+    slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = (uint16_t)(slot->band_count * 2),
+        .height = slot->band_tex_height,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = "font_band",
+    });
+}
+
+static void destroy_font_textures(nt_font_slot_t *slot) {
+    if (slot->curve_texture.id != 0) {
+        nt_gfx_destroy_texture(slot->curve_texture);
+    }
+    if (slot->band_texture.id != 0) {
+        nt_gfx_destroy_texture(slot->band_texture);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(!s_font.initialized);
@@ -1605,8 +1637,7 @@ void nt_font_shutdown(void) {
         free(slot->free_stack);
         free(slot->hash_table);
         free(slot->measure_cache.key_hashes); /* SoA base — frees all 4 sub-arrays; NULL-safe */
-        nt_gfx_destroy_texture(slot->curve_texture);
-        nt_gfx_destroy_texture(slot->band_texture);
+        destroy_font_textures(slot);
     }
     // #endregion
     free(s_font.slots);
@@ -1637,37 +1668,8 @@ void nt_font_step(void) {
             if (nt_gfx_texture_ready(slot->curve_texture) && nt_gfx_texture_ready(slot->band_texture)) {
                 continue;
             }
-            /* Never had textures at all: creation failed at nt_font_create, which
-             * a rebuild cannot fix. Retrying every frame would churn GL and the
-             * glyph cache for the rest of the session. */
-            if (slot->curve_texture.id == 0 && slot->band_texture.id == 0) {
-                continue;
-            }
-
-            nt_gfx_destroy_texture(slot->curve_texture);
-            nt_gfx_destroy_texture(slot->band_texture);
-
-            slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = slot->curve_tex_width,
-                .height = slot->curve_tex_height,
-                .format = NT_TEXTURE_FORMAT_RGBA16F,
-                .min_filter = NT_FILTER_NEAREST,
-                .mag_filter = NT_FILTER_NEAREST,
-                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-                .label = "font_curve",
-            });
-            slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = (uint16_t)(slot->band_count * 2),
-                .height = slot->band_tex_height,
-                .format = NT_TEXTURE_FORMAT_RG16UI,
-                .min_filter = NT_FILTER_NEAREST,
-                .mag_filter = NT_FILTER_NEAREST,
-                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-                .label = "font_band",
-            });
-
+            destroy_font_textures(slot);
+            create_font_textures(slot);
             clear_glyph_cache(slot); /* textures recreated — old cache entries point at stale GPU regions */
         }
     }
@@ -1896,31 +1898,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     slot->max_glyphs = desc->band_texture_height;
     // #endregion
 
-    // #region Create GPU textures (once, never resized)
-    slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = desc->curve_texture_width,
-        .height = desc->curve_texture_height,
-        .format = NT_TEXTURE_FORMAT_RGBA16F,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .data = NULL,
-        .label = "font_curve",
-    });
-
-    slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = (uint16_t)(band_count * 2), /* Y-bands + X-bands */
-        .height = desc->band_texture_height,
-        .format = NT_TEXTURE_FORMAT_RG16UI,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .data = NULL,
-        .label = "font_band",
-    });
-    // #endregion
+    create_font_textures(slot);
 
     // #region Allocate cache, free stack, hash table
     slot->cache = (nt_font_cache_slot_t *)calloc(desc->band_texture_height, sizeof(nt_font_cache_slot_t));
@@ -1950,8 +1928,7 @@ void nt_font_destroy(nt_font_t font) {
     free(slot->free_stack);
     free(slot->hash_table);
     free(slot->measure_cache.key_hashes); /* SoA base pointer — frees all 4 arrays in one block. NULL-safe. */
-    nt_gfx_destroy_texture(slot->curve_texture);
-    nt_gfx_destroy_texture(slot->band_texture);
+    destroy_font_textures(slot);
     memset(slot, 0, sizeof(*slot));
     nt_pool_free(&s_font.pool, font.id);
 }
@@ -2117,7 +2094,11 @@ int16_t nt_font_quantize_weight(float weight_units) {
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    return nt_font_lookup_glyph_in_slot(get_slot(font), codepoint);
+    nt_font_slot_t *slot = get_slot(font);
+    if (!nt_gfx_texture_ready(slot->curve_texture) || !nt_gfx_texture_ready(slot->band_texture)) {
+        return NULL;
+    }
+    return nt_font_lookup_glyph_in_slot(slot, codepoint);
 }
 
 /* ---- GPU texture access ---- */

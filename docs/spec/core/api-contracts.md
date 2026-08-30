@@ -171,18 +171,25 @@ is a flat replace: `NT_PROGRAM_INVALID` over a program, a program over
 rule. Assigning the handle the material already holds changes nothing, so a
 per-frame gate may call it unconditionally and needs no latch.
 
-A replace does not reach work already staged. The immediate-mode renderers
-resolve a pipeline when a batch opens and keep it, so glyphs and sprites go out
-through the program they were laid out for; the new program takes effect from
-the next batch. If that program is destroyed rather than merely replaced, its
-pipelines go with it and the staged batch is dropped instead -- there is nothing
-left to draw it through.
+A replace does not reach work already staged. Text captures its pipeline on the
+first quad of an empty staging buffer, including the first quad after an internal
+flush. Sprite captures its pipeline and bindings when a command opens; a capacity
+flush continues that command's snapshot even if the material's program changed.
+An explicit `nt_sprite_renderer_set_material` rechecks the program even for the
+same material handle. Numeric material params remain mutable and are read at
+flush; the snapshot does not freeze the whole material.
+
+For an explicit game-controlled transition, flush, replace the program, then call
+the renderer's `set_material` before emitting more work. If the old program is
+destroyed rather than merely replaced, its pipelines go with it and the staged
+batch is dropped instead -- there is nothing left to draw it through.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
 the first assignment and false once the program died with the context or was
 destroyed -- a destroyed program's slot generation is stale, so the query answers
-from the handle alone. The ECS `draw_list` paths gate their draws on it silently;
+from the handle alone. The ECS `draw_list` paths skip unready programs and warn
+once until a pipeline is built again;
 the immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Liveness is deliberately not their question: on the frame the context

@@ -52,7 +52,11 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
 
 void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_render_targets = 16}); }
 
-void tearDown(void) { nt_gfx_shutdown(); }
+void tearDown(void) {
+    nt_assert_handler = NULL;
+    nt_gfx_shutdown();
+    nt_gfx_stub_test_reset();
+}
 
 /* ---- Pool: alloc returns nonzero ---- */
 
@@ -382,6 +386,43 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, prog.id);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
+}
+
+void test_gfx_program_link_context_loss_releases_every_slot(void) {
+    nt_gfx_stub_test_reset();
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t programs[4];
+
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) != 0) {
+        nt_assert_handler = NULL;
+        nt_gfx_stub_test_set_context_lost(false);
+        TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
+    }
+    for (uint32_t attempt = 0; attempt < 12; attempt++) {
+        nt_gfx_stub_test_set_context_lost(false);
+        nt_gfx_stub_test_lose_context_on_program_create();
+        nt_program_t program = nt_gfx_make_program(vs, fs);
+        TEST_ASSERT_EQUAL_UINT32(0, program.id);
+        TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
+        TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+        TEST_ASSERT_TRUE(nt_gfx_backend_is_context_lost());
+        TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_stub_test_program_create_count());
+    }
+
+    nt_gfx_stub_test_set_context_lost(false);
+    for (uint32_t i = 0; i < 4; i++) {
+        programs[i] = nt_gfx_make_program(vs, fs);
+        TEST_ASSERT_TRUE(nt_gfx_program_ready(programs[i]));
+    }
+    nt_assert_handler = NULL;
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_program_create_count());
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_TRUE(nt_gfx_program_valid(programs[i]));
+        nt_gfx_destroy_program(programs[i]);
+    }
+    nt_gfx_stub_test_reset();
 }
 
 /* ---- Program: context loss clears readiness, handles stay valid ---- */
@@ -2037,6 +2078,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
     RUN_TEST(test_gfx_make_program_asserts_on_link_failure);
     RUN_TEST(test_gfx_make_program_context_lost_returns_invalid);
+    RUN_TEST(test_gfx_program_link_context_loss_releases_every_slot);
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
     RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);

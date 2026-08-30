@@ -116,26 +116,20 @@ static nt_entity_t s_entities[MAX_SCENE_NODES];
 static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static uint8_t s_material_shader_types[MAX_SCENE_NODES];
-static nt_program_ref_t s_programs[3];    /* indexed by SponzaShaderType */
-static uint32_t s_program_assigned_count; /* entities link_programs has already assigned */
+static nt_program_ref_t s_programs[3]; /* indexed by SponzaShaderType */
 
-/* Safe to call every frame: update() is free once linked. The manifest and the
- * shader stages arrive in either order, so both a fresh link and a freshly
- * built scene have to reach the materials. */
+/* New materials take the current program at creation; relinks update survivors. */
 static void link_programs(void) {
     bool linked_any = false;
     for (uint32_t t = 0; t < 3; t++) {
         linked_any = nt_program_ref_update(&s_programs[t]) || linked_any;
     }
-    /* A fresh link re-assigns every material; otherwise only the ones the scene
-     * added since the last sweep. The scene is built well after the stages
-     * resolve, so both cases are real -- but without the watermark this walked
-     * all 256 materials every frame for the life of the run. */
-    const uint32_t first = linked_any ? 0U : s_program_assigned_count;
-    for (uint32_t i = first; i < s_entity_count; i++) {
+    if (!linked_any) {
+        return;
+    }
+    for (uint32_t i = 0; i < s_entity_count; i++) {
         nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]].program);
     }
-    s_program_assigned_count = s_entity_count;
 }
 
 static void drop_programs(void) {
@@ -266,11 +260,11 @@ static void load_scene_from_manifest(void) {
             s_tex_handles[tex_base + 2] = nt_resource_request((nt_hash64_t){.value = mn->specular_rid}, NT_ASSET_TEXTURE);
         }
 
-        /* The program is assigned by link_programs once the stages resolve. */
         s_material_shader_types[i] = (mn->shader_type < 3) ? mn->shader_type : (uint8_t)SPONZA_SHADER_DIFFUSE;
 
         /* Create material descriptor */
         nt_material_create_desc_t mat_desc = {
+            .program = s_programs[s_material_shader_types[i]].program,
             .depth_test = true,
             .depth_write = true,
             .cull_mode = NT_CULL_BACK,

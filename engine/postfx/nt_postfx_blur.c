@@ -137,9 +137,6 @@ static void destroy_gpu_resources(void) {
     if (s_blur.triangle_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_blur.triangle_vbo);
     }
-    if (s_blur.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_blur.pipeline);
-    }
     if (s_blur.program.id != 0) {
         nt_gfx_destroy_program(s_blur.program);
     }

@@ -46,8 +46,11 @@ stage links a second program and assigns it with `nt_material_set_program` --
 a supported flat replace, and the only runtime shader replacement there is.
 The pipeline entries renderers cached on the old program are keyed out by the new
 handle, and destroying the old program reclaims them along with it, so repeated
-replacement does not accumulate. A batch already staged when the replace lands
-still draws through the program it was laid out for; see
+replacement does not accumulate. Staged work keeps its original pipeline: text
+captures it on the first quad of empty staging, while a sprite command preserves
+its snapshot across capacity flushes until an explicit material setter. Numeric
+material params are still read at flush. Destroying the old program discards its
+staged work rather than switching that work to the replacement; see
 [API contracts](../core/api-contracts.md#program-handles).
 
 Uniform block bindings are program state, not material state: a program is

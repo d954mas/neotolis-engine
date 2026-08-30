@@ -134,7 +134,12 @@ static int s_nt_ready;                 /* set after the first rendered frame */
 static unsigned int s_nt_drawn_frames; /* frames that reached the draw path */
 static float s_nt_field_css_x;         /* Cyrillic field center, CSS px (canvas-relative) */
 static float s_nt_field_css_y;
+static float s_nt_field_css_w;
+static float s_nt_field_css_h;
 static int s_nt_field_visible; /* the field was laid out this frame */
+static int s_nt_hidden_probe;
+static nt_ui_input_style_t s_nt_hidden_input_style;
+static nt_ui_label_style_t s_nt_hidden_caption;
 
 /* The quest <link>'s block-local rect (from res.first_link_rect), stashed at the rich_text call and
  * mapped to CSS px against the block bbox each frame so rich.spec.ts clicks its exact center. */
@@ -146,9 +151,7 @@ static float s_nt_rich_link_css_w;
 static float s_nt_rich_link_css_h;
 
 EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
-/* Counts frames that reached the draw path. A context loss stalls it; a correct
- * recovery makes it climb again, which is the whole restore contract observed
- * from outside. */
+/* A fresh draw is required in addition to the test's pixel comparison. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
@@ -157,7 +160,13 @@ EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyr
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_w(void) { return s_nt_field_css_w; }
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_h(void) { return s_nt_field_css_h; }
 EMSCRIPTEN_KEEPALIVE int nt_test_field_visible(void) { return s_nt_field_visible; }
+EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
+    NT_ASSERT(mode >= 0 && mode <= 2);
+    s_nt_hidden_probe = mode;
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_rich_link_present(void) { return s_nt_rich_link_present; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_x(void) { return s_nt_rich_link_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_y(void) { return s_nt_rich_link_css_y; }
@@ -177,9 +186,10 @@ EM_JS(void, nt_test_install_hooks, (void), {
         walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         drawn_frames: function() { return _nt_test_drawn_frames() >>> 0; },
         programs_ready: function() { return _nt_test_programs_ready() !== 0; },
+        hide_probe: function(mode) { _nt_test_hide_probe(mode); },
         field_visible: function() { return _nt_test_field_visible() !== 0; },
         field_css: function() {
-            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
+            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y(), w: _nt_test_field_css_w(), h: _nt_test_field_css_h() };
         },
         rich_link_css: function() {
             return { present: _nt_test_rich_link_present() !== 0, x: _nt_test_rich_link_css_x(), y: _nt_test_rich_link_css_y(), w: _nt_test_rich_link_css_w(), h: _nt_test_rich_link_css_h() };
@@ -322,6 +332,16 @@ static void frame(void) {
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
 
+        const nt_ui_label_style_t *caption = &s_caption;
+        const nt_ui_input_style_t *input_style = &s_input_style;
+#if defined(__EMSCRIPTEN__)
+        if (s_nt_hidden_probe == 1) {
+            input_style = &s_nt_hidden_input_style;
+        } else if (s_nt_hidden_probe == 2) {
+            caption = &s_nt_hidden_caption;
+        }
+#endif
+
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
                          .padding = CLAY_PADDING_ALL(24),
@@ -330,8 +350,8 @@ static void frame(void) {
                          .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = {18.0F, 20.0F, 26.0F, 255.0F}}) {
             /* Surface 1: Cyrillic input field. */
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", &s_caption);
-            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, &s_input_style,
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", caption);
+            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, input_style,
                                    &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}}, true, NULL);
 
             /* Surface 2: rich-text block with one clickable link. */
@@ -357,6 +377,8 @@ static void frame(void) {
                 const float cy_fb = scale.offset_y + (fb.y + fb.height * 0.5F) * scale.scale_y;
                 s_nt_field_css_x = cx_fb / dpr;
                 s_nt_field_css_y = cy_fb / dpr;
+                s_nt_field_css_w = fb.width * scale.scale_x / dpr;
+                s_nt_field_css_h = fb.height * scale.scale_y / dpr;
             }
             s_nt_ready = 1;
         }
@@ -531,6 +553,14 @@ int main(int argc, char *argv[]) {
 #endif
 
 #if defined(__EMSCRIPTEN__)
+    /* Transparency removes one probe's pixels without changing layout or readiness. */
+    s_nt_hidden_input_style = s_input_style;
+    for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {
+        s_nt_hidden_input_style.skin[i].bg_color &= 0x00FFFFFFU;
+        s_nt_hidden_input_style.skin[i].border_color &= 0x00FFFFFFU;
+    }
+    s_nt_hidden_caption = s_caption;
+    s_nt_hidden_caption.color.a = 0.0F;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
 #endif
 

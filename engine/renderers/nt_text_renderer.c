@@ -188,11 +188,6 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     s_text.pipeline_count++;
     return pip;
 }
-
-/* Binds the staging that follows to a pipeline of its own. Called wherever
- * staging becomes empty and more glyphs may still arrive: the top of a draw, and
- * the overflow flush in the middle of one. */
-static void open_batch_pipeline(void) { s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0}; }
 // #endregion
 
 // #region Lifecycle
@@ -324,7 +319,10 @@ static void transform_point(float out[3], const float model[16], float x, float 
 static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
-        open_batch_pipeline(); /* the tail of this draw is a new batch */
+    }
+    /* Glyph lookup may have flushed staging through the font cache callback. */
+    if (s_text.glyph_count == 0) {
+        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
 
     /* 0.5 px screen-space dilation ("Decade of Slug" improvement): oversize
@@ -402,7 +400,9 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
-        open_batch_pipeline(); /* the tail of this draw is a new batch */
+    }
+    if (s_text.glyph_count == 0) {
+        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
     nt_text_vertex_t *v = &s_text.vertices[s_text.vertex_count];
 
@@ -587,18 +587,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (len == 0U || utf8 == NULL) {
         return;
     }
-    /* Batch start: resolve the pipeline these glyphs are laid out for and keep
-     * it. Whatever the material's program becomes afterwards, they draw through
-     * the one they were staged under -- or, if it dies with the program, through
-     * nothing at all, which flush sees as an invalid handle. */
-    if (s_text.glyph_count == 0) {
-        open_batch_pipeline();
-    }
     NT_ASSERT(s_text.font.id != 0 && "nt_text_renderer_draw_n: call set_font before draw");
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
         return; /* no resource loaded yet (or all unmounted) */
+    }
+    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font)) || !nt_gfx_texture_ready(nt_font_get_band_texture(s_text.font))) {
+        return;
     }
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);

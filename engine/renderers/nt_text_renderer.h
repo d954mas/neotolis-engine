@@ -48,6 +48,7 @@ void nt_text_renderer_set_font(nt_font_t font);
 
 /* NULL/len=0 → no-op. UTF-8 cut at `len` boundary → trailing partial
  * codepoint dropped (no over-read past utf8+len).
+ * Unavailable font textures skip glyphs and decorations.
  *
  * letter_tracking: EXTRA px between glyphs (additive, NOT absolute).
  *   0 = font's natural advance. Positive = loose, negative = tight.
