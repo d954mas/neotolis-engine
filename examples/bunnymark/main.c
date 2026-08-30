@@ -30,6 +30,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "material_comp/nt_material_comp.h"
 #include "metrics/nt_metrics.h"
 #include "render/nt_render_defs.h"
@@ -75,8 +76,6 @@ static nt_hash32_t s_pack_id;
 static nt_hash32_t s_hd_pack_id;
 
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_vs_handle;
-static nt_resource_t s_fs_handle;
 
 /* HD/SD toggle state — demo starts in SD.
  *
@@ -99,29 +98,17 @@ static nt_material_t s_sprite_material;
 
 /* Stats overlay — separate material/font from sprites. */
 static nt_material_t s_text_material;
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
-static nt_program_t s_sprite_program;
-static nt_program_t s_text_program;
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program;
 
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
 static void link_programs(void) {
-    if (s_sprite_program.id == 0) {
-        uint32_t vs = nt_resource_get(s_vs_handle);
-        uint32_t fs = nt_resource_get(s_fs_handle);
-        if (vs != 0 && fs != 0) {
-            s_sprite_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
-            nt_material_set_program(s_sprite_material, s_sprite_program);
-        }
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (s_text_program.id == 0) {
-        uint32_t vs = nt_resource_get(s_text_vs_handle);
-        uint32_t fs = nt_resource_get(s_text_fs_handle);
-        if (vs != 0 && fs != 0) {
-            s_text_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
-            nt_material_set_program(s_text_material, s_text_program);
-        }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
     }
 }
 static nt_font_t s_overlay_font;
@@ -436,10 +423,8 @@ static void frame(void) {
          * so every renderer skips until the gate below relinks and re-assigns. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
-        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_text_program);
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         can_render = false;
     }
@@ -635,8 +620,8 @@ int main(void) {
     s_hd_pack_id = nt_hash32_str("bunnymark_hd");
 
     /* Resource handles */
-    s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_BUNNIES, NT_ASSET_ATLAS);
     nt_resource_t atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_BUNNIES_TEX0, NT_ASSET_TEXTURE);
 
@@ -652,8 +637,8 @@ int main(void) {
     });
 
     /* Stats overlay material (Slug shader) + Latin font for FPS / draws / bunnies HUD. */
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
@@ -704,8 +689,8 @@ int main(void) {
     nt_entity_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
-    nt_gfx_destroy_program(s_sprite_program);
-    nt_gfx_destroy_program(s_text_program);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

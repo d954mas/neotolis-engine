@@ -19,6 +19,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "render/nt_render_defs.h"
@@ -75,14 +76,12 @@ static nt_texture_t make_fallback_texture(void) {
 static nt_hash32_t s_pack_id;
 
 static nt_resource_t s_mesh_handle;
-static nt_resource_t s_vs_handle;
-static nt_resource_t s_fs_handle;
 static nt_resource_t s_atlas_tex_handle;
 
 /* ---- Material ---- */
 
 static nt_material_t s_material;
-static nt_program_t s_program;
+static nt_program_ref_t s_program;
 
 /* ---- Entity ---- */
 
@@ -96,16 +95,9 @@ static bool s_pack_dumped;
 /* Links once both stages are ready. The program is ours: the material only
  * borrows the handle, and context loss forces a relink. */
 static void link_program(void) {
-    if (s_program.id != 0) {
-        return;
+    if (nt_program_ref_update(&s_program)) {
+        nt_material_set_program(s_material, s_program.program);
     }
-    uint32_t vs = nt_resource_get(s_vs_handle);
-    uint32_t fs = nt_resource_get(s_fs_handle);
-    if (vs == 0 || fs == 0) {
-        return;
-    }
-    s_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
-    nt_material_set_program(s_material, s_program);
 }
 
 /* ---- Frame callback ---- */
@@ -200,8 +192,7 @@ static void frame(void) {
          * materials keep their handles -- a destroyed program reads as not ready,
          * so every renderer skips until the gate below relinks and re-assigns. */
         nt_mesh_renderer_restore_gpu();
-        nt_gfx_destroy_program(s_program); /* GL object is gone; this frees the pool slot */
-        s_program = NT_PROGRAM_INVALID;
+        nt_program_ref_drop(&s_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
@@ -273,8 +264,8 @@ int main(void) {
 
     /* Request resource handles */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
-    s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
+    s_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     /* Atlas page texture: "spineboy/tex0" */
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SPINEBOY_TEX0, NT_ASSET_TEXTURE);
 
@@ -344,7 +335,7 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_material_destroy(s_material);
-    nt_gfx_destroy_program(s_program);
+    nt_program_ref_drop(&s_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

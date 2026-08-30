@@ -39,6 +39,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "render/nt_render_defs.h"
@@ -108,13 +109,6 @@ static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, spe
 
 /* ---- Shader resource handles (6 shaders, 3 permutations) ---- */
 
-static nt_resource_t s_vs_full;
-static nt_resource_t s_fs_full;
-static nt_resource_t s_vs_diffuse;
-static nt_resource_t s_fs_diffuse;
-static nt_resource_t s_vs_alpha;
-static nt_resource_t s_fs_alpha;
-
 /* ---- Materials and entities ---- */
 
 static nt_material_t s_materials[MAX_SCENE_NODES];
@@ -122,50 +116,27 @@ static nt_entity_t s_entities[MAX_SCENE_NODES];
 static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static uint8_t s_material_shader_types[MAX_SCENE_NODES];
-static nt_program_t s_programs[3]; /* indexed by SponzaShaderType */
+static nt_program_ref_t s_programs[3]; /* indexed by SponzaShaderType */
 
-static void link_all_programs(void) {
-    const nt_resource_t stages[3][2] = {
-        [SPONZA_SHADER_DIFFUSE] = {s_vs_diffuse, s_fs_diffuse},
-        [SPONZA_SHADER_ALPHA] = {s_vs_alpha, s_fs_alpha},
-        [SPONZA_SHADER_FULL] = {s_vs_full, s_fs_full},
-    };
-    uint32_t backends[3][2];
-    for (uint32_t t = 0; t < 3; t++) {
-        backends[t][0] = nt_resource_get(stages[t][0]);
-        backends[t][1] = nt_resource_get(stages[t][1]);
-        if (backends[t][0] == 0 || backends[t][1] == 0) {
-            return;
-        }
-    }
-    for (uint32_t t = 0; t < 3; t++) {
-        s_programs[t] = nt_gfx_make_program((nt_shader_t){backends[t][0]}, (nt_shader_t){backends[t][1]});
-    }
-}
-
-/* All three pairs come from the same pack, so they go ready together; linking
- * them eagerly keeps program assignment out of the draw path. Idempotent by
- * construction: assigning the handle a material already holds is a no-op, so
- * this runs every frame and needs no "already assigned" latch -- the manifest
- * and the shader stages may arrive in either order. */
+/* All three pairs come from the same pack, so they go ready together. Idempotent
+ * by construction: update() is free once linked and assigning the handle a
+ * material already holds is a no-op, so this runs every frame without a latch --
+ * the manifest and the shader stages may arrive in either order. */
 static void link_programs(void) {
-    if (s_programs[SPONZA_SHADER_DIFFUSE].id == 0) {
-        link_all_programs();
+    for (uint32_t t = 0; t < 3; t++) {
+        (void)nt_program_ref_update(&s_programs[t]);
     }
-    if (s_programs[SPONZA_SHADER_DIFFUSE].id == 0) {
+    if (s_programs[SPONZA_SHADER_DIFFUSE].program.id == 0) {
         return;
     }
     for (uint32_t i = 0; i < s_entity_count; i++) {
-        nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
+        nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]].program);
     }
 }
 
-/* Materials keep their handles: a destroyed program reads as not ready, and the
- * gate above re-assigns once the stages come back. */
 static void drop_programs(void) {
     for (uint32_t t = 0; t < 3; t++) {
-        nt_gfx_destroy_program(s_programs[t]);
-        s_programs[t] = NT_PROGRAM_INVALID;
+        nt_program_ref_drop(&s_programs[t]);
     }
 }
 static bool s_scene_loaded;
@@ -712,12 +683,12 @@ int main(void) {
     nt_mesh_renderer_init(&mr_desc);
 
     /* 11. Request shader resource handles (6 shaders, 3 permutations) */
-    s_vs_full = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_full = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG, NT_ASSET_SHADER_CODE);
-    s_vs_diffuse = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_diffuse = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG, NT_ASSET_SHADER_CODE);
-    s_vs_alpha = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_alpha = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_FULL].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_FULL].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_DIFFUSE].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_DIFFUSE].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_ALPHA].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT, NT_ASSET_SHADER_CODE);
+    s_programs[SPONZA_SHADER_ALPHA].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 12. Request manifest and fallback texture resource handles */
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
@@ -778,7 +749,7 @@ int main(void) {
     }
     nt_material_shutdown();
     for (uint32_t t = 0; t < 3; t++) {
-        nt_gfx_destroy_program(s_programs[t]);
+        nt_program_ref_drop(&s_programs[t]);
     }
     nt_resource_shutdown();
     nt_fs_shutdown();

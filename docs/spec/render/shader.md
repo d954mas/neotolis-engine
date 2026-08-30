@@ -28,6 +28,16 @@ that wants one program behind many materials links it once and passes the same
 handle to each, via `nt_material_set_program`. Materials, pipelines and pipeline
 caches all borrow the handle and never destroy it.
 
+A program linked from pack-loaded stages needs a per-frame gate, because the
+stages arrive asynchronously and nothing can link before both resolve.
+`nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
+the two resource handles once, calls `nt_program_ref_update` every frame, and
+assigns on the frame it returns true. It stores the resource handles rather than
+the compiled stages or the source text, because only the handles survive a
+context loss -- `nt_program_ref_drop` clears the program and the same gate links
+again once the stages re-activate. A shader embedded as a source string needs
+none of this: compile and link at init, with nothing to wait for.
+
 Pack priority does not reach a material's program. A material stores a linked
 `nt_program_t`, not the `NT_ASSET_SHADER_CODE` stages behind it, so a
 higher-priority pack republishing a stage changes only what `nt_resource_get`

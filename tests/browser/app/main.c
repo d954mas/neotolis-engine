@@ -15,6 +15,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
@@ -71,33 +72,21 @@ static nt_ui_context_t *s_ctx;
 static uint8_t s_ui_arena[1U << 20];
 
 static nt_hash32_t s_pack_id;
-static nt_resource_t s_sprite_vs_handle, s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle, s_text_fs_handle;
 static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
 static nt_material_t s_sprite_material, s_text_material;
-static nt_program_t s_sprite_program, s_text_program;
+static nt_program_ref_t s_sprite_program, s_text_program;
 
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
 static void link_programs(void) {
-    if (s_sprite_program.id == 0) {
-        uint32_t vs = nt_resource_get(s_sprite_vs_handle);
-        uint32_t fs = nt_resource_get(s_sprite_fs_handle);
-        if (vs != 0 && fs != 0) {
-            s_sprite_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
-            nt_material_set_program(s_sprite_material, s_sprite_program);
-        }
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
     }
-    if (s_text_program.id == 0) {
-        uint32_t vs = nt_resource_get(s_text_vs_handle);
-        uint32_t fs = nt_resource_get(s_text_fs_handle);
-        if (vs != 0 && fs != 0) {
-            s_text_program = nt_gfx_make_program((nt_shader_t){vs}, (nt_shader_t){fs});
-            nt_material_set_program(s_text_material, s_text_program);
-        }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
     }
 }
 static nt_font_t s_font;
@@ -295,10 +284,8 @@ static void frame(void) {
          * so every renderer skips until the gate below relinks and re-assigns. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
-        nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
-        nt_gfx_destroy_program(s_text_program);
-        s_sprite_program = NT_PROGRAM_INVALID;
-        s_text_program = NT_PROGRAM_INVALID;
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         s_font_bound = false;
@@ -449,10 +436,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/ui_showcase.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
@@ -543,8 +530,8 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
-    nt_gfx_destroy_program(s_sprite_program);
-    nt_gfx_destroy_program(s_text_program);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
