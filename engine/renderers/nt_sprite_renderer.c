@@ -301,7 +301,8 @@ static void warn_program_not_ready(const nt_material_info_t *mat_info) {
     if (s_sprite.warned_program_not_ready) {
         return;
     }
-    NT_LOG_WARN("skipping '%s': its program is not ready -- link one and assign it with nt_material_set_program", (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
+    NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",
+                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
     s_sprite.warned_program_not_ready = true;
 }
 

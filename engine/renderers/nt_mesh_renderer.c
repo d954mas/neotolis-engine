@@ -161,7 +161,8 @@ static void warn_program_not_ready(const nt_material_info_t *mat_info) {
     if (s_mesh_renderer.warned_program_not_ready) {
         return;
     }
-    NT_LOG_WARN("skipping '%s': its program is not ready -- link one and assign it with nt_material_set_program", (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
+    NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",
+                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
     s_mesh_renderer.warned_program_not_ready = true;
 }
 
@@ -471,13 +472,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
             const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
-            /* Not ready is legitimate runtime state, not a bug: async activation
-             * and the context-restore window both produce it. Skip like the
-             * sprite path does. The NULL check stays a real branch -- the code
-             * below dereferences mat_info, and asserts vanish under OFF. */
-            /* The header contract says bindings and resources stay live through
-             * this call, so a missing one is the caller's bug, not runtime state.
-             * The branch stays real because asserts vanish under OFF. */
+            /* Two different causes share one branch: a missing material or mesh
+             * breaks the header contract and traps, while a program that is not
+             * ready is legitimate during load and restore and only skips. The
+             * branch stays real because asserts vanish under OFF. */
             NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
             const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
             if (!mat_info || !mesh_info || !program_ready) {

@@ -1625,12 +1625,18 @@ void nt_font_step(void) {
     }
 
     // #region Context restore: re-create GPU textures
-    if (g_nt_gfx.context_restored) {
+    /* Derived from the textures, not latched on the one frame context_restored is
+     * set: the recovery contract asks a game to skip that frame, and a game that
+     * does would otherwise never rebuild and render blank text for good. */
+    if (!g_nt_gfx.context_lost) {
         for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
             if (!nt_pool_slot_alive(&s_font.pool, i)) {
                 continue;
             }
             nt_font_slot_t *slot = &s_font.slots[i];
+            if (nt_gfx_texture_ready(slot->curve_texture) && nt_gfx_texture_ready(slot->band_texture)) {
+                continue;
+            }
 
             nt_gfx_destroy_texture(slot->curve_texture);
             nt_gfx_destroy_texture(slot->band_texture);

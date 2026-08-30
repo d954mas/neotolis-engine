@@ -1287,7 +1287,8 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0); /* stale pipeline after context loss — must recreate */
+    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0 &&
+              "bind_pipeline: this pipeline outlived a context loss -- call the owning renderer's restore entry point (nt_*_renderer_restore_gpu) in the restored frame");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }
@@ -1605,9 +1606,6 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
      * caller's own readiness decisions -- was computed before begin_frame and
      * describes the dead context. Rebuild this frame, submit the next one. */
     NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
-    /* Everything a draw is built from -- resolved handles, render items, the
-     * caller's own readiness decisions -- was computed before begin_frame and
-     * describes the dead context. Rebuild this frame, submit the next one. */
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
