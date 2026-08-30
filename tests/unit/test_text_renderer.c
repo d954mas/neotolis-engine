@@ -470,19 +470,20 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 }
 
 /* Glyphs belong to the program they were staged under. A replace between draw
- * and flush must not push them through a program they were never laid out for:
- * flush resolves for the staged program, so the batch keeps its own pipeline. */
-void test_flush_uses_the_program_the_glyphs_were_staged_under(void) {
+ * and flush invalidates them: flush drops the batch rather than pushing it
+ * through a program it was never laid out for. */
+void test_flush_discards_a_batch_whose_program_was_replaced(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(mat);
+    draw_and_flush(); /* warm A's cache entry so a rebuild is not what we measure */
 
     nt_gfx_stub_test_reset();
+    nt_text_renderer_test_reset_call_counters();
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
 
     /* The game swaps the program after the glyphs are already staged. */
-    nt_program_t other = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                             nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
-    nt_material_set_program(mat, other);
+    nt_material_set_program(mat, nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                                     nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"})));
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -490,9 +491,44 @@ void test_flush_uses_the_program_the_glyphs_were_staged_under(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    /* The staged program's entry was already cached, so nothing new is built --
-     * resolving for the new program would have created a second pipeline. */
+    /* Dropped, not retargeted: nothing drawn, nothing built for the new program. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_nonempty_flush_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+}
+
+/* An overflow flush inside a draw clears staging mid-batch. Whatever is staged
+ * after it belongs to the material's program as it stands then, so the marker has
+ * to move with it -- otherwise the next flush discards a perfectly good batch. */
+void test_overflow_flush_rearms_the_batch_program(void) {
+    nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(mat);
+    draw_and_flush();
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    /* Fill staging to one draw short of the cap, under program A. */
+    for (uint32_t i = 0; i < (NT_TEXT_RENDERER_MAX_GLYPHS / 2U) - 1U; i++) {
+        nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    }
+
+    /* The game swaps the program while that batch is still staged. */
+    nt_material_set_program(mat, nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                                     nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"})));
+
+    /* This draw overflows: emit flushes the A batch (correctly discarded, the
+     * marker still says A) and then stages these glyphs, which belong to B. */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_test_reset_call_counters();
+    nt_text_renderer_flush();
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* The B tail must draw. With a stale marker it is discarded instead. */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
 }
 
 /* UI text alternates between a context default and per-style overrides, so a
@@ -1070,7 +1106,8 @@ int main(void) {
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
-    RUN_TEST(test_flush_uses_the_program_the_glyphs_were_staged_under);
+    RUN_TEST(test_flush_discards_a_batch_whose_program_was_replaced);
+    RUN_TEST(test_overflow_flush_rearms_the_batch_program);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
     RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);

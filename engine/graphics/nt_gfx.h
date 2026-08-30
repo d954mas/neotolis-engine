@@ -508,8 +508,10 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Handle still refers to a live slot. Says nothing about the GPU object:
  * after context loss handles stay valid while the GL program is gone. */
-/* The GL object behind the stage exists. False after a context loss until the
- * asset re-activates, which is what makes a relink safe to attempt. */
+/* The GL object behind the stage exists, which is what makes a relink safe to
+ * attempt. Terminal per handle, as for programs: a context loss clears it for
+ * good and re-activation publishes a NEW handle, so waiting on this one is a
+ * wait forever -- re-read the handle from its resource. */
 bool nt_gfx_shader_ready(nt_shader_t shd);
 bool nt_gfx_program_valid(nt_program_t prog);
 /* Handle still refers to a live pipeline. False once its program was destroyed,

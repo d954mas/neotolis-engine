@@ -475,8 +475,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
              * and the context-restore window both produce it. Skip like the
              * sprite path does. The NULL check stays a real branch -- the code
              * below dereferences mat_info, and asserts vanish under OFF. */
-            if (!mat_info || !mesh_info || !nt_gfx_program_ready(mat_info->program)) {
-                warn_program_not_ready(mat_info);
+            const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
+            if (!mat_info || !mesh_info || !program_ready) {
+                if (!program_ready) {
+                    warn_program_not_ready(mat_info);
+                }
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
                 draw_byte_offset += instance_count * s_instance_layouts[cm].stride;

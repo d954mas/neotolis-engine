@@ -40,6 +40,7 @@ typedef struct {
  * is reclaimed here. Calling drop() in the restore branch is still the clear way
  * to say so, but forgetting it costs a frame rather than the session. */
 static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
+    NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
     if (ref->program.id != 0) {
         if (nt_gfx_program_ready(ref->program)) {
@@ -72,6 +73,7 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
  * materials (*_restore_gpu), and nt_resource_invalidate() the shader-code asset
  * type so the stages recompile. */
 static inline void nt_program_ref_drop(nt_program_ref_t *ref) {
+    NT_ASSERT(ref != NULL && "nt_program_ref_drop: ref is required");
     nt_gfx_destroy_program(ref->program);
     ref->program = NT_PROGRAM_INVALID;
 }

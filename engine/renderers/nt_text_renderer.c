@@ -736,6 +736,15 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 // #endregion
 
 // #region Flush
+/* The staged batch's program marker. Flush clears staging, so whatever is staged
+ * next belongs to the material's program as it stands now -- an overflow flush in
+ * the middle of a draw would otherwise leave the marker on the previous one and
+ * make the next flush discard a perfectly good batch. */
+static void rearm_batch_program(void) {
+    const nt_material_info_t *info = nt_material_get_info(s_text.material);
+    s_text.material_program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
+}
+
 void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
@@ -752,11 +761,12 @@ void nt_text_renderer_flush(void) {
     }
     if (pipeline.id == 0) {
         if (!s_text.warned_no_pipeline) {
-            NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs; the material's program is not ready", s_text.glyph_count);
+            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
+        rearm_batch_program();
         return;
     }
 
@@ -800,6 +810,7 @@ void nt_text_renderer_flush(void) {
     /* Reset staging buffer */
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
+    rearm_batch_program();
 }
 // #endregion
 
