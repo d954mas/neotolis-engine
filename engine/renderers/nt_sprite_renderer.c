@@ -293,6 +293,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
      * -- context alive, material still holding the old handle -- would reach
      * make_pipeline's readiness assert and trap on recoverable state. */
     if (!nt_gfx_program_ready(mat_info->program)) {
+        /* The one choke point every caller passes through, so the immediate and
+         * draw_list paths both get told. */
+        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
     /* Pipeline signature: layout discriminator + program handle + render-state
@@ -505,6 +508,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
         s_sprite.cur_custom_bytes = 0;
     }
 
+    /* An invalid pipeline still opens a cmd; flush drops it. find_or_create_pipeline
+     * has already said why. */
     nt_pipeline_t pip = find_or_create_pipeline(mat_info);
     open_cmd(pip, mat_info, mat);
 }
@@ -1294,9 +1299,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         nt_entity_t leader = {.id = items[run_start].entity};
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
-        if (mat_info == NULL || !nt_gfx_program_ready(mat_info->program)) {
-            /* Legitimate runtime state during load and restore: skip the run. */
-            nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
+        if (mat_info == NULL) { /* destroyed between item build and replay */
             run_start = run_end;
             continue;
         }

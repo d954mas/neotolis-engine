@@ -131,6 +131,7 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     /* One query covers every state: no program yet, a program that died with the
      * context, and a program its owner destroyed. */
     if (!info || !nt_gfx_program_ready(program)) {
+        nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info);
         return (nt_pipeline_t){0};
     }
 
@@ -736,6 +737,9 @@ void nt_text_renderer_flush(void) {
      * the first glyph and here. */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
     if (!nt_gfx_pipeline_valid(pipeline)) {
+        /* Fallback only: a not-ready program was already named at batch open, so
+         * reaching here with the flag clear means a full cache or a failed
+         * backend allocation. */
         if (!s_text.warned_no_pipeline) {
             NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;

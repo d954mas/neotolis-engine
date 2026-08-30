@@ -156,6 +156,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
      * context, and a program its owner destroyed. Inside the function so any
      * caller is safe, as in the sprite and text renderers. */
     if (!nt_gfx_program_ready(mat_info->program)) {
+        nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
 
@@ -449,9 +450,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
             const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
             if (!mat_info || !mesh_info || !program_ready) {
-                if (!program_ready) {
-                    nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
-                }
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
                 draw_byte_offset += instance_count * s_instance_layouts[cm].stride;
