@@ -1601,6 +1601,13 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* Everything a draw is built from -- resolved handles, render items, the
+     * caller's own readiness decisions -- was computed before begin_frame and
+     * describes the dead context. Rebuild this frame, submit the next one. */
+    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
+    /* Everything a draw is built from -- resolved handles, render items, the
+     * caller's own readiness decisions -- was computed before begin_frame and
+     * describes the dead context. Rebuild this frame, submit the next one. */
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1622,6 +1629,10 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* Everything a draw is built from -- resolved handles, render items, the
+     * caller's own readiness decisions -- was computed before begin_frame and
+     * describes the dead context. Rebuild this frame, submit the next one. */
+    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1645,6 +1656,10 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* Everything a draw is built from -- resolved handles, render items, the
+     * caller's own readiness decisions -- was computed before begin_frame and
+     * describes the dead context. Rebuild this frame, submit the next one. */
+    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1667,6 +1682,10 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* Everything a draw is built from -- resolved handles, render items, the
+     * caller's own readiness decisions -- was computed before begin_frame and
+     * describes the dead context. Rebuild this frame, submit the next one. */
+    NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md");
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {

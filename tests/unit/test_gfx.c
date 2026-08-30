@@ -1869,6 +1869,54 @@ void test_gfx_update_texture_invalid_handle(void) {
 
 /* ---- Per-frame draw call counter ---- */
 
+/* The restored frame is for rebuilding, not submitting: everything a draw is
+ * built from was decided before begin_frame, under the dead context. The rule
+ * used to live only in the spec, and two examples quietly broke it. */
+void test_gfx_restored_frame_rejects_draws(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = prog,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    });
+
+    /* Lose it, then let begin_frame see the context back: that frame is the
+     * restored one and carries the flag. */
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+
+    /* Clearing is still allowed -- the game may want the screen blanked. */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    nt_pipeline_t rebuilt = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+    });
+    nt_gfx_bind_pipeline(rebuilt);
+    EXPECT_ASSERT(nt_gfx_draw(0, 0));
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* And the very next frame draws normally. */
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(rebuilt);
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    (void)pip;
+}
+
 void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     /* A rejected bind must not leave the previous pipeline live: draw only gates
      * on bound_pipeline, so the new pipeline's vertices would go through it. */
@@ -2091,6 +2139,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_valid);
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
+    RUN_TEST(test_gfx_restored_frame_rejects_draws);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     return UNITY_END();

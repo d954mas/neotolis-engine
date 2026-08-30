@@ -142,7 +142,9 @@ When `context_restored` is true, the game does three things in the restored
 frame, all of them before it submits anything:
 
 - discards render decisions and draw lists prepared before
-  `nt_gfx_begin_frame()`, and draws nothing for this frame
+  `nt_gfx_begin_frame()`, and draws nothing for this frame. The draw entry points
+  assert on it rather than leaving the rule to prose: clearing through
+  `nt_gfx_begin_pass` stays legal, submitting geometry does not
 - destroys its own `nt_program_t` handles and sets each handle variable to
   `NT_PROGRAM_INVALID`. A stale non-zero handle asserts on the next destroy --
   the one mistake single ownership cannot absorb
