@@ -274,6 +274,12 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
+    # Real OpenGL: a rejected bind must clear the backend slot mirrors (stub cannot show it).
+    add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
+    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
+    set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
+
     add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c)
     target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_render_target_native)
