@@ -17,8 +17,8 @@
 #ifndef NT_TEXT_RENDERER_MAX_PIPELINES
 #define NT_TEXT_RENDERER_MAX_PIPELINES 4
 #endif
-/* pipeline_count is uint8_t: a larger cap would never reach the full check. */
-_Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 255, "NT_TEXT_RENDERER_MAX_PIPELINES > 255 overflows the uint8 cache counter");
+/* pipeline_count is uint16_t, as in sprite and mesh. */
+_Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 65535, "NT_TEXT_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
 
 #define NT_TEXT_RENDERER_MAX_VERTICES (NT_TEXT_RENDERER_MAX_GLYPHS * 4)
 #define NT_TEXT_RENDERER_MAX_INDICES (NT_TEXT_RENDERER_MAX_GLYPHS * 6)
@@ -138,7 +138,7 @@ bool nt_text_renderer_test_saw_strike(void);
 uint32_t nt_text_renderer_test_material_id(void);
 /* Live entries in the pipeline cache — pins the key's identity (one entry per
  * program + render state, not per material). */
-uint8_t nt_text_renderer_test_pipeline_cache_count(void);
+uint16_t nt_text_renderer_test_pipeline_cache_count(void);
 #endif
 // #endregion
 

@@ -6,6 +6,7 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "renderers/nt_renderer_shared.h"
 
 #include "utf8/nt_utf8.h"
 
@@ -42,15 +43,10 @@ typedef struct {
     float oblique;          /* synthetic-oblique shear folded into the model in draw_n (faux-italic lean); 0 = upright */
 } nt_text_deco_t;
 
-typedef struct {
-    uint64_t key; /* program handle folded with the material's render state */
-    nt_pipeline_t pipeline;
-} nt_text_pipeline_entry_t;
-
 static struct {
     /* GPU resources */
-    nt_text_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
-    uint8_t pipeline_count;
+    nt_renderer_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
+    uint16_t pipeline_count;
     nt_buffer_t vbo; /* dynamic vertex buffer */
     nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
 
@@ -61,9 +57,10 @@ static struct {
 
     /* Current state */
     nt_material_t material;
-    /* The program the staged glyphs were bound under; a flat replace keeps the
-     * material handle, so the set_material fence must compare programs too. */
-    nt_program_t material_program;
+    /* Resolved once when the batch opens: the staged glyphs belong to it, so a
+     * program replaced under them cannot redirect them. Zero, or invalidated by
+     * a destroyed program, means flush has nothing to draw through. */
+    nt_pipeline_t batch_pipeline;
     nt_font_t font;
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
@@ -138,17 +135,9 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     }
 
     const uint64_t key = ((uint64_t)program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
-    for (uint8_t i = 0; i < s_text.pipeline_count;) {
-        /* Destroying a program destroys its pipelines, so an entry can go dead
-         * under us; swap-remove it rather than pin a slot on a corpse. */
-        if (!nt_gfx_pipeline_valid(s_text.pipelines[i].pipeline)) {
-            s_text.pipelines[i] = s_text.pipelines[--s_text.pipeline_count];
-            continue;
-        }
-        if (s_text.pipelines[i].key == key) {
-            return s_text.pipelines[i].pipeline;
-        }
-        i++;
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, &s_text.pipeline_count, key);
+    if (cached.id != 0) {
+        return cached;
     }
 
     /* Cache full is a configuration bug, not a runtime recovery case. */
@@ -198,6 +187,11 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     s_text.pipeline_count++;
     return pip;
 }
+
+/* Binds the staging that follows to a pipeline of its own. Called wherever
+ * staging becomes empty and more glyphs may still arrive: the top of a draw, and
+ * the overflow flush in the middle of one. */
+static void open_batch_pipeline(void) { s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0}; }
 // #endregion
 
 // #region Lifecycle
@@ -222,15 +216,12 @@ static void create_gpu_resources(void) {
 }
 
 static void destroy_gpu_resources(void) {
-    for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
-        /* A destroyed program already took its pipelines; destroying the stale
-         * handle again would log a false invalid-handle error. */
-        if (nt_gfx_pipeline_valid(s_text.pipelines[i].pipeline)) {
-            nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
-        }
-        s_text.pipelines[i] = (nt_text_pipeline_entry_t){0};
+    for (uint16_t i = 0; i < s_text.pipeline_count; i++) {
+        nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
+        s_text.pipelines[i] = (nt_renderer_pipeline_entry_t){0};
     }
     s_text.pipeline_count = 0;
+    s_text.batch_pipeline = (nt_pipeline_t){0}; /* the cache it pointed into is gone */
     nt_gfx_destroy_buffer(s_text.vbo);
     nt_gfx_destroy_buffer(s_text.ibo);
     s_text.vbo = (nt_buffer_t){0};
@@ -290,10 +281,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
         return; /* real branch: the derefs below outlive the assert under OFF */
     }
 
-    /* Programs too, not just the handle: a flat replace keeps the material id, so
-     * comparing ids alone would let glyphs staged under the old program flush
-     * through the new one. Same fence as the sprite renderer's. */
-    if (s_text.material.id == mat.id && info->program.id == s_text.material_program.id) {
+    if (s_text.material.id == mat.id) {
         return;
     }
 
@@ -302,7 +290,6 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     }
 
     s_text.material = mat;
-    s_text.material_program = info->program;
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
@@ -336,6 +323,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
 static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
+        open_batch_pipeline(); /* the tail of this draw is a new batch */
     }
 
     /* 0.5 px screen-space dilation ("Decade of Slug" improvement): oversize
@@ -413,6 +401,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
+        open_batch_pipeline(); /* the tail of this draw is a new batch */
     }
     nt_text_vertex_t *v = &s_text.vertices[s_text.vertex_count];
 
@@ -597,13 +586,12 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (len == 0U || utf8 == NULL) {
         return;
     }
-    /* Batch start: record which program these glyphs are being laid out for, so
-     * flush can tell a batch that is still current from one whose program was
-     * replaced under it. A mid-batch replace leaves the two disagreeing, which
-     * is exactly the case flush must drop. */
-    if (s_text.glyph_count == 0 && s_text.material.id != 0) {
-        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
-        s_text.material_program = (mi != NULL) ? mi->program : NT_PROGRAM_INVALID;
+    /* Batch start: resolve the pipeline these glyphs are laid out for and keep
+     * it. Whatever the material's program becomes afterwards, they draw through
+     * the one they were staged under -- or, if it dies with the program, through
+     * nothing at all, which flush sees as an invalid handle. */
+    if (s_text.glyph_count == 0) {
+        open_batch_pipeline();
     }
     NT_ASSERT(s_text.font.id != 0 && "nt_text_renderer_draw_n: call set_font before draw");
 
@@ -739,37 +727,22 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 // #endregion
 
 // #region Flush
-/* The staged batch's program marker. Flush clears staging, so whatever is staged
- * next belongs to the material's program as it stands now -- an overflow flush in
- * the middle of a draw would otherwise leave the marker on the previous one and
- * make the next flush discard a perfectly good batch. */
-static void rearm_batch_program(void) {
-    const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    s_text.material_program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
-}
-
 void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Flush is the only place a pipeline is resolved: set_material just records
-     * the material, so there is one path and no stale handle to keep in sync. */
-    nt_pipeline_t pipeline = {0};
-    if (s_text.material.id != 0) {
-        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
-        /* The staged glyphs belong to the program they were laid out under. A
-         * replace between draw and flush invalidates them -- drawing them
-         * through a program they never targeted is worse than dropping them. */
-        pipeline = (mi != NULL && mi->program.id == s_text.material_program.id) ? find_or_create_pipeline() : (nt_pipeline_t){0};
-    }
-    if (pipeline.id == 0) {
+    /* Resolved when the batch opened. Re-checked rather than trusted: destroying
+     * a program destroys the pipelines built on it, and that can happen between
+     * the first glyph and here. */
+    const nt_pipeline_t pipeline = s_text.batch_pipeline;
+    if (!nt_gfx_pipeline_valid(pipeline)) {
         if (!s_text.warned_no_pipeline) {
             NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
-        rearm_batch_program();
+        s_text.batch_pipeline = (nt_pipeline_t){0};
         return;
     }
 
@@ -810,10 +783,12 @@ void nt_text_renderer_flush(void) {
     s_text.test_nonempty_flush_calls++;
 #endif
 
-    /* Reset staging buffer */
+    /* Reset staging buffer. The next glyph opens a new batch and resolves its
+     * own pipeline, so an overflow flush mid-draw cannot pin the rest of the
+     * run to this one. */
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
-    rearm_batch_program();
+    s_text.batch_pipeline = (nt_pipeline_t){0};
 }
 // #endregion
 
@@ -854,6 +829,6 @@ bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underlin
 bool nt_text_renderer_test_saw_strike(void) { return s_text.test_saw_strike; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 
-uint8_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
+uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif
 // #endregion

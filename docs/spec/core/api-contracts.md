@@ -168,8 +168,15 @@ condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
 `nt_material_set_program` is the only way to change a material's program, and it
 is a flat replace: `NT_PROGRAM_INVALID` over a program, a program over
 `NT_PROGRAM_INVALID`, and program A over program B are one operation under one
-rule. Assigning the handle the material already holds returns without touching
-anything, so a per-frame gate may call it unconditionally and needs no latch.
+rule. Assigning the handle the material already holds changes nothing, so a
+per-frame gate may call it unconditionally and needs no latch.
+
+A replace does not reach work already staged. The immediate-mode renderers
+resolve a pipeline when a batch opens and keep it, so glyphs and sprites go out
+through the program they were laid out for; the new program takes effect from
+the next batch. If that program is destroyed rather than merely replaced, its
+pipelines go with it and the staged batch is dropped instead -- there is nothing
+left to draw it through.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
@@ -188,7 +195,10 @@ it left behind: a pipeline outlives its program only as a corpse, so
 `nt_gfx_destroy_program` destroys the pipelines built on it, and each renderer
 drops the now-dead cache entry the next time it scans. A program kept alive but
 no longer assigned keeps its pipelines alive too -- that is the owner's choice,
-not a leak. Destroying a program does not touch materials, and does not need to:
+not a leak. `nt_gfx_destroy_pipeline` therefore treats a stale handle as a
+no-op rather than an error, unlike `nt_gfx_destroy_program`: a cached pipeline
+handle going dead under its owner is this model working, not a lost handle.
+Destroying a program does not touch materials, and does not need to:
 the material reports not ready from the stale handle, and the next assignment
 overwrites it.
 

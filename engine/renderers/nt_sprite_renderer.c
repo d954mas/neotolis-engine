@@ -28,11 +28,6 @@
 
 // #region module state
 typedef struct {
-    uint64_t key;
-    nt_pipeline_t pipeline;
-} nt_sprite_pipeline_entry_t;
-
-typedef struct {
     nt_pipeline_t pipeline;
     nt_material_t material; /* handle for material-param lookup at flush; param values
                                are NOT snapshotted — material info is stable within a
@@ -50,7 +45,7 @@ typedef struct {
 static struct {
     bool initialized;
     uint16_t max_pipelines;
-    nt_sprite_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
+    nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
     uint16_t count;
 
     nt_buffer_t vbo; /* dynamic, sized for the worst single flush (staging_size) */
@@ -195,12 +190,8 @@ void nt_sprite_renderer_shutdown(void) {
     s_sprite.indices = NULL;
     /* Destroy pipelines in cache */
     for (uint16_t i = 0; i < s_sprite.count; i++) {
-        /* A destroyed program already took its pipelines; destroying the stale
-         * handle again would log a false invalid-handle error. */
-        if (nt_gfx_pipeline_valid(s_sprite.entries[i].pipeline)) {
-            nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
-        }
-        s_sprite.entries[i] = (nt_sprite_pipeline_entry_t){0};
+        nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
+        s_sprite.entries[i] = (nt_renderer_pipeline_entry_t){0};
     }
     s_sprite.count = 0;
     nt_gfx_destroy_buffer(s_sprite.vbo);
@@ -312,18 +303,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
-    /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_sprite.count;) {
-        /* Destroying a program destroys its pipelines, so an entry can go dead
-         * under us; swap-remove it rather than pin a slot on a corpse. */
-        if (!nt_gfx_pipeline_valid(s_sprite.entries[i].pipeline)) {
-            s_sprite.entries[i] = s_sprite.entries[--s_sprite.count];
-            continue;
-        }
-        if (s_sprite.entries[i].key == key) {
-            return s_sprite.entries[i].pipeline;
-        }
-        i++;
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, &s_sprite.count, key);
+    if (cached.id != 0) {
+        return cached;
     }
 
     /* Miss — create. Cache full is a configuration bug, not a runtime

@@ -412,7 +412,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     draw_and_flush();
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* Render state is folded in, so one program with two states is two pipelines. */
@@ -431,7 +431,7 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     draw_and_flush();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* A destroyed program's pool slot comes back with a bumped generation, so the
@@ -466,13 +466,13 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
     /* One entry, not two: destroying the program destroyed the pipeline built on
      * it, and the scan swap-removed the dead entry instead of pinning a slot. */
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
-/* Glyphs belong to the program they were staged under. A replace between draw
- * and flush invalidates them: flush drops the batch rather than pushing it
- * through a program it was never laid out for. */
-void test_flush_discards_a_batch_whose_program_was_replaced(void) {
+/* Glyphs belong to the pipeline they were staged under. A replace between draw
+ * and flush does not redirect them: they go out through the program they were
+ * laid out for, and nothing is built for the new one until the next batch. */
+void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(mat);
     draw_and_flush(); /* warm A's cache entry so a rebuild is not what we measure */
@@ -491,16 +491,16 @@ void test_flush_discards_a_batch_whose_program_was_replaced(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    /* Dropped, not retargeted: nothing drawn, nothing built for the new program. */
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_nonempty_flush_calls());
+    /* Drawn through A, not retargeted to B and not dropped. */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_stub_test_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 }
 
-/* An overflow flush inside a draw clears staging mid-batch. Whatever is staged
- * after it belongs to the material's program as it stands then, so the marker has
- * to move with it -- otherwise the next flush discards a perfectly good batch. */
-void test_overflow_flush_rearms_the_batch_program(void) {
+/* An overflow flush inside a draw clears staging mid-batch. The tail is a new
+ * batch and needs a pipeline of its own -- left on the flushed one it would be
+ * discarded, or drawn through a program it was never laid out for. */
+void test_overflow_flush_reopens_the_batch_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(mat);
     draw_and_flush();
@@ -517,8 +517,8 @@ void test_overflow_flush_rearms_the_batch_program(void) {
     nt_material_set_program(mat, nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
                                                      nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"})));
 
-    /* This draw overflows: emit flushes the A batch (correctly discarded, the
-     * marker still says A) and then stages these glyphs, which belong to B. */
+    /* This draw overflows: emit flushes the A batch (drawn through A's pipeline)
+     * and reopens on B for the glyphs that follow. */
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_test_reset_call_counters();
@@ -527,7 +527,7 @@ void test_overflow_flush_rearms_the_batch_program(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    /* The B tail must draw. With a stale marker it is discarded instead. */
+    /* The B tail must draw. Without reopening it is discarded instead. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
 }
 
@@ -631,7 +631,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_text_renderer_restore_gpu();
     nt_gfx_destroy_program(first);
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_text_renderer_test_pipeline_cache_count());
     /* The handle still names a live material -- recovery destroys programs, not
      * materials, which is why ECS components need no re-binding. */
     TEST_ASSERT_TRUE(nt_material_valid(handle_before));
@@ -653,7 +653,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
@@ -1106,8 +1106,8 @@ int main(void) {
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
-    RUN_TEST(test_flush_discards_a_batch_whose_program_was_replaced);
-    RUN_TEST(test_overflow_flush_rearms_the_batch_program);
+    RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
+    RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
     RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);

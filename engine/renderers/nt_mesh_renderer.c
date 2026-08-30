@@ -13,17 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Pipeline cache entry ---- */
-
-typedef struct {
-    uint64_t key; /* hash of full pipeline signature (layout + shaders + render state) */
-    nt_pipeline_t pipeline;
-} nt_pipeline_cache_entry_t;
-
 /* ---- Module state ---- */
 
 static struct {
-    nt_pipeline_cache_entry_t *entries; /* [max_pipelines] */
+    nt_renderer_pipeline_entry_t *entries; /* [max_pipelines] */
     uint16_t max_pipelines;
     uint16_t count;
 
@@ -178,18 +171,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[i];
     }
 
-    /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_mesh_renderer.count;) {
-        /* Destroying a program destroys its pipelines, so an entry can go dead
-         * under us; swap-remove it rather than pin a slot on a corpse. */
-        if (!nt_gfx_pipeline_valid(s_mesh_renderer.entries[i].pipeline)) {
-            s_mesh_renderer.entries[i] = s_mesh_renderer.entries[--s_mesh_renderer.count];
-            continue;
-        }
-        if (s_mesh_renderer.entries[i].key == key) {
-            return s_mesh_renderer.entries[i].pipeline;
-        }
-        i++;
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, &s_mesh_renderer.count, key);
+    if (cached.id != 0) {
+        return cached;
     }
 
     /* Build vertex layout from mesh streams + material attr_map */
@@ -283,7 +267,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     s_mesh_renderer.max_pipelines = desc->max_pipelines;
 
     /* Allocate pipeline cache */
-    s_mesh_renderer.entries = (nt_pipeline_cache_entry_t *)calloc(desc->max_pipelines, sizeof(nt_pipeline_cache_entry_t));
+    s_mesh_renderer.entries = (nt_renderer_pipeline_entry_t *)calloc(desc->max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (!s_mesh_renderer.entries) {
         NT_LOG_ERROR("failed to allocate pipeline cache");
         return NT_ERR_INIT_FAILED;
@@ -335,11 +319,7 @@ void nt_mesh_renderer_shutdown(void) {
 
     /* Destroy all cached pipelines */
     for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
-        /* A destroyed program already took its pipelines; destroying the stale
-         * handle again would log a false invalid-handle error. */
-        if (nt_gfx_pipeline_valid(s_mesh_renderer.entries[i].pipeline)) {
-            nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
-        }
+        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
     }
 
     /* Free pipeline cache */

@@ -1128,11 +1128,11 @@ void nt_gfx_destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    if (pip.id == 0) {
-        return; /* invalid-zero is a first-class value, as for programs */
-    }
+    /* Zero and stale are both no-ops, and neither is an error: destroying a
+     * program destroys the pipelines built on it, so a cached handle going dead
+     * under its owner is the ownership model working, not a lost handle. That is
+     * what separates this from destroy_program, which asserts on a stale one. */
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        NT_LOG_ERROR("destroy_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
