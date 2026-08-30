@@ -333,8 +333,75 @@ void test_flush_stops_after_program_cleared(void) {
     nt_gfx_end_frame();
 }
 
+/* Two materials on one program and one render state are one pipeline: the key is
+ * the pipeline signature, not the material's identity. */
+void test_materials_sharing_a_program_share_one_pipeline(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_step();
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(a);
+    nt_text_renderer_set_material(b);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
+}
+
+/* Render state is folded in, so one program with two states is two pipelines. */
+void test_one_program_with_two_render_states_builds_two_pipelines(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
+    nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_step();
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(opaque_mat);
+    nt_text_renderer_set_material(blended);
+
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT8(2U, nt_text_renderer_test_pipeline_cache_count());
+}
+
+/* A destroyed program's pool slot comes back with a bumped generation, so the
+ * successor's handle can never collide with the dead entry's key. The swap lands
+ * on the same material handle, so set_material early-returns and flush is what
+ * re-resolves -- that is the path a program change actually takes. */
+void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
+    nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
+    const nt_program_t dead = nt_material_get_info(mat)->program;
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(mat);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
+
+    nt_gfx_destroy_program(dead);
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_program_t reborn = nt_gfx_make_program(vs, fs); /* same pool slot, new generation */
+    TEST_ASSERT_NOT_EQUAL_UINT32(dead.id, reborn.id);
+
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    nt_material_set_program(mat, reborn);
+
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT8(2U, nt_text_renderer_test_pipeline_cache_count());
+}
+
 /* UI text alternates between a context default and per-style overrides, so a
- * single pipeline slot rebuilt a VAO on every switch (#378). */
+ * single pipeline slot rebuilt a VAO on every switch. */
 void test_switching_back_to_a_material_reuses_its_pipeline(void) {
     nt_material_t a = create_test_material_with_blend(nt_blend_alpha());
     nt_material_t b = create_test_material_with_blend(nt_blend_opaque());
@@ -376,9 +443,9 @@ void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_stub_test_pipeline_create_count());
 }
 
-/* A ready material pointing at a destroyed program is the mistake the spec says
- * must trap; discarding the glyphs instead would hide it behind a warning. */
-void test_flush_traps_on_a_destroyed_program(void) {
+/* A material still holding a destroyed program is what the whole restore window
+ * looks like, so flush discards the glyphs and retries rather than trapping. */
+void test_flush_discards_glyphs_on_a_destroyed_program(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t dead = nt_material_get_info(material)->program;
     nt_text_renderer_set_material(material);
@@ -386,17 +453,75 @@ void test_flush_traps_on_a_destroyed_program(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
-    /* Clear first so the re-assignment below bumps the version and forces the
-     * rebuild -- a game that stashed the old handle across a context loss. */
-    nt_material_set_program(material, NT_PROGRAM_INVALID);
+    /* The material keeps the handle: recovery destroys programs, not materials. */
     nt_gfx_destroy_program(dead);
-    nt_material_set_program(material, dead);
 
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_flush();
+
+    /* Nothing drawn, nothing built, staging cleared for the next frame. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+}
+
+/* The whole recovery contract in one pass: the material handle survives, the
+ * renderer skips while the program is dead, and the same gate that built the
+ * first pipeline builds the next one once the game relinks. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    const nt_material_t handle_before = material;
+    const nt_program_t first = nt_material_get_info(material)->program;
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(material);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
+
+    /* Context dies: handles stay valid, GPU objects do not. */
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(first));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+
+    /* Restore frame: reset the renderer, drop the program, keep the material. */
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    nt_text_renderer_restore_gpu();
+    nt_gfx_destroy_program(first);
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_text_renderer_test_pipeline_cache_count());
+    /* The handle still names a live material -- recovery destroys programs, not
+     * materials, which is why ECS components need no re-binding. */
+    TEST_ASSERT_TRUE(nt_material_valid(handle_before));
+    TEST_ASSERT_NOT_NULL(nt_material_get_info(handle_before));
+
+    /* The game's gate relinks and re-assigns onto the same material. */
+    nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+    nt_material_set_program(material, second);
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, second.id);
+
+    nt_gfx_stub_test_reset();
+    nt_text_renderer_set_material(material);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT8(1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
@@ -843,7 +968,11 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
-    RUN_TEST(test_flush_traps_on_a_destroyed_program);
+    RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);
+    RUN_TEST(test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline);
+    RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);
+    RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
+    RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_switching_back_to_a_material_reuses_its_pipeline);
     RUN_TEST(test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline);
     RUN_TEST(test_draw_n_matches_draw);

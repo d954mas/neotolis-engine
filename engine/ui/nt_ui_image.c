@@ -99,7 +99,8 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(img->slice9_scale) && img->slice9_scale > 0.0F && "nt_ui_image_custom: slice9_scale must be finite > 0");
     /* The block must fill exactly one FLOAT4 per declared material attr — set_custom_attrs asserts the same. */
     const nt_material_info_t *mi = nt_material_get_info(img->material);
-    NT_ASSERT(mi != NULL && mi->ready && "nt_ui_image_custom: material must be ready");
+    /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
+    NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui_image_custom: material must have a program");
     NT_ASSERT((uint32_t)mi->attr_map_count * 16U == (uint32_t)img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material attr_map_count*16");
     NT_ASSERT(nt_ui_image_attr_order_ok(mi, img->attr_names) && "nt_ui_image_custom: material attr_map names/order must match img->attr_names (data attrs bake at fixed offsets)");
     if (decl != NULL) {

@@ -223,6 +223,15 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
+    /* Full cache is a configuration bug, not a runtime recovery case. Hard guard,
+     * not just the assert: NT_ASSERT_MODE=OFF would write past entries[]. Before
+     * make_pipeline so OFF does not create-then-destroy. */
+    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
+    if (s_mesh_renderer.count >= s_mesh_renderer.max_pipelines) {
+        NT_LOG_ERROR("pipeline cache full -- increase max_pipelines in desc");
+        return (nt_pipeline_t){0};
+    }
+
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
     /* Invalid here means a lost context or a failed backend allocation. Caching
      * it would pin the failure for the rest of the session; retry next frame. */
@@ -230,18 +239,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         return pip;
     }
 
-    /* Store in cache -- full cache is a configuration bug, not a runtime recovery case */
-    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
-    if (s_mesh_renderer.count < s_mesh_renderer.max_pipelines) {
-        s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
-        s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
-        s_mesh_renderer.count++;
-    } else {
-        NT_LOG_ERROR("pipeline cache full -- increase max_pipelines in desc");
-        nt_gfx_destroy_pipeline(pip);
-        return (nt_pipeline_t){0};
-    }
-
+    s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
+    s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
+    s_mesh_renderer.count++;
     return pip;
 }
 
@@ -440,9 +440,9 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
             /* Not ready is legitimate runtime state, not a bug: async activation
              * and the context-restore window both produce it. Skip like the
-             * sprite path does -- the material diagnostics report a material
-             * that never gets a program. */
-            if (!mat_info || !mat_info->ready || !mesh_info) {
+             * sprite path does. The NULL check stays a real branch -- the code
+             * below dereferences mat_info, and asserts vanish under OFF. */
+            if (!mat_info || !mesh_info || !nt_gfx_program_ready(mat_info->program)) {
                 /* Still need to advance byte offset for skipped runs */
                 nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
                 draw_byte_offset += instance_count * s_instance_layouts[cm].stride;

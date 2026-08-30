@@ -90,6 +90,9 @@ static inline nt_material_desc_t nt_material_desc_defaults(void) {
 /* ---- Material info (read-only query for render module) ---- */
 
 typedef struct {
+    /* Borrowed: the material never links, destroys or inspects it. May name a
+     * program that died with the GL context or that its owner destroyed -- ask
+     * nt_gfx_program_ready(program) before building a pipeline from it. */
     nt_program_t program;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
@@ -111,8 +114,6 @@ typedef struct {
     nt_cull_mode_t cull_mode;
     nt_color_mode_t color_mode;
     uint64_t render_state_hash;
-    uint32_t version;
-    bool ready;        /* a program is assigned -- says nothing about its GPU liveness */
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
@@ -127,18 +128,18 @@ void nt_material_step(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
-/* The only way to change the program, and it bumps the material version.
+/* Flat replace of the borrowed handle: the first assignment, clearing to
+ * NT_PROGRAM_INVALID, and swapping one live program for another are one
+ * operation under one rule. Assigning the handle the material already holds is a
+ * no-op, so a per-frame gate may call this unconditionally and needs no latch.
  *
- * Legal transitions:
- *   NT_PROGRAM_INVALID -> program   any time (first async assignment, or after a restore)
- *   program -> NT_PROGRAM_INVALID   only after every renderer that draws this
- *                                   material has been reset (queued commands
- *                                   dropped, pipeline caches cleared)
- *   program A -> program B          rejected; go A -> INVALID -> B across a reset
+ * A material has no readiness of its own -- ask
+ * nt_gfx_program_ready(nt_material_get_info(mat)->program).
  *
- * A -> B asserts. The material cannot see the renderers holding commands and
- * pipelines built on A, so the ordering is the caller's to honour; this assert
- * only catches the step that is locally visible. */
+ * Replacing A with B strands the pipeline entries renderers cached on A: keyed
+ * out by the new handle, never selected again, but reclaimed only by a
+ * renderer's restore entry point. Free inside a context restore, which resets
+ * every renderer anyway; one cache slot per replacement outside one. */
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
@@ -154,10 +155,8 @@ void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const flo
 void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value);
 
 #ifdef NT_TEST_ACCESS
-/* Diagnostics for the "never got a program" warnings (see nt_material.c). */
-uint32_t nt_material_test_not_ready_warn_count(void);
+/* Counts the "destroyed without ever receiving a program" warning. */
 uint32_t nt_material_test_never_ready_destroy_count(void);
-uint32_t nt_material_test_not_ready_warn_steps(void);
 #endif
 
 #endif /* NT_MATERIAL_H */

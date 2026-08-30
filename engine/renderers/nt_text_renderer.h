@@ -9,11 +9,16 @@
 
 #ifndef NT_TEXT_RENDERER_MAX_GLYPHS
 #define NT_TEXT_RENDERER_MAX_GLYPHS 4096
-/* One entry per (material, version) the frame draws through. UI text switches
- * between a context default and per-style overrides, so a single slot would
- * rebuild a VAO on every switch. */
+#endif
+
+/* One entry per (program, render state) the frame draws through. UI text
+ * switches between a context default and per-style overrides, so a single slot
+ * would rebuild a VAO on every switch. */
+#ifndef NT_TEXT_RENDERER_MAX_PIPELINES
 #define NT_TEXT_RENDERER_MAX_PIPELINES 4
 #endif
+/* pipeline_count is uint8_t: a larger cap would never reach the full check. */
+_Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 255, "NT_TEXT_RENDERER_MAX_PIPELINES > 255 overflows the uint8 cache counter");
 
 #define NT_TEXT_RENDERER_MAX_VERTICES (NT_TEXT_RENDERER_MAX_GLYPHS * 4)
 #define NT_TEXT_RENDERER_MAX_INDICES (NT_TEXT_RENDERER_MAX_GLYPHS * 6)
@@ -30,9 +35,9 @@ _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPH
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 /* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. This is the reset a material's program change
- * requires -- run it before clearing a material to NT_PROGRAM_INVALID, so no
- * command or cache entry outlives the program it was built on. */
+ * rebuilds the GPU-side buffers. Cache entries are keyed out by a new program
+ * but never evicted, so this is also what reclaims the ones a program change
+ * left behind. */
 void nt_text_renderer_restore_gpu(void);
 
 /* Material must use the slug_text vs/fs, a blend compatible with its premultiplied output, and cull NONE. u_alpha_cutoff is an opt-in param:
@@ -132,6 +137,9 @@ bool nt_text_renderer_test_saw_underline(void);
 bool nt_text_renderer_test_saw_strike(void);
 /* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
 uint32_t nt_text_renderer_test_material_id(void);
+/* Live entries in the pipeline cache — pins the key's identity (one entry per
+ * program + render state, not per material). */
+uint8_t nt_text_renderer_test_pipeline_cache_count(void);
 #endif
 // #endregion
 

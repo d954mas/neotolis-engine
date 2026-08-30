@@ -560,8 +560,26 @@ void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
 
-    /* Only now may the material let go of the program it was drawn with. */
+    /* The material may keep or drop the handle; neither is required. */
     nt_material_set_program(mat, NT_PROGRAM_INVALID);
+}
+
+/* The restore window with the context already back: the material still holds the
+ * program the game destroyed, and the live-context poll inside make_pipeline no
+ * longer covers it. Binding must degrade to a pipeline-less cmd, not trap. */
+void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    nt_material_t mat = create_test_material();
+    const nt_program_t dead = nt_material_get_info(mat)->program;
+
+    nt_sprite_renderer_restore_gpu();     /* drops the cache, as recovery does */
+    nt_gfx_destroy_program(dead);         /* game destroys its program */
+    nt_sprite_renderer_set_material(mat); /* material still names it */
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
 }
 
 void test_sprite_renderer_forwards_material_blend_state(void) {
@@ -1122,6 +1140,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
+    RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);

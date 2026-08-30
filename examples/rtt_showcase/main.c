@@ -387,7 +387,7 @@ static void declare_slider_control(const char *title, const char *value_text, ui
 static bool ui_ready(void) {
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    return s_atlas_bound && s_font_bound && sprite_info != NULL && sprite_info->ready && text_info != NULL && text_info->ready;
+    return s_atlas_bound && s_font_bound && sprite_info != NULL && nt_gfx_program_ready(sprite_info->program) && text_info != NULL && nt_gfx_program_ready(text_info->program);
 }
 
 static void draw_ui_overlay(void) {
@@ -545,9 +545,9 @@ static void frame(void) {
         return;
     }
     if (g_nt_gfx.context_restored) {
-        /* Restore order: reset the renderers (drops queued commands and pipeline
-         * caches), clear the materials, destroy the programs, then invalidate the
-         * stages. Anything else leaves a command or a cache entry on a dead program. */
+        /* Order does not matter here: nothing draws between these calls, and the
+         * materials keep their handles -- a destroyed program reads as not ready,
+         * so every renderer skips until the gate below relinks and re-assigns. */
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
@@ -564,8 +564,6 @@ static void frame(void) {
         restored = s_frame_ubo.id != 0 && restored;
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
-        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_text_program);
         s_sprite_program = NT_PROGRAM_INVALID;

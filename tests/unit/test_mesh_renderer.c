@@ -334,6 +334,26 @@ void test_draw_list_skips_a_not_ready_run_and_offsets_the_next(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + NT_INSTANCE_STRIDE_NONE, nt_gfx_stub_test_last_instance_offset());
 }
 
+/* The restore window: the game destroyed its program and the material still
+ * names it. The gate asks liveness, not assignment, so the run is skipped --
+ * asking assignment here would reach make_pipeline's readiness assert. */
+void test_draw_list_skips_a_run_whose_program_was_destroyed(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_gfx_destroy_program(nt_material_get_info(mat)->program);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
+
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+}
+
 /* Same reset contract as the sprite renderer: a cached pipeline borrows the
  * material's program, so it must not survive into the next epoch. */
 void test_reset_drops_cached_pipelines(void) {
@@ -798,6 +818,7 @@ int main(void) {
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_skips_a_not_ready_run_and_offsets_the_next);
+    RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);
     RUN_TEST(test_reset_drops_cached_pipelines);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);

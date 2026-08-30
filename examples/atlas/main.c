@@ -176,7 +176,7 @@ static void frame(void) {
 
     /* Render */
     const nt_material_info_t *mat_info = nt_material_get_info(s_material);
-    bool can_render = mat_info && mat_info->ready && nt_resource_is_ready(s_mesh_handle);
+    bool can_render = mat_info && nt_gfx_program_ready(mat_info->program) && nt_resource_is_ready(s_mesh_handle);
 
     nt_gfx_begin_frame();
 
@@ -196,11 +196,10 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Restore order: reset the renderers (drops queued commands and pipeline
-         * caches), clear the materials, destroy the programs, then invalidate the
-         * stages. Anything else leaves a command or a cache entry on a dead program. */
+        /* Order does not matter here: nothing draws between these calls, and the
+         * materials keep their handles -- a destroyed program reads as not ready,
+         * so every renderer skips until the gate below relinks and re-assigns. */
         nt_mesh_renderer_restore_gpu();
-        nt_material_set_program(s_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_program); /* GL object is gone; this frees the pool slot */
         s_program = NT_PROGRAM_INVALID;
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

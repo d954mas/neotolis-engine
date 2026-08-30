@@ -1994,7 +1994,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     /* The radial program links on its own frame, so readiness -- not just the
      * handle -- gates the body: the walker asserts on a not-ready material. */
     const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
-    if (!radial_info || !radial_info->ready) {
+    if (!radial_info || !nt_gfx_program_ready(radial_info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
     }
@@ -3762,19 +3762,15 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Renderers first: destroy order is pipeline, then program. */
-        /* Restore order: reset the renderers (drops queued commands and pipeline
-         * caches), clear the materials, destroy the programs, then invalidate the
-         * stages. Anything else leaves a command or a cache entry on a dead program. */
+        /* Order does not matter here: nothing draws between these calls, and the
+         * materials keep their handles -- a destroyed program reads as not ready,
+         * so every renderer skips until the gate below relinks and re-assigns. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
         nt_shape_renderer_restore_gpu();
-        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_radial_material, NT_PROGRAM_INVALID);
         for (int m = 0; m < 4; ++m) {
             nt_material_set_program(s_radial_image_material[m], NT_PROGRAM_INVALID);
         }
-        nt_material_set_program(s_radial_image_packed_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_sprite_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_text_program);
         nt_gfx_destroy_program(s_radial_program);
@@ -3798,7 +3794,7 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));

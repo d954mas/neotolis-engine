@@ -115,8 +115,9 @@ void nt_sprite_renderer_flush(void);
  *
  * Bind material for subsequent emit_region calls. Auto-flushes staging
  * on change to a different .id (mirrors nt_text_renderer_set_material).
- * Same-handle reentry is a no-op. Asserts the material resolves with
- * .ready == true. */
+ * Same-handle reentry is a no-op. Asserts the material resolves and carries a
+ * program; a program that is merely dead (context loss, owner destroyed it)
+ * opens a cmd with no pipeline, which flush skips. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Set the custom per-vertex attr block baked into every vertex of the next emit

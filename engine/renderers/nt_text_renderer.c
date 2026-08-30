@@ -43,7 +43,7 @@ typedef struct {
 } nt_text_deco_t;
 
 typedef struct {
-    uint64_t key; /* material id folded with its version */
+    uint64_t key; /* program handle folded with the material's render state */
     nt_pipeline_t pipeline;
 } nt_text_pipeline_entry_t;
 
@@ -116,20 +116,22 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline cache
-/* Resolve the bound material's pipeline, building it on a miss. The version is
- * folded into the key, so a material that loses its program never selects the
- * entry built on the old one. Returns an invalid handle while the material has
- * no usable program -- flush discards the glyphs and retries next frame. */
+/* Resolve the bound material's pipeline, building it on a miss. Key identity is
+ * the pipeline signature, as in sprite and mesh: the program plus the material's
+ * render state. The key is complete only while this renderer's vertex layout,
+ * depth func and label stay compile-time literals -- folding a constant in would
+ * discriminate nothing. Two materials on one program share an entry; a material
+ * that swaps program keys out of the old one. Returns an invalid handle while
+ * the material has no usable program -- flush discards the glyphs and retries. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    if (!info || !info->ready) {
+    /* One query covers every state: no program yet, a program that died with the
+     * context, and a program its owner destroyed. */
+    if (!info || !nt_gfx_program_ready(info->program)) {
         return (nt_pipeline_t){0};
     }
-    /* Nothing relinks an existing handle, so a ready material holding a program
-     * without a GPU object never recovers -- clear the program instead. */
-    NT_ASSERT(nt_gfx_program_ready(info->program) && "text material holds a program that will never link");
 
-    const uint64_t key = ((uint64_t)s_text.material.id << 32) | info->version;
+    const uint64_t key = ((uint64_t)info->program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
     for (uint8_t i = 0; i < s_text.pipeline_count; i++) {
         if (s_text.pipelines[i].key == key) {
             return s_text.pipelines[i].pipeline;
@@ -138,6 +140,12 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 
     /* Cache full is a configuration bug, not a runtime recovery case. */
     NT_ASSERT(s_text.pipeline_count < NT_TEXT_RENDERER_MAX_PIPELINES && "text pipeline cache exhausted; raise NT_TEXT_RENDERER_MAX_PIPELINES");
+    /* Hard guard, not just the assert: NT_ASSERT_MODE=OFF would write past
+     * pipelines[]. Before make_pipeline so OFF does not create-then-destroy. */
+    if (s_text.pipeline_count >= NT_TEXT_RENDERER_MAX_PIPELINES) {
+        NT_LOG_ERROR("text pipeline cache full -- raise NT_TEXT_RENDERER_MAX_PIPELINES");
+        return (nt_pipeline_t){0};
+    }
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
@@ -257,7 +265,10 @@ void nt_text_renderer_set_material(nt_material_t mat) {
      * bumped generation) must assert even if the id still matches what we cached. */
     const nt_material_info_t *info = nt_material_get_info(mat);
     NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
-    NT_ASSERT(info->ready && "nt_text_renderer_set_material: material not ready");
+    /* Assignment, not liveness: on the frame the context dies the program is
+     * already dead here, and trapping on that would crash a recoverable event.
+     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+    NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
 
     if (s_text.material.id == mat.id) {
         return;
@@ -701,8 +712,8 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Re-resolve rather than trust the handle set_material picked: a version bump
-     * between the two (a new program) selects a different entry. Normally a hit. */
+    /* Re-resolve rather than trust the handle set_material picked: a program
+     * assigned between the two selects a different entry. Normally a hit. */
     if (s_text.material.id != 0) {
         s_text.pipeline = find_or_create_pipeline();
     }
@@ -792,5 +803,7 @@ float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_out
 bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underline; }
 bool nt_text_renderer_test_saw_strike(void) { return s_text.test_saw_strike; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
+
+uint8_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif
 // #endregion

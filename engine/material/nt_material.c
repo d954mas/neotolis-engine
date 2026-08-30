@@ -10,12 +10,6 @@
 
 /* ---- Internal slot struct ---- */
 
-/* A material that never gets a program renders nothing, and the renderers'
- * not-ready branches skip it in silence -- the game filters it out before the
- * engine ever sees it, so no assert can fire. Only the module that owns `ready`
- * can notice. Steps, not seconds: a slow pack legitimately delays readiness. */
-#define NT_MATERIAL_NOT_READY_WARN_STEPS 600
-
 typedef struct {
     /* Read-only query data -- MUST be first member so nt_material_info_t* can alias */
     nt_material_info_t info;
@@ -23,9 +17,7 @@ typedef struct {
     /* Creation-time resource handles (not in info) */
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
 
-    uint16_t not_ready_steps; /* consecutive steps without a program */
-    bool warned_not_ready;    /* one-shot latch, re-armed when the material goes ready */
-    bool ever_ready;          /* cleared only at creation; drives the destroy-time warn */
+    bool ever_ready; /* cleared only at creation; drives the destroy-time warn */
 } nt_material_slot_t;
 
 /* ---- Module state ---- */
@@ -35,7 +27,6 @@ static struct {
     nt_material_slot_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
 #ifdef NT_TEST_ACCESS
-    uint32_t not_ready_warn_count;
     uint32_t never_ready_destroy_count;
 #endif
 } s_mat;
@@ -43,9 +34,7 @@ static struct {
 static const char *material_label(const nt_material_info_t *info) { return info->label != NULL ? info->label : "(unlabeled)"; }
 
 #ifdef NT_TEST_ACCESS
-uint32_t nt_material_test_not_ready_warn_count(void) { return s_mat.not_ready_warn_count; }
 uint32_t nt_material_test_never_ready_destroy_count(void) { return s_mat.never_ready_destroy_count; }
-uint32_t nt_material_test_not_ready_warn_steps(void) { return NT_MATERIAL_NOT_READY_WARN_STEPS; }
 #endif
 
 /* ---- Lifecycle ---- */
@@ -72,6 +61,16 @@ void nt_material_shutdown(void) {
     if (!s_mat.initialized) {
         return;
     }
+    /* Most games never destroy their materials, so the destroy-time warn alone
+     * would never fire for the case it exists to catch. */
+    for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_mat.pool, i) && !s_mat.slots[i].ever_ready) {
+            NT_LOG_WARN("material '%s' never received a program", material_label(&s_mat.slots[i].info));
+#ifdef NT_TEST_ACCESS
+            s_mat.never_ready_destroy_count++;
+#endif
+        }
+    }
     free(s_mat.slots);
     nt_pool_shutdown(&s_mat.pool);
     memset(&s_mat, 0, sizeof(s_mat));
@@ -90,23 +89,6 @@ void nt_material_step(void) {
         }
 
         nt_material_slot_t *mat = &s_mat.slots[i];
-
-        if (mat->info.ready) {
-            mat->ever_ready = true;
-            mat->not_ready_steps = 0;
-            mat->warned_not_ready = false; /* re-arm: a later loss warns again */
-        } else {
-            if (mat->not_ready_steps < NT_MATERIAL_NOT_READY_WARN_STEPS) {
-                mat->not_ready_steps++;
-            }
-            if (!mat->warned_not_ready && mat->not_ready_steps >= NT_MATERIAL_NOT_READY_WARN_STEPS) {
-                NT_LOG_WARN("material '%s' has had no program for %u steps -- call nt_material_set_program()", material_label(&mat->info), (uint32_t)mat->not_ready_steps);
-                mat->warned_not_ready = true;
-#ifdef NT_TEST_ACCESS
-                s_mat.not_ready_warn_count++;
-#endif
-            }
-        }
 
         /* Resolve textures */
         for (uint8_t t = 0; t < mat->info.tex_count; t++) {
@@ -138,10 +120,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     memset(slot, 0, sizeof(*slot));
 
     slot->info.program = desc->program;
-    slot->info.ready = (desc->program.id != 0);
-    /* Latched on assignment, not in step: a material created ready and destroyed
-     * before the next step did receive a program. */
-    slot->ever_ready = slot->info.ready;
+    /* Latched on assignment, not in step: a material created with a program and
+     * destroyed before the next step did receive one. */
+    slot->ever_ready = (desc->program.id != 0);
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -251,24 +232,17 @@ void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     if (!info) {
         return;
     }
+    /* Same handle is a no-op, so a per-frame gate can call this unconditionally
+     * and needs no latch of its own. */
     if (info->program.id == program.id) {
         return;
     }
-    /* A -> B in one step would strand queued draw commands and cached pipelines
-     * built on A: nothing links a material back to the renderers holding them.
-     * Reset the renderers, clear to NT_PROGRAM_INVALID, then assign B. */
-    NT_ASSERT((info->program.id == 0 || program.id == 0) && "material program A -> B: reset the renderers and clear to NT_PROGRAM_INVALID first");
 
     info->program = program;
-    info->ready = (program.id != 0);
-    info->version++;
     if (program.id != 0) {
-        /* Re-arm here too, not only in step: a program that arrives and goes
-         * again between two steps must still warn on the second loss. */
-        nt_material_slot_t *slot = &s_mat.slots[nt_pool_slot_index(mat.id)];
-        slot->ever_ready = true;
-        slot->not_ready_steps = 0;
-        slot->warned_not_ready = false;
+        /* Latched on assignment, not in step, so a material assigned and
+         * destroyed between two steps still counts as having had a program. */
+        s_mat.slots[nt_pool_slot_index(mat.id)].ever_ready = true;
     }
 }
 

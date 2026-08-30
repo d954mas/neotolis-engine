@@ -890,17 +890,12 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Restore order: reset the renderers (drops queued commands and pipeline
-         * caches), clear the materials, destroy the programs, then invalidate the
-         * stages. Anything else leaves a command or a cache entry on a dead program. */
+        /* Order does not matter here: nothing draws between these calls, and the
+         * materials keep their handles -- a destroyed program reads as not ready,
+         * so every renderer skips until the gate below relinks and re-assigns. */
         nt_shape_renderer_restore_gpu();
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
-        nt_material_set_program(s_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_text_material_3d, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_inspector_sprite_material, NT_PROGRAM_INVALID);
-        nt_material_set_program(s_inspector_text_material, NT_PROGRAM_INVALID);
         nt_gfx_destroy_program(s_sprite_cutoff_program); /* GL objects are gone; this frees the pool slots */
         nt_gfx_destroy_program(s_sprite_program);
         nt_gfx_destroy_program(s_text_program);
@@ -928,7 +923,7 @@ static void frame(void) {
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (ui_can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
@@ -973,7 +968,7 @@ static void frame(void) {
     }
 
     /* HUD: ortho VP. */
-    if (text_info && text_info->ready) {
+    if (text_info && nt_gfx_program_ready(text_info->program)) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         draw_hud(fb_w, fb_h);
@@ -984,7 +979,7 @@ static void frame(void) {
      * two link on different frames -- ui_can_render does not cover them. */
     const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
     const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
-    const bool inspector_can_render = insp_sprite && insp_sprite->ready && insp_text && insp_text->ready;
+    const bool inspector_can_render = insp_sprite && nt_gfx_program_ready(insp_sprite->program) && insp_text && nt_gfx_program_ready(insp_text->program);
 
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho). */

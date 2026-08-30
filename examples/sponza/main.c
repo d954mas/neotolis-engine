@@ -123,7 +123,6 @@ static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static uint8_t s_material_shader_types[MAX_SCENE_NODES];
 static nt_program_t s_programs[3]; /* indexed by SponzaShaderType */
-static bool s_programs_assigned;
 
 static void link_all_programs(void) {
     const nt_resource_t stages[3][2] = {
@@ -145,30 +144,29 @@ static void link_all_programs(void) {
 }
 
 /* All three pairs come from the same pack, so they go ready together; linking
- * them eagerly keeps program assignment out of the draw path. Linking and
- * assignment are separate steps because the manifest -- and with it every
- * material -- can arrive on either side of the shader stages. */
+ * them eagerly keeps program assignment out of the draw path. Idempotent by
+ * construction: assigning the handle a material already holds is a no-op, so
+ * this runs every frame and needs no "already assigned" latch -- the manifest
+ * and the shader stages may arrive in either order. */
 static void link_programs(void) {
     if (s_programs[SPONZA_SHADER_DIFFUSE].id == 0) {
         link_all_programs();
     }
-    if (!s_programs_assigned && s_entity_count > 0 && s_programs[SPONZA_SHADER_DIFFUSE].id != 0) {
-        for (uint32_t i = 0; i < s_entity_count; i++) {
-            nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
-        }
-        s_programs_assigned = true;
+    if (s_programs[SPONZA_SHADER_DIFFUSE].id == 0) {
+        return;
+    }
+    for (uint32_t i = 0; i < s_entity_count; i++) {
+        nt_material_set_program(s_materials[i], s_programs[s_material_shader_types[i]]);
     }
 }
 
+/* Materials keep their handles: a destroyed program reads as not ready, and the
+ * gate above re-assigns once the stages come back. */
 static void drop_programs(void) {
-    for (uint32_t i = 0; i < s_entity_count; i++) {
-        nt_material_set_program(s_materials[i], NT_PROGRAM_INVALID);
-    }
     for (uint32_t t = 0; t < 3; t++) {
         nt_gfx_destroy_program(s_programs[t]);
         s_programs[t] = NT_PROGRAM_INVALID;
     }
-    s_programs_assigned = false;
 }
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
@@ -544,7 +542,7 @@ static void frame(void) {
             }
 
             const nt_material_info_t *mat_info = nt_material_get_info(s_materials[i]);
-            if (!mat_info || !mat_info->ready) {
+            if (!mat_info || !nt_gfx_program_ready(mat_info->program)) {
                 skip_mat++;
                 continue;
             }
@@ -597,9 +595,9 @@ static void frame(void) {
             .size = sizeof(nt_lighting_t),
             .label = "lighting",
         });
-        /* Restore order: reset the renderers (drops queued commands and pipeline
-         * caches), clear the materials, destroy the programs, then invalidate the
-         * stages. Anything else leaves a command or a cache entry on a dead program. */
+        /* Order does not matter here: nothing draws between these calls, and the
+         * materials keep their handles -- a destroyed program reads as not ready,
+         * so every renderer skips until the gate below relinks and re-assigns. */
         nt_mesh_renderer_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

@@ -1238,7 +1238,8 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     memcpy(out, blk->custom_attrs, blk->custom_bytes);
 
     const nt_material_info_t *mi = nt_material_get_info(p->material);
-    NT_ASSERT(mi != NULL && mi->ready && "nt_ui custom: material must be ready");
+    /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
+    NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui custom: material must have a program");
     /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
     static uint32_t s_hash_layout;
     static uint32_t s_hash_uvrect;

@@ -381,160 +381,49 @@ void test_create_stores_program(void) {
     TEST_ASSERT_EQUAL_UINT32(77, info->program.id);
 }
 
-/* ---- Test 16: ready true once a program is assigned ---- */
+/* ---- Program assignment ---- */
 
-void test_ready_true_with_program(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.program = (nt_program_t){.id = 5};
-    nt_material_t mat = nt_material_create(&d);
-
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_TRUE(info->ready);
-}
-
-/* ---- Test 17: ready false without a program ---- */
-
-void test_ready_false_without_program(void) {
+/* A material may be created without a program and pick one up later -- the
+ * first assignment and every later one are the same operation. */
+void test_set_program_assigns_from_invalid(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.program = NT_PROGRAM_INVALID;
     nt_material_t mat = nt_material_create(&d);
-
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_FALSE(info->ready);
 
-    /* Assigning one later flips ready -- the game links after the stages resolve. */
+    TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
     nt_material_set_program(mat, (nt_program_t){.id = 9});
-    TEST_ASSERT_TRUE(info->ready);
     TEST_ASSERT_EQUAL_UINT32(9, info->program.id);
 }
 
-/* ---- Test 18: set_program bumps version so pipeline caches rebuild ---- */
-
-void test_set_program_increments_version(void) {
-    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 1}});
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    uint32_t v1 = info->version;
-
-    /* Clearing it is a change too: renderers must drop the stale pipeline. */
-    nt_material_set_program(mat, NT_PROGRAM_INVALID);
-    TEST_ASSERT_TRUE(info->version > v1);
-    TEST_ASSERT_FALSE(info->ready);
-
-    uint32_t v2 = info->version;
-    nt_material_set_program(mat, (nt_program_t){.id = 2});
-    TEST_ASSERT_TRUE(info->version > v2);
-}
-
-/* ---- Program transitions: only across a renderer reset ---- */
-
-/* The whole point of the contract: a material may pick up a program at any
- * time, because before that no command or pipeline can have been built on it. */
-void test_set_program_allows_invalid_to_program(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.program = NT_PROGRAM_INVALID;
-    nt_material_t mat = nt_material_create(&d);
-
-    nt_material_set_program(mat, (nt_program_t){.id = 7});
-
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_EQUAL_UINT32(7, info->program.id);
-    TEST_ASSERT_TRUE(info->ready);
-}
-
-/* A -> B in one step would strand queued commands and cached pipelines built on
- * A, and nothing links a material back to the renderers holding them. */
-void test_set_program_rejects_a_to_b(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.program = (nt_program_t){.id = 1};
-    nt_material_t mat = nt_material_create(&d);
-
-    nt_assert_handler = test_assert_handler;
-    if (setjmp(s_assert_jmp) == 0) {
-        nt_material_set_program(mat, (nt_program_t){.id = 2});
-        nt_assert_handler = NULL;
-        TEST_FAIL_MESSAGE("Expected NT_ASSERT on a direct program A -> B");
-    }
-    nt_assert_handler = NULL;
-
-    /* Rejected, so the material still holds A. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_get_info(mat)->program.id);
-}
-
-/* The supported route for the same move: reset the renderers, clear, reassign. */
-void test_set_program_allows_a_invalid_b(void) {
+/* Flat replace: A -> B directly, no clearing step in between. Renderers key
+ * their caches on the program, so B never selects the entry built on A. */
+void test_set_program_replaces_a_with_b(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.program = (nt_program_t){.id = 1};
     nt_material_t mat = nt_material_create(&d);
     const nt_material_info_t *info = nt_material_get_info(mat);
 
-    nt_material_set_program(mat, NT_PROGRAM_INVALID);
-    TEST_ASSERT_FALSE(info->ready);
     nt_material_set_program(mat, (nt_program_t){.id = 2});
-
     TEST_ASSERT_EQUAL_UINT32(2, info->program.id);
-    TEST_ASSERT_TRUE(info->ready);
 }
 
-/* ---- Test 19: version stable when the program does not change ---- */
-
-void test_version_stable_when_unchanged(void) {
-    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 3}});
+/* Clearing is the same operation once more. */
+void test_set_program_clears_to_invalid(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.program = (nt_program_t){.id = 1};
+    nt_material_t mat = nt_material_create(&d);
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    uint32_t v1 = info->version;
 
-    nt_material_set_program(mat, (nt_program_t){.id = 3});
-    nt_material_step();
-    TEST_ASSERT_EQUAL_UINT32(v1, info->version);
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
 }
 
 /* ---- Diagnostics: a material that never gets a program ---- */
 
-static void step_n(uint32_t n) {
-    for (uint32_t i = 0; i < n; i++) {
-        nt_material_step();
-    }
-}
-
-/* The renderers cannot catch this: the game filters not-ready materials out
- * before draw_list, so their asserts never see one. */
-void test_warns_once_when_program_never_arrives(void) {
-    nt_material_create_desc_t d = make_test_desc();
-    d.program = NT_PROGRAM_INVALID;
-    nt_material_t mat = nt_material_create(&d);
-
-    step_n(nt_material_test_not_ready_warn_steps() - 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_material_test_not_ready_warn_count());
-
-    step_n(1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
-
-    /* One-shot: a stuck material must not warn every frame. */
-    step_n(nt_material_test_not_ready_warn_steps());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
-
-    nt_material_set_program(mat, (nt_program_t){.id = 1});
-    step_n(1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
-}
-
-/* Re-armed on the way back to ready, so a failed relink after context loss
- * warns again instead of hiding behind the first one. */
-void test_not_ready_warning_rearms_after_ready(void) {
-    nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){.program = (nt_program_t){.id = 1}, .label = "rearm"});
-
-    step_n(nt_material_test_not_ready_warn_steps() + 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_material_test_not_ready_warn_count());
-
-    nt_material_set_program(mat, NT_PROGRAM_INVALID);
-    step_n(nt_material_test_not_ready_warn_steps());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_material_test_not_ready_warn_count());
-}
-
-/* No threshold, no false positive from a slow load: it is gone and never drew. */
+/* The renderers cannot catch this: they skip a material with no usable program
+ * silently, so nothing downstream ever reports it. No threshold and no false
+ * positive from a slow load -- the material is gone and never drew. */
 void test_warns_when_destroyed_without_ever_being_ready(void) {
     nt_material_create_desc_t d = make_test_desc();
     d.program = NT_PROGRAM_INVALID;
@@ -747,15 +636,9 @@ int main(void) {
 
     /* Step: resolve + change detection */
     RUN_TEST(test_create_stores_program);
-    RUN_TEST(test_ready_true_with_program);
-    RUN_TEST(test_ready_false_without_program);
-    RUN_TEST(test_set_program_increments_version);
-    RUN_TEST(test_set_program_allows_invalid_to_program);
-    RUN_TEST(test_set_program_rejects_a_to_b);
-    RUN_TEST(test_set_program_allows_a_invalid_b);
-    RUN_TEST(test_version_stable_when_unchanged);
-    RUN_TEST(test_warns_once_when_program_never_arrives);
-    RUN_TEST(test_not_ready_warning_rearms_after_ready);
+    RUN_TEST(test_set_program_assigns_from_invalid);
+    RUN_TEST(test_set_program_replaces_a_with_b);
+    RUN_TEST(test_set_program_clears_to_invalid);
     RUN_TEST(test_warns_when_destroyed_without_ever_being_ready);
     RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
     RUN_TEST(test_step_resolves_textures);
