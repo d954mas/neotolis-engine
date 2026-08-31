@@ -1842,6 +1842,9 @@ void test_gfx_restored_frame_rejects_draws(void) {
         .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
     });
     nt_gfx_bind_pipeline(rebuilt);
+    /* Full draw state bound: the ONLY reason these trap is the restored-frame
+     * rule, not a missing vertex input. */
+    bind_test_vertex_input();
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());

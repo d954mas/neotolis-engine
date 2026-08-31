@@ -94,9 +94,10 @@ buffer is *not* cascade-tracked: destroying one while vertex inputs still
 hold pointers into it leaves zombie GL attachments until those vertex inputs
 die or re-point. Buffer *contents* may change freely — `update`/`orphan`
 keep the GL name, so baked attachments survive per-flush orphaning — and
-index-buffer data ops run with VAO 0 bound in the backend, because the
-element-array binding is VAO state and would otherwise be silently rewired
-into whichever vertex input is bound. Vertex inputs die with a lost context
+index-buffer data ops run inside a service upload VAO in the backend,
+because the element-array binding is VAO state — it would otherwise be
+silently rewired into whichever vertex input is bound, and core-profile GL
+rejects the bind with VAO 0. Vertex inputs die with a lost context
 and are not auto-restored; renderer restore paths recreate them. Loss alone
 does not fail `nt_gfx_vertex_input_valid` — pool slots live until the restore
 path's buffer destroys cascade through them; a bind that reaches a
@@ -140,7 +141,9 @@ Vertex-input caches follow the same hash-as-identity standard for *derived*
 layouts. The mesh renderer keeps a per-mesh versions table
 (`[nt_gfx_max_meshes()][nt_mesh_renderer_desc_t.max_mesh_layouts]`): entry
 identity is the hash of the derived layout (mesh streams × material
-attr_map — attr_map entries matching no stream do not split) plus color
+attr_map — attr_map entries matching no stream do not split; a material
+mapping none of the streams derives an empty layout and takes the
+attribute-less gl_VertexID path) plus color
 mode, plus the mesh's full generation-checked handle, which stays exact so
 pool-slot reuse cannot alias a stale entry. Exhausting a mesh's version row
 asserts, naming the knob — silent eviction would hide VAO re-creation

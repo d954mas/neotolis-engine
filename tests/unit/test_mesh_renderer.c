@@ -663,6 +663,20 @@ void test_vertex_input_shared_for_same_derived_layout(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
+/* A material mapping none of the mesh's streams derives an empty layout: the
+ * attribute-less gl_VertexID path draws through a vertex input with no VBO. */
+void test_vertex_input_empty_derived_layout_draws(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+}
+
 /* Mesh slot reuse must not alias the stale vertex input: the versions table
  * stores the full generation-checked handle. */
 void test_vertex_input_survives_mesh_slot_reuse(void) {
@@ -1012,6 +1026,7 @@ int main(void) {
     RUN_TEST(test_vertex_input_reused_across_draw_list_calls);
     RUN_TEST(test_vertex_input_distinct_per_mesh);
     RUN_TEST(test_vertex_input_shared_for_same_derived_layout);
+    RUN_TEST(test_vertex_input_empty_derived_layout_draws);
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);

@@ -152,6 +152,35 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 // #endregion
 
 // #region Lifecycle
+/* Buffer creation can fail only on a lost context; skip the vertex input
+ * then (make_vertex_input traps on invalid buffer handles). Flush retries
+ * this after a recoverable backend failure, like the lazy pipeline cache. */
+static void create_vertex_input(void) {
+    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
+        return;
+    }
+    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
+    s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout =
+            {
+                .attr_count = 6,
+                .stride = 72,
+                .attrs =
+                    {
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
+                    },
+            },
+        .vertex_buffer = s_text.vbo,
+        .index_buffer = s_text.ibo,
+        .label = "text_vi",
+    });
+}
+
 /* GPU resources only — pipelines are built lazily on a cache miss, so this owns just the buffers +
  * index pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
 static void create_gpu_resources(void) {
@@ -170,30 +199,7 @@ static void create_gpu_resources(void) {
         .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
-    /* Buffer creation can fail only on a lost context; skip the vertex input
-     * then (make_vertex_input traps on invalid buffer handles). */
-    if (s_text.vbo.id != 0 && s_text.ibo.id != 0) {
-        /* Slug vertex layout: 6 attributes, stride = 72 bytes */
-        s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-            .layout =
-                {
-                    .attr_count = 6,
-                    .stride = 72,
-                    .attrs =
-                        {
-                            {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
-                            {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
-                            {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
-                            {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
-                            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
-                            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
-                        },
-                },
-            .vertex_buffer = s_text.vbo,
-            .index_buffer = s_text.ibo,
-            .label = "text_vi",
-        });
-    }
+    create_vertex_input();
 }
 
 static void destroy_gpu_resources(void) {
@@ -709,10 +715,15 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
+    /* A recoverable creation failure (backend VAO alloc) must not disable
+     * text until the next restore -- retry lazily, like the pipeline cache. */
+    if (!nt_gfx_vertex_input_valid(s_text.vertex_input)) {
+        create_vertex_input();
+    }
     /* Resolved when the batch opened. Re-checked rather than trusted: destroying
      * a program destroys the pipelines built on it, and that can happen between
-     * the first glyph and here. The vertex input can be missing after a failed
-     * backend allocation in create_gpu_resources. */
+     * the first glyph and here. The vertex input stays invalid when the retry
+     * above failed (context still lost / backend failure). */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
     if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
         /* Unready programs were reported at batch open; destruction of a captured

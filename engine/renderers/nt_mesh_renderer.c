@@ -268,7 +268,9 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
     const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = layout,
         .instance_layout = s_instance_layouts[mat_info->color_mode],
-        .vertex_buffer = mesh_info->vbo,
+        /* A material mapping none of this mesh's streams derives an empty
+         * layout -- the attribute-less gl_VertexID path takes no buffer. */
+        .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
         .index_buffer = mesh_info->ibo,
         .label = "mesh_vi",
     });

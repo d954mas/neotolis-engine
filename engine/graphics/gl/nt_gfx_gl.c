@@ -123,6 +123,9 @@ typedef struct {
 
 static uint32_t s_bound_pipeline_slot;     /* currently bound pipeline index */
 static uint32_t s_bound_vertex_input_slot; /* currently bound vertex-input index */
+/* Service VAO for index-buffer data ops: the ELEMENT_ARRAY_BUFFER bind is VAO
+ * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
+static GLuint s_ebo_upload_vao;
 
 static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
@@ -441,6 +444,8 @@ static void nt_gfx_gl_init_context_features(void) {
     nt_gfx_gl_ctx_enable_debug_callback();
     s_segment_count = 0;
     s_active_segment = -1;
+    /* Fresh context (init or restore): the previous upload VAO died with it. */
+    glGenVertexArrays(1, &s_ebo_upload_vao);
 }
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
@@ -500,6 +505,10 @@ void nt_gfx_backend_shutdown(void) {
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
+    if (s_ebo_upload_vao != 0) {
+        glDeleteVertexArrays(1, &s_ebo_upload_vao);
+        s_ebo_upload_vao = 0;
+    }
 
     nt_gfx_gl_ctx_destroy();
 }
@@ -1309,11 +1318,12 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     }
     GLenum usage = map_buffer_usage(desc->usage);
     /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: with a vertex-input VAO
-     * bound this data op would silently rewire its index binding, so run
-     * index-buffer data ops with VAO 0 bound (few extra binds, off hot path). */
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+     * bound this data op would silently rewire its index binding, and core
+     * profile rejects the bind with VAO 0. All index-buffer data ops run
+     * inside the service upload VAO (few extra binds, off hot path). */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(0);
+        gl_bind_vao(s_ebo_upload_vao);
     }
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
@@ -1357,10 +1367,10 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
-    /* Index-buffer data ops run with VAO 0 -- see create_buffer. */
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+    /* Index-buffer data ops run inside the upload VAO -- see create_buffer. */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(0);
+        gl_bind_vao(s_ebo_upload_vao);
     }
     glBindBuffer(target, buf);
     glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
@@ -1375,10 +1385,10 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
-    /* Index-buffer data ops run with VAO 0 -- see create_buffer. */
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+    /* Index-buffer data ops run inside the upload VAO -- see create_buffer. */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(0);
+        gl_bind_vao(s_ebo_upload_vao);
     }
     glBindBuffer(target, buf);
     /* glBufferData with non-NULL data both orphans the existing storage and
