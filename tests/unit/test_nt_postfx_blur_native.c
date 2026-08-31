@@ -6,9 +6,11 @@
  * each stage separately and never links a pair. This test is the only thing
  * that links these two shaders.
  *
- * It only bites on drivers that fold branches before checking array bounds --
- * NVIDIA does, Mesa/llvmpipe (what CI runs under xvfb) accepts the rejected
- * form. A green CI run is therefore not proof that the shaders are portable. */
+ * Linking alone only bites on drivers that fold branches before checking array
+ * bounds -- NVIDIA does, Mesa/llvmpipe (what CI runs under xvfb) accepts the
+ * rejected form. The shape of the source is pinned separately, by
+ * test_blur_fs_keeps_the_masked_kernel_index in test_nt_postfx_blur.c, which
+ * needs no driver and no display. */
 
 #include "graphics/nt_gfx.h"
 #include "postfx/nt_postfx_blur.h"

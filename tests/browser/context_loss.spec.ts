@@ -16,6 +16,19 @@ declare global {
 
 type Rect = { x: number; y: number; width: number; height: number };
 
+/* The two SDK reflection paths that call getActiveUniform more than once, named
+ * by the frame the pinned emsdk puts on the stack. This is the one place these
+ * names live: an emsdk bump that renames or inlines either one is a two-string
+ * edit, and every test below asserts its hook armed so the bump fails saying so
+ * instead of timing out like a flake. */
+const REFLECTION_FRAMES = {
+  'max-length': '_emscripten_glGetProgramiv',
+  'uniform-location': 'webglPrepareUniformLocationsBeforeFirstUse',
+} as const;
+
+const armedMessage = (query: keyof typeof REFLECTION_FRAMES) =>
+  `reflection hook never armed: no getActiveUniform call came through '${REFLECTION_FRAMES[query]}' -- the pinned emsdk likely renamed or inlined it`;
+
 test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 
 async function capturePixels(page: Page, rect: Rect): Promise<number[]> {
@@ -133,25 +146,29 @@ for (const query of ['max-length', 'uniform-location'] as const) {
   test('SDK reflection reports errors unrelated to context loss: ' + query, async ({ page }) => {
     await page.goto('/index.html');
     await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
-    await page.evaluate((query) => {
+    await page.evaluate((target) => {
       const gl = document.querySelector('canvas')!.getContext('webgl2')!;
       window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
       const original = gl.getActiveUniform;
       gl.getActiveUniform = function (program, index) {
         const stack = new Error().stack ?? '';
-        const target = query === 'max-length' ? '_emscripten_glGetProgramiv' : 'webglPrepareUniformLocationsBeforeFirstUse';
         if (stack.includes(target)) {
           gl.getActiveUniform = original;
+          window.__ntReflectionLossInjected = true;
           throw new Error('injected non-loss reflection error');
         }
         return original.call(this, program, index);
       };
       window.__ntLossExtension!.loseContext();
-    }, query);
+    }, REFLECTION_FRAMES[query]);
     await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
-    const error = page.waitForEvent('pageerror');
+    const error = page.waitForEvent('pageerror', { timeout: 20_000 }).catch(() => null);
     await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-    expect((await error).message).toBe('injected non-loss reflection error');
+    const raised = await error;
+    /* Checked before the message: a rename in the pinned emsdk means the hook never
+     * armed, and without this that reads as an unexplained event timeout. */
+    expect(await page.evaluate(() => window.__ntReflectionLossInjected === true), armedMessage(query)).toBe(true);
+    expect(raised?.message).toBe('injected non-loss reflection error');
     expect(await page.evaluate(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost())).toBe(false);
   });
 
@@ -168,14 +185,12 @@ for (const query of ['max-length', 'uniform-location'] as const) {
     await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
     const drawnBefore = await page.evaluate(() => window.__nt!.drawn_frames());
 
-    await page.evaluate((query) => {
+    await page.evaluate((target) => {
       const gl = document.querySelector('canvas')!.getContext('webgl2')!;
       window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
       const original = gl.getActiveUniform;
       gl.getActiveUniform = function (program, index) {
-        // Pin the two multi-call reflection paths in the configured Emscripten SDK.
         const stack = new Error().stack ?? '';
-        const target = query === 'max-length' ? '_emscripten_glGetProgramiv' : 'webglPrepareUniformLocationsBeforeFirstUse';
         if (stack.includes(target)) {
           gl.getActiveUniform = original;
           window.__ntReflectionLossInjected = true;
@@ -184,10 +199,15 @@ for (const query of ['max-length', 'uniform-location'] as const) {
         return original.call(this, program, index);
       };
       window.__ntLossExtension!.loseContext();
-    }, query);
+    }, REFLECTION_FRAMES[query]);
     await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
     await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-    await page.waitForFunction(() => window.__ntReflectionLossInjected && document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
+    await page.waitForFunction(() => window.__ntReflectionLossInjected === true, undefined, { timeout: 20_000 }).catch((cause: Error) => {
+      /* Keep the original: a crashed page or a closed context must not be
+       * misread as an emsdk rename and send the next reader to edit the const. */
+      throw new Error(`${armedMessage(query)} (underlying: ${cause.message})`);
+    });
+    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
     expect(errors, 'reflection interrupted by context loss must not throw').toEqual([]);
 
     const stopped = await page.evaluate(() => window.__nt!.drawn_frames());

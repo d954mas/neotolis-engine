@@ -64,7 +64,10 @@ static struct {
     nt_program_t program;
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
+    /* Logical life and GPU life are separate: a restore that fails leaves the
+     * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
+    bool gpu_ready;
 #ifdef NT_TEST_ACCESS
     uint32_t draw_count;
 #endif
@@ -208,6 +211,7 @@ nt_result_t nt_postfx_blur_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_blur.initialized = true;
+    s_blur.gpu_ready = true;
     return NT_OK;
 }
 
@@ -217,17 +221,23 @@ void nt_postfx_blur_shutdown(void) {
 }
 
 nt_result_t nt_postfx_blur_restore_gpu(void) {
-    NT_ASSERT(s_blur.initialized && "nt_postfx_blur_restore_gpu: module is not initialized");
+    /* Rejected, not trapped: a game restores every module it might own without
+     * tracking which ones it turned off, exactly as the four renderers allow. The
+     * return says nothing was rebuilt, which is what an inactive module owes. */
     if (!s_blur.initialized) {
         return NT_ERR_INIT_FAILED;
     }
+    s_blur.gpu_ready = false;
     destroy_gpu_resources();
     if (!make_gpu_resources()) {
+        /* A second loss can land between begin_frame's recovery and this call.
+         * Stay initialized so the next restore rebuilds instead of the module
+         * going dark for the session. */
         NT_LOG_ERROR("postfx_blur restore failed");
         destroy_gpu_resources();
-        s_blur.initialized = false;
         return NT_ERR_INIT_FAILED;
     }
+    s_blur.gpu_ready = true;
     return NT_OK;
 }
 
@@ -240,7 +250,9 @@ typedef struct {
 static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
-    return s_blur.initialized && pass != NULL;
+    /* gpu_ready is not asserted: a rebuild still pending after a context loss is
+     * recoverable state, so the pass skips and retries on a later frame. */
+    return s_blur.initialized && s_blur.gpu_ready && pass != NULL;
 }
 
 static bool validate_scissor_state(void) {
@@ -400,6 +412,8 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
 uint32_t nt_postfx_blur_test_build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) { return build_kernel(radius, sigma, out_weights); }
 
 uint32_t nt_postfx_blur_test_draw_count(void) { return s_blur.draw_count; }
+
+const char *nt_postfx_blur_test_fs_source(void) { return s_blur_fs_src; }
 
 void nt_postfx_blur_test_reset_counters(void) { s_blur.draw_count = 0; }
 #endif

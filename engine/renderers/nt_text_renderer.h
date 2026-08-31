@@ -14,8 +14,12 @@
 /* One entry per (program, render state) the frame draws through. UI text
  * switches between a context default and per-style overrides, so a single slot
  * would rebuild a VAO on every switch. */
+/* One entry per distinct (program, render state) pair the frame draws through, so
+ * blend/depth/cull variants multiply with programs rather than replacing them.
+ * Raise it with -DNT_TEXT_RENDERER_MAX_PIPELINES=N; exhaustion asserts, it does
+ * not evict. */
 #ifndef NT_TEXT_RENDERER_MAX_PIPELINES
-#define NT_TEXT_RENDERER_MAX_PIPELINES 4
+#define NT_TEXT_RENDERER_MAX_PIPELINES 8
 #endif
 /* pipeline_count is uint16_t, as in sprite and mesh. */
 _Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 65535, "NT_TEXT_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");

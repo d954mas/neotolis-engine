@@ -306,14 +306,10 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, &s_sprite.count, key);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, key);
     if (cached.id != 0) {
         return cached;
     }
-
-    /* Miss — create. Cache full is a configuration bug, not a runtime
-     * recovery case. */
-    NT_ASSERT(s_sprite.count < s_sprite.max_pipelines && "sprite pipeline cache exhausted; raise NT_SPRITE_RENDERER_MAX_PIPELINES or desc.max_pipelines");
 
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -326,18 +322,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    /* Invalid here means a lost context or a failed backend allocation. Caching
-     * it would pin the failure for the rest of the session; retry next frame. */
-    if (pip.id == 0) {
-        return pip;
-    }
-
-    s_sprite.entries[s_sprite.count].key = key;
-    s_sprite.entries[s_sprite.count].pipeline = pip;
-    s_sprite.count++;
-    s_sprite.warned_program_not_ready = false;
-    return pip;
+    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
 }
 // #endregion
 

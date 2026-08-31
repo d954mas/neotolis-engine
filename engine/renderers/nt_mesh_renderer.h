@@ -50,6 +50,7 @@ uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
 uint32_t nt_mesh_renderer_test_ring_cursor(void);
+bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion
 

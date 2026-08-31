@@ -303,6 +303,27 @@ void nt_gfx_shutdown(void) {
         }
     }
 
+    /* Everything a caller still owns. backend_shutdown only frees its tables and
+     * the native context outlives it, so without this every live GL object of an
+     * init/shutdown cycle stays allocated. Every backend destroy zeroes its own
+     * entry, so the render-target and mesh passes above cannot double-delete.
+     * Pipelines before programs: a pipeline's VAO is its own, the program is not. */
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        nt_gfx_backend_destroy_program(s_gfx.program_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+        nt_gfx_backend_destroy_shader(s_gfx.shader_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+        nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        nt_gfx_backend_destroy_texture(s_gfx.texture_backends[i]);
+    }
+
     nt_gfx_backend_shutdown();
 
     nt_pool_shutdown(&s_gfx.shader_pool);
@@ -860,9 +881,10 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
      * the caller retries on a later frame. */
     nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
-    /* Live poll before the readiness assert: context loss is what zeroes the
-     * program backend, so without this every renderer would trap on it. */
-    if (nt_gfx_backend_is_context_lost()) {
+    /* Same predicate as make_program: context loss is what zeroes the program
+     * backend, so without this every renderer would trap on the readiness assert
+     * below -- and the browser can recover before begin_frame resets the tables. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
         return result;
     }
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
@@ -902,11 +924,11 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
         return result;
     }
 
+    /* Exhaustion is a configuration error, as for programs, pipelines and
+     * textures. Degrading sent it up as a renderer init failure, which surfaced
+     * as a trap about restore rather than about max_buffers. */
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("buffer pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
@@ -976,11 +998,12 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     // #endregion
 
     // #region allocate
+    /* Exhaustion is a configuration error, as for programs and pipelines: both
+     * texture formats the engine itself needs are core GL/WebGL2, so a create
+     * that fails here means max_textures is too small, not that the device said
+     * no. Degrading would hide that behind a font that silently renders nothing. */
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("texture pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
 
     uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
     if (backend == 0) {

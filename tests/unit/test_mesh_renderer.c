@@ -621,6 +621,24 @@ void test_restore_gpu(void) {
 
 /* ---- Test 10: stream -> vertex type mapping is total over all stream types ---- */
 
+/* The restore contract is "every ACTIVE renderer". Without the entry guard this
+ * re-inits from a zeroed desc and traps on max_instances == 0, so a game that
+ * restores all four renderers unconditionally would abort. */
+void test_restore_on_inactive_renderer_does_nothing(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_mesh_renderer_shutdown();
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+
+    nt_mesh_renderer_restore_gpu();
+
+    /* The live assertion: init would have set this. The trap on a zeroed desc
+     * aborts before ever reaching here, so it cannot be what pins the guard. */
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_stream_to_vertex_type_total(void) {
     TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_stream_to_vertex_type(NT_STREAM_FLOAT32));
@@ -875,6 +893,7 @@ int main(void) {
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     RUN_TEST(test_ring_cursor_advances_and_wraps);
     RUN_TEST(test_ring_upload_and_draw_base_agree);
+    RUN_TEST(test_restore_on_inactive_renderer_does_nothing);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_vertex_type_total);
     RUN_TEST(test_vertex_type_sizes);

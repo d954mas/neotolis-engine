@@ -136,13 +136,10 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     }
 
     const uint64_t key = ((uint64_t)program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, &s_text.pipeline_count, key);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, s_text.pipeline_count, key);
     if (cached.id != 0) {
         return cached;
     }
-
-    /* Cache full is a configuration bug, not a runtime recovery case. */
-    NT_ASSERT(s_text.pipeline_count < NT_TEXT_RENDERER_MAX_PIPELINES && "text pipeline cache exhausted; raise NT_TEXT_RENDERER_MAX_PIPELINES");
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
@@ -160,7 +157,7 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     };
 
     /* Read render state from material — same pattern as mesh_renderer */
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+    const nt_pipeline_desc_t desc = {
         .program = program,
         .layout = layout,
         .depth_test = info->depth_test,
@@ -169,18 +166,8 @@ static nt_pipeline_t find_or_create_pipeline(void) {
         .blend = info->blend,
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
-    });
-    /* Invalid means a lost context or a failed backend allocation. Caching it
-     * would pin the failure for the rest of the session; retry next frame. */
-    if (pip.id == 0) {
-        return pip;
-    }
-
-    s_text.warned_no_pipeline = false;
-    s_text.pipelines[s_text.pipeline_count].key = key;
-    s_text.pipelines[s_text.pipeline_count].pipeline = pip;
-    s_text.pipeline_count++;
-    return pip;
+    };
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, key, &desc, &s_text.warned_no_pipeline);
 }
 // #endregion
 

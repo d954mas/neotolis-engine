@@ -151,6 +151,9 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
+    /* Sprite and text gate on readiness here; this renderer gates in draw_list, so
+     * state the requirement where the pipeline is actually built. */
+    NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
 
     /* Full pipeline signature: layout + program + render state. The 64-bit hash
      * IS the cache identity -- descriptors are never compared on a hit, so every
@@ -164,7 +167,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[i];
     }
 
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, &s_mesh_renderer.count, key);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, key);
     if (cached.id != 0) {
         return cached;
     }
@@ -215,20 +218,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
-    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines && "mesh pipeline cache exhausted; raise desc.max_pipelines");
-
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    /* Invalid here means a lost context or a failed backend allocation. Caching
-     * it would pin the failure for the rest of the session; retry next frame. */
-    if (pip.id == 0) {
-        return pip;
-    }
-
-    s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
-    s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
-    s_mesh_renderer.count++;
-    s_mesh_renderer.warned_program_not_ready = false;
-    return pip;
+    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, key, &desc, &s_mesh_renderer.warned_program_not_ready);
 }
 
 /* ---- Lifecycle ---- */
@@ -311,6 +301,11 @@ void nt_mesh_renderer_shutdown(void) {
 }
 
 void nt_mesh_renderer_restore_gpu(void) {
+    /* The contract is "every ACTIVE renderer", and a game that restores all four
+     * unconditionally would otherwise re-init this one from a zeroed desc. */
+    if (!s_mesh_renderer.initialized) {
+        return;
+    }
     uint16_t saved_max = s_mesh_renderer.max_instances;
     uint16_t saved_pip = s_mesh_renderer.max_pipelines;
     nt_mesh_renderer_shutdown();
@@ -499,3 +494,5 @@ uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.fr
 uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.frame_instance_total; }
 
 uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }
+
+bool nt_mesh_renderer_test_initialized(void) { return s_mesh_renderer.initialized; }

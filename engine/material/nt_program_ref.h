@@ -57,7 +57,12 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
  * This is the ref's whole part of a context restore. The rest is not its
  * business and still belongs to the game: reset every renderer that drew these
  * materials (*_restore_gpu), and nt_resource_invalidate() the shader-code asset
- * type so the stages recompile. */
+ * type so the stages recompile.
+ *
+ * The ref is the program's only owner. Destroying ref.program directly, or
+ * letting nt_gfx_shutdown outlive the ref, leaves a handle the pool no longer
+ * knows -- and the next update() or drop() traps on it, which is the ownership
+ * model working. Drop the ref before nt_gfx_shutdown. */
 static inline void nt_program_ref_drop(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_drop: ref is required");
     nt_gfx_destroy_program(ref->program);

@@ -1029,9 +1029,23 @@ void test_gfx_double_destroy_texture(void) {
     nt_gfx_destroy_texture(tex); /* must be safe no-op */
 }
 
-/* ---- Texture: pool exhaustion ---- */
+/* ---- Buffer: exhausting the pool is a configuration error ---- */
 
-void test_gfx_texture_pool_full(void) {
+void test_gfx_buffer_pool_full_asserts(void) {
+    nt_buffer_t buffers[8]; /* setUp: max_buffers = 8 */
+    for (int i = 0; i < 8; i++) {
+        buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
+    }
+    EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64}));
+    for (int i = 0; i < 8; i++) {
+        nt_gfx_destroy_buffer(buffers[i]);
+    }
+}
+
+/* ---- Texture: exhausting the pool is a configuration error ---- */
+
+void test_gfx_texture_pool_full_asserts(void) {
     nt_texture_t textures[8];
     for (int i = 0; i < 8; i++) {
         textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){
@@ -1042,13 +1056,12 @@ void test_gfx_texture_pool_full(void) {
         });
         TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
     }
-    nt_texture_t overflow = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, overflow.id);
+    }));
     for (int i = 0; i < 8; i++) {
         nt_gfx_destroy_texture(textures[i]);
     }
@@ -2149,7 +2162,8 @@ int main(void) {
     RUN_TEST(test_gfx_bind_texture_invalid);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
     RUN_TEST(test_gfx_double_destroy_texture);
-    RUN_TEST(test_gfx_texture_pool_full);
+    RUN_TEST(test_gfx_buffer_pool_full_asserts);
+    RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
     RUN_TEST(test_activate_texture_bad_magic);

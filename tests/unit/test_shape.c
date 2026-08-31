@@ -458,6 +458,25 @@ void test_shape_failed_restore_preserves_settings(void) {
     }
 }
 
+/* The restore contract is "every ACTIVE renderer". A game that calls all four
+ * unconditionally must not have this one silently initialize itself and take
+ * program and pipeline slots the game sized for its own materials. */
+void test_shape_restore_on_inactive_renderer_does_nothing(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_shape_renderer_shutdown();
+    const uint32_t programs = nt_gfx_stub_test_program_create_count();
+    const uint32_t pipelines = nt_gfx_stub_test_pipeline_create_count();
+
+    nt_shape_renderer_restore_gpu();
+
+    TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
+    TEST_ASSERT_EQUAL_UINT32(programs, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(pipelines, nt_gfx_stub_test_pipeline_create_count());
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 static void emit_test_instance(int type) {
     const float center[3] = {1, 2, 3};
     const float size[3] = {2, 3, 4};
@@ -590,5 +609,6 @@ int main(void) {
     RUN_TEST(test_shape_failed_restore_preserves_settings);
     RUN_TEST(test_shape_failed_restore_instance_staging_stays_bounded);
     RUN_TEST(test_shape_failed_restore_geometry_staging_stays_bounded);
+    RUN_TEST(test_shape_restore_on_inactive_renderer_does_nothing);
     return UNITY_END();
 }

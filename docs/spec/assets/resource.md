@@ -157,6 +157,17 @@ them. Destroying a program clears the borrow record of every pipeline built on
 it, destroying a pipeline never consults its program, and no restore entry point
 flushes. What is load-bearing is that all three precede the frame's first draw.
 
+No step needs pool headroom over the steady state: every rebuild destroys before
+it recreates, whether it is a renderer relinking inside its own restore entry
+point or `nt_program_ref_update` reclaiming a dead handle before linking again.
+
+Restore is asked of ACTIVE renderers only, and every restore entry point makes
+that safe rather than assuming it: one whose module was never initialized returns
+without touching anything, so a game may call all of them unconditionally instead
+of tracking which modules it turned off. Without that, restoring an unused
+self-owned renderer would take program and pipeline slots the game sized for
+itself.
+
 Two kinds of renderer answer that third bullet differently. One that owns its
 own program -- `nt_shape_renderer`, `nt_postfx_blur`, both linking from embedded
 sources -- relinks inside its restore entry point and needs nothing from the

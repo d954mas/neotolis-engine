@@ -34,6 +34,8 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 uint32_t nt_postfx_blur_test_build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]);
 uint32_t nt_postfx_blur_test_draw_count(void);
 void nt_postfx_blur_test_reset_counters(void);
+/* The fragment source, so a test can pin its shape on any driver. */
+const char *nt_postfx_blur_test_fs_source(void);
 #endif
 // #endregion
 

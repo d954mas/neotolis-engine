@@ -224,6 +224,10 @@ static struct {
     /* Sin/Cos lookup table (fixed NT_SHAPE_SEGMENTS) */
     float sin_lut[NT_SHAPE_SEGMENTS + 1];
     float cos_lut[NT_SHAPE_SEGMENTS + 1];
+    /* A restore whose re-init failed -- a second context loss landing mid-recovery
+     * -- must still be retried by the next one, or the module stays dark for the
+     * session. restore_gpu sets this after init(), so the memset does not eat it. */
+    bool restore_pending;
 } s_shape;
 
 /* ---- Helpers ---- */
@@ -735,6 +739,10 @@ void nt_shape_renderer_init(void) {
 }
 
 void nt_shape_renderer_shutdown(void) {
+    /* Before the early return: an explicit shutdown ends the module even if the
+     * last restore left it pending, so a later restore must not resurrect it.
+     * restore_gpu re-arms this after its own init. */
+    s_shape.restore_pending = false;
     if (!s_shape.initialized) {
         return;
     }
@@ -761,6 +769,12 @@ void nt_shape_renderer_shutdown(void) {
 }
 
 void nt_shape_renderer_restore_gpu(void) {
+    /* The contract is "every ACTIVE renderer": without this, restoring an
+     * unused shape renderer would silently init it and take 4 programs and 8
+     * pipelines from pools the game sized for itself. */
+    if (!s_shape.initialized && !s_shape.restore_pending) {
+        return;
+    }
     /* Save CPU-side state that survives context loss */
     float saved_vp[16];
     float saved_cam_pos[3];
@@ -782,8 +796,10 @@ void nt_shape_renderer_restore_gpu(void) {
     s_shape.line_width = saved_line_width;
     s_shape.depth_enabled = saved_depth;
     if (!s_shape.initialized) {
+        s_shape.restore_pending = true; /* after init()'s memset, so it survives */
         return;
     }
+    s_shape.restore_pending = false;
     s_shape.batch_pip_active = saved_depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
     s_shape.inst_pip_active = saved_depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
     s_shape.cap_inst_pip_active = saved_depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;

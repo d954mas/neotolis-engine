@@ -972,8 +972,12 @@ static void nt_gfx_gl_log_program(uint32_t program) {
 }
 
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
-    GLuint shader = (GLuint)backend_handle;
-    glDeleteShader(shader);
+    /* Zero reaches here from nt_gfx_shutdown's sweep over free slots, and that
+     * sweep also runs when nt_gfx_init failed before glad loaded an entry point. */
+    if (backend_handle == 0) {
+        return;
+    }
+    glDeleteShader((GLuint)backend_handle);
 }
 
 /* Links a stage pair and binds every registered global UBO block. Returns 0 on
