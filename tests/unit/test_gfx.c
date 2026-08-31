@@ -208,7 +208,6 @@ void test_gfx_make_destroy_pipeline(void) {
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_destroy_pipeline(pip);
@@ -222,7 +221,6 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
@@ -275,6 +273,20 @@ void test_gfx_pipeline_asserts_unready_program(void) { EXPECT_ASSERT(nt_gfx_make
 static nt_shader_t make_test_vs(void) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"}); }
 
 static nt_shader_t make_test_fs(void) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"}); }
+
+/* Draws require a bound vertex input; an indexed one satisfies every draw
+ * variant (draw_indexed asserts a captured index type). */
+static void bind_test_vertex_input(void) {
+    static const float verts[9] = {0};
+    static const uint16_t indices[3] = {0, 1, 2};
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
+    nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = sizeof(indices), .index_type = NT_INDEX_UINT16});
+    nt_gfx_bind_vertex_input(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .vertex_buffer = vbo,
+        .index_buffer = ibo,
+    }));
+}
 
 /* ---- Program: no dedup — same pair links twice ---- */
 
@@ -593,6 +605,7 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(untouched);
+    bind_test_vertex_input();
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
 
@@ -645,92 +658,6 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
     nt_gfx_destroy_shader(vs);
 }
 
-void test_gfx_pipeline_asserts_duplicate_location(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-
-    /* Same location in vertex and instance layouts: glVertexAttribPointer twice on one slot */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 3}}},
-        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 3, .type = NT_VERTEX_FLOAT, .count = 4}}},
-    }));
-
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_gfx_pipeline_asserts_location_out_of_range(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-
-    /* WebGL2 guarantees only 16 attribute locations; 16 is already out of range */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 3}}},
-    }));
-
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_gfx_pipeline_asserts_normalized_float(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-
-    /* GL ignores normalized on float types; the contract allows it on integer types only */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = true}}},
-    }));
-
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_gfx_pipeline_asserts_misaligned_offset(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    /* f32 attr at offset 2: WebGL2 requires offset % 4 == 0 */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 2}}},
-    }));
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_gfx_pipeline_asserts_misaligned_stride(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    /* stride 13 with an f32 attr: WebGL2 requires stride % 4 == 0 */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 13, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
-    }));
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_gfx_pipeline_asserts_bad_instance_layout(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    /* Pins that the instance layout goes through the same WebGL2 asserts */
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
-        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 4}}},
-    }));
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
 void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(NULL)); }
 
 /* Context loss is what zeroes a program's backend, so it must not read as the
@@ -746,20 +673,6 @@ void test_gfx_pipeline_context_lost_returns_invalid(void) {
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
     TEST_ASSERT_EQUAL_UINT32(0, pip.id);
-}
-
-void test_gfx_pipeline_asserts_too_many_attrs(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4},
-    }));
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .instance_layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4},
-    }));
 }
 
 void test_gfx_pipeline_pool_full_asserts(void) {
@@ -785,28 +698,6 @@ void test_gfx_pipeline_backend_failure_returns_invalid(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, retry.id);
     nt_gfx_destroy_pipeline(retry);
     nt_gfx_stub_test_reset();
-}
-
-void test_gfx_pipeline_stride_255_boundary(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-
-    /* WebGL2 caps vertexAttribPointer stride at 255; u8 attr keeps 255 alignment-legal */
-    nt_pipeline_t ok = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 255, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, ok.id);
-    nt_gfx_destroy_pipeline(ok);
-
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 256, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}},
-    }));
-
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
 }
 
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
@@ -1720,54 +1611,6 @@ void test_update_buffer_rejects_out_of_range(void) {
     nt_gfx_destroy_buffer(buf);
 }
 
-void test_bind_instance_buffer_rejects_unaligned_offset(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
-    nt_gfx_bind_pipeline(pip);
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
-    nt_gfx_bind_instance_buffer(buf, 4);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 1));                   /* WebGL2 rejects unaligned attrib offsets */
-    nt_gfx_destroy_buffer(buf);
-    nt_gfx_destroy_pipeline(pip);
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
-void test_bind_instance_buffer_requires_pipeline_each_frame(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
-
-    nt_gfx_begin_frame();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_instance_buffer(buf, 0); /* bound this frame: passes */
-    nt_gfx_end_frame();
-
-    /* Backend drops its pipeline cache per frame — a bind without re-binding
-     * the pipeline must trap, not silently skip attrib setup. */
-    nt_gfx_begin_frame();
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(buf, 0));
-    nt_gfx_end_frame();
-
-    nt_gfx_destroy_buffer(buf);
-    nt_gfx_destroy_pipeline(pip);
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
-}
-
 void test_update_buffer_rejects_immutable(void) {
     uint8_t initial[64] = {0};
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -1982,7 +1825,6 @@ void test_gfx_restored_frame_rejects_draws(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
 
     /* Lose it, then let begin_frame see the context back: that frame is the
@@ -1998,7 +1840,6 @@ void test_gfx_restored_frame_rejects_draws(void) {
 
     nt_pipeline_t rebuilt = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     nt_gfx_bind_pipeline(rebuilt);
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
@@ -2013,6 +1854,7 @@ void test_gfx_restored_frame_rejects_draws(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(rebuilt);
+    bind_test_vertex_input();
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
     nt_gfx_end_pass();
@@ -2029,7 +1871,6 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_desc_t desc = {
         .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     };
     nt_pipeline_t live = nt_gfx_make_pipeline(&desc);
     nt_pipeline_t dead = nt_gfx_make_pipeline(&desc);
@@ -2039,6 +1880,7 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_gfx_bind_pipeline(live);
+    bind_test_vertex_input();
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
 
@@ -2066,7 +1908,6 @@ void test_gfx_frame_draw_calls(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
@@ -2079,6 +1920,7 @@ void test_gfx_frame_draw_calls(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
+    bind_test_vertex_input();
 
     /* Fire each of the 4 entry points exactly once. */
     nt_gfx_draw(0, 0);
@@ -2147,16 +1989,8 @@ int main(void) {
     RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
     RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);
-    RUN_TEST(test_gfx_pipeline_asserts_too_many_attrs);
     RUN_TEST(test_gfx_pipeline_pool_full_asserts);
     RUN_TEST(test_gfx_pipeline_backend_failure_returns_invalid);
-    RUN_TEST(test_gfx_pipeline_stride_255_boundary);
-    RUN_TEST(test_gfx_pipeline_asserts_duplicate_location);
-    RUN_TEST(test_gfx_pipeline_asserts_normalized_float);
-    RUN_TEST(test_gfx_pipeline_asserts_location_out_of_range);
-    RUN_TEST(test_gfx_pipeline_asserts_misaligned_offset);
-    RUN_TEST(test_gfx_pipeline_asserts_misaligned_stride);
-    RUN_TEST(test_gfx_pipeline_asserts_bad_instance_layout);
     RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
     RUN_TEST(test_activate_texture_bad_version);
     RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
@@ -2225,8 +2059,6 @@ int main(void) {
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);
     RUN_TEST(test_update_buffer_rejects_immutable);
-    RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
-    RUN_TEST(test_bind_instance_buffer_requires_pipeline_each_frame);
     RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);

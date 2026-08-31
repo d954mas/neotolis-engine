@@ -476,18 +476,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     (void)data;
 }
 
-void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    (void)backend_handle;
-#ifdef NT_TEST_ACCESS
-    /* Mirror the GL backend's transitional rule: a pipeline bind clobbers
-     * the bound vertex input (pipelines still own VAOs). */
-    s_stub_bound_vertex_input = 0;
-#endif
-}
-
-void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) { (void)backend_handle; }
-
-void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
     (void)backend_handle;

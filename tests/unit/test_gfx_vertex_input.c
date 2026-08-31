@@ -143,6 +143,44 @@ void test_vi_creation_asserts_on_untyped_index_buffer(void) {
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .vertex_buffer = vbo, .index_buffer = untyped_ibo}));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_vi_creation_asserts_webgl2_rules(void) {
+    nt_buffer_t vbo = make_vbo();
+    /* WebGL2 guarantees only 16 attribute locations; 16 is already out of range */
+    EXPECT_ASSERT(
+        nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 3}}}, .vertex_buffer = vbo}));
+    /* GL ignores normalized on float types; the contract allows it on integer types only */
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = true}}}, .vertex_buffer = vbo}));
+    /* f32 attr at offset 2: WebGL2 requires offset % 4 == 0 */
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 2}}}, .vertex_buffer = vbo}));
+    /* stride 13 with an f32 attr: WebGL2 requires stride % 4 == 0 */
+    EXPECT_ASSERT(
+        nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 13, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}}, .vertex_buffer = vbo}));
+    /* The instance layout goes through the same rules */
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos_layout(),
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 16, .type = NT_VERTEX_FLOAT, .count = 4}}},
+        .vertex_buffer = vbo,
+    }));
+    /* Attr-count caps */
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}, .vertex_buffer = vbo}));
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}}));
+}
+
+void test_vi_stride_255_boundary(void) {
+    nt_buffer_t vbo = make_vbo();
+    /* WebGL2 caps vertexAttribPointer stride at 255; u8 attr keeps 255 alignment-legal */
+    nt_vertex_input_t ok = nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 255, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}}, .vertex_buffer = vbo});
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(ok));
+    nt_gfx_destroy_vertex_input(ok);
+
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 256, .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true}}}, .vertex_buffer = vbo}));
+}
+
 /* --- Destroy cascade --- */
 
 void test_destroy_vbo_cascades_to_vi(void) {
@@ -210,18 +248,19 @@ void test_bind_invalid_vi_unbinds(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
 }
 
-void test_bind_pipeline_clears_bound_vi(void) {
+void test_bind_pipeline_preserves_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_pipeline_t pip = make_test_pipeline();
     nt_gfx_bind_vertex_input(vi);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    uint32_t bound = nt_gfx_stub_test_bound_vertex_input();
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, bound);
     nt_gfx_bind_pipeline(pip);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
-    /* The frontend mirror is cleared too: with no pipeline-side instance
-     * layout the instance bind still runs the legacy pipeline path. */
+    /* Orthogonal state: a pipeline change must not disturb the geometry bind. */
+    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_stub_test_bound_vertex_input());
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_bind_instance_buffer(stream, 0); /* no assert: pipeline fallback */
+    nt_gfx_bind_instance_buffer(stream, 16); /* still points into the bound vertex input */
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
 }
 
 void test_destroy_while_bound_clears_mirrors(void) {
@@ -325,46 +364,58 @@ void test_attributeless_vi_draws(void) {
     nt_gfx_end_frame();
 }
 
-/* Transitional dual path: a migrated (vertex-input) draw and a legacy
- * (pipeline-VAO) draw must coexist in one frame. bind_pipeline clears the
- * bound vertex input, so the legacy instance bind falls back to the
- * pipeline's instance layout instead of writing into the vertex input. */
-void test_interleave_migrated_then_legacy_in_one_frame(void) {
+/* Pipelines and vertex inputs bind orthogonally: switching pipelines over one
+ * vertex input and switching vertex inputs under one pipeline both draw. */
+void test_pipeline_and_vertex_input_bind_orthogonally(void) {
     nt_buffer_t vbo = make_vbo();
     nt_buffer_t ibo = make_ibo();
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_pipeline_t migrated_pip = make_test_pipeline();
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_pipeline_t legacy_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs), .layout = pos_layout(), .instance_layout = inst_layout()});
+    nt_vertex_input_t vi_indexed = make_vi(vbo, ibo);
+    nt_vertex_input_t vi_plain = make_vi(vbo, (nt_buffer_t){0});
+    nt_pipeline_t pip_a = make_test_pipeline();
+    nt_pipeline_t pip_b = make_test_pipeline();
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
-    /* Migrated renderer pattern: pipeline -> vertex input -> instance bind. */
-    nt_gfx_bind_pipeline(migrated_pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 16);
-    nt_gfx_draw_instanced(0, 3, 2);
+    nt_gfx_bind_pipeline(pip_a);
+    nt_gfx_bind_vertex_input(vi_indexed);
+    nt_gfx_draw_indexed(0, 3, 3);
 
-    /* Legacy renderer in the same frame. */
-    nt_gfx_bind_pipeline(legacy_pip);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
-    nt_gfx_bind_vertex_buffer(vbo);
-    nt_gfx_bind_index_buffer(ibo);
-    nt_gfx_bind_instance_buffer(stream, 32); /* pipeline-layout fallback path */
-    TEST_ASSERT_EQUAL_UINT32(32, nt_gfx_stub_test_last_instance_offset());
-    nt_gfx_draw_indexed_instanced(0, 3, 3, 2);
+    /* Pipeline switch under the same geometry: no re-bind of the vertex input. */
+    nt_gfx_bind_pipeline(pip_b);
+    nt_gfx_draw_indexed(0, 3, 3);
 
-    /* Migrated again after the legacy draw. */
-    nt_gfx_bind_pipeline(migrated_pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 48);
-    TEST_ASSERT_EQUAL_UINT32(48, nt_gfx_stub_test_last_instance_offset());
-    nt_gfx_draw_instanced(0, 3, 2);
+    /* Geometry switch under the same pipeline. */
+    nt_gfx_bind_vertex_input(vi_plain);
+    nt_gfx_draw(0, 3);
 
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_get_frame_draw_calls());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* WebGL2 rejects unaligned attrib offsets; the byte offset is asserted. */
+void test_bind_instance_buffer_rejects_unaligned_offset(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(stream, 4);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
+    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 1));
+}
+
+/* Every draw variant requires a bound vertex input. */
+void test_draw_without_vertex_input_asserts(void) {
+    nt_pipeline_t pip = make_test_pipeline();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    EXPECT_ASSERT(nt_gfx_draw(0, 3));
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 3, 3));
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 1));
+    EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 3, 3, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -404,12 +455,14 @@ int main(void) {
     RUN_TEST(test_vi_pool_exhaustion_asserts);
     RUN_TEST(test_vi_creation_asserts_on_caller_errors);
     RUN_TEST(test_vi_creation_asserts_on_untyped_index_buffer);
+    RUN_TEST(test_vi_creation_asserts_webgl2_rules);
+    RUN_TEST(test_vi_stride_255_boundary);
     RUN_TEST(test_destroy_vbo_cascades_to_vi);
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_bind_vi_reaches_backend);
     RUN_TEST(test_bind_invalid_vi_unbinds);
-    RUN_TEST(test_bind_pipeline_clears_bound_vi);
+    RUN_TEST(test_bind_pipeline_preserves_bound_vi);
     RUN_TEST(test_destroy_while_bound_clears_mirrors);
     RUN_TEST(test_begin_frame_clears_bound_vi);
     RUN_TEST(test_bind_instance_buffer_uses_bound_vi);
@@ -417,7 +470,9 @@ int main(void) {
     RUN_TEST(test_draw_indexed_asserts_on_non_indexed_vi);
     RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
     RUN_TEST(test_attributeless_vi_draws);
-    RUN_TEST(test_interleave_migrated_then_legacy_in_one_frame);
+    RUN_TEST(test_pipeline_and_vertex_input_bind_orthogonally);
+    RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
+    RUN_TEST(test_draw_without_vertex_input_asserts);
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
     RUN_TEST(test_vi_bind_after_context_loss_asserts);
     return UNITY_END();

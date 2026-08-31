@@ -328,19 +328,19 @@ typedef struct {
     const char *label;
 } nt_shader_desc_t;
 
+/* Program + fixed render state only; vertex input is a separate owned object
+ * (nt_vertex_input_desc_t) bound independently of the pipeline. */
 typedef struct {
     /* Borrowed; destroying the program also destroys this pipeline. */
     nt_program_t program;
-    nt_vertex_layout_t layout;
     bool depth_test;
     bool depth_write;
     nt_depth_func_t depth_func;
     uint8_t cull_mode; /* 0=none, 1=back, 2=front (matches nt_cull_mode_t) */
     nt_blend_state_t blend;
-    bool polygon_offset;                /* enable GL_POLYGON_OFFSET_FILL */
-    float polygon_offset_factor;        /* glPolygonOffset factor (typically 1.0) */
-    float polygon_offset_units;         /* glPolygonOffset units (typically 1.0) */
-    nt_vertex_layout_t instance_layout; /* per-instance vertex attributes (optional, divisor=1) */
+    bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
+    float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
+    float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
     const char *label;
 } nt_pipeline_desc_t;
 
@@ -563,12 +563,10 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
- * index binding) for the following draws. Transitional while pipelines still
- * own vertex layouts: bind the pipeline FIRST, then the vertex input --
- * nt_gfx_bind_pipeline clears the bound vertex input. */
+ * index binding) for the following draws. Orthogonal to pipeline binding --
+ * either may change without re-binding the other. Every draw requires a bound
+ * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
-void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
  * bind_texture installs the texture's own default sampler and discards this one.
@@ -619,11 +617,9 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 /* ---- Instance buffer ---- */
 
 /* Re-specifies instance attrib pointers at byte_offset into the bound vertex
- * input (which must declare a nonempty instance_layout; asserted). With no
- * vertex input bound it falls back to the bound pipeline's instance layout
- * (transitional while pipelines still own layouts). The offset must be
- * 4-byte aligned (WebGL2 rejects unaligned attrib offsets); asserted.
- * Re-bind per draw to re-point. */
+ * input, which must declare a nonempty instance_layout; both asserted. The
+ * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
+ * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 

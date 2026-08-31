@@ -75,7 +75,6 @@ typedef struct {
 } nt_cached_uniform_t;
 
 typedef struct {
-    GLuint vao;
     bool depth_test_enabled;
     bool depth_write_enabled;
     GLenum depth_func;
@@ -91,10 +90,7 @@ typedef struct {
     bool polygon_offset_enabled;
     float polygon_offset_factor;
     float polygon_offset_units;
-    /* Store layouts for re-applying vertex attrib pointers on buffer bind */
-    nt_vertex_layout_t layout;
-    nt_vertex_layout_t instance_layout;
-    uint32_t program_slot; /* index into s_programs; the pipeline borrows it */
+    uint32_t program_slot; /* index into s_programs; the pipeline borrows it. 0 = free slot */
 } nt_gfx_gl_pipeline_t;
 
 /* Uniform locations are per-program, so the cache lives here, not on the
@@ -792,22 +788,12 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 /* ---- Pipeline bind ---- */
 
-/* Clear pipeline/VAO selection so later binds cannot mutate a stale VAO.
- * The program cache still describes the actual GL binding. */
-static void unbind_pipeline_state(void) {
-    s_bound_pipeline_slot = 0;
-    /* Transitional: the pipeline VAO replaced any bound vertex-input VAO. */
-    s_bound_vertex_input_slot = 0;
-    if (s_gl_cache.vao != 0) {
-        gl_bind_vao(0);
-        s_gl_cache.vao = 0;
-    }
-}
+/* Clear the pipeline selection so later uniform writes cannot target a stale
+ * program. Vertex-input state is orthogonal and stays bound. */
+static void unbind_pipeline_state(void) { s_bound_pipeline_slot = 0; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    /* Clear both the slot mirror and VAO: later buffer binds must not rewrite
-     * the rejected pipeline's vertex attributes or element-buffer binding. */
     if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         unbind_pipeline_state();
         return;
@@ -820,12 +806,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         return;
     }
 
-    if (s_gl_cache.vao != pip->vao) {
-        gl_bind_vao(pip->vao);
-        s_gl_cache.vao = pip->vao;
-    }
-    /* Transitional: the pipeline VAO replaced any bound vertex-input VAO. */
-    s_bound_vertex_input_slot = 0;
     GLuint program = s_programs[pip->program_slot].program;
     if (s_gl_cache.program != program) {
         glUseProgram(program);
@@ -1176,7 +1156,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     /* Find free pipeline slot */
     uint32_t slot = 0;
     for (uint32_t i = 1; i <= s_init_desc.max_pipelines; i++) {
-        if (s_pipelines[i].vao == 0) {
+        if (s_pipelines[i].program_slot == 0) {
             slot = i;
             break;
         }
@@ -1185,29 +1165,8 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0; /* no free slots */
     }
 
-    /* Create VAO with vertex layout.
-     * Only enable attributes here — actual glVertexAttribPointer calls happen
-     * in bind_vertex_buffer() once a buffer is bound.  WebGL requires a bound
-     * ARRAY_BUFFER for non-zero offsets, so calling it here would be an error. */
-    GLuint vao = 0;
-    glGenVertexArrays(1, &vao);
-    if (vao == 0) {
-        return 0;
-    }
-    gl_bind_vao(vao);
-    for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
-        glEnableVertexAttribArray(desc->layout.attrs[i].location);
-    }
-    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
-        GLuint loc = desc->instance_layout.attrs[i].location;
-        glEnableVertexAttribArray(loc);
-        glVertexAttribDivisor(loc, 1);
-    }
-    gl_bind_vao(s_gl_cache.vao);
-
-    /* Store pipeline data */
+    /* Store pipeline data (fixed-function state + borrowed program only) */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
-    pip->vao = vao;
     pip->program_slot = program_backend;
     pip->depth_test_enabled = desc->depth_test;
     pip->depth_write_enabled = desc->depth_write;
@@ -1224,8 +1183,6 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->polygon_offset_enabled = desc->polygon_offset;
     pip->polygon_offset_factor = desc->polygon_offset_factor;
     pip->polygon_offset_units = desc->polygon_offset_units;
-    pip->layout = desc->layout;
-    pip->instance_layout = desc->instance_layout;
 
     return slot;
 }
@@ -1234,19 +1191,12 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         return;
     }
-    nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
-    /* Invalidate cache if this pipeline's VAO is currently bound. The program
-     * is not ours to delete -- it outlives every pipeline built on it. */
-    if (pip->vao && s_gl_cache.vao == pip->vao) {
-        s_gl_cache.vao = 0;
-    }
-    if (pip->vao) {
-        glDeleteVertexArrays(1, &pip->vao);
-    }
+    /* The program is not ours to delete -- it outlives every pipeline built
+     * on it; the pipeline owns no GL objects of its own. */
     if (s_bound_pipeline_slot == backend_handle) {
         s_bound_pipeline_slot = 0;
     }
-    memset(pip, 0, sizeof(*pip));
+    memset(&s_pipelines[backend_handle], 0, sizeof(s_pipelines[backend_handle]));
 }
 
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend) {
@@ -1435,37 +1385,6 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     }
 }
 
-void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
-    GLuint buf = s_buffer_gl[backend_handle];
-    glBindBuffer(GL_ARRAY_BUFFER, buf);
-
-    /* Re-apply vertex attribute pointers from the currently bound pipeline.
-     * VAOs record the buffer binding per attribute, so when a different
-     * buffer is bound we must re-set the pointers. */
-    if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
-        const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].layout;
-        for (uint8_t i = 0; i < layout->attr_count; i++) {
-            const nt_vertex_attr_t *attr = &layout->attrs[i];
-            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
-                                  (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
-#ifdef NT_TEST_ACCESS
-            s_test_static_attrib_pointer_calls++;
-#endif
-        }
-    }
-}
-
-void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
-    GLuint buf = s_buffer_gl[backend_handle];
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf);
-}
-
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
@@ -1473,13 +1392,10 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
-    /* The bound vertex input's instance layout wins; the bound pipeline's is
-     * the transitional fallback while pipelines still own layouts. */
+    /* Re-specify the bound vertex input's instance pointers into its VAO. */
     const nt_vertex_layout_t *layout = NULL;
     if (s_bound_vertex_input_slot != 0 && s_bound_vertex_input_slot <= s_init_desc.max_vertex_inputs) {
         layout = &s_vertex_inputs[s_bound_vertex_input_slot].instance_layout;
-    } else if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
-        layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
     }
     if (layout != NULL) {
         for (uint8_t i = 0; i < layout->attr_count; i++) {
