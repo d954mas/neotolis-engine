@@ -170,6 +170,35 @@ if(NOT EMSCRIPTEN)
         set(GLFW_LIBRARY_TYPE "STATIC")
     endif()
     add_subdirectory(deps/glfw EXCLUDE_FROM_ALL)
+
+    # libcurl: nt_http native backend. HTTP(S)-only static lib, TLS from the OS
+    # (Schannel on Windows, OpenSSL elsewhere) — no bundled crypto. Vendored tree
+    # is stripped to the CMake lib build (no docs/tests/src), so everything that
+    # would reference the removed dirs stays OFF and Perl detection is disabled.
+    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+    set(BUILD_MISC_DOCS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
+    set(CMAKE_DISABLE_FIND_PACKAGE_Perl ON CACHE BOOL "" FORCE)
+    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
+    set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
+    set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
+    set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    if(WIN32)
+        set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+    endif()
+    add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
+
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
     add_subdirectory(deps/cgltf EXCLUDE_FROM_ALL)
     add_subdirectory(deps/stb EXCLUDE_FROM_ALL)
@@ -179,6 +208,10 @@ if(NOT EMSCRIPTEN)
     # GLFW calls CRT functions (assert, sscanf, powf, wcscpy) that resolve to
     # __declspec(dllimport) stubs under the default -D_DLL flag — missing with a static UCRT.
     nt_set_static_crt(glfw)
+    nt_set_static_crt(libcurl_static)
+    if(TARGET libcurl_object)
+        nt_set_static_crt(libcurl_object)
+    endif()
 endif()
 
 # Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the

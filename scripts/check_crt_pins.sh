@@ -17,7 +17,7 @@ FAIL=0
 
 # Upstream-vendored deps keep their own build files (see AGENTS.md); our thin
 # wrapper CMakeLists under deps/ (cjson, stb, ...) ARE checked.
-UPSTREAM_DEPS='^(\./)?deps/(clay|cglm|unity|basisu|glfw)/'
+UPSTREAM_DEPS='^(\./)?deps/(clay|cglm|unity|basisu|glfw|curl)/'
 # git ls-files (tracked + untracked-unignored) replaces a tree walk that
 # sniffed .git packfiles and node_modules: same file set the repo can build from.
 CMAKE_FILES="$( { git ls-files -- 'CMakeLists.txt' '**/CMakeLists.txt' '*.cmake' '**/*.cmake';
