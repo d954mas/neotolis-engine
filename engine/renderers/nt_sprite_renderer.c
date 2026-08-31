@@ -337,23 +337,14 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
 }
 
-/* One vertex input per distinct layout, all baked over the shared (vbo, ibo)
- * pair. Cached handles are revalidated on lookup: the destroy-buffer cascade
- * (restore_gpu recreates vbo/ibo) kills them without notifying the renderer. */
+/* The renderer owns both buffers and clears the cache before replacing them. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
     const uint64_t key = nt_sprite_layout_hash(mat_info);
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         if (s_sprite.vi_entries[i].key != key) {
             continue;
         }
-        if (!nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi)) {
-            s_sprite.vi_entries[i].vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-                .layout = build_sprite_layout(mat_info),
-                .vertex_buffer = s_sprite.vbo,
-                .index_buffer = s_sprite.ibo,
-                .label = "sprite_vi",
-            });
-        }
+        NT_ASSERT(nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi));
         return s_sprite.vi_entries[i].vi;
     }
     NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");

@@ -829,6 +829,31 @@ void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
+void test_sprite_renderer_retries_vertex_input_after_backend_failure(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xA7ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_stub_test_fail_next_vertex_input_create();
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_vertex_input_create_count());
+
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_vertex_input_create_count());
+
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_vertex_input_create_count());
+}
+
 /* The custom-attr emit path bakes the per-widget float block into
  * EVERY vertex it emits (like color), into a separate byte-staging buffer at
  * the extended stride — read back via the radial test accessor. */
@@ -928,7 +953,7 @@ void test_sprite_renderer_flip_mirrors_around_pivot(void) {
     assert_pos_close(2.0F, -28.0F, p, "flip-both v3");
 }
 
-/* ---- Test: restore_gpu re-cycle clears pipeline cache ---- */
+/* ---- Test: restore_gpu clears both caches before recreating buffers ---- */
 
 void test_sprite_renderer_restore_gpu_cycle(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -943,16 +968,21 @@ void test_sprite_renderer_restore_gpu_cycle(void) {
     items[0].entity = e.id;
     items[0].batch_key = sprite_batch_key(e, mat);
 
+    nt_gfx_stub_test_reset();
     nt_sprite_renderer_draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_vertex_input_create_count());
 
     nt_sprite_renderer_restore_gpu();
     TEST_ASSERT_TRUE(nt_sprite_renderer_test_initialized());
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
 
-    /* Subsequent draws still work — pipeline is rebuilt lazily */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_input_cache_count());
     nt_sprite_renderer_draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
 }
 
@@ -1234,6 +1264,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
+    RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);

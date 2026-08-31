@@ -86,7 +86,7 @@ created once and cached by their owners, so the asserts are off the hot path.
 live vertex input referencing that buffer as its vertex or index buffer
 (precedent: destroying a program destroys its pipelines). Mesh deactivation
 destroys the mesh's buffers and reaches no renderer, so this cascade is what
-keeps renderer-cached vertex inputs from outliving mesh buffers; caches
+keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
@@ -150,6 +150,12 @@ attribute-less gl_VertexID path) plus color mode. Handles are revalidated on
 lookup because buffer destruction can invalidate cached versions.
 Exhausting a mesh's version row asserts, naming the knob — silent eviction would hide VAO re-creation
 thrash as an invisible perf regression.
+
+The sprite renderer owns its vertex/index buffers and clears its entire
+vertex-input cache on shutdown or GPU restore before replacing those buffers.
+A cache hit asserts handle validity; a miss creates the vertex input and
+caches it only on success. Recoverable creation failures leave the cache
+unchanged so the next lookup retries.
 
 ### Render targets
 
