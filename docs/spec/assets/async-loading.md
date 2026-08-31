@@ -105,20 +105,43 @@ typedef struct {
 
 `meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see [Resource System — blob pinning](resource.md) for the full lifecycle.
 
-## JS bridge — fetch contract
+## HTTP requests — nt_http contract
 
-C exports:
+`engine/http` is a general HTTP client (swappable: web `fetch()` / native libcurl
+multi / stub). `nt_http_request(url)` is the GET shorthand;
+`nt_http_request_ex(url, opts)` adds method, body (copied at call time),
+request-header pairs, an optional `content_type` (defaulted to
+`application/octet-stream` when a body is present and no Content-Type pair was
+given), and `timeout_ms`. A body on GET/HEAD is asserted out — backends would
+diverge otherwise.
+
+State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
+body is data, not a transport error) — the caller checks `nt_http_status()`;
+**FAILED = transport error, timeout or cancel** (a status may still be recorded).
+`nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
+until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` pumps native
+transfers (no-op on web/stub) — call it once per frame while requests are in
+flight; `nt_resource_step()` pumps it itself for its packs (see
+[frame lifecycle](../runtime/frame-lifecycle.md)).
+
+The pack loader treats a non-2xx status and a 2xx response with an empty body as
+load failures (normal retry policy applies).
+
+Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
 
 ```c
-// Called from C → JS
-void platform_request_fetch(uint32_t request_id, const char *url);
+// Called from C → JS (request parameters read from the slot)
+void nt_http_web_fetch(int slot, int generation, const char *url, const char *method,
+                       const uint8_t *body, int body_size, const char *headers,
+                       int headers_size, int timeout_ms);
 
-// Called from JS → C
+// Called from JS → C (generation-checked against the slot)
 EMSCRIPTEN_KEEPALIVE
-void platform_on_fetch_progress(uint32_t request_id, uint32_t received, uint32_t total);
+void nt_http_web_on_progress(int slot, int generation, int received, int total);
 
 EMSCRIPTEN_KEEPALIVE
-void platform_on_fetch_complete(uint32_t request_id, uint8_t *data, uint32_t size, uint32_t success);
+void nt_http_web_on_complete(int slot, int generation, uint8_t *data, int size,
+                             int status, char *resp_headers, int success);
 ```
 
 ## Asset activation strategy

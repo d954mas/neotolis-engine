@@ -35,8 +35,3 @@ Checks: >
 WarningsAsErrors: '*'
 HeaderFilterRegex: '[/\\\\](engine|shared|tools|examples|tests)[/\\\\]'
 FormatStyle: file
-CheckOptions:
-  # curl's public headers include each other cyclically by design (guarded);
-  # this check ignores HeaderFilterRegex, so waive curl's headers explicitly.
-  - key: misc-header-include-cycle.IgnoredFilesList
-    value: 'curl.h;mprintf.h;multi.h;urlapi.h'

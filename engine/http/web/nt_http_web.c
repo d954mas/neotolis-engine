@@ -1,5 +1,7 @@
 #include "http/nt_http_internal.h"
 
+#include "core/nt_assert.h"
+
 #include <emscripten.h>
 #include <stdlib.h>
 
@@ -21,43 +23,56 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
     var controller = new AbortController();
     Module['_nt_http_controllers'][slot_index] = controller;
 
-    var init = { method: UTF8ToString(method_ptr), signal: controller.signal };
+    /* Quoted keys/calls survive Closure without relying on its fetch externs */
+    var init = { 'method': UTF8ToString(method_ptr), 'signal': controller.signal };
     if (headers_size > 0) {
-        /* Blob of alternating NUL-terminated name,value strings (trailing NUL -> drop last split part) */
+        /* Blob of alternating NUL-terminated name,value strings (trailing NUL -> drop last split part).
+         * A real Headers object + append keeps duplicate names, matching the native backend. */
         var parts = new TextDecoder().decode(HEAPU8.subarray(headers_ptr, headers_ptr + headers_size)).split('\0');
-        var headers = {};
+        var headers = new Headers();
         for (var i = 0; i + 1 < parts.length; i += 2) {
-            headers[parts[i]] = parts[i + 1];
+            headers['append'](parts[i], parts[i + 1]);
         }
-        init.headers = headers;
+        init['headers'] = headers;
     }
     if (body_size > 0) {
-        init.body = HEAPU8.slice(body_ptr, body_ptr + body_size);
+        init['body'] = HEAPU8.slice(body_ptr, body_ptr + body_size);
     }
 
     var timer = 0;
-    if (timeout_ms > 0) {
-        timer = setTimeout(function() { controller.abort(); }, timeout_ms);
-    }
+    var status = 0;
+    var hdrs = 0; /* wasm-heap block; owned here until handed to on_complete exactly once */
+    var finished = false;
 
-    function finish(ptr, size, status, hdrs_ptr, success) {
+    function finish(ptr, size, success) {
+        if (finished) return; /* a throw inside the first finish must not complete twice */
+        finished = true;
         if (timer) clearTimeout(timer);
-        delete Module['_nt_http_controllers'][slot_index];
-        _nt_http_web_on_complete(slot_index, generation, ptr, size, status, hdrs_ptr, success);
+        /* The slot may already be reused by a newer request — only drop OUR controller */
+        if (Module['_nt_http_controllers'][slot_index] === controller) {
+            delete Module['_nt_http_controllers'][slot_index];
+        }
+        _nt_http_web_on_complete(slot_index, generation, ptr, size, status, hdrs, success);
+        hdrs = 0;
     }
     function headerBlock(response) {
         var s = "";
         response.headers.forEach(function(v, k) { s += k + ': ' + v + '\n'; });
         var bytes = new TextEncoder().encode(s);
         var p = wasmExports['malloc'](bytes.length + 1);
+        if (!p) return 0;
         HEAPU8.set(bytes, p);
         HEAPU8[p + bytes.length] = 0;
         return p;
     }
 
+    if (timeout_ms > 0) {
+        timer = setTimeout(function() { controller.abort(); }, timeout_ms);
+    }
+
     fetch(url, init).then(function(response) {
-        var status = response.status;
-        var hdrs = headerBlock(response);
+        status = response.status;
+        hdrs = headerBlock(response);
 
         /* Try ReadableStream for progress, fall back to arrayBuffer */
         if (response.body && typeof response.body.getReader === 'function') {
@@ -72,12 +87,13 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     if (result.done) {
                         var totalLen = received;
                         var ptr = wasmExports['malloc'](totalLen);
+                        if (totalLen > 0 && !ptr) { finish(0, 0, 0); return; } /* OOM: FAILED, never write at 0 */
                         var offset = 0;
                         for (var i = 0; i < chunks.length; i++) {
                             HEAPU8.set(chunks[i], ptr + offset);
                             offset += chunks[i].length;
                         }
-                        finish(ptr, totalLen, status, hdrs, 1);
+                        finish(ptr, totalLen, 1);
                         return;
                     }
                     var chunk = result.value;
@@ -87,7 +103,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     pump();
                 }).catch(function(e) {
                     console.error('ERROR [http] stream error slot=' + slot_index, e);
-                    finish(0, 0, status, hdrs, 0);
+                    finish(0, 0, 0);
                 });
             }
             pump();
@@ -96,15 +112,17 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
             response.arrayBuffer().then(function(buf) {
                 var arr = new Uint8Array(buf);
                 var ptr = wasmExports['malloc'](arr.length);
+                if (arr.length > 0 && !ptr) { finish(0, 0, 0); return; }
                 HEAPU8.set(arr, ptr);
-                finish(ptr, arr.length, status, hdrs, 1);
+                finish(ptr, arr.length, 1);
             }).catch(function() {
-                finish(0, 0, status, hdrs, 0);
+                finish(0, 0, 0);
             });
         }
     }).catch(function(err) {
-        if (err && err.name === 'AbortError') { finish(0, 0, 0, 0, 0); return; }
-        finish(0, 0, 0, 0, 0);
+        /* Covers network errors, aborts (cancel/timeout) and throws after headerBlock —
+         * finish still owns hdrs, so the block is handed over, never leaked. */
+        finish(0, 0, 0);
     });
 })
 
@@ -146,12 +164,19 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation
 
 void nt_http_backend_init(void) {}
 
-void nt_http_backend_shutdown(void) {}
+/* Abort everything in flight: generations restart after a shutdown/init cycle, so a
+ * surviving fetch could otherwise match a reused slot and deliver a stale response. */
+void nt_http_backend_shutdown(void) {
+    for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
+        nt_http_web_cancel((int)i);
+    }
+}
 
 void nt_http_backend_update(void) {}
 
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
+    NT_ASSERT(slot != NULL);
     nt_http_web_fetch((int)slot_index, (int)slot->generation, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
 }
 

@@ -516,6 +516,7 @@ void nt_resource_step(void) {
                         loaded_blob = nt_http_take_data(req, &loaded_size);
                         io_done = true;
                     } else {
+                        NT_LOG_ERROR("pack 0x%08X http status %u", pack->pack_id, nt_http_status(req));
                         io_failed = true;
                     }
                     nt_http_free(req);
@@ -538,6 +539,13 @@ void nt_resource_step(void) {
                     pack->io_request_id = 0;
                     io_failed = true;
                 }
+            }
+
+            /* A completed load with no bytes (204, empty file) is a failure — without
+             * this the pack would sit in REQUESTED forever with io_request_id 0 */
+            if (io_done && loaded_blob == NULL) {
+                io_done = false;
+                io_failed = true;
             }
 
             if (io_done && loaded_blob != NULL) {

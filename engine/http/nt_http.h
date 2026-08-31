@@ -22,7 +22,7 @@ typedef enum {
 } nt_http_state_t;
 
 typedef struct {
-    const char *method; /* NULL -> "GET" */
+    const char *method; /* NULL -> "GET"; a body requires a non-GET/HEAD method */
     const void *body;   /* copied at call time, caller keeps ownership; NULL -> no body */
     uint32_t body_size;
     const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL */
@@ -39,12 +39,12 @@ void nt_http_update(void);
 nt_http_request_t nt_http_request(const char *url);                                   /* GET shorthand */
 nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *opts); /* opts NULL -> GET */
 nt_http_state_t nt_http_state(nt_http_request_t req);
-/* HTTP status code (200/404/...); 0 until a response line arrived. A FAILED request
- * may still carry one (e.g. timeout mid-body). */
+/* HTTP status code (200/404/...); 0 until the request completes (DONE or FAILED).
+ * A FAILED request may still carry one (e.g. timeout mid-body). */
 uint16_t nt_http_status(nt_http_request_t req);
 void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total);
-/* Response headers as "name: value\n" lines, names lowercased; NULL until a response
- * arrived. Pointer valid until nt_http_free. */
+/* Response headers as "name: value\n" lines, names lowercased; NULL until the request
+ * completes. Pointer valid until nt_http_free or nt_http_shutdown. */
 const char *nt_http_response_headers(nt_http_request_t req);
 /* Transfers the completed response buffer to the caller; caller frees with free().
  * out_size may be NULL; when non-NULL it receives size or 0 on no transfer.

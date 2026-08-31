@@ -115,13 +115,32 @@ static void http_copy_headers(NtHttpSlot *slot, const nt_http_options_t *opts, c
     slot->header_pairs = (uint32_t)pairs + (content_type != NULL ? 1U : 0U);
 }
 
+/* Content-Type to append for a body; NULL when there is no body or the caller
+ * already passed one as an explicit header pair. */
+static const char *http_default_content_type(const NtHttpSlot *slot, const nt_http_options_t *opts) {
+    if (slot->body == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; opts != NULL && i < opts->header_count; i++) {
+        if (http_iequals(opts->headers[i * 2], "Content-Type")) {
+            return NULL;
+        }
+    }
+    return (opts != NULL && opts->content_type != NULL) ? opts->content_type : "application/octet-stream";
+}
+
 /* Copies method/body/headers/timeout out of opts so the caller keeps ownership. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansions
 static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_options_t *opts) {
+    NT_ASSERT(opts == NULL || opts->header_count == 0 || opts->headers != NULL);
     slot->url = http_strdup(url);
     slot->method = http_strdup(opts != NULL && opts->method != NULL ? opts->method : "GET");
     slot->body = NULL;
     slot->body_size = 0;
     if (opts != NULL && opts->body != NULL && opts->body_size > 0) {
+        /* A body on GET/HEAD is a caller bug: fetch rejects it, curl would silently
+         * reinterpret it as POST — crash early instead of diverging per backend. */
+        NT_ASSERT(!http_iequals(slot->method, "GET") && !http_iequals(slot->method, "HEAD"));
         slot->body = malloc(opts->body_size);
         NT_ASSERT(slot->body != NULL);
         memcpy(slot->body, opts->body, opts->body_size);
@@ -131,17 +150,7 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     slot->headers = NULL;
     slot->headers_size = 0;
     slot->header_pairs = 0;
-    const char *content_type = NULL;
-    if (slot->body != NULL) {
-        content_type = (opts != NULL && opts->content_type != NULL) ? opts->content_type : "application/octet-stream";
-        for (size_t i = 0; opts != NULL && i < opts->header_count; i++) {
-            if (http_iequals(opts->headers[i * 2], "Content-Type")) {
-                content_type = NULL; /* caller already set one explicitly */
-                break;
-            }
-        }
-    }
-    http_copy_headers(slot, opts, content_type);
+    http_copy_headers(slot, opts, http_default_content_type(slot, opts));
 
     slot->timeout_ms = opts != NULL ? opts->timeout_ms : 0;
 }
@@ -167,6 +176,10 @@ nt_result_t nt_http_init(void) {
 }
 
 void nt_http_shutdown(void) {
+    /* Guard double-shutdown: backend teardown (curl_global_cleanup) must pair 1:1 with init */
+    if (!s_http.initialized) {
+        return;
+    }
     nt_http_backend_shutdown();
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         http_free_slot_buffers(&s_http.slots[i]);
@@ -311,7 +324,9 @@ void nt_http_free(nt_http_request_t req) {
         slot->generation = 1;
     }
 
-    /* Return slot to free queue */
+    /* Return slot to free queue. A full queue means a double-free through a
+     * generation-wrapped stale handle — crash early instead of writing OOB. */
+    NT_ASSERT(s_http.queue_top < NT_HTTP_MAX_REQUESTS);
     s_http.free_queue[s_http.queue_top] = index;
     s_http.queue_top++;
 }

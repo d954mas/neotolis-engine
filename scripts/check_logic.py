@@ -20,10 +20,16 @@ def ctest_command_stems(lines):
         if "add_test(" not in line:
             continue
         tokens = _cmake_tokens(line)
-        # Wrapper-launched tests (e.g. python run_x.py <exe>) carry the target
-        # exe in a later token — collect stems from every command token.
-        for token in tokens[1:]:
-            stems.add(os.path.splitext(os.path.basename(token))[0])
+        if len(tokens) < 2:
+            continue
+        # tokens[0] is the test NAME — never registration evidence. The command
+        # (tokens[1]) always counts; later args count only when they point into
+        # the test output dir (wrapper-launched exes: python run_x.py <exe>), so
+        # a test exe merely passed as data to another test cannot satisfy the gate.
+        stems.add(os.path.splitext(os.path.basename(tokens[1]))[0])
+        for token in tokens[2:]:
+            if "/build/tests/" in token.replace("\\", "/"):
+                stems.add(os.path.splitext(os.path.basename(token))[0])
     return stems
 
 
