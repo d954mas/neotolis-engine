@@ -707,23 +707,38 @@ void test_vertex_input_empty_derived_layout_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
-/* Bufferless vertex inputs (empty derived layout + non-indexed mesh) have no
- * destroy-cascade hook: stale-generation entries are purged on lookup, so
- * mesh recreate cycles cannot exhaust the versions row. */
+/* Bufferless versions survive buffer destruction and need row-wide cleanup. */
 void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_program_t program = create_test_program();
+    nt_material_t mat = create_test_material_with_attr(program, NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_material_t colored = create_test_material_with_attr(program, NT_COLOR_MODE_RGBA8, "not_a_mesh_stream", 0, nt_blend_opaque());
     nt_mesh_t mesh = create_test_mesh_nonindexed();
     nt_entity_t e = create_test_entity(mesh, mat);
-    nt_render_item_t items[1];
-    /* More cycles than max_mesh_layouts (default 4): without the purge the
-     * live-vi count climbs and the 5th lookup trips the row-overflow assert. */
+    nt_entity_t e_colored = create_test_entity(mesh, colored);
+    nt_mesh_t neighbor = create_test_mesh_nonindexed();
+    nt_entity_t e_neighbor = create_test_entity(neighbor, mat);
+    nt_render_item_t neighbor_item = {.entity = e_neighbor.id, .batch_key = nt_mesh_renderer_batch_key(mat, neighbor)};
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(&neighbor_item, 1);
+
     for (int cycle = 0; cycle < 6; cycle++) {
-        items[0] = (nt_render_item_t){.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+        nt_render_item_t items[2] = {
+            {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)},
+            {.entity = e_colored.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
+        };
         nt_mesh_renderer_draw_list(items, 1);
-        TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+        TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+        nt_mesh_renderer_draw_list(items, 2);
+        nt_mesh_renderer_draw_list(&neighbor_item, 1);
+        TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_vertex_input_count());
+        TEST_ASSERT_EQUAL_UINT32(1 + (2 * (cycle + 1)), nt_gfx_stub_test_vertex_input_create_count());
+        const uint32_t old_id = mesh.id;
         nt_gfx_deactivate_mesh(mesh.id);
         mesh = create_test_mesh_nonindexed(); /* reuses the freed pool slot */
+        TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_id), nt_pool_slot_index(mesh.id));
+        TEST_ASSERT_NOT_EQUAL(old_id, mesh.id);
         *nt_mesh_comp_handle(e) = mesh;
+        *nt_mesh_comp_handle(e_colored) = mesh;
     }
 }
 

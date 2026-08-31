@@ -139,14 +139,16 @@ material module and every renderer).
 
 Vertex-input caches follow the same hash-as-identity standard for *derived*
 layouts. The mesh renderer keeps a per-mesh versions table
-(`[nt_gfx_max_meshes()][nt_mesh_renderer_desc_t.max_mesh_layouts]`): entry
-identity is the hash of the derived layout (mesh streams × material
-attr_map — attr_map entries matching no stream do not split; a material
+(`[nt_gfx_max_meshes()][nt_mesh_renderer_desc_t.max_mesh_layouts]`). Each row
+stores its mesh's full generation-checked handle. A different generation
+clears the entire row, including bufferless vertex inputs that have no
+destroy-cascade hook. Within the row, entry identity is the hash of the
+derived layout (mesh streams × material attr_map — attr_map entries
+matching no stream do not split; a material
 mapping none of the streams derives an empty layout and takes the
-attribute-less gl_VertexID path) plus color
-mode, plus the mesh's full generation-checked handle, which stays exact so
-pool-slot reuse cannot alias a stale entry. Exhausting a mesh's version row
-asserts, naming the knob — silent eviction would hide VAO re-creation
+attribute-less gl_VertexID path) plus color mode. Handles are revalidated on
+lookup because buffer destruction can invalidate cached versions.
+Exhausting a mesh's version row asserts, naming the knob — silent eviction would hide VAO re-creation
 thrash as an invisible perf regression.
 
 ### Render targets

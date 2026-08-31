@@ -16,14 +16,9 @@
 
 /* ---- Module state ---- */
 
-/* One vertex-input version per (derived layout x color mode) drawing a mesh.
- * mesh_id is the full generation-checked handle -- slot reuse must not alias
- * a stale entry; key is the derived-layout hash (hash-as-identity, per the
- * pipeline-cache standard). */
 typedef struct {
     uint64_t key;
     nt_vertex_input_t vi;
-    uint32_t mesh_id;
 } nt_mesh_vi_version_t;
 
 static struct {
@@ -32,6 +27,8 @@ static struct {
     uint16_t count;
 
     nt_mesh_vi_version_t *vi_versions; /* [nt_gfx_max_meshes()][max_mesh_layouts] */
+    /* Row ownership includes the mesh generation. */
+    nt_mesh_t *vi_meshes;
     uint16_t max_mesh_layouts;
     uint16_t vi_mesh_capacity; /* nt_gfx_max_meshes() at init time */
 
@@ -245,24 +242,23 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= s_mesh_renderer.vi_mesh_capacity);
     nt_mesh_vi_version_t *row = &s_mesh_renderer.vi_versions[(size_t)(slot - 1) * s_mesh_renderer.max_mesh_layouts];
+    if (s_mesh_renderer.vi_meshes[slot - 1].id != mesh.id) {
+        /* Bufferless vertex inputs have no buffer-destroy cascade hook. */
+        for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
+            nt_gfx_destroy_vertex_input(row[i].vi);
+            row[i] = (nt_mesh_vi_version_t){0};
+        }
+        s_mesh_renderer.vi_meshes[slot - 1] = mesh;
+    }
 
     nt_mesh_vi_version_t *reusable = NULL;
     for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
         nt_mesh_vi_version_t *e = &row[i];
-        /* Exact mesh identity (generation-checked) + live handle: slot reuse
-         * and the destroy-buffer cascade both kill entries without notice. */
-        if (e->mesh_id == mesh.id && e->key == key && nt_gfx_vertex_input_valid(e->vi)) {
+        const bool live = nt_gfx_vertex_input_valid(e->vi);
+        if (e->key == key && live) {
             return e->vi;
         }
-        /* Row i serves pool slot i, so a different mesh_id is a dead
-         * generation. Destroy its vi here -- a bufferless vi (empty layout,
-         * non-indexed mesh) has no cascade hook and would otherwise pin the
-         * entry until shutdown. */
-        if (e->mesh_id != 0 && e->mesh_id != mesh.id) {
-            nt_gfx_destroy_vertex_input(e->vi);
-            *e = (nt_mesh_vi_version_t){0};
-        }
-        if (reusable == NULL && (e->vi.id == 0 || !nt_gfx_vertex_input_valid(e->vi))) {
+        if (reusable == NULL && !live) {
             reusable = e;
         }
     }
@@ -287,7 +283,6 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
     }
     reusable->key = key;
     reusable->vi = vi;
-    reusable->mesh_id = mesh.id;
     return vi;
 }
 
@@ -320,7 +315,12 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
 
     /* Vertex-input versions table: one row per mesh pool slot */
     s_mesh_renderer.vi_versions = (nt_mesh_vi_version_t *)calloc((size_t)s_mesh_renderer.vi_mesh_capacity * desc->max_mesh_layouts, sizeof(nt_mesh_vi_version_t));
-    if (!s_mesh_renderer.vi_versions) {
+    s_mesh_renderer.vi_meshes = (nt_mesh_t *)calloc(s_mesh_renderer.vi_mesh_capacity, sizeof(nt_mesh_t));
+    if (!s_mesh_renderer.vi_versions || !s_mesh_renderer.vi_meshes) {
+        free(s_mesh_renderer.vi_meshes);
+        s_mesh_renderer.vi_meshes = NULL;
+        free(s_mesh_renderer.vi_versions);
+        s_mesh_renderer.vi_versions = NULL;
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
         NT_LOG_ERROR("failed to allocate vertex-input versions");
@@ -330,6 +330,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     /* Allocate CPU staging byte buffer (worst-case stride) */
     s_mesh_renderer.instance_data = (uint8_t *)calloc(desc->max_instances, NT_INSTANCE_STRIDE_MAX);
     if (!s_mesh_renderer.instance_data) {
+        free(s_mesh_renderer.vi_meshes);
+        s_mesh_renderer.vi_meshes = NULL;
         free(s_mesh_renderer.vi_versions);
         s_mesh_renderer.vi_versions = NULL;
         free(s_mesh_renderer.entries);
@@ -350,6 +352,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     if (s_mesh_renderer.instance_buf.id == 0) {
         free(s_mesh_renderer.instance_data);
         s_mesh_renderer.instance_data = NULL;
+        free(s_mesh_renderer.vi_meshes);
+        s_mesh_renderer.vi_meshes = NULL;
         free(s_mesh_renderer.vi_versions);
         s_mesh_renderer.vi_versions = NULL;
         free(s_mesh_renderer.entries);
@@ -386,6 +390,7 @@ void nt_mesh_renderer_shutdown(void) {
         nt_gfx_destroy_vertex_input(s_mesh_renderer.vi_versions[i].vi);
     }
     free(s_mesh_renderer.vi_versions);
+    free(s_mesh_renderer.vi_meshes);
 
     /* Free pipeline cache */
     free(s_mesh_renderer.entries);
