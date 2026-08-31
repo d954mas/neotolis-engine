@@ -35,8 +35,10 @@ static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { ret
 
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
-/* Reinitializes buffers and pipeline cache with the existing capacities. */
-void nt_mesh_renderer_restore_gpu(void);
+/* Retains CPU storage and initialization; drops GPU caches and recreates buffers.
+ * Failure returns NT_ERR_INIT_FAILED: retry before drawing, or shut down.
+ * Inactive modules are unchanged and return NT_OK. */
+nt_result_t nt_mesh_renderer_restore_gpu(void);
 
 /* Contract: caller must pre-filter `items` by visibility — the renderer draws
  * every entry unconditionally and does not consult drawable_comp's visible

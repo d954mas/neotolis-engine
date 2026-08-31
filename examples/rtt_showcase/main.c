@@ -524,7 +524,8 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_R)) {
         bool make_large = !s_demo.large_target;
         rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
-        s_demo.render_resources_ready = resize_result != RTT_RESIZE_UNUSABLE;
+        /* Resizing targets cannot repair a failed renderer restore. */
+        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
         if (resize_result == RTT_RESIZE_COMMITTED) {
             s_demo.large_target = make_large;
         }
@@ -556,7 +557,7 @@ static void frame(void) {
             .label = "rtt_frame_uniforms",
         });
         restored = s_frame_ubo.id != 0 && restored;
-        nt_sprite_renderer_restore_gpu();
+        restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
         nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);

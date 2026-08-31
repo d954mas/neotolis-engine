@@ -400,7 +400,9 @@ static void frame(void) {
         });
         /* Materials retain their handles; rendering waits for relinking on a later frame.
          * Renderer reset and program destruction may run in either order without draws. */
-        nt_sprite_renderer_restore_gpu();
+        const nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
         nt_text_renderer_restore_gpu();
         /* The probe's mesh and vertex input died with the context. */
         mesh_probe_destroy();

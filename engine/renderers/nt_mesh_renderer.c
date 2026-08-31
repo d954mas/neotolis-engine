@@ -288,6 +288,39 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
 
 /* ---- Lifecycle ---- */
 
+static nt_result_t create_gpu_resources(void) {
+    s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_STREAM,
+        .size = (uint32_t)s_mesh_renderer.max_instances * (uint32_t)NT_INSTANCE_STRIDE_MAX,
+        .label = "mesh_renderer_instance",
+    });
+    if (s_mesh_renderer.instance_buf.id == 0) {
+        return NT_ERR_INIT_FAILED;
+    }
+    /* NONE color mode reads the generic attribute instead of a buffer. */
+    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
+    return NT_OK;
+}
+
+static void destroy_gpu_resources(void) {
+    nt_gfx_destroy_buffer(s_mesh_renderer.instance_buf);
+    s_mesh_renderer.instance_buf = (nt_buffer_t){0};
+    for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
+        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
+    }
+    s_mesh_renderer.count = 0;
+    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
+        nt_gfx_destroy_vertex_input(s_mesh_renderer.vi_versions[i].vi);
+        s_mesh_renderer.vi_versions[i] = (nt_mesh_vi_version_t){0};
+    }
+    memset(s_mesh_renderer.vi_meshes, 0, (size_t)s_mesh_renderer.vi_mesh_capacity * sizeof(nt_mesh_t));
+    s_mesh_renderer.ring_cursor = 0;
+    s_mesh_renderer.frame_draw_calls = 0;
+    s_mesh_renderer.frame_instance_total = 0;
+    s_mesh_renderer.warned_program_not_ready = false;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_mesh_renderer.initialized);
@@ -340,16 +373,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Create instance buffer (STREAM: ring-suballocated, refilled every frame) */
-    s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_STREAM,
-        .size = (uint32_t)desc->max_instances * (uint32_t)NT_INSTANCE_STRIDE_MAX,
-        .data = NULL,
-        .label = "mesh_renderer_instance",
-    });
-
-    if (s_mesh_renderer.instance_buf.id == 0) {
+    if (create_gpu_resources() != NT_OK) {
         free(s_mesh_renderer.instance_data);
         s_mesh_renderer.instance_data = NULL;
         free(s_mesh_renderer.vi_meshes);
@@ -362,11 +386,6 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Set generic attribute 7 to white -- when color attribute is disabled
-     * (NONE mode), shaders read (1,1,1,1) as identity for multiplication.
-     * Must be called after GL context exists. */
-    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
-
     s_mesh_renderer.initialized = true;
     return NT_OK;
 }
@@ -376,19 +395,7 @@ void nt_mesh_renderer_shutdown(void) {
         return;
     }
 
-    /* Destroy instance buffer */
-    nt_gfx_destroy_buffer(s_mesh_renderer.instance_buf);
-
-    /* Destroy all cached pipelines */
-    for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
-        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
-    }
-
-    /* Destroy cached vertex inputs. Tolerant stale-destroy makes any
-     * deactivate-then-shutdown order safe (the cascade may have run first). */
-    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
-        nt_gfx_destroy_vertex_input(s_mesh_renderer.vi_versions[i].vi);
-    }
+    destroy_gpu_resources();
     free(s_mesh_renderer.vi_versions);
     free(s_mesh_renderer.vi_meshes);
 
@@ -401,20 +408,12 @@ void nt_mesh_renderer_shutdown(void) {
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 }
 
-void nt_mesh_renderer_restore_gpu(void) {
-    /* The contract is "every ACTIVE renderer", and a game that restores all four
-     * unconditionally would otherwise re-init this one from a zeroed desc. */
+nt_result_t nt_mesh_renderer_restore_gpu(void) {
     if (!s_mesh_renderer.initialized) {
-        return;
+        return NT_OK;
     }
-    uint16_t saved_max = s_mesh_renderer.max_instances;
-    uint16_t saved_pip = s_mesh_renderer.max_pipelines;
-    uint16_t saved_layouts = s_mesh_renderer.max_mesh_layouts;
-    nt_mesh_renderer_shutdown();
-    nt_mesh_renderer_desc_t desc = {.max_instances = saved_max, .max_pipelines = saved_pip, .max_mesh_layouts = saved_layouts};
-    nt_result_t res = nt_mesh_renderer_init(&desc);
-    NT_ASSERT(res == NT_OK); /* context alive but GPU alloc failed = fatal */
-    (void)res;
+    destroy_gpu_resources();
+    return create_gpu_resources();
 }
 
 /* ---- Draw list ---- */
@@ -427,6 +426,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         return;
     }
     NT_ASSERT(items != NULL);
+    NT_ASSERT(s_mesh_renderer.instance_buf.id != 0 && "retry failed GPU restore before drawing");
 
     /* Reset per-frame tracking */
     s_mesh_renderer.frame_draw_calls = 0;

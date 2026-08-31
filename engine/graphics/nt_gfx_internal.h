@@ -149,6 +149,7 @@ uint32_t nt_gfx_stub_test_update_buffer_count(void);
 uint32_t nt_gfx_stub_test_backend_restore_count(void);
 uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void);
 void nt_gfx_stub_test_fail_texture_creates(uint8_t mask);
+void nt_gfx_stub_test_fail_buffer_creates(uint8_t mask);
 void nt_gfx_stub_test_fail_next_backend_restore(void);
 void nt_gfx_stub_test_fail_next_render_target_create(void);
 void nt_gfx_stub_test_fail_next_render_target_resize(void);

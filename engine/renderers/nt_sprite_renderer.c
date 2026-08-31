@@ -121,6 +121,58 @@ static struct {
 // #endregion
 
 // #region lifecycle
+static nt_result_t create_gpu_resources(void) {
+    s_sprite.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = s_sprite.staging_size,
+        .label = "sprite_vbo",
+    });
+    if (s_sprite.vbo.id == 0) {
+        return NT_ERR_INIT_FAILED;
+    }
+    s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = s_sprite.max_indices * (uint32_t)sizeof(uint16_t),
+        .index_type = NT_INDEX_UINT16,
+        .label = "sprite_ibo",
+    });
+    if (s_sprite.ibo.id == 0) {
+        nt_gfx_destroy_buffer(s_sprite.vbo);
+        s_sprite.vbo = (nt_buffer_t){0};
+        return NT_ERR_INIT_FAILED;
+    }
+    return NT_OK;
+}
+
+static void destroy_gpu_resources(void) {
+    for (uint16_t i = 0; i < s_sprite.count; i++) {
+        nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
+    }
+    s_sprite.count = 0;
+    for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
+        nt_gfx_destroy_vertex_input(s_sprite.vi_entries[i].vi);
+    }
+    s_sprite.vi_count = 0;
+    nt_gfx_destroy_buffer(s_sprite.vbo);
+    nt_gfx_destroy_buffer(s_sprite.ibo);
+    s_sprite.vbo = (nt_buffer_t){0};
+    s_sprite.ibo = (nt_buffer_t){0};
+
+    /* Queued commands reference the discarded GPU objects; never flush them. */
+    s_sprite.cmd_count = 0;
+    s_sprite.vertex_count = 0;
+    s_sprite.index_count = 0;
+    s_sprite.cur_stride = 0;
+    s_sprite.cur_custom_bytes = 0;
+    s_sprite.cur_material_custom_bytes = 0;
+    s_sprite.current_mat = (nt_material_t){0};
+    s_sprite.current_program = NT_PROGRAM_INVALID;
+    s_sprite.last_draw_list_calls = 0;
+    s_sprite.warned_program_not_ready = false;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     NT_ASSERT(!s_sprite.initialized);
@@ -156,37 +208,16 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     const uint32_t custom_bytes = d.custom_max_vertices * (NT_SPRITE_BASE_STRIDE + NT_SPRITE_CUSTOM_STRIDE_MAX);
     s_sprite.staging_size = (plain_bytes > custom_bytes) ? plain_bytes : custom_bytes;
 
-    /* Dynamic VBO and IBO. Pattern: nt_text_renderer.c init code. Sized to
-     * staging_size so any single flush's direct upload fits. */
-    s_sprite.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = s_sprite.staging_size,
-        .label = "sprite_vbo",
-    });
-    NT_ASSERT(s_sprite.vbo.id != 0);
-
-    s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = d.max_indices * (uint32_t)sizeof(uint16_t),
-        .index_type = NT_INDEX_UINT16,
-        .label = "sprite_ibo",
-    });
-    NT_ASSERT(s_sprite.ibo.id != 0);
-
     /* Heap-backed CPU staging (mirrors nt_mesh_renderer): one variable-stride
      * byte buffer holds base + interleaved custom block by construction, so flush
      * uploads it directly with no interleave pass. */
     s_sprite.staging = (uint8_t *)calloc(1, s_sprite.staging_size);
     s_sprite.indices = (uint16_t *)calloc(d.max_indices, sizeof(uint16_t));
-    if (s_sprite.staging == NULL || s_sprite.indices == NULL) {
+    if (s_sprite.staging == NULL || s_sprite.indices == NULL || create_gpu_resources() != NT_OK) {
         free(s_sprite.staging);
         free(s_sprite.indices);
-        nt_gfx_destroy_buffer(s_sprite.vbo);
-        nt_gfx_destroy_buffer(s_sprite.ibo);
         memset(&s_sprite, 0, sizeof(s_sprite));
-        NT_LOG_ERROR("failed to allocate sprite CPU staging");
+        NT_LOG_ERROR("failed to initialize sprite renderer");
         return NT_ERR_INIT_FAILED;
     }
 
@@ -198,41 +229,18 @@ void nt_sprite_renderer_shutdown(void) {
     if (!s_sprite.initialized) {
         return;
     }
-    /* Free CPU staging first (final memset also zeros, but free before reset). */
+    destroy_gpu_resources();
     free(s_sprite.staging);
     free(s_sprite.indices);
-    s_sprite.staging = NULL;
-    s_sprite.indices = NULL;
-    /* Destroy pipelines in cache */
-    for (uint16_t i = 0; i < s_sprite.count; i++) {
-        nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
-        s_sprite.entries[i] = (nt_renderer_pipeline_entry_t){0};
-    }
-    s_sprite.count = 0;
-    for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
-        nt_gfx_destroy_vertex_input(s_sprite.vi_entries[i].vi);
-    }
-    s_sprite.vi_count = 0;
-    nt_gfx_destroy_buffer(s_sprite.vbo);
-    nt_gfx_destroy_buffer(s_sprite.ibo);
     memset(&s_sprite, 0, sizeof(s_sprite));
 }
 
-void nt_sprite_renderer_restore_gpu(void) {
+nt_result_t nt_sprite_renderer_restore_gpu(void) {
     if (!s_sprite.initialized) {
-        return;
+        return NT_OK;
     }
-    uint16_t saved_pip = s_sprite.max_pipelines;
-    uint32_t saved_max_v = s_sprite.max_vertices;
-    uint32_t saved_max_i = s_sprite.max_indices;
-    uint32_t saved_custom_v = s_sprite.custom_max_vertices;
-    nt_sprite_renderer_shutdown();
-    nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip, .max_vertices = saved_max_v, .max_indices = saved_max_i, .custom_max_vertices = saved_custom_v};
-    /* Outside the assert: NT_ASSERT does not evaluate its expression under OFF,
-     * which would leave the renderer shut down after every context restore. */
-    const nt_result_t res = nt_sprite_renderer_init(&desc);
-    NT_ASSERT(res == NT_OK);
-    (void)res;
+    destroy_gpu_resources();
+    return create_gpu_resources();
 }
 // #endregion
 
@@ -495,8 +503,10 @@ void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes) {
 // #endregion
 
 // #region set_material
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(s_sprite.vbo.id != 0 && s_sprite.ibo.id != 0 && "retry failed GPU restore before submitting materials");
     NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
     /* Validate BEFORE same-handle early return: stale handle (destroyed material,
@@ -1290,12 +1300,14 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
 // #region draw_list
 /* Emit pass: stream verts into staging per batch_key; flush() does the upload. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
         return;
     }
     NT_ASSERT(items != NULL);
+    NT_ASSERT(s_sprite.vbo.id != 0 && s_sprite.ibo.id != 0 && "retry failed GPU restore before drawing");
 
     s_sprite.last_draw_list_calls = 0;
     s_sprite.cur_custom_bytes = 0; /* ECS sprite path emits no custom attrs */

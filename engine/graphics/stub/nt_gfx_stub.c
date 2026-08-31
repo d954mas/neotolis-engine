@@ -37,6 +37,7 @@ static uint32_t s_stub_next_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
 static uint8_t s_stub_fail_texture_creates;
+static uint8_t s_stub_fail_buffer_creates;
 static bool s_stub_fail_next_program_create;
 static bool s_stub_lose_context_on_program_create;
 static bool s_stub_fail_next_pipeline_create;
@@ -89,6 +90,10 @@ void nt_gfx_stub_test_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_stub_fail_texture_creates = mask;
 }
+void nt_gfx_stub_test_fail_buffer_creates(uint8_t mask) {
+    NT_ASSERT(mask <= 3);
+    s_stub_fail_buffer_creates = mask;
+}
 void nt_gfx_stub_test_fail_next_program_create(void) { s_stub_fail_next_program_create = true; }
 void nt_gfx_stub_test_lose_context_on_program_create(void) { s_stub_lose_context_on_program_create = true; }
 void nt_gfx_stub_test_fail_next_pipeline_create(void) { s_stub_fail_next_pipeline_create = true; }
@@ -138,6 +143,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_texture_creates = 0;
+    s_stub_fail_buffer_creates = 0;
     s_stub_fail_next_program_create = false;
     s_stub_lose_context_on_program_create = false;
     s_stub_fail_next_pipeline_create = false;
@@ -300,6 +306,13 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     (void)desc;
+#ifdef NT_TEST_ACCESS
+    bool fail = (s_stub_fail_buffer_creates & 1U) != 0;
+    s_stub_fail_buffer_creates >>= 1U;
+    if (fail) {
+        return 0;
+    }
+#endif
     return 1;
 }
 

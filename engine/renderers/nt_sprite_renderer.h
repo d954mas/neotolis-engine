@@ -85,9 +85,10 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
 
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
-/* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. */
-void nt_sprite_renderer_restore_gpu(void);
+/* Retains CPU storage and initialization; drops queued draws and GPU caches.
+ * Failure returns NT_ERR_INIT_FAILED: retry before drawing/setting materials, or shut down.
+ * Inactive modules are unchanged and return NT_OK. */
+nt_result_t nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
  *   1. Atlas page texture binds to slot 0; material may override sampler.

@@ -241,6 +241,24 @@ void test_init_shutdown(void) {
     nt_mesh_renderer_init(&desc);
 }
 
+void test_init_retries_after_buffer_creation_failure(void) {
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_gfx_stub_test_fail_buffer_creates(1);
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_mesh_renderer_init(&desc));
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_restore_gpu());
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t entity = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+}
+
 /* ---- Test 2: draw_list with count=0 is a no-op ---- */
 
 void test_draw_list_empty(void) {
@@ -823,6 +841,37 @@ void test_restore_gpu(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
 }
 
+void test_restore_gpu_retries_after_context_loss(void) {
+    nt_mesh_renderer_shutdown();
+    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+    nt_entity_t entity = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_mesh_renderer_test_ring_cursor());
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_result_t result = nt_mesh_renderer_restore_gpu();
+    nt_gfx_stub_test_set_context_lost(false);
+
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, result);
+    TEST_ASSERT_TRUE(nt_mesh_renderer_test_initialized());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_ring_cursor());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
+
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(&item, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_restore_gpu());
+    nt_render_item_t items[3] = {item, item, item};
+    nt_mesh_renderer_draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_instance_total());
+    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_MAX, nt_mesh_renderer_test_ring_cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+}
+
 /* ---- Test 10: stream -> vertex type mapping is total over all stream types ---- */
 
 /* The restore contract is "every ACTIVE renderer". Without the entry guard this
@@ -834,7 +883,7 @@ void test_restore_on_inactive_renderer_does_nothing(void) {
     nt_mesh_renderer_shutdown();
     TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
 
-    nt_mesh_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_restore_gpu());
 
     /* The live assertion: init would have set this. The trap on a zeroed desc
      * aborts before ever reaching here, so it cannot be what pins the guard. */
@@ -1067,6 +1116,7 @@ int main(void) {
     UNITY_BEGIN();
 
     RUN_TEST(test_init_shutdown);
+    RUN_TEST(test_init_retries_after_buffer_creation_failure);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_unready_program_warns_once_and_rearms_after_pipeline_creation);
@@ -1096,6 +1146,7 @@ int main(void) {
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);
+    RUN_TEST(test_restore_gpu_retries_after_context_loss);
     /* Color mode tests */
     RUN_TEST(test_draw_list_color_mode_float4);
     RUN_TEST(test_draw_list_color_mode_rgba8);

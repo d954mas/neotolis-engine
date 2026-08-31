@@ -167,6 +167,17 @@ module initialized but unable to draw; the game must retry
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 restore drops queued commands and pipeline caches, then the game relinks.
 
+`nt_mesh_renderer_restore_gpu()` and `nt_sprite_renderer_restore_gpu()` return
+`nt_result_t`. They retain CPU allocations, configured capacities, and module
+initialization; only GPU buffers, cached pipelines/vertex inputs, and queued
+draw state are reset. An inactive module is a no-op returning `NT_OK`.
+Failed GPU creation returns `NT_ERR_INIT_FAILED` after releasing partial GPU
+resources. The module stays initialized, so the game can call restore again or
+shut it down. There is no automatic retry. After failure, the game must not
+submit draws or sprite materials until a restore succeeds; violating that
+precondition asserts. Examples may explicitly choose fail-fast handling, while
+a game that needs retries owns that policy.
+
 Materials survive teardown and retain their old program handles. Destroying a
 program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
 reports false. Material handles remain unchanged; ECS components, the UI context,
