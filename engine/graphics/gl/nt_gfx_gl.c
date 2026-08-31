@@ -66,7 +66,7 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 
 /* ---- Pipeline backend data ---- */
 
-/* Per-pipeline uniform location cache (populated at link time) */
+/* Per-program standalone locations, including each array element. */
 #define NT_MAX_CACHED_UNIFORMS 16
 
 typedef struct {
@@ -1007,24 +1007,72 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     return program;
 }
 
-/* Cache active uniform locations (avoids glGetUniformLocation per frame) */
-static void nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, uint8_t *out_count) {
+static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
+    char digits[10];
+    uint8_t count = 0;
+    do {
+        digits[count++] = (char)('0' + (element % 10));
+        element /= 10;
+    } while (element != 0);
+    *suffix++ = '[';
+    while (count != 0) {
+        *suffix++ = digits[--count];
+    }
+    *suffix++ = ']';
+    *suffix = '\0';
+}
+
+/* Cache locations off the hot path; NT_ASSERT expansion inflates complexity. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, uint8_t *out_count) {
     *out_count = 0;
-    GLint active_uniforms = 0;
-    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
-    for (GLint ui = 0; ui < active_uniforms && *out_count < NT_MAX_CACHED_UNIFORMS; ui++) {
-        char uname[64];
+    GLint active_uniforms = -1;
+    nt_gfx_gl_ctx_get_programiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    if (active_uniforms < 0) {
+        return false;
+    }
+    if (active_uniforms == 0) {
+        return true;
+    }
+    GLint max_name_length = 0;
+    nt_gfx_gl_ctx_get_programiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
+    if (max_name_length <= 0) {
+        return false;
+    }
+    /* Expanded indices can be wider than reflection's terminal [0]. */
+    size_t name_capacity = (size_t)max_name_length + 10U;
+    char *uname = malloc(name_capacity);
+    NT_ASSERT(uname != NULL);
+    uint32_t uniform_count = 0;
+    for (GLint ui = 0; ui < active_uniforms; ui++) {
         GLsizei ulen = 0;
         GLint usize = 0;
         GLenum utype = 0;
-        glGetActiveUniform(program, (GLuint)ui, (GLsizei)sizeof(uname), &ulen, &usize, &utype, uname);
-        GLint loc = glGetUniformLocation(program, uname);
-        if (loc >= 0) {
-            out[*out_count].name_hash = nt_hash32_str(uname).value;
-            out[*out_count].location = loc;
-            (*out_count)++;
+        glGetActiveUniform(program, (GLuint)ui, max_name_length, &ulen, &usize, &utype, uname);
+        if (ulen <= 0 || usize <= 0) {
+            free(uname);
+            return false;
+        }
+        NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
+        for (GLint element = 0; element < usize; element++) {
+            if (element > 0) {
+                size_t suffix = (size_t)ulen - 3U;
+                nt_gfx_gl_write_array_index(uname + suffix, element);
+            }
+            GLint loc = nt_gfx_gl_ctx_get_uniform_location(program, uname);
+            if (loc >= 0) {
+                if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
+                    out[uniform_count].name_hash = nt_hash32_str(uname).value;
+                    out[uniform_count].location = loc;
+                }
+                uniform_count++;
+            }
         }
     }
+    free(uname);
+    NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
+    *out_count = (uint8_t)uniform_count;
+    return true;
 }
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
@@ -1045,8 +1093,11 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         return 0; /* no free slots */
     }
 
+    if (!nt_gfx_gl_cache_uniforms(program, s_programs[slot].uniforms, &s_programs[slot].uniform_count) || nt_gfx_backend_is_context_lost()) {
+        glDeleteProgram(program);
+        return 0;
+    }
     s_programs[slot].program = program;
-    nt_gfx_gl_cache_uniforms(program, s_programs[slot].uniforms, &s_programs[slot].uniform_count);
     return slot;
 }
 
@@ -1091,8 +1142,11 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
      * Only enable attributes here — actual glVertexAttribPointer calls happen
      * in bind_vertex_buffer() once a buffer is bound.  WebGL requires a bound
      * ARRAY_BUFFER for non-zero offsets, so calling it here would be an error. */
-    GLuint vao;
+    GLuint vao = 0;
     glGenVertexArrays(1, &vao);
+    if (vao == 0) {
+        return 0;
+    }
     glBindVertexArray(vao);
     for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
         glEnableVertexAttribArray(desc->layout.attrs[i].location);
@@ -1102,8 +1156,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         glEnableVertexAttribArray(loc);
         glVertexAttribDivisor(loc, 1);
     }
-    glBindVertexArray(0);
-    s_gl_cache.vao = 0; /* create dirtied VAO binding */
+    glBindVertexArray(s_gl_cache.vao);
 
     /* Store pipeline data */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];

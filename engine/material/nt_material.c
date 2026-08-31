@@ -195,9 +195,6 @@ const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_m
 void nt_material_set_program(nt_material_t mat, nt_program_t program) {
     nt_material_info_t *info = get_mutable_info(mat);
     NT_ASSERT(info && "set_program on invalid material handle");
-    if (!info) {
-        return;
-    }
     /* A plain store: assigning the handle the material already holds changes
      * nothing, so a per-frame gate can call this unconditionally. */
     info->program = program;

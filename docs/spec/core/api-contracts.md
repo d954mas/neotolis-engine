@@ -164,6 +164,9 @@ bind at link time, so without the retroactive half a late registration would
 silently miss every existing program -- including those engine renderers link
 inside their own init, before the game runs. There is no per-program override. A lost context is the only
 condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
+This includes the interval after the browser recovers but before
+`nt_gfx_begin_frame` finishes resetting the backend tables. Linking waits until
+that recovery completes, even when newly created shader stages are ready.
 
 `nt_material_set_program` is the only way to change a material's program, and it
 is a flat replace: `NT_PROGRAM_INVALID` over a program, a program over
@@ -275,6 +278,8 @@ unready program, an attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride
 over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, so a
 returned invalid pipeline handle means a lost context or a failed backend
 allocation — the two recoverable outcomes, both retried on a later frame.
+Creating a pipeline preserves the currently bound pipeline and its vertex-input
+state; the caller does not need to rebind it after creating another pipeline.
 Backend allocation, framebuffer completeness, resize, and context-restore
 failures remain runtime failures reported through invalid handles, `false`, or
 readiness queries.

@@ -10,6 +10,7 @@ declare global {
       hide_probe(mode: number): void;
     };
     __ntLossExtension?: WEBGL_lose_context;
+    __ntReflectionLossInjected?: boolean;
   }
 }
 
@@ -127,3 +128,76 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   }
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
+
+for (const query of ['max-length', 'uniform-location'] as const) {
+  test('SDK reflection reports errors unrelated to context loss: ' + query, async ({ page }) => {
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
+    await page.evaluate((query) => {
+      const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+      window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
+      const original = gl.getActiveUniform;
+      gl.getActiveUniform = function (program, index) {
+        const stack = new Error().stack ?? '';
+        const target = query === 'max-length' ? '_emscripten_glGetProgramiv' : 'webglPrepareUniformLocationsBeforeFirstUse';
+        if (stack.includes(target)) {
+          gl.getActiveUniform = original;
+          throw new Error('injected non-loss reflection error');
+        }
+        return original.call(this, program, index);
+      };
+      window.__ntLossExtension!.loseContext();
+    }, query);
+    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
+    const error = page.waitForEvent('pageerror');
+    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+    expect((await error).message).toBe('injected non-loss reflection error');
+    expect(await page.evaluate(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost())).toBe(false);
+  });
+
+  test('context loss inside SDK reflection: ' + query, async ({ page }) => {
+    test.setTimeout(90_000);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      const text = message.text();
+      if (text === 'ERROR [gfx] WebGL context lost') return;
+      if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+    });
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
+    const drawnBefore = await page.evaluate(() => window.__nt!.drawn_frames());
+
+    await page.evaluate((query) => {
+      const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+      window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
+      const original = gl.getActiveUniform;
+      gl.getActiveUniform = function (program, index) {
+        // Pin the two multi-call reflection paths in the configured Emscripten SDK.
+        const stack = new Error().stack ?? '';
+        const target = query === 'max-length' ? '_emscripten_glGetProgramiv' : 'webglPrepareUniformLocationsBeforeFirstUse';
+        if (stack.includes(target)) {
+          gl.getActiveUniform = original;
+          window.__ntReflectionLossInjected = true;
+          window.__ntLossExtension!.loseContext();
+        }
+        return original.call(this, program, index);
+      };
+      window.__ntLossExtension!.loseContext();
+    }, query);
+    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
+    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+    await page.waitForFunction(() => window.__ntReflectionLossInjected && document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
+    expect(errors, 'reflection interrupted by context loss must not throw').toEqual([]);
+
+    const stopped = await page.evaluate(() => window.__nt!.drawn_frames());
+    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+    await page.waitForFunction((before) => window.__nt!.programs_ready() && window.__nt!.drawn_frames() > before, Math.max(drawnBefore, stopped));
+    const canvas = (await page.locator('canvas').boundingBox())!;
+    const field = await page.evaluate(() => window.__nt!.field_css());
+    const sprite = await capturePixels(page, { x: Math.round(canvas.x + field.x + field.w / 2 - 32), y: Math.round(canvas.y + field.y - 5), width: 20, height: 10 });
+    const text = await capturePixels(page, { x: Math.round(canvas.x + 24), y: Math.round(canvas.y + 24), width: 230, height: 24 });
+    expectVisibleProbes(sprite, text);
+    expect(errors, 'fresh frames after recovery must not report browser/gfx errors').toEqual([]);
+  });
+}

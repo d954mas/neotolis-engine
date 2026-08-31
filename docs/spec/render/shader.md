@@ -61,9 +61,22 @@ existing and future. A block declared by a single shader needs no special case
 -- the bind skips programs that do not declare it. What varies per draw is the
 buffer, via `nt_gfx_bind_uniform_buffer`.
 
+The GL backend caches at most 16 active standalone uniform locations per
+program. Each active array element consumes one entry; uniforms in blocks do
+not consume entries. Exceeding the cache capacity asserts at link time instead
+of silently omitting values. Uniform setters use complete names, including
+explicit array indices such as `colors[1]` or `lights[0].color`. Reflection reads
+the complete reported names and uses temporary storage only while linking;
+setting a uniform performs no allocation.
+
+Context loss during reflection discards the new program before publication. The WebGL
+bridge suppresses SDK exceptions only while the context is lost; unrelated
+JavaScript errors remain visible.
+
 A link failure is a developer error and traps (`NT_ASSERT`) rather than
 returning an invalid handle; the only invalid handle `nt_gfx_make_program`
-returns is on a lost context. Because the builder validates each stage
+returns is on a lost context, including pending engine recovery after the
+browser has restored it. Because the builder validates each stage
 separately and never links a pair, the trap is also where mismatched varyings
 and device limits surface — offline linking arrives with `ShaderAsset`.
 

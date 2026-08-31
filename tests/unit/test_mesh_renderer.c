@@ -14,6 +14,7 @@
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "render/nt_render_items.h"
 #include "render/nt_render_defs.h"
 #include "graphics/nt_gfx_internal.h"
@@ -24,6 +25,15 @@
 /* clang-format on */
 
 /* ---- Virtual pack counter (unique per test) ---- */
+
+static uint32_t s_program_warnings;
+
+static void capture_program_warning(nt_log_level_t level, const char *domain, const char *message, void *user) {
+    (void)user;
+    if (level == NT_LOG_LEVEL_WARN && strcmp(domain, "mesh_renderer") == 0 && strstr(message, "program is not ready") != NULL) {
+        s_program_warnings++;
+    }
+}
 
 /* ---- Helper: build a minimal mesh blob and activate it via nt_gfx ---- */
 
@@ -146,6 +156,8 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
 /* ---- Unity setUp / tearDown ---- */
 
 void setUp(void) {
+    s_program_warnings = 0;
+    nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 32,
@@ -173,6 +185,7 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+    nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_mesh_renderer_shutdown();
@@ -205,6 +218,30 @@ void test_draw_list_empty(void) {
 }
 
 void test_draw_list_null_items_asserts_when_nonempty(void) { NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NULL, 1)); }
+
+void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_entity_t entity = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    nt_mesh_renderer_draw_list(&item, 1);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+
+    nt_program_t program = create_test_program();
+    nt_material_set_program(mat, program);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+
+    nt_gfx_destroy_program(program);
+    nt_mesh_renderer_draw_list(&item, 1);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, s_program_warnings);
+}
 
 void test_batch_key_packs_material_and_mesh_slots(void) {
     nt_material_t material = {.id = 0x00010001U};
@@ -810,6 +847,7 @@ int main(void) {
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
+    RUN_TEST(test_unready_program_warns_once_and_rearms_after_pipeline_creation);
     RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
     RUN_TEST(test_batch_key_ignores_generation_bits);
     RUN_TEST(test_batch_key_distinguishes_old_hash_collision);

@@ -143,12 +143,6 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 
     /* Cache full is a configuration bug, not a runtime recovery case. */
     NT_ASSERT(s_text.pipeline_count < NT_TEXT_RENDERER_MAX_PIPELINES && "text pipeline cache exhausted; raise NT_TEXT_RENDERER_MAX_PIPELINES");
-    /* Hard guard, not just the assert: NT_ASSERT_MODE=OFF would write past
-     * pipelines[]. Before make_pipeline so OFF does not create-then-destroy. */
-    if (s_text.pipeline_count >= NT_TEXT_RENDERER_MAX_PIPELINES) {
-        NT_LOG_ERROR("text pipeline cache full -- raise NT_TEXT_RENDERER_MAX_PIPELINES");
-        return (nt_pipeline_t){0};
-    }
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
@@ -273,9 +267,6 @@ void nt_text_renderer_set_material(nt_material_t mat) {
      * already dead here, and trapping on that would crash a recoverable event.
      * make_pipeline polls the lost context and hands back an invalid pipeline. */
     NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
-    if (info == NULL) {
-        return; /* real branch: the derefs below outlive the assert under OFF */
-    }
 
     if (s_text.material.id == mat.id) {
         return;
@@ -601,9 +592,6 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
-    if (!slot) {
-        return;
-    }
 
     /* Fold synthetic-oblique into the model once (constant for the whole call): col0/col1 of the already
      * Y-flipped model ARE the text-local axes, so out.col1 += oblique*col0 leans x by oblique*y about the

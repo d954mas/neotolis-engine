@@ -496,6 +496,11 @@ void test_gfx_destroy_program_asserts_on_a_stale_handle(void) {
 /* A program is immutable: a lost context does not repair one, so recovery is a
  * new handle from a new link, never the old handle coming back to life. */
 void test_gfx_context_restore_yields_a_new_program_handle(void) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_programs = 1;
+    nt_gfx_init(&desc);
+    nt_gfx_stub_test_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     nt_program_t old = nt_gfx_make_program(vs, fs);
@@ -507,6 +512,19 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_ready(old));
 
     nt_gfx_destroy_program(old);
+    nt_shader_t pending_vs = make_test_vs();
+    nt_shader_t pending_fs = make_test_fs();
+    uint32_t links_before = nt_gfx_stub_test_program_create_count();
+    nt_program_t pending = nt_gfx_make_program(pending_vs, pending_fs);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(0, pending.id);
+    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_stub_test_program_create_count());
+    nt_gfx_destroy_shader(pending_vs);
+    nt_gfx_destroy_shader(pending_fs);
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_gfx_end_frame();
     nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     TEST_ASSERT_NOT_EQUAL_UINT32(old.id, fresh.id); /* generation moved on */

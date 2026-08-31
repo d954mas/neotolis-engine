@@ -218,6 +218,16 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
     republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_gfx_end_frame();
+    republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
+    republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    nt_resource_step();
+
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));

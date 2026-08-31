@@ -150,9 +150,6 @@ static void destroy_quad_resources(void) {
     if (s_demo.quad_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_demo.quad_vbo);
     }
-    if (s_demo.quad_pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_demo.quad_pipeline);
-    }
     if (s_demo.quad_program.id != 0) {
         nt_gfx_destroy_program(s_demo.quad_program);
     }

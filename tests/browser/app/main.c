@@ -179,22 +179,23 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_stat
  * glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
 EM_JS_DEPS(nt_browser_app_test_hooks, "$UTF8ToString")
 
+/* Quoted keys keep the Playwright-facing API stable under Closure. */
 EM_JS(void, nt_test_install_hooks, (void), {
-    window.__nt = {
-        get ready() { return _nt_test_ready() !== 0; },
-        input_buffer: function() { return UTF8ToString(_nt_test_input_buffer()); },
-        walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
-        drawn_frames: function() { return _nt_test_drawn_frames() >>> 0; },
-        programs_ready: function() { return _nt_test_programs_ready() !== 0; },
-        hide_probe: function(mode) { _nt_test_hide_probe(mode); },
-        field_visible: function() { return _nt_test_field_visible() !== 0; },
-        field_css: function() {
-            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y(), w: _nt_test_field_css_w(), h: _nt_test_field_css_h() };
+    window['__nt'] = {
+        get 'ready'() { return _nt_test_ready() !== 0; },
+        'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
+        'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
+        'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
+        'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
+        'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
+        'field_visible': function() { return _nt_test_field_visible() !== 0; },
+        'field_css': function() {
+            return { 'x': _nt_test_field_css_x(), 'y': _nt_test_field_css_y(), 'w': _nt_test_field_css_w(), 'h': _nt_test_field_css_h() };
         },
-        rich_link_css: function() {
-            return { present: _nt_test_rich_link_present() !== 0, x: _nt_test_rich_link_css_x(), y: _nt_test_rich_link_css_y(), w: _nt_test_rich_link_css_w(), h: _nt_test_rich_link_css_h() };
+        'rich_link_css': function() {
+            return { 'present': _nt_test_rich_link_present() !== 0, 'x': _nt_test_rich_link_css_x(), 'y': _nt_test_rich_link_css_y(), 'w': _nt_test_rich_link_css_w(), 'h': _nt_test_rich_link_css_h() };
         },
-        rich_link_clicks: function() { return _nt_test_rich_link_clicks() >>> 0; }
+        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; }
     };
 })
 /* clang-format on */

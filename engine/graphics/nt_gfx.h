@@ -469,9 +469,10 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links the pair. A link failure is a developer error and traps; the only
- * invalid handle returned is on a lost context. Both stages must be valid. */
+/* Links valid stages; link errors and the GL cache limit (16 uniform locations) assert.
+ * Returns invalid while the context is lost or begin_frame has not completed recovery. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
+/* Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);

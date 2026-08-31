@@ -763,9 +763,8 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
 
-    /* Live poll, not g_nt_gfx.context_lost: that flag is only refreshed in
-     * begin_frame, and games create resources in update, before it runs. */
-    if (nt_gfx_backend_is_context_lost()) {
+    /* The browser can recover before begin_frame resets the backend tables. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
         return NT_PROGRAM_INVALID;
     }
 
@@ -861,9 +860,6 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
      * the caller retries on a later frame. */
     nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
-    if (desc == NULL) {
-        return result; /* real branch: the derefs below outlive the assert under OFF */
-    }
     /* Live poll before the readiness assert: context loss is what zeroes the
      * program backend, so without this every renderer would trap on it. */
     if (nt_gfx_backend_is_context_lost()) {
@@ -872,11 +868,6 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
     NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
-    /* Hard guard, not just the asserts: both loops below and the backend read
-     * attr_count entries out of a fixed attrs[NT_GFX_MAX_VERTEX_ATTRS]. */
-    if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS || desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        return result;
-    }
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
     NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
@@ -1156,9 +1147,6 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
-    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
-        return;
-    }
     /* A pipeline outlives its program only as a corpse: bind rejects it and no
      * cache key can select it again, since every key folds the program handle.
      * So destroying the program destroys them -- otherwise each one holds a pool

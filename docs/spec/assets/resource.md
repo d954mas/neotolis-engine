@@ -183,8 +183,8 @@ shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step'
 activation budget, and the frame's `nt_resource_step()` has already run by the
 time `context_restored` is seen. The game links a new program once both stages
 resolve -- never relinking an existing handle, which no API supports -- and
-assigns it with `nt_material_set_program`. Because assignment is a flat replace
-with a same-handle early-out, that gate is written to run every frame and carries
+assigns it with `nt_material_set_program`. Because assigning the same handle
+changes nothing, that gate is written to run every frame and carries
 no "already assigned" latch; a game whose materials sit on several programs gates
 each material on its own program. A blob-resident pack (the default,
 `NT_BLOB_KEEP`) re-activates on the next step; an evicted one re-downloads first,

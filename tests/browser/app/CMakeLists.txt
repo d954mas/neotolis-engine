@@ -7,8 +7,7 @@ set(BROWSER_APP_ASSETS_DIR "${BROWSER_APP_OUTPUT_DIR}/assets")
 # Shared pack location -- the native ui_showcase build writes ui_showcase.ntpack here; we copy from it.
 set(UI_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/ui_showcase")
 
-# EXCLUDE_FROM_ALL: built ONLY by the browser-test CI job (explicit --target), never by the main
-# wasm "build all" -- keeps the always-on EM_JS hooks out of the Closure-using wasm-release build.
+# EXCLUDE_FROM_ALL: browser tests build this target explicitly; regular game builds omit its hooks.
 add_executable(browser_smoke EXCLUDE_FROM_ALL main.c)
 target_link_libraries(browser_smoke PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource

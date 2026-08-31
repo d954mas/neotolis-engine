@@ -314,14 +314,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     /* Miss — create. Cache full is a configuration bug, not a runtime
      * recovery case. */
     NT_ASSERT(s_sprite.count < s_sprite.max_pipelines && "sprite pipeline cache exhausted; raise NT_SPRITE_RENDERER_MAX_PIPELINES or desc.max_pipelines");
-    /* Hard guard, not just the assert: entries[] is sized to the hardcap and
-     * max_pipelines is the soft cap, so OFF writes past the array only at
-     * max_pipelines == HARDCAP -- below it, this holds the configured bound.
-     * Before make_pipeline so OFF does not create-then-destroy. */
-    if (s_sprite.count >= s_sprite.max_pipelines) {
-        NT_LOG_ERROR("sprite pipeline cache full -- raise desc.max_pipelines");
-        return (nt_pipeline_t){0};
-    }
 
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -488,9 +480,6 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
      * already dead here, and trapping on that would crash a recoverable event.
      * make_pipeline polls the lost context and hands back an invalid pipeline. */
     NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
-    if (mat_info == NULL) {
-        return; /* real branch: the deref below outlives the assert under OFF */
-    }
 
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
     if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {

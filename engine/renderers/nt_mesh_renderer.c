@@ -152,14 +152,6 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
 
-    /* One query covers every state: no program yet, a program that died with the
-     * context, and a program its owner destroyed. Inside the function so any
-     * caller is safe, as in the sprite and text renderers. */
-    if (!nt_gfx_program_ready(mat_info->program)) {
-        nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
-        return (nt_pipeline_t){0};
-    }
-
     /* Full pipeline signature: layout + program + render state. The 64-bit hash
      * IS the cache identity -- descriptors are never compared on a hit, so every
      * nt_pipeline_desc_t field this renderer varies must be folded in here. */
@@ -199,10 +191,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
         if (found) {
             NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
-            if (layout.attr_count >= NT_GFX_MAX_VERTEX_ATTRS) {
-                NT_LOG_ERROR("vertex attr count exceeds max");
-                break;
-            }
             layout.attrs[layout.attr_count].location = location;
             layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);
             layout.attrs[layout.attr_count].count = stream->count;
@@ -227,14 +215,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
-    /* Full cache is a configuration bug, not a runtime recovery case. Hard guard,
-     * not just the assert: NT_ASSERT_MODE=OFF would write past entries[]. Before
-     * make_pipeline so OFF does not create-then-destroy. */
-    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
-    if (s_mesh_renderer.count >= s_mesh_renderer.max_pipelines) {
-        NT_LOG_ERROR("pipeline cache full -- increase max_pipelines in desc");
-        return (nt_pipeline_t){0};
-    }
+    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines && "mesh pipeline cache exhausted; raise desc.max_pipelines");
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
     /* Invalid here means a lost context or a failed backend allocation. Caching
@@ -258,9 +239,6 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_instances > 0);
     NT_ASSERT(desc->max_pipelines > 0);
-    if (s_mesh_renderer.initialized || !desc || desc->max_instances == 0 || desc->max_pipelines == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
 
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 
@@ -443,16 +421,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
             const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
-            /* Two different causes share one branch: a missing material or mesh
-             * breaks the header contract and traps, while a program that is not
-             * ready is legitimate during load and restore and only skips. The
-             * branch stays real because asserts vanish under OFF. */
             NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
-            const bool program_ready = (mat_info != NULL) && nt_gfx_program_ready(mat_info->program);
-            if (!mat_info || !mesh_info || !program_ready) {
+            if (!nt_gfx_program_ready(mat_info->program)) {
+                nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
                 /* Still need to advance byte offset for skipped runs */
-                nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
-                draw_byte_offset += instance_count * s_instance_layouts[cm].stride;
+                draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
                 run_start = run_end;
                 continue;
             }

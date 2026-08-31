@@ -1,9 +1,13 @@
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -898,6 +902,179 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
     nt_gfx_destroy_shader(vs);
 }
 
+static GLuint bind_uniform_test_program(const char *fragment_source) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(program));
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    GLint current_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
+    return (GLuint)current_program;
+}
+
+static void assert_uniform_float(GLuint program, const char *name, int expected) {
+    GLint location = glGetUniformLocation(program, name);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, location);
+    GLfloat value = 0.0F;
+    glGetUniformfv(program, location, &value);
+    TEST_ASSERT_EQUAL_INT(expected, (int)value);
+}
+
+static void test_uniform_cache_addresses_all_sixteen_array_elements(void) {
+    static const char *fragment_source = "layout(std140) uniform Globals { vec4 g_values[17]; };\n"
+                                         "uniform float u_values[16];\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    float sum = 0.0;\n"
+                                         "    for (int i = 0; i < 16; i++) { sum += u_values[i]; }\n"
+                                         "    frag_color = vec4(sum + g_values[16].x);\n"
+                                         "}\n";
+    GLuint program = bind_uniform_test_program(fragment_source);
+    for (int i = 0; i < 16; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof(name), "u_values[%d]", i);
+        nt_gfx_set_uniform_float(name, (float)(i + 1));
+        assert_uniform_float(program, name, i + 1);
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+#define LONG_UNIFORM_NAME "u_uniform_with_a_name_that_is_longer_than_sixty_four_characters_and_must_not_be_truncated"
+
+static void test_uniform_cache_preserves_long_names(void) {
+    static const char *fragment_source = "uniform float " LONG_UNIFORM_NAME ";\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(" LONG_UNIFORM_NAME "); }\n";
+    GLuint program = bind_uniform_test_program(fragment_source);
+    nt_gfx_set_uniform_float(LONG_UNIFORM_NAME, 7.0F);
+    assert_uniform_float(program, LONG_UNIFORM_NAME, 7);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static void test_uniform_cache_expands_only_terminal_struct_array_indices(void) {
+    static const char *fragment_source = "struct Light { float weights[2]; };\n"
+                                         "uniform Light u_lights[2];\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    frag_color = vec4(u_lights[0].weights[0] + u_lights[0].weights[1]\n"
+                                         "                    + u_lights[1].weights[0] + u_lights[1].weights[1]);\n"
+                                         "}\n";
+    GLuint program = bind_uniform_test_program(fragment_source);
+    nt_gfx_set_uniform_float("u_lights[0].weights[1]", 3.0F);
+    nt_gfx_set_uniform_float("u_lights[1].weights[1]", 5.0F);
+    assert_uniform_float(program, "u_lights[0].weights[1]", 3);
+    assert_uniform_float(program, "u_lights[1].weights[1]", 5);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static void test_uniform_cache_asserts_when_array_elements_exceed_capacity(void) {
+    static const char *fragment_source = "uniform float u_values[17];\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    float sum = 0.0;\n"
+                                         "    for (int i = 0; i < 17; i++) { sum += u_values[i]; }\n"
+                                         "    frag_color = vec4(sum);\n"
+                                         "}\n";
+    NT_TEST_EXPECT_ASSERT((void)bind_uniform_test_program(fragment_source));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_MAX_CACHED_UNIFORMS"));
+}
+
+static void test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity(void) {
+    static const char *fragment_source = "uniform float u0, u1, u2, u3, u4, u5, u6, u7, u8;\n"
+                                         "uniform float u9, u10, u11, u12, u13, u14, u15, u16;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    frag_color = vec4(u0 + u1 + u2 + u3 + u4 + u5 + u6 + u7 + u8\n"
+                                         "                    + u9 + u10 + u11 + u12 + u13 + u14 + u15 + u16);\n"
+                                         "}\n";
+    NT_TEST_EXPECT_ASSERT((void)bind_uniform_test_program(fragment_source));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_MAX_CACHED_UNIFORMS"));
+}
+
+static PFNGLGETPROGRAMIVPROC s_get_program_iv;
+static PFNGLGETACTIVEUNIFORMPROC s_get_active_uniform;
+static GLenum s_skipped_program_query;
+static GLuint s_failed_reflection_program;
+
+static void GLAD_API_PTR skip_program_query(GLuint program, GLenum query, GLint *value) {
+    if (query == s_skipped_program_query) {
+        s_failed_reflection_program = program;
+        return;
+    }
+    s_get_program_iv(program, query, value);
+}
+
+static void GLAD_API_PTR skip_second_uniform_query(GLuint program, GLuint index, GLsizei capacity, GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
+    if (s_skipped_program_query == 0 && index == 1) {
+        s_failed_reflection_program = program;
+        return;
+    }
+    s_get_active_uniform(program, index, capacity, length, size, type, name);
+}
+
+static void assert_reflection_query_failure_retries(GLenum skipped_query) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_programs = 2;
+    nt_gfx_init(&desc);
+
+    uint32_t vs = nt_gfx_backend_create_shader(&(nt_shader_desc_t){
+        .type = NT_SHADER_VERTEX,
+        .source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n",
+    });
+    uint32_t fs = nt_gfx_backend_create_shader(&(nt_shader_desc_t){
+        .type = NT_SHADER_FRAGMENT,
+        .source = "uniform float u_first, u_second;\n"
+                  "out vec4 frag_color;\n"
+                  "void main() { frag_color = vec4(u_first + u_second); }\n",
+    });
+    uint32_t existing = nt_gfx_backend_create_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, existing);
+
+    s_get_program_iv = glad_glGetProgramiv;
+    s_get_active_uniform = glad_glGetActiveUniform;
+    s_skipped_program_query = skipped_query;
+    s_failed_reflection_program = 0;
+    glad_glGetProgramiv = skip_program_query;
+    glad_glGetActiveUniform = skip_second_uniform_query;
+    nt_test_assert_install();
+    nt_test_assert_last_expr[0] = '\0';
+    nt_test_assert_armed = true;
+    volatile uint32_t failed = UINT32_MAX;
+    if (setjmp(nt_test_assert_jmp) == 0) {
+        failed = nt_gfx_backend_create_program(vs, fs);
+    }
+    nt_test_assert_armed = false;
+    glad_glGetProgramiv = s_get_program_iv;
+    glad_glGetActiveUniform = s_get_active_uniform;
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", nt_test_assert_last_expr, "incomplete reflection must return failure without asserting");
+    TEST_ASSERT_EQUAL_UINT32(0, failed);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, s_failed_reflection_program);
+    TEST_ASSERT_FALSE(glIsProgram(s_failed_reflection_program));
+
+    uint32_t retry = nt_gfx_backend_create_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, retry);
+    nt_gfx_backend_destroy_program(retry);
+    nt_gfx_backend_destroy_program(existing);
+    nt_gfx_backend_destroy_shader(fs);
+    nt_gfx_backend_destroy_shader(vs);
+}
+
+static void test_missing_active_uniform_count_releases_program_for_retry(void) { assert_reflection_query_failure_retries(GL_ACTIVE_UNIFORMS); }
+
+static void test_missing_uniform_name_length_releases_program_for_retry(void) { assert_reflection_query_failure_retries(GL_ACTIVE_UNIFORM_MAX_LENGTH); }
+
+static void test_missing_uniform_details_releases_partial_cache_for_retry(void) { assert_reflection_query_failure_retries(0); }
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
@@ -914,5 +1091,13 @@ int main(void) {
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);
+    RUN_TEST(test_uniform_cache_addresses_all_sixteen_array_elements);
+    RUN_TEST(test_uniform_cache_preserves_long_names);
+    RUN_TEST(test_uniform_cache_expands_only_terminal_struct_array_indices);
+    RUN_TEST(test_uniform_cache_asserts_when_array_elements_exceed_capacity);
+    RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
+    RUN_TEST(test_missing_active_uniform_count_releases_program_for_retry);
+    RUN_TEST(test_missing_uniform_name_length_releases_program_for_retry);
+    RUN_TEST(test_missing_uniform_details_releases_partial_cache_for_retry);
     return UNITY_END();
 }
