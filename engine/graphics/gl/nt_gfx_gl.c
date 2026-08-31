@@ -505,10 +505,12 @@ void nt_gfx_backend_shutdown(void) {
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
-    if (s_ebo_upload_vao != 0) {
+    /* A dead context already reclaimed the name; a GL call here would run
+     * without a current context on web. */
+    if (s_ebo_upload_vao != 0 && !nt_gfx_gl_ctx_is_lost()) {
         glDeleteVertexArrays(1, &s_ebo_upload_vao);
-        s_ebo_upload_vao = 0;
     }
+    s_ebo_upload_vao = 0;
 
     nt_gfx_gl_ctx_destroy();
 }
@@ -1255,10 +1257,16 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     gl_bind_vao(s_gl_cache.vao);
 
     s_vertex_inputs[slot].vao = vao;
-    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
+    /* Clamped copy: the frontend asserts the cap, but OFF must not write past
+     * the compact array (the full-size source could not overflow, this can). */
+    uint8_t inst_count = desc->instance_layout.attr_count;
+    if (inst_count > NT_GFX_MAX_INSTANCE_ATTRS) {
+        inst_count = NT_GFX_MAX_INSTANCE_ATTRS;
+    }
+    for (uint8_t i = 0; i < inst_count; i++) {
         s_vertex_inputs[slot].instance_attrs[i] = desc->instance_layout.attrs[i];
     }
-    s_vertex_inputs[slot].instance_attr_count = desc->instance_layout.attr_count;
+    s_vertex_inputs[slot].instance_attr_count = inst_count;
     s_vertex_inputs[slot].instance_stride = desc->instance_layout.stride;
     return slot;
 }
@@ -1301,6 +1309,9 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     glGenBuffers(1, &buf);
+    if (buf == 0) {
+        return 0; /* lost context: storing name 0 would alias the free-slot sentinel */
+    }
     GLenum target;
     switch (desc->type) {
     case NT_BUFFER_VERTEX:

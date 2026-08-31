@@ -1015,6 +1015,11 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     if (!desc) {
         return result;
     }
+    /* Same recoverable contract as the other make_* creators -- without this
+     * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        return result;
+    }
 
     /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
@@ -1774,7 +1779,7 @@ static void assert_instance_attribs_pointed(void) {
     }
     NT_ASSERT(
         (s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_pointed) &&
-        "instanced draw: bind_instance_buffer has not pointed the bound vertex input's instance attribs");
+        "draw: bound vertex input has instance attribs that bind_instance_buffer has not pointed");
 }
 
 /* The bound vertex input carries its own index type; NT_INDEX_NONE here means

@@ -150,10 +150,13 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_bind_instance_buffer(inst_buf, 0);
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
-    /* begin_frame's cache reset (VAO 0) + one bind per vertex-input switch. */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_gl_test_vao_binds());
+    /* Captured before end_frame so teardown binds cannot pollute it. */
+    uint32_t frame_vao_binds = nt_gfx_gl_test_vao_binds();
     nt_gfx_end_frame();
+    /* Restore before any assert -- a failure longjmps past this line. */
     glad_glVertexAttribPointer = s_saved_attrib_pointer;
+    /* begin_frame's cache reset (VAO 0) + one bind per vertex-input switch. */
+    TEST_ASSERT_EQUAL_UINT32(4, frame_vao_binds);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_static_attrib_pointer_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_instance_attrib_pointer_calls());
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
@@ -275,6 +278,31 @@ static void test_creating_vertex_input_preserves_bound_one(void) {
     nt_gfx_end_frame();
 }
 
+static const char *s_vertexid_vs_src = "precision mediump float;\n"
+                                       "void main() {\n"
+                                       "    vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);\n"
+                                       "    gl_Position = vec4(p, 0.0, 1.0);\n"
+                                       "}\n";
+
+/* Attribute-less draws (gl_VertexID) go through an empty vertex input: a
+ * bound VAO with zero enabled arrays must rasterize on real core GL. */
+static void test_empty_vertex_input_draws_fullscreen(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vertexid_vs_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 static void GLAD_API_PTR fail_gen_vertex_arrays(GLsizei count, GLuint *arrays) {
     for (GLsizei i = 0; i < count; i++) {
         arrays[i] = 0;
@@ -319,6 +347,7 @@ int main(void) {
     RUN_TEST(test_second_frame_issues_no_static_attrib_pointers);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_orphan_under_live_vertex_input_renders);
+    RUN_TEST(test_empty_vertex_input_draws_fullscreen);
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);

@@ -254,6 +254,14 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
         if (e->mesh_id == mesh.id && e->key == key && nt_gfx_vertex_input_valid(e->vi)) {
             return e->vi;
         }
+        /* Row i serves pool slot i, so a different mesh_id is a dead
+         * generation. Destroy its vi here -- a bufferless vi (empty layout,
+         * non-indexed mesh) has no cascade hook and would otherwise pin the
+         * entry until shutdown. */
+        if (e->mesh_id != 0 && e->mesh_id != mesh.id) {
+            nt_gfx_destroy_vertex_input(e->vi);
+            *e = (nt_mesh_vi_version_t){0};
+        }
         if (reusable == NULL && (e->vi.id == 0 || !nt_gfx_vertex_input_valid(e->vi))) {
             reusable = e;
         }

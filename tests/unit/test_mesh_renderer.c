@@ -83,6 +83,36 @@ static nt_mesh_t create_test_mesh(void) {
     return (nt_mesh_t){.id = handle};
 }
 
+/* Non-indexed variant: 3 vertices, no index data (index_type NONE). */
+static nt_mesh_t create_test_mesh_nonindexed(void) {
+    uint32_t vdata_size = 3 * 3 * (uint32_t)sizeof(float);
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + (uint32_t)sizeof(NtStreamDesc) + vdata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 0; /* none */
+    hdr->vertex_count = 3;
+    hdr->index_count = 0;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = 0;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = nt_hash32_str("position").value;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+
+    float *verts = (float *)(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc));
+    verts[3] = 1.0F;
+    verts[7] = 1.0F;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    return (nt_mesh_t){.id = handle};
+}
+
 /* ---- Helper: link a real GFX program, then create a material on it ---- */
 
 static nt_program_t create_test_program(void) {
@@ -677,6 +707,26 @@ void test_vertex_input_empty_derived_layout_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
+/* Bufferless vertex inputs (empty derived layout + non-indexed mesh) have no
+ * destroy-cascade hook: stale-generation entries are purged on lookup, so
+ * mesh recreate cycles cannot exhaust the versions row. */
+void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
+    nt_material_t mat = create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_mesh_t mesh = create_test_mesh_nonindexed();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1];
+    /* More cycles than max_mesh_layouts (default 4): without the purge the
+     * live-vi count climbs and the 5th lookup trips the row-overflow assert. */
+    for (int cycle = 0; cycle < 6; cycle++) {
+        items[0] = (nt_render_item_t){.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+        nt_mesh_renderer_draw_list(items, 1);
+        TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+        nt_gfx_deactivate_mesh(mesh.id);
+        mesh = create_test_mesh_nonindexed(); /* reuses the freed pool slot */
+        *nt_mesh_comp_handle(e) = mesh;
+    }
+}
+
 /* Mesh slot reuse must not alias the stale vertex input: the versions table
  * stores the full generation-checked handle. */
 void test_vertex_input_survives_mesh_slot_reuse(void) {
@@ -1027,6 +1077,7 @@ int main(void) {
     RUN_TEST(test_vertex_input_distinct_per_mesh);
     RUN_TEST(test_vertex_input_shared_for_same_derived_layout);
     RUN_TEST(test_vertex_input_empty_derived_layout_draws);
+    RUN_TEST(test_bufferless_vertex_input_purged_on_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);

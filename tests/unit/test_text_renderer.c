@@ -436,6 +436,25 @@ void test_flush_stops_after_program_cleared(void) {
     nt_gfx_end_frame();
 }
 
+/* A recoverable vertex-input creation failure must not disable text until the
+ * next restore: flush retries the creation lazily, like the pipeline cache. */
+void test_flush_retries_vertex_input_after_backend_failure(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(material);
+
+    /* Buffers recreate fine; the vertex input creation fails once. */
+    nt_gfx_stub_test_fail_next_vertex_input_create();
+    nt_text_renderer_restore_gpu();
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_flush(); /* without the retry this discards the glyphs */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 /* Two materials on one program and one render state are one pipeline: the key is
  * the pipeline signature, not the material's identity. */
 void test_materials_sharing_a_program_share_one_pipeline(void) {
@@ -1310,6 +1329,7 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
+    RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);
     RUN_TEST(test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);

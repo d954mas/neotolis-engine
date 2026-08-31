@@ -780,6 +780,8 @@ void nt_text_renderer_flush(void) {
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
     s_text.batch_pipeline = (nt_pipeline_t){0};
+    /* Recovered: a later distinct failure warns again instead of going silent. */
+    s_text.warned_no_pipeline = false;
 }
 // #endregion
 
