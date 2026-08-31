@@ -6,6 +6,7 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "renderers/nt_renderer_shared.h"
 
 #include "utf8/nt_utf8.h"
 
@@ -44,7 +45,8 @@ typedef struct {
 
 static struct {
     /* GPU resources */
-    nt_pipeline_t pipeline;
+    nt_renderer_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
+    uint16_t pipeline_count;
     nt_buffer_t vbo; /* dynamic vertex buffer */
     nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
 
@@ -55,6 +57,10 @@ static struct {
 
     /* Current state */
     nt_material_t material;
+    /* Resolved once when the batch opens: the staged glyphs belong to it, so a
+     * program replaced under them cannot redirect them. Zero, or invalidated by
+     * a destroyed program, means flush has nothing to draw through. */
+    nt_pipeline_t batch_pipeline;
     nt_font_t font;
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
@@ -62,10 +68,10 @@ static struct {
     /* Per-run decoration axes (weight/outline/shadow/underline/strike/oblique); reset as one unit. */
     nt_text_deco_t deco;
 
-    /* Cached pipeline state */
-    uint32_t pipeline_material_version; /* version when pipeline was last created */
-
     bool initialized;
+    /* One-shot so a load-time discard does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_no_pipeline;
 
 #ifdef NT_TEST_ACCESS
     /* Count every set_material / set_font entry regardless of early-out so
@@ -111,15 +117,22 @@ static void generate_quad_indices(void) {
 }
 // #endregion
 
-// #region Pipeline creation
-static void create_pipeline(void) {
+// #region Pipeline cache
+/* The key omits layout, depth_func and label because they are constant here. */
+static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    if (!info || !info->ready) {
-        return;
+    const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
+    /* One query covers every state: no program yet, a program that died with the
+     * context, and a program its owner destroyed. */
+    if (!info || !nt_gfx_program_ready(program)) {
+        nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info);
+        return (nt_pipeline_t){0};
     }
 
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
+    const uint64_t key = ((uint64_t)program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, s_text.pipeline_count, key);
+    if (cached.id != 0) {
+        return cached;
     }
 
     /* Slug vertex layout: 6 attributes, stride = 72 bytes */
@@ -138,9 +151,8 @@ static void create_pipeline(void) {
     };
 
     /* Read render state from material — same pattern as mesh_renderer */
-    s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = (nt_shader_t){info->resolved_vs},
-        .fragment_shader = (nt_shader_t){info->resolved_fs},
+    const nt_pipeline_desc_t desc = {
+        .program = program,
         .layout = layout,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
@@ -148,18 +160,14 @@ static void create_pipeline(void) {
         .blend = info->blend,
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
-    });
-
-    /* Bind global UBO slot */
-    nt_gfx_set_uniform_block(s_text.pipeline, "Globals", 0);
-
-    s_text.pipeline_material_version = info->version;
+    };
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, key, &desc, &s_text.warned_no_pipeline);
 }
 // #endregion
 
 // #region Lifecycle
-/* GPU resources only — the pipeline is created lazily in flush, so this owns just the buffers + index
- * pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
+/* GPU resources only — pipelines are built lazily on a cache miss, so this owns just the buffers +
+ * index pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
 static void create_gpu_resources(void) {
     generate_quad_indices();
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -179,10 +187,12 @@ static void create_gpu_resources(void) {
 }
 
 static void destroy_gpu_resources(void) {
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
-        s_text.pipeline = (nt_pipeline_t){0};
+    for (uint16_t i = 0; i < s_text.pipeline_count; i++) {
+        nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
+        s_text.pipelines[i] = (nt_renderer_pipeline_entry_t){0};
     }
+    s_text.pipeline_count = 0;
+    s_text.batch_pipeline = (nt_pipeline_t){0}; /* the cache it pointed into is gone */
     nt_gfx_destroy_buffer(s_text.vbo);
     nt_gfx_destroy_buffer(s_text.ibo);
     s_text.vbo = (nt_buffer_t){0};
@@ -220,8 +230,7 @@ void nt_text_renderer_restore_gpu(void) {
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
-    s_text.glyph_count = 0;
-    s_text.pipeline_material_version = 0; /* pipeline destroyed above → flush rebuilds it lazily */
+    s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
 }
 // #endregion
 
@@ -235,7 +244,10 @@ void nt_text_renderer_set_material(nt_material_t mat) {
      * bumped generation) must assert even if the id still matches what we cached. */
     const nt_material_info_t *info = nt_material_get_info(mat);
     NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
-    NT_ASSERT(info->ready && "nt_text_renderer_set_material: material not ready");
+    /* Assignment, not liveness: on the frame the context dies the program is
+     * already dead here, and trapping on that would crash a recoverable event.
+     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+    NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
 
     if (s_text.material.id == mat.id) {
         return;
@@ -246,8 +258,6 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     }
 
     s_text.material = mat;
-    s_text.pipeline_material_version = 0;
-    create_pipeline();
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
@@ -281,6 +291,10 @@ static void transform_point(float out[3], const float model[16], float x, float 
 static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
+    }
+    /* Glyph lookup may have flushed staging through the font cache callback. */
+    if (s_text.glyph_count == 0) {
+        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
 
     /* 0.5 px screen-space dilation ("Decade of Slug" improvement): oversize
@@ -358,6 +372,9 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
+    }
+    if (s_text.glyph_count == 0) {
+        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
     nt_text_vertex_t *v = &s_text.vertices[s_text.vertex_count];
 
@@ -548,14 +565,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (metrics.units_per_em == 0) {
         return; /* no resource loaded yet (or all unmounted) */
     }
+    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font)) || !nt_gfx_texture_ready(nt_font_get_band_texture(s_text.font))) {
+        return;
+    }
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
 
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
-    if (!slot) {
-        return;
-    }
 
     /* Fold synthetic-oblique into the model once (constant for the whole call): col0/col1 of the already
      * Y-flipped model ARE the text-local axes, so out.col1 += oblique*col0 leans x by oblique*y about the
@@ -680,17 +697,20 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    /* Recreate pipeline if missing or material version changed (shader invalidation) */
-    if (s_text.material.id != 0) {
-        const nt_material_info_t *info = nt_material_get_info(s_text.material);
-        if (info && info->version != s_text.pipeline_material_version) {
-            create_pipeline();
+    /* Resolved when the batch opened. Re-checked rather than trusted: destroying
+     * a program destroys the pipelines built on it, and that can happen between
+     * the first glyph and here. */
+    const nt_pipeline_t pipeline = s_text.batch_pipeline;
+    if (!nt_gfx_pipeline_valid(pipeline)) {
+        /* Unready programs were reported at batch open; destruction of a captured
+         * pipeline or backend allocation failure still needs a warning. */
+        if (!s_text.warned_no_pipeline) {
+            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
+            s_text.warned_no_pipeline = true;
         }
-    }
-    if (s_text.pipeline.id == 0) {
-        NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
+        s_text.batch_pipeline = (nt_pipeline_t){0};
         return;
     }
 
@@ -699,7 +719,7 @@ void nt_text_renderer_flush(void) {
      * stalling on the previous frame's draw of the same VBO. */
     nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
-    nt_gfx_bind_pipeline(s_text.pipeline);
+    nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_buffer(s_text.vbo);
     nt_gfx_bind_index_buffer(s_text.ibo);
 
@@ -731,9 +751,12 @@ void nt_text_renderer_flush(void) {
     s_text.test_nonempty_flush_calls++;
 #endif
 
-    /* Reset staging buffer */
+    /* Reset staging buffer. The next glyph opens a new batch and resolves its
+     * own pipeline, so an overflow flush mid-draw cannot pin the rest of the
+     * run to this one. */
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
+    s_text.batch_pipeline = (nt_pipeline_t){0};
 }
 // #endregion
 
@@ -773,5 +796,7 @@ float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_out
 bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underline; }
 bool nt_text_renderer_test_saw_strike(void) { return s_text.test_saw_strike; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
+
+uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif
 // #endregion

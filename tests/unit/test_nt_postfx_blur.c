@@ -46,6 +46,7 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
+        .max_programs = 8,
         .max_pipelines = 8,
         .max_buffers = 8,
         .max_textures = 12,
@@ -356,8 +357,61 @@ static void test_blur_lifecycle_misuse_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_init());
 
     nt_postfx_blur_shutdown();
-    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_restore_gpu());
+    /* Restoring an inactive module is a no-op, not a trap: a game restores every
+     * module it might own without tracking which ones it turned off. */
+    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
+}
+
+/* A second context loss can land between begin_frame's recovery and the restore
+ * call, so the relink inside restore fails. The module has to stay active and
+ * rebuild on the next restore instead of going dark for the session. */
+static void test_failed_restore_is_retried_by_the_next_one(void) {
+    /* setUp already initialized the module. Lose the context during the relink
+     * inside restore, which is what a second browser loss does. */
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    const nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = temp, .dest = dest, .radius = 4.0F};
+
+    nt_gfx_stub_test_lose_context_on_program_create();
+    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
+
+    /* A pass while the rebuild is still pending skips instead of trapping: the
+     * state is recoverable, so it must not crash a game that blurs every frame. */
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_postfx_blur_test_reset_counters();
+    nt_gfx_begin_frame();
+    nt_postfx_blur_gaussian(&pass);
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+
+    /* Still active, only its GPU objects are gone: the next restore rebuilds
+     * rather than asserting on a module that shut itself down. */
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
+
+    nt_postfx_blur_test_reset_counters();
+    nt_gfx_begin_frame();
+    nt_postfx_blur_gaussian(&pass);
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
+}
+
+/* Separate vec4 uniforms and a masked index avoid driver-dependent array bounds
+ * rejection; checking the source also covers drivers that accept unsafe indexing. */
+static void test_blur_fs_keeps_the_masked_kernel_index(void) {
+    const char *src = nt_postfx_blur_test_fs_source();
+    TEST_ASSERT_NOT_NULL(src);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(src, "k[i & 3]"), "kernel index must stay masked to 0..3");
+    TEST_ASSERT_NULL_MESSAGE(strstr(src, "u_kernel["), "kernel taps must stay separate vec4 uniforms, not an array");
+    for (int i = 0; i < 5; i++) {
+        char name[16];
+        (void)snprintf(name, sizeof(name), "u_kernel%d", i);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(src, name), "all five kernel uniforms must be declared");
+    }
 }
 
 static void test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets(void) {
@@ -395,6 +449,8 @@ int main(void) {
     RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
+    RUN_TEST(test_failed_restore_is_retried_by_the_next_one);
+    RUN_TEST(test_blur_fs_keeps_the_masked_kernel_index);
     RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);
     return UNITY_END();
 }

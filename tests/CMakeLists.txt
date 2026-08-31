@@ -274,7 +274,14 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
-    add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c)
+    # Real OpenGL: a rejected bind must clear the backend slot mirrors (stub cannot show it).
+    add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
+    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
+    set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
+
+    add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_nt_gfx_render_target_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
     target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_render_target_native)
     set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
@@ -291,6 +298,13 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_postfx_blur PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_postfx_blur PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_postfx_blur WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Real GL: the stub never links, so this is the only link coverage the
+    # helper's embedded shader pair has.
+    add_executable(test_nt_postfx_blur_native unit/test_nt_postfx_blur_native.c)
+    target_link_libraries(test_nt_postfx_blur_native PRIVATE nt_postfx_blur nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_postfx_blur_native)
+    set_tests_properties(test_nt_postfx_blur_native PROPERTIES LABELS "native")
 
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)
@@ -385,6 +399,17 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_render_items COMMAND test_render_items)
 
+    # Exercise Sponza's real loader and link gate without its packs or a window.
+    add_executable(test_sponza_program_assignment unit/test_sponza_program_assignment.c)
+    target_include_directories(test_sponza_program_assignment PRIVATE "${CMAKE_SOURCE_DIR}/examples/sponza/generated")
+    target_link_libraries(test_sponza_program_assignment PRIVATE
+        nt_mesh_renderer nt_app_stub nt_input_stub nt_window_stub nt_resource nt_material
+        nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_render
+        nt_hash nt_math nt_time nt_shared nt_core
+        nt_gfx_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
+    )
+    nt_setup_test_target(test_sponza_program_assignment)
+
     # --- Sort module tests ---
     add_executable(test_sort unit/test_sort.c)
     target_link_libraries(test_sort PRIVATE nt_sort unity)
@@ -397,7 +422,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c)
-    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub stb_truetype unity nt_meshwire_stub)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
     nt_setup_test_target(test_font)
 
@@ -417,8 +442,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_ui_3d_bench)
 
     # --- Text renderer module tests ---
-    add_executable(test_text_renderer unit/test_text_renderer.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
+    # nt_assert_trap.c backs the dead-program death-test; needs unit/ on the include
+    # path so it resolves "test_helpers/nt_assert_trap.h".
+    add_executable(test_text_renderer unit/test_text_renderer.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub)
+    target_include_directories(test_text_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_text_renderer)
 
@@ -970,7 +998,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_mesh_renderer PRIVATE
         nt_mesh_renderer nt_render nt_gfx_stub nt_basisu_transcoder_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
-        nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity
      nt_meshwire_stub)
     target_compile_definitions(test_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_include_directories(test_mesh_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")

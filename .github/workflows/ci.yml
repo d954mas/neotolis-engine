@@ -694,7 +694,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts context_loss.spec.ts
 
   deploy:
     name: Deploy

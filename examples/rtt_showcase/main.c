@@ -11,6 +11,7 @@
 #include "http/nt_http.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
+#include "material/nt_program_ref.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h"
@@ -84,13 +85,22 @@ static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
-static nt_resource_t s_sprite_vs_handle;
-static nt_resource_t s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
+}
 static nt_font_t s_font;
 static nt_atlas_region_ref_t s_white_ref;
 static bool s_atlas_bound;
@@ -118,6 +128,7 @@ static struct {
     nt_texture_t white;
     nt_shader_t quad_vs;
     nt_shader_t quad_fs;
+    nt_program_t quad_program;
     nt_pipeline_t quad_pipeline;
     nt_buffer_t quad_vbo;
     uint16_t rt_width;
@@ -139,8 +150,8 @@ static void destroy_quad_resources(void) {
     if (s_demo.quad_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_demo.quad_vbo);
     }
-    if (s_demo.quad_pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_demo.quad_pipeline);
+    if (s_demo.quad_program.id != 0) {
+        nt_gfx_destroy_program(s_demo.quad_program);
     }
     if (s_demo.quad_fs.id != 0) {
         nt_gfx_destroy_shader(s_demo.quad_fs);
@@ -153,6 +164,7 @@ static void destroy_quad_resources(void) {
     }
     s_demo.quad_vbo = (nt_buffer_t){0};
     s_demo.quad_pipeline = (nt_pipeline_t){0};
+    s_demo.quad_program = NT_PROGRAM_INVALID;
     s_demo.quad_fs = (nt_shader_t){0};
     s_demo.quad_vs = (nt_shader_t){0};
     s_demo.white = (nt_texture_t){0};
@@ -164,10 +176,13 @@ static bool make_quad_resources(void) {
     if (s_demo.quad_vs.id == 0 || s_demo.quad_fs.id == 0) {
         return false;
     }
+    s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
+    if (!nt_gfx_program_ready(s_demo.quad_program)) {
+        return false;
+    }
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = s_demo.quad_vs,
-        .fragment_shader = s_demo.quad_fs,
+        .program = s_demo.quad_program,
         .layout =
             {
                 .stride = sizeof(rtt_quad_vertex_t),
@@ -356,7 +371,7 @@ static void declare_slider_control(const char *title, const char *value_text, ui
 static bool ui_ready(void) {
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    return s_atlas_bound && s_font_bound && sprite_info != NULL && sprite_info->ready && text_info != NULL && text_info->ready;
+    return s_atlas_bound && s_font_bound && sprite_info != NULL && nt_gfx_program_ready(sprite_info->program) && text_info != NULL && nt_gfx_program_ready(text_info->program);
 }
 
 static void draw_ui_overlay(void) {
@@ -505,6 +520,7 @@ static void frame(void) {
     }
     nt_resource_step();
     nt_material_step();
+    link_programs();
     try_bind_ui_resources();
 
     nt_gfx_begin_frame();
@@ -513,11 +529,12 @@ static void frame(void) {
         return;
     }
     if (g_nt_gfx.context_restored) {
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
         restored = make_quad_resources() && restored;
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -530,12 +547,22 @@ static void frame(void) {
         restored = s_frame_ubo.id != 0 && restored;
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
         s_demo.render_resources_ready = restored && render_targets_ready();
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
         }
+        /* Everything decided before begin_frame described the dead context, so
+         * this frame draws nothing -- the next one is built from scratch. */
+        nt_gfx_end_frame();
+        nt_window_swap_buffers();
+        return;
     }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
         nt_gfx_end_frame();
@@ -622,18 +649,16 @@ int main(void) {
     nt_resource_load_auto(s_pack_id, "assets/rtt_showcase.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_RTT_SHOWCASE_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
     init_ui_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -643,8 +668,6 @@ int main(void) {
         .label = "rtt_showcase_ui_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -700,6 +723,8 @@ int main(void) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();

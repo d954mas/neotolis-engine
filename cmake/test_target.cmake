@@ -35,7 +35,7 @@ function(nt_setup_test_target target_name)
     set_tests_properties(${target_name} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
     # Display-touching tests (real GLFW/GL) share one xvfb display on headless
     # runners: never run two concurrently.
-    if(target_name MATCHES "^(test_window_native|test_nt_gfx_render_target_native|test_shape_renderer_ring_native|test_clipboard)$")
+    if(target_name MATCHES "^(test_window_native|test_nt_gfx_bind_mirrors_native|test_nt_gfx_render_target_native|test_shape_renderer_ring_native|test_nt_postfx_blur_native|test_clipboard)$")
         set_tests_properties(${target_name} PROPERTIES RESOURCE_LOCK gl_display)
     endif()
 endfunction()

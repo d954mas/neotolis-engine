@@ -32,6 +32,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "render/nt_render_defs.h"
@@ -90,13 +91,20 @@ static nt_hash32_t s_pixel_pack_id;
 static nt_hash32_t s_hires_pack_id;
 
 static nt_resource_t s_mesh_handle;
-static nt_resource_t s_vs_handle;
-static nt_resource_t s_fs_handle;
 static nt_resource_t s_lenna_handle;
 
 /* ---- Material ---- */
 
 static nt_material_t s_cube_material;
+static nt_program_ref_t s_cube_program;
+
+/* Links once both stages are ready. The program is ours: the material only
+ * borrows the handle, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_cube_program)) {
+        nt_material_set_program(s_cube_material, s_cube_program.program);
+    }
+}
 
 static int16_t s_pixel_prio = 10;
 static int16_t s_hires_prio = 20;
@@ -216,6 +224,7 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     /* Dump pack contents when they become READY */
     if (!s_base_dumped && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
@@ -290,7 +299,7 @@ static void frame(void) {
     /* ---- Build render items ---- */
 
     const nt_material_info_t *mat_info = nt_material_get_info(s_cube_material);
-    bool can_render = mat_info && mat_info->ready && nt_resource_is_ready(s_mesh_handle);
+    bool can_render = mat_info && nt_gfx_program_ready(mat_info->program) && nt_resource_is_ready(s_mesh_handle);
 
     /* ---- Render ---- */
 
@@ -300,7 +309,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         can_render = false;
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
@@ -317,7 +325,11 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_mesh_renderer_restore_gpu();
+        nt_program_ref_drop(&s_cube_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
@@ -418,14 +430,12 @@ int main(void) {
 
     /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
-    s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
+    s_cube_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_cube_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_lenna_handle = nt_resource_request(ASSET_TEXTURE_TEXTURES_LENNA, NT_ASSET_TEXTURE);
 
     /* Create material from resource handles */
     s_cube_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_vs_handle,
-        .fs = s_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_lenna_handle}},
         .texture_count = 1,
         .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
@@ -508,6 +518,7 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_material_destroy(s_cube_material);
+    nt_program_ref_drop(&s_cube_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

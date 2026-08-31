@@ -15,6 +15,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -521,17 +522,10 @@ static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
-static nt_resource_t s_sprite_vs_handle;
-static nt_resource_t s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
 /* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
 static nt_resource_t s_rich_font_resource[4];
 /* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
-static nt_resource_t s_radial_vs_handle;
-static nt_resource_t s_radial_fs_handle;
-static nt_resource_t s_radial_image_fs_handle;
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
@@ -543,6 +537,30 @@ static nt_material_t s_text_material;
 static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program;
+static nt_program_ref_t s_radial_program;
+static nt_program_ref_t s_radial_image_program; /* shared by all five radial-image materials */
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
+    if (nt_program_ref_update(&s_radial_program)) {
+        nt_material_set_program(s_radial_material, s_radial_program.program);
+    }
+    if (nt_program_ref_update(&s_radial_image_program)) {
+        for (int m = 0; m < 4; ++m) {
+            nt_material_set_program(s_radial_image_material[m], s_radial_image_program.program);
+        }
+        nt_material_set_program(s_radial_image_packed_material, s_radial_image_program.program);
+    }
+}
 static nt_atlas_region_ref_t s_radial_art_ref;
 /* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
  * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
@@ -1948,8 +1966,9 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
-    /* The radial material(s) load with the pack; until ready, skip the tab body (no-art early-out). */
-    if (s_radial_material.id == 0U) {
+    /* Custom images require a program assignment; skip declaration until the radial program is ready. */
+    const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
+    if (!radial_info || !nt_gfx_program_ready(radial_info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
     }
@@ -3631,6 +3650,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     /* Auto-animate progress when its panel toggle is on. On the off->on edge, derive the ramp direction
      * from the current value so it continues toward the nearer end instead of snapping. */
@@ -3706,7 +3726,6 @@ static void frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -3716,11 +3735,21 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_shape_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_program_ref_drop(&s_radial_program);
+        nt_program_ref_drop(&s_radial_image_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init next frame so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
-        s_font_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -3732,7 +3761,7 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -3895,10 +3924,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/ui_showcase.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
@@ -3907,9 +3936,10 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
-    s_radial_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
-    s_radial_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
-    s_radial_image_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
+    s_radial_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
+    s_radial_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
+    s_radial_image_program.vs = s_radial_program.vs; /* shares the radial vertex stage */
+    s_radial_image_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
     s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
@@ -3920,8 +3950,6 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -3931,8 +3959,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -3946,8 +3972,6 @@ int main(int argc, char *argv[]) {
      * a_layout @ loc 7, walker-filled by name) + the flat SDF FS. No texture — the shape is
      * per-pixel. Declares the custom per-vertex attrs so the renderer builds the extended layout. */
     s_radial_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_radial_vs_handle,
-        .fs = s_radial_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -3965,8 +3989,6 @@ int main(int argc, char *argv[]) {
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
-            .vs = s_radial_vs_handle,
-            .fs = s_radial_image_fs_handle,
             .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
             .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
@@ -3988,8 +4010,6 @@ int main(int argc, char *argv[]) {
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
      * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_radial_vs_handle,
-        .fs = s_radial_image_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4059,6 +4079,10 @@ int main(int argc, char *argv[]) {
         nt_material_destroy(s_radial_image_material[m]);
     }
     nt_material_destroy(s_radial_image_packed_material);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
+    nt_program_ref_drop(&s_radial_program);
+    nt_program_ref_drop(&s_radial_image_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

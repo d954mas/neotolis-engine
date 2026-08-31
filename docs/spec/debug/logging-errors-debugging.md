@@ -40,7 +40,7 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 ### Recoverable
 
 - missing texture → placeholder
-- material mismatch → placeholder material
+- material without a ready program → renderers skip it (there is no placeholder material)
 - resource load fail → asset state failed + log
 - audio decode failure → clip state failed + log
 

@@ -18,6 +18,14 @@ typedef struct {
     uint32_t id;
 } nt_shader_t;
 
+/* Linked stage pair owned by the caller; destroy with nt_gfx_destroy_program.
+ * Linking never deduplicates. Pipelines and materials borrow the handle.
+ * Linkage is immutable; context recovery
+ * requires a newly linked program. */
+typedef struct {
+    uint32_t id;
+} nt_program_t;
+
 typedef struct {
     uint32_t id;
 } nt_pipeline_t;
@@ -40,6 +48,7 @@ typedef struct {
 
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
+#define NT_PROGRAM_INVALID ((nt_program_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
  * itself. One texture can be sampled with different filters in different
@@ -61,7 +70,7 @@ typedef struct {
 #define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
-    const char *name; /* string literal, not owned */
+    const char *name; /* borrowed unchanged until nt_gfx_shutdown */
     uint32_t binding_slot;
     bool active;
 } nt_global_block_t;
@@ -288,6 +297,7 @@ typedef struct {
 
 typedef struct {
     uint16_t max_shaders;        /* default: 32 */
+    uint16_t max_programs;       /* default: 16 */
     uint16_t max_pipelines;      /* default: 16 */
     uint16_t max_buffers;        /* default: 128 */
     uint16_t max_textures;       /* default: 64 */
@@ -307,8 +317,8 @@ typedef struct {
 } nt_shader_desc_t;
 
 typedef struct {
-    nt_shader_t vertex_shader;
-    nt_shader_t fragment_shader;
+    /* Borrowed; destroying the program also destroys this pipeline. */
+    nt_program_t program;
     nt_vertex_layout_t layout;
     bool depth_test;
     bool depth_write;
@@ -418,6 +428,7 @@ extern nt_gfx_t g_nt_gfx;
 static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
     return (nt_gfx_desc_t){
         .max_shaders = 32,
+        .max_programs = 16,
         .max_pipelines = 16,
         .max_buffers = 128,
         .max_textures = 64,
@@ -430,6 +441,8 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
 
 /* ---- Global UBO block registration ---- */
 
+/* Registers the block binding for existing and future programs.
+ * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it. */
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
@@ -451,6 +464,12 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
+/* Links valid stages; link errors and the GL cache limit (16 uniform locations) assert.
+ * Returns invalid while the context is lost or begin_frame has not completed recovery, and
+ * for a live stage handle whose GPU object an earlier loss discarded -- recreate the stages
+ * and link again. Only a stale stage handle asserts. */
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
+/* Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
@@ -461,7 +480,14 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 
 /* ---- Resource destruction ---- */
 
+/* Already linked programs remain usable after their stages are destroyed. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
+/* Destroys the program and its pipelines; materials retain the now-unready handle.
+ * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
+ * Clear
+ * the caller's handle to NT_PROGRAM_INVALID after destruction. */
+void nt_gfx_destroy_program(nt_program_t prog);
+/* Invalid and stale handles are no-ops because program destruction also destroys pipelines. */
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -478,6 +504,16 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
+/* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
+ * re-read the new handle from its resource after reactivation. */
+bool nt_gfx_shader_ready(nt_shader_t shd);
+/* Reports a live pool slot, independent of GPU readiness. */
+bool nt_gfx_program_valid(nt_program_t prog);
+/* Reports a live pipeline slot; false after pipeline or program destruction. */
+bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
+/* Reports a live program backend, required by nt_gfx_make_pipeline.
+ * Readiness lost to context loss never returns for that handle. */
+bool nt_gfx_program_ready(nt_program_t prog);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
 /* Returns INVALID for invalid or stale handles. */
@@ -546,7 +582,6 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
-void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint
@@ -590,6 +625,21 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
+typedef struct {
+    nt_pipeline_t pipeline;
+    nt_program_t program;
+    uint32_t first_vertex;
+    uint32_t num_vertices;
+    uint32_t first_index;
+    uint32_t num_indices;
+    uint32_t instance_count;
+} nt_gfx_test_draw_t;
+
+void nt_gfx_test_draw_trace_reset(bool enabled);
+uint32_t nt_gfx_test_draw_trace_count(void);
+nt_gfx_test_draw_t nt_gfx_test_draw_trace_at(uint32_t index);
+bool nt_gfx_test_draw_trace_overflowed(void);
+
 /* Read back the cached scissor rect [x, y, w, h] from the last
  * nt_gfx_set_scissor call. Out-param must be a 4-element int array. */
 void nt_gfx_test_scissor_rect(int out[4]);

@@ -290,29 +290,9 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sprite_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "sprite_fs"});
 
-    char vs_name[64];
-    char fs_name[64];
-    char pack_name[64];
-    (void)snprintf(vs_name, sizeof(vs_name), "test_sr_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof(fs_name), "test_sr_fs_%u", s_vpack_counter);
-    (void)snprintf(pack_name, sizeof(pack_name), "mat_pack_%u", s_vpack_counter++);
-
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.blend = blend;
@@ -336,36 +316,20 @@ static nt_material_t create_test_material(void) { return create_test_material_wi
  *
  * loc==0 → no attr_map (plain 20B base). loc>0 → one custom FLOAT4 attr
  * "a_radial" bound to that GL location. */
-/* Shared shader handles for the radial helper — reset to {0} in setUp each test
+/* One program shared by every radial material — reset in setUp each test
  * (subsystems are re-init'd per test, so cached handles cannot persist). */
-static nt_resource_t s_radial_shared_vs;
-static nt_resource_t s_radial_shared_fs;
+static nt_program_t s_radial_shared_program;
 
 static nt_material_t create_radial_test_material(const char *stream_name, uint8_t loc) {
-    if (s_radial_shared_vs.id == 0) {
+    if (s_radial_shared_program.id == 0) {
         nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
         nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "radial_fs"});
-        char vs_name[64];
-        char fs_name[64];
-        char pack_name[64];
-        (void)snprintf(vs_name, sizeof(vs_name), "radial_shared_vs_%u", s_vpack_counter);
-        (void)snprintf(fs_name, sizeof(fs_name), "radial_shared_fs_%u", s_vpack_counter);
-        (void)snprintf(pack_name, sizeof(pack_name), "radial_shared_pack_%u", s_vpack_counter++);
-        nt_hash32_t pid = nt_hash32_str(pack_name);
-        nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-        nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-        nt_resource_create_pack(pid, 0);
-        nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
-        nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-        s_radial_shared_vs = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-        s_radial_shared_fs = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-        nt_resource_step();
+        s_radial_shared_program = nt_gfx_make_program(vs, fs);
     }
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = s_radial_shared_vs;
-    desc.fs = s_radial_shared_fs;
+    desc.program = s_radial_shared_program;
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -423,11 +387,10 @@ void setUp(void) {
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_atlas_res = NT_RESOURCE_INVALID;
     s_vpack_counter = 0;
-    s_radial_shared_vs = NT_RESOURCE_INVALID;
-    s_radial_shared_fs = NT_RESOURCE_INVALID;
+    s_radial_shared_program = NT_PROGRAM_INVALID;
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_render_targets = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
 
@@ -577,6 +540,128 @@ void test_sprite_renderer_pipeline_cache(void) {
     /* Re-issuing the same materials must NOT inflate the cache */
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+}
+
+/* Context restore drops queued commands and cached pipelines without destroying borrowed programs. */
+void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat); /* opens a cmd and caches a pipeline */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+
+    nt_sprite_renderer_restore_gpu();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+
+    /* The material may keep or drop the handle; neither is required. */
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+}
+
+/* The restore window with the context already back: the material still holds the
+ * program the game destroyed, and the live-context poll inside make_pipeline no
+ * longer covers it. Binding must degrade to a pipeline-less cmd, not trap. */
+void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    nt_material_t mat = create_test_material();
+    const nt_program_t dead = nt_material_get_info(mat)->program;
+
+    nt_sprite_renderer_restore_gpu();     /* drops the cache, as recovery does */
+    nt_gfx_destroy_program(dead);         /* game destroys its program */
+    nt_sprite_renderer_set_material(mat); /* material still names it */
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+}
+
+void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.max_vertices = 16;
+    desc.max_indices = 24;
+    desc.custom_max_vertices = 16;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xC8ULL);
+    nt_material_t mat = create_test_material();
+    nt_material_t other = create_test_material();
+    nt_program_t program_a = nt_material_get_info(mat)->program;
+    nt_program_t program_b = nt_material_get_info(other)->program;
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    nt_sprite_renderer_set_material(other);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    nt_gfx_test_draw_trace_reset(true);
+
+    nt_sprite_renderer_set_material(mat);
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    }
+    nt_material_set_program(mat, program_b);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    nt_gfx_test_draw_t first = nt_gfx_test_draw_trace_at(0);
+    nt_gfx_test_draw_t second = nt_gfx_test_draw_trace_at(1);
+    nt_gfx_test_draw_t third = nt_gfx_test_draw_trace_at(2);
+    TEST_ASSERT_EQUAL_UINT32(program_a.id, first.program.id);
+    TEST_ASSERT_EQUAL_UINT32(program_a.id, second.program.id);
+    TEST_ASSERT_EQUAL_UINT32(program_b.id, third.program.id);
+    TEST_ASSERT_EQUAL_UINT32(first.pipeline.id, second.pipeline.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(second.pipeline.id, third.pipeline.id);
+    for (uint32_t i = 0; i < 3; i++) {
+        nt_gfx_test_draw_t draw = nt_gfx_test_draw_trace_at(i);
+        TEST_ASSERT_EQUAL_UINT32(i == 0 ? 24 : 6, draw.num_indices);
+        TEST_ASSERT_EQUAL_UINT32(i == 0 ? 16 : 4, draw.num_vertices);
+    }
+}
+
+/* Queued work outlives the program it was built on when the owner destroys it
+ * mid-frame. Flush drops those cmds: binding a destroyed pipeline leaves nothing
+ * bound, and the draw would then trap pointing at the wrong cause. */
+void test_sprite_renderer_flush_drops_cmds_whose_program_died(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xC7ULL);
+    nt_material_t mat = create_test_material();
+    const nt_program_t dead = nt_material_get_info(mat)->program;
+
+    /* Immediate mode: draw_list flushes on exit, so only this path can leave a
+     * cmd queued across the destroy. */
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0.0F, 0.0F, 0xFFFFFFFFU, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_sprite_renderer_test_vertex_count());
+
+    nt_program_t replacement = nt_material_get_info(create_test_material())->program;
+    nt_material_set_program(mat, replacement);
+    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_destroy_program(dead); /* takes the queued cmd's pipeline with it */
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_draw_trace_count());
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_test_draw_trace_at(0).num_indices);
+    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
 }
 
 void test_sprite_renderer_forwards_material_blend_state(void) {
@@ -911,23 +996,9 @@ static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "smp_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "smp_fs"});
 
-    char names[3][64];
-    (void)snprintf(names[0], sizeof(names[0]), "smp_vs_%u", s_vpack_counter);
-    (void)snprintf(names[1], sizeof(names[1]), "smp_fs_%u", s_vpack_counter);
-    (void)snprintf(names[2], sizeof(names[2]), "smp_pack_%u", s_vpack_counter++);
-
-    nt_hash32_t pid = nt_hash32_str(names[2]);
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, nt_hash64_str(names[0]), NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pid, nt_hash64_str(names[1]), NT_ASSET_SHADER_CODE, fs.id);
-    nt_resource_t vs_res = nt_resource_request(nt_hash64_str(names[0]), NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(nt_hash64_str(names[1]), NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.cull_mode = NT_CULL_NONE;
     desc.texture_count = 1;
     desc.textures[0].name = "u_tex";
@@ -1150,6 +1221,10 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
+    RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
+    RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
+    RUN_TEST(test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter);
+    RUN_TEST(test_sprite_renderer_flush_drops_cmds_whose_program_died);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);

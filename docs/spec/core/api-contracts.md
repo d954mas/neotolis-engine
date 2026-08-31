@@ -126,6 +126,83 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+### Program handles
+
+`nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:
+whoever called `nt_gfx_make_program`. Pipelines and materials store the handle
+without owning it. Destroying the program destroys its pipelines; the owner
+does not need to walk them. Shader stages have independent lifetimes: destroying
+a stage does not affect a program already linked from it.
+
+A program's linked executable and identity are immutable after
+`nt_gfx_make_program`; its uniform values and block bindings remain mutable.
+Recovery requires the owner to destroy the old program and link a new handle.
+
+Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
+whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
+whether the GL program behind it exists. Processing context loss clears readiness while
+handles stay valid, and because no API relinks, a valid handle that is not ready
+never becomes ready again -- that state is terminal, not transitional.
+`nt_gfx_make_pipeline` requires readiness.
+
+`nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
+a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
+when destroying it.
+
+A link failure is a developer error and asserts, alongside an invalid stage
+handle, and an exhausted program pool.
+
+`nt_gfx_register_global_block` applies the global name -> binding slot registry
+to existing and future programs; registration may precede or follow linking.
+There is no per-program override. The registry borrows `name` without copying:
+the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
+survives context loss.
+
+`nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
+loss leaves behind, and for nothing else. The first is the loss itself, including
+the interval after the browser recovers but before `nt_gfx_begin_frame` finishes
+resetting the backend tables: linking waits until that recovery completes, even
+when newly created shader stages are ready. The second is a stage handle that is
+still live but whose GPU object that loss discarded — permanently unready, so the
+owner recreates the stage and links again. Both are recoverable and neither
+asserts. A stale stage handle remains a developer error and traps.
+
+`nt_material_set_program` is the only setter for the borrowed handle, including assignment
+from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
+per-frame gate needs no assignment latch.
+
+A replace does not reach work already staged. Text captures its pipeline on the
+first quad of an empty staging buffer, including the first quad after an internal
+flush. Sprite captures its pipeline and bindings when a command opens; a capacity
+flush continues that command's snapshot even if the material's program changed.
+An explicit `nt_sprite_renderer_set_material` rechecks the program even for the
+same material handle. Numeric material params remain mutable and are read at
+flush; the snapshot does not freeze the whole material.
+
+For an explicit game-controlled transition, flush, replace the program, then call
+the renderer's `set_material` before emitting more work. If the old program is
+destroyed rather than merely replaced, its pipelines go with it and the staged
+batch is dropped instead -- there is nothing left to draw it through.
+
+A material carries no readiness field. Callers derive readiness with
+`nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
+the first assignment, after context loss is processed, or after program
+destruction. The ECS `draw_list` paths skip unready programs and warn once until
+a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
+`nt_text_renderer_set_material` entry points assert only that a program was
+assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
+context loss before asserting readiness.
+
+Pipeline cache keys include the program handle, so replacement selects a
+different entry. Destroying the old program frees its pipelines immediately;
+renderers remove their dead cache records on the next insertion after a miss,
+or when resetting the cache. Lookup validates a matching pipeline but does not
+remove records. An unassigned program kept alive by its owner keeps its pipelines
+alive too. `nt_gfx_destroy_pipeline` accepts stale handles as a no-op because
+program destruction can invalidate a renderer's cached handles.
+Materials retain the stale program handle until reassignment; readiness reports
+false without mutating the material.
+
 ### Texture descriptors
 
 `nt_texture_desc_t.format` is required and names the real storage format.
@@ -187,9 +264,16 @@ values, and non-`NEAREST` depth filtering — comparison is sampler state and
 never reaches this descriptor. These cases, exhausted configured target
 capacity, stale handles, direct mutation of owned attachments, and
 render-target lifecycle calls inside an active pass are developer errors and
-assert. Backend allocation, framebuffer completeness,
-resize, and context-restore failures remain runtime failures reported through
-invalid handles, `false`, or readiness queries.
+assert. `nt_gfx_make_pipeline` follows the same split: a NULL descriptor, an
+unready program, an attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride
+over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, so a
+returned invalid pipeline handle means a lost context or a failed backend
+allocation — the two recoverable outcomes, both retried on a later frame.
+Creating a pipeline preserves the currently bound pipeline and its vertex-input
+state; the caller does not need to rebind it after creating another pipeline.
+Backend allocation, framebuffer completeness, resize, and context-restore
+failures remain runtime failures reported through invalid handles, `false`, or
+readiness queries.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
 Callers check readiness before beginning work that depends on restored GPU

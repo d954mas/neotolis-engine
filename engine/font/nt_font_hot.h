@@ -10,9 +10,9 @@ typedef struct nt_font_slot_s nt_font_slot_t;
 
 nt_font_slot_t *nt_font_get_slot(nt_font_t font); /* NULL if invalid */
 
-/* Weight-aware glyph lookup: regular text passes key_offset 0; emboldened
- * variants pass a quantized weight bucket (font units, from nt_font_quantize_weight).
- * (codepoint, key_offset) is the LRU cache key — variants coexist in one font's cache. */
+/* Both lookups require ready curve/band textures; check once per draw.
+ * key_offset is a quantized font-unit weight (0 = regular).
+ * (codepoint, key_offset) keys variants in the same font cache. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset);
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint); /* == offset 0 */
 

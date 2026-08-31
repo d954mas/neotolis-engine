@@ -27,8 +27,23 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > no `NT_ASSET_MATERIAL` activator and no pack-loadable material format yet.
 > The layout below describes the planned on-disk shape once material assets
 > become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
-> planned types; current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs
-> referenced by `nt_resource_t` directly.
+> planned types. A material does not reference shaders: it stores a borrowed
+> `nt_program_t` that the game links from `NT_ASSET_SHADER_CODE` stages or from
+> embedded sources. `nt_material_set_program` replaces it, including assignment
+> from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
+> per-frame gate needs no assignment latch. The material module never links,
+> destroys, or inspects the program.
+>
+> A material has no readiness field or version. Use
+> `nt_gfx_program_ready(info->program)` before building a pipeline: it is false
+> before assignment, after context loss is processed, or after program
+> destruction. The material survives recovery and retains its old program
+> handle until reassignment.
+>
+> Pipeline cache keys include the program handle. Destroying the replaced
+> program frees its pipelines; dead cache records are removed during insertion
+> after a miss or on cache reset. For staged-work behavior, see
+> [Program handles](../core/api-contracts.md#program-handles).
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
@@ -77,7 +92,7 @@ No duplicated material data. Material is created once (either from code via desc
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
 
-Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame; no version bump is needed. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
+Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
 ## Render state and material
 

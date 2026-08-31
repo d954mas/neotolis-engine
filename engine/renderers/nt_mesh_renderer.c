@@ -7,22 +7,16 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
+#include "renderers/nt_renderer_shared.h"
 #include "transform_comp/nt_transform_comp.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Pipeline cache entry ---- */
-
-typedef struct {
-    uint64_t key; /* hash of full pipeline signature (layout + shaders + render state) */
-    nt_pipeline_t pipeline;
-} nt_pipeline_cache_entry_t;
-
 /* ---- Module state ---- */
 
 static struct {
-    nt_pipeline_cache_entry_t *entries; /* [max_pipelines] */
+    nt_renderer_pipeline_entry_t *entries; /* [max_pipelines] */
     uint16_t max_pipelines;
     uint16_t count;
 
@@ -31,6 +25,10 @@ static struct {
     uint8_t *instance_data; /* CPU staging byte buffer [max_instances * NT_INSTANCE_STRIDE_MAX] */
     uint16_t max_instances;
     uint32_t ring_cursor; /* next free byte in instance_buf; disjoint writes avoid driver copies of in-flight data */
+
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_program_not_ready;
 
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
@@ -153,13 +151,15 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
+    /* Sprite and text gate on readiness here; this renderer gates in draw_list, so
+     * state the requirement where the pipeline is actually built. */
+    NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
 
-    /* Full pipeline signature: layout + shaders + render state. The 64-bit hash
+    /* Full pipeline signature: layout + program + render state. The 64-bit hash
      * IS the cache identity -- descriptors are never compared on a hit, so every
      * nt_pipeline_desc_t field this renderer varies must be folded in here. */
     uint64_t key = mesh_info->layout_hash;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_count;
     for (uint8_t i = 0; i < mat_info->attr_map_count; i++) {
@@ -167,11 +167,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[i];
     }
 
-    /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
-        if (s_mesh_renderer.entries[i].key == key) {
-            return s_mesh_renderer.entries[i].pipeline;
-        }
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, key);
+    if (cached.id != 0) {
+        return cached;
     }
 
     /* Build vertex layout from mesh streams + material attr_map */
@@ -196,10 +194,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
         if (found) {
             NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
-            if (layout.attr_count >= NT_GFX_MAX_VERTEX_ATTRS) {
-                NT_LOG_ERROR("vertex attr count exceeds max");
-                break;
-            }
             layout.attrs[layout.attr_count].location = location;
             layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);
             layout.attrs[layout.attr_count].count = stream->count;
@@ -214,8 +208,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     /* Create pipeline descriptor */
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vertex_shader = (nt_shader_t){.id = mat_info->resolved_vs};
-    desc.fragment_shader = (nt_shader_t){.id = mat_info->resolved_fs};
+    desc.program = mat_info->program;
     desc.layout = layout;
     desc.instance_layout = s_instance_layouts[mat_info->color_mode];
     desc.depth_test = mat_info->depth_test;
@@ -225,21 +218,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-
-    /* Store in cache -- full cache is a configuration bug, not a runtime recovery case */
-    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
-    if (s_mesh_renderer.count < s_mesh_renderer.max_pipelines) {
-        s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
-        s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
-        s_mesh_renderer.count++;
-    } else {
-        NT_LOG_ERROR("pipeline cache full -- increase max_pipelines in desc");
-        nt_gfx_destroy_pipeline(pip);
-        return (nt_pipeline_t){0};
-    }
-
-    return pip;
+    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, key, &desc, &s_mesh_renderer.warned_program_not_ready);
 }
 
 /* ---- Lifecycle ---- */
@@ -250,9 +229,6 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_instances > 0);
     NT_ASSERT(desc->max_pipelines > 0);
-    if (s_mesh_renderer.initialized || !desc || desc->max_instances == 0 || desc->max_pipelines == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
 
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 
@@ -260,7 +236,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     s_mesh_renderer.max_pipelines = desc->max_pipelines;
 
     /* Allocate pipeline cache */
-    s_mesh_renderer.entries = (nt_pipeline_cache_entry_t *)calloc(desc->max_pipelines, sizeof(nt_pipeline_cache_entry_t));
+    s_mesh_renderer.entries = (nt_renderer_pipeline_entry_t *)calloc(desc->max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (!s_mesh_renderer.entries) {
         NT_LOG_ERROR("failed to allocate pipeline cache");
         return NT_ERR_INIT_FAILED;
@@ -325,6 +301,11 @@ void nt_mesh_renderer_shutdown(void) {
 }
 
 void nt_mesh_renderer_restore_gpu(void) {
+    /* The contract is "every ACTIVE renderer", and a game that restores all four
+     * unconditionally would otherwise re-init this one from a zeroed desc. */
+    if (!s_mesh_renderer.initialized) {
+        return;
+    }
     uint16_t saved_max = s_mesh_renderer.max_instances;
     uint16_t saved_pip = s_mesh_renderer.max_pipelines;
     nt_mesh_renderer_shutdown();
@@ -435,11 +416,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
             const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
-            NT_ASSERT(mat_info && mat_info->ready && mesh_info); /* caller must filter not-ready items */
-            if (!mat_info || !mat_info->ready || !mesh_info) {
+            NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
+            if (!nt_gfx_program_ready(mat_info->program)) {
+                nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
                 /* Still need to advance byte offset for skipped runs */
-                nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
-                draw_byte_offset += instance_count * s_instance_layouts[cm].stride;
+                draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
                 run_start = run_end;
                 continue;
             }
@@ -447,14 +428,22 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             /* Bind pipeline (if material or mesh changed) */
             if (run_mat.id != prev_mat.id || run_mesh.id != prev_mesh.id) {
                 nt_pipeline_t pip = find_or_create_pipeline(mat_info, mesh_info);
+                if (pip.id == 0) {
+                    draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+                    run_start = run_end;
+                    continue;
+                }
                 nt_gfx_bind_pipeline(pip);
 
+                /* Sampler units are program state shared with every other
+                 * material on this program, so each declared slot is written
+                 * whether or not its texture resolved. */
                 for (uint8_t t = 0; t < mat_info->tex_count; t++) {
+                    if (mat_info->tex_names[t] != NULL) {
+                        nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
+                    }
                     if (mat_info->resolved_tex[t] != 0) {
                         nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
-                        if (mat_info->tex_names[t] != NULL) {
-                            nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
-                        }
                         if (mat_info->resolved_sampler[t].id != 0) {
                             nt_gfx_bind_sampler(mat_info->resolved_sampler[t], t);
                         }
@@ -505,3 +494,5 @@ uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.fr
 uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.frame_instance_total; }
 
 uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }
+
+bool nt_mesh_renderer_test_initialized(void) { return s_mesh_renderer.initialized; }

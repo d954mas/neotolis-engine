@@ -15,6 +15,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
@@ -71,13 +72,23 @@ static nt_ui_context_t *s_ctx;
 static uint8_t s_ui_arena[1U << 20];
 
 static nt_hash32_t s_pack_id;
-static nt_resource_t s_sprite_vs_handle, s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle, s_text_fs_handle;
 static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
 static nt_material_t s_sprite_material, s_text_material;
+static nt_program_ref_t s_sprite_program, s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
+}
 static nt_font_t s_font;
 static nt_font_t s_rich_font[4]; /* R/B/I/BI faces for the rich block */
 
@@ -119,10 +130,16 @@ static void try_bind_resources(void) {
 
 // #region web test hooks (window.__nt) -- web build only; the native build compiles without them.
 #if defined(__EMSCRIPTEN__)
-static int s_nt_ready;         /* set after the first rendered frame */
-static float s_nt_field_css_x; /* Cyrillic field center, CSS px (canvas-relative) */
+static int s_nt_ready;                 /* set after the first rendered frame */
+static unsigned int s_nt_drawn_frames; /* frames that reached the draw path */
+static float s_nt_field_css_x;         /* Cyrillic field center, CSS px (canvas-relative) */
 static float s_nt_field_css_y;
+static float s_nt_field_css_w;
+static float s_nt_field_css_h;
 static int s_nt_field_visible; /* the field was laid out this frame */
+static int s_nt_hidden_probe;
+static nt_ui_input_style_t s_nt_hidden_input_style;
+static nt_ui_label_style_t s_nt_hidden_caption;
 
 /* The quest <link>'s block-local rect (from res.first_link_rect), stashed at the rich_text call and
  * mapped to CSS px against the block bbox each frame so rich.spec.ts clicks its exact center. */
@@ -134,11 +151,22 @@ static float s_nt_rich_link_css_w;
 static float s_nt_rich_link_css_h;
 
 EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
+/* A fresh draw is required in addition to the test's pixel comparison. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
+/* Both game programs linked and assigned -- false through the whole window
+ * between the loss and the relink. */
+EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_w(void) { return s_nt_field_css_w; }
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_h(void) { return s_nt_field_css_h; }
 EMSCRIPTEN_KEEPALIVE int nt_test_field_visible(void) { return s_nt_field_visible; }
+EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
+    NT_ASSERT(mode >= 0 && mode <= 2);
+    s_nt_hidden_probe = mode;
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_rich_link_present(void) { return s_nt_rich_link_present; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_x(void) { return s_nt_rich_link_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_y(void) { return s_nt_rich_link_css_y; }
@@ -151,19 +179,23 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_stat
  * glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
 EM_JS_DEPS(nt_browser_app_test_hooks, "$UTF8ToString")
 
+/* Quoted keys keep the Playwright-facing API stable under Closure. */
 EM_JS(void, nt_test_install_hooks, (void), {
-    window.__nt = {
-        get ready() { return _nt_test_ready() !== 0; },
-        input_buffer: function() { return UTF8ToString(_nt_test_input_buffer()); },
-        walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
-        field_visible: function() { return _nt_test_field_visible() !== 0; },
-        field_css: function() {
-            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
+    window['__nt'] = {
+        get 'ready'() { return _nt_test_ready() !== 0; },
+        'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
+        'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
+        'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
+        'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
+        'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
+        'field_visible': function() { return _nt_test_field_visible() !== 0; },
+        'field_css': function() {
+            return { 'x': _nt_test_field_css_x(), 'y': _nt_test_field_css_y(), 'w': _nt_test_field_css_w(), 'h': _nt_test_field_css_h() };
         },
-        rich_link_css: function() {
-            return { present: _nt_test_rich_link_present() !== 0, x: _nt_test_rich_link_css_x(), y: _nt_test_rich_link_css_y(), w: _nt_test_rich_link_css_w(), h: _nt_test_rich_link_css_h() };
+        'rich_link_css': function() {
+            return { 'present': _nt_test_rich_link_present() !== 0, 'x': _nt_test_rich_link_css_x(), 'y': _nt_test_rich_link_css_y(), 'w': _nt_test_rich_link_css_w(), 'h': _nt_test_rich_link_css_h() };
         },
-        rich_link_clicks: function() { return _nt_test_rich_link_clicks() >>> 0; }
+        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; }
     };
 })
 /* clang-format on */
@@ -226,6 +258,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     s_state.time += g_nt_app.dt;
 
@@ -258,7 +291,6 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -268,11 +300,16 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
-        s_rich_font_bound = false;
+        /* Font sources survive restore; adding them again asserts on duplicates.
+         * nt_font_step rebuilds textures after the font assets reactivate. */
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -284,7 +321,7 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool can_render = s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -292,6 +329,16 @@ static void frame(void) {
 
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
+
+        const nt_ui_label_style_t *caption = &s_caption;
+        const nt_ui_input_style_t *input_style = &s_input_style;
+#if defined(__EMSCRIPTEN__)
+        if (s_nt_hidden_probe == 1) {
+            input_style = &s_nt_hidden_input_style;
+        } else if (s_nt_hidden_probe == 2) {
+            caption = &s_nt_hidden_caption;
+        }
+#endif
 
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
@@ -301,8 +348,8 @@ static void frame(void) {
                          .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = {18.0F, 20.0F, 26.0F, 255.0F}}) {
             /* Surface 1: Cyrillic input field. */
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", &s_caption);
-            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, &s_input_style,
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", caption);
+            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, input_style,
                                    &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}}, true, NULL);
 
             /* Surface 2: rich-text block with one clickable link. */
@@ -328,6 +375,8 @@ static void frame(void) {
                 const float cy_fb = scale.offset_y + (fb.y + fb.height * 0.5F) * scale.scale_y;
                 s_nt_field_css_x = cx_fb / dpr;
                 s_nt_field_css_y = cy_fb / dpr;
+                s_nt_field_css_w = fb.width * scale.scale_x / dpr;
+                s_nt_field_css_h = fb.height * scale.scale_y / dpr;
             }
             s_nt_ready = 1;
         }
@@ -347,6 +396,13 @@ static void frame(void) {
 #endif /* __EMSCRIPTEN__ */
 
         nt_text_renderer_flush();
+#ifdef __EMSCRIPTEN__
+        /* Count frames that actually submitted geometry: reaching the draw path
+         * proves nothing if every renderer skipped. */
+        if (nt_gfx_get_frame_draw_calls() > 0U) {
+            s_nt_drawn_frames++;
+        }
+#endif
     }
 
     nt_gfx_end_pass();
@@ -419,10 +475,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/ui_showcase.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
@@ -432,8 +488,6 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -443,8 +497,6 @@ int main(int argc, char *argv[]) {
         .label = "browser_smoke_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -499,6 +551,14 @@ int main(int argc, char *argv[]) {
 #endif
 
 #if defined(__EMSCRIPTEN__)
+    /* Transparency removes one probe's pixels without changing layout or readiness. */
+    s_nt_hidden_input_style = s_input_style;
+    for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {
+        s_nt_hidden_input_style.skin[i].bg_color &= 0x00FFFFFFU;
+        s_nt_hidden_input_style.skin[i].border_color &= 0x00FFFFFFU;
+    }
+    s_nt_hidden_caption = s_caption;
+    s_nt_hidden_caption.color.a = 0.0F;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
 #endif
 
@@ -517,6 +577,8 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();

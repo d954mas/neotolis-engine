@@ -27,7 +27,11 @@ void nt_gfx_backend_end_pass(void);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t vs_backend, uint32_t fs_backend);
+/* Links the pair and caches its uniform locations. Returns 0 on link failure. */
+uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
+void nt_gfx_backend_destroy_program(uint32_t backend_handle);
+
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
@@ -71,7 +75,7 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
-void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot);
+void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix);
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec);
@@ -121,15 +125,24 @@ uint32_t nt_gfx_stub_test_render_target_create_count(void);
 uint32_t nt_gfx_stub_test_render_target_resize_count(void);
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
 uint32_t nt_gfx_stub_test_texture_create_count(void);
+uint32_t nt_gfx_stub_test_program_create_count(void);
+uint32_t nt_gfx_stub_test_pipeline_create_count(void);
+uint32_t nt_gfx_stub_test_uniform_int_count(void);
+const char *nt_gfx_stub_test_uniform_int_name_at(uint32_t index);
+int nt_gfx_stub_test_uniform_int_value_at(uint32_t index);
+void nt_gfx_stub_test_fail_next_program_create(void);
+void nt_gfx_stub_test_lose_context_on_program_create(void);
+void nt_gfx_stub_test_fail_next_pipeline_create(void);
 uint16_t nt_gfx_stub_test_last_render_target_width(void);
 uint16_t nt_gfx_stub_test_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
 nt_texture_desc_t nt_gfx_stub_test_last_texture_desc(void);
 uint32_t nt_gfx_stub_test_last_depth_texture_backend(void);
 uint32_t nt_gfx_stub_test_update_texture_count(void);
+uint32_t nt_gfx_stub_test_update_buffer_count(void);
 uint32_t nt_gfx_stub_test_backend_restore_count(void);
 uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void);
-void nt_gfx_stub_test_fail_next_texture_create(void);
+void nt_gfx_stub_test_fail_texture_creates(uint8_t mask);
 void nt_gfx_stub_test_fail_next_backend_restore(void);
 void nt_gfx_stub_test_fail_next_render_target_create(void);
 void nt_gfx_stub_test_fail_next_render_target_resize(void);

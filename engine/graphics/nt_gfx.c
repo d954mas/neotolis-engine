@@ -103,13 +103,16 @@ typedef struct {
 
 static struct {
     nt_pool_t shader_pool;
+    nt_pool_t program_pool;
     nt_pool_t pipeline_pool;
     nt_pool_t buffer_pool;
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
 
     uint32_t *shader_backends; /* backend handles parallel to pool slots */
+    uint32_t *program_backends;
     uint32_t *pipeline_backends;
+    uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
     uint32_t *render_target_backends;
@@ -139,15 +142,64 @@ static struct {
     int viewport_rect[4]; /* GL bottom-left x,y,w,h */
 } s_gfx;
 
+#ifdef NT_TEST_ACCESS
+static nt_gfx_test_draw_t s_test_draws[128];
+static nt_pipeline_t s_test_bound_pipeline;
+static uint32_t s_test_draw_count;
+static bool s_test_draw_enabled;
+static bool s_test_draw_overflow;
+
+void nt_gfx_test_draw_trace_reset(bool enabled) {
+    s_test_draw_count = 0;
+    s_test_draw_overflow = false;
+    s_test_draw_enabled = enabled;
+}
+
+uint32_t nt_gfx_test_draw_trace_count(void) { return s_test_draw_count; }
+bool nt_gfx_test_draw_trace_overflowed(void) { return s_test_draw_overflow; }
+
+nt_gfx_test_draw_t nt_gfx_test_draw_trace_at(uint32_t index) {
+    NT_ASSERT(index < s_test_draw_count);
+    return s_test_draws[index];
+}
+
+static void test_record_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    if (!s_test_draw_enabled) {
+        return;
+    }
+    if (s_test_draw_count == sizeof(s_test_draws) / sizeof(s_test_draws[0])) {
+        s_test_draw_overflow = true;
+        return;
+    }
+    s_test_draws[s_test_draw_count++] = (nt_gfx_test_draw_t){
+        .pipeline = s_test_bound_pipeline,
+        .program = {s_gfx.pipeline_programs[nt_pool_slot_index(s_test_bound_pipeline.id)]},
+        .first_vertex = first_vertex,
+        .num_vertices = num_vertices,
+        .first_index = first_index,
+        .num_indices = num_indices,
+        .instance_count = instance_count,
+    };
+}
+#endif
+
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
     s_global_blocks[s_global_block_count].name = name;
     s_global_blocks[s_global_block_count].binding_slot = binding_slot;
     s_global_blocks[s_global_block_count].active = true;
     s_global_block_count++;
+
+    /* Late registration must also bind blocks in programs already linked. */
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        if (s_gfx.program_backends[i] != 0) {
+            nt_gfx_backend_set_uniform_block(s_gfx.program_backends[i], name, binding_slot);
+        }
+    }
 }
 
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
@@ -161,8 +213,12 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
+#ifdef NT_TEST_ACCESS
+    nt_gfx_test_draw_trace_reset(false);
+#endif
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_programs > 0 && "nt_gfx_desc_t.max_programs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_pipelines > 0 && "nt_gfx_desc_t.max_pipelines is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
@@ -173,13 +229,16 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
+    nt_pool_init(&s_gfx.program_pool, desc->max_programs);
     nt_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
     nt_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
     nt_pool_init(&s_gfx.texture_pool, desc->max_textures);
     nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
+    s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
+    s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
     s_gfx.render_target_backends = (uint32_t *)calloc(max_render_targets + 1, sizeof(uint32_t));
@@ -207,8 +266,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    /* GL deletes MUST run before backend_shutdown — that destroys the
-     * GL context, after which any glDelete* call hits a dead context. */
+    /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
     /* Render targets own attachment texture handles. */
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
@@ -242,9 +300,30 @@ void nt_gfx_shutdown(void) {
         }
     }
 
+    /* The native context survives backend teardown, so release remaining GL objects.
+     * Backend destroys clear entries; owned attachments and mesh buffers are safe
+     * to revisit. Pipelines
+     * own their VAOs, not their programs. */
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        nt_gfx_backend_destroy_program(s_gfx.program_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+        nt_gfx_backend_destroy_shader(s_gfx.shader_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+        nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        nt_gfx_backend_destroy_texture(s_gfx.texture_backends[i]);
+    }
+
     nt_gfx_backend_shutdown();
 
     nt_pool_shutdown(&s_gfx.shader_pool);
+    nt_pool_shutdown(&s_gfx.program_pool);
     nt_pool_shutdown(&s_gfx.pipeline_pool);
     nt_pool_shutdown(&s_gfx.buffer_pool);
     nt_pool_shutdown(&s_gfx.texture_pool);
@@ -252,7 +331,9 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
+    free(s_gfx.program_backends);
     free(s_gfx.pipeline_backends);
+    free(s_gfx.pipeline_programs);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.render_target_backends);
@@ -455,6 +536,9 @@ void nt_gfx_begin_frame(void) {
         /* First detection: wipe all backend handles */
         for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
             s_gfx.shader_backends[i] = 0;
+        }
+        for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+            s_gfx.program_backends[i] = 0;
         }
         for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
             s_gfx.pipeline_backends[i] = 0;
@@ -691,6 +775,43 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
+
+    /* The browser can recover before begin_frame resets the backend tables. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        return NT_PROGRAM_INVALID;
+    }
+
+    uint32_t vs_backend = s_gfx.shader_backends[nt_pool_slot_index(vs.id)];
+    uint32_t fs_backend = s_gfx.shader_backends[nt_pool_slot_index(fs.id)];
+    /* Rejected, not trapped: a context loss leaves stage handles live but
+     * permanently unready, so this is recoverable state and not a caller error.
+     * The owner recreates the stages and links again. */
+    if (vs_backend == 0 || fs_backend == 0) {
+        return NT_PROGRAM_INVALID;
+    }
+
+    /* Before the link, not after: the GL backend's program table has the same
+     * capacity, so linking first makes exhaustion surface as a link failure. */
+    uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
+    NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
+
+    uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
+    if (backend == 0 && nt_gfx_backend_is_context_lost()) {
+        nt_pool_free(&s_gfx.program_pool, id);
+        return NT_PROGRAM_INVALID;
+    }
+    NT_ASSERT(backend != 0 && "program link failed");
+
+    s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
+
+    nt_program_t result = {id};
+    return result;
+}
+
 static bool blend_factor_valid(nt_blend_factor_t factor) { return factor <= NT_BLEND_SRC_ALPHA_SATURATE; }
 
 static bool blend_factor_uses_constant_color(nt_blend_factor_t factor) { return factor == NT_BLEND_CONSTANT_COLOR || factor == NT_BLEND_ONE_MINUS_CONSTANT_COLOR; }
@@ -751,47 +872,36 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
+    /* Everything a caller controls is a developer error and traps. What is left
+     * -- a lost context, a failed backend allocation -- returns an invalid handle
+     * the caller retries on a later frame. */
     nt_pipeline_t result = {0};
-    if (!desc) {
+    NT_ASSERT(desc != NULL);
+    /* Same predicate as make_program: context loss is what zeroes the program
+     * backend, so without this every renderer would trap on the readiness assert
+     * below -- and the browser can recover before begin_frame resets the tables. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
         return result;
     }
-    if (!nt_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
-        NT_LOG_ERROR("pipeline creation failed: invalid shader handle");
-        return result;
-    }
-    if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        NT_LOG_ERROR("pipeline creation failed: too many vertex attrs");
-        return result;
-    }
-    if (desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
-        return result;
-    }
+    NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
+    NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
+    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
-    if (desc->layout.stride > 255 || desc->instance_layout.stride > 255) {
-        NT_LOG_ERROR("pipeline creation failed: stride %u exceeds WebGL2 max 255", (uint32_t)((desc->layout.stride > 255) ? desc->layout.stride : desc->instance_layout.stride));
-        return result;
-    }
-    /* After the attr_count bounds check -- the loops read attr_count entries. */
+    NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
+    /* After the attr_count asserts -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     assert_layout_webgl2_rules(&desc->instance_layout);
     NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("pipeline pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
-    uint32_t vs_slot = nt_pool_slot_index(desc->vertex_shader.id);
-    uint32_t fs_slot = nt_pool_slot_index(desc->fragment_shader.id);
-    uint32_t vs_backend = s_gfx.shader_backends[vs_slot];
-    uint32_t fs_backend = s_gfx.shader_backends[fs_slot];
-
-    uint32_t backend = nt_gfx_backend_create_pipeline(desc, vs_backend, fs_backend);
+    uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
+    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
         nt_pool_free(&s_gfx.pipeline_pool, id);
@@ -800,6 +910,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.pipeline_backends[slot] = backend;
+    s_gfx.pipeline_programs[slot] = desc->program.id;
 
     result.id = id;
     return result;
@@ -811,11 +922,9 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
         return result;
     }
 
+    /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("buffer pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
@@ -885,11 +994,9 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     // #endregion
 
     // #region allocate
+    /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
-    if (id == 0) {
-        NT_LOG_ERROR("texture pool full");
-        return result;
-    }
+    NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
 
     uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
     if (backend == 0) {
@@ -1034,6 +1141,9 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
+    if (shd.id == 0) {
+        return; /* invalid-zero is a first-class value, as for programs */
+    }
     if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
         NT_LOG_ERROR("destroy_shader: invalid handle");
         return;
@@ -1044,9 +1154,31 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     nt_pool_free(&s_gfx.shader_pool, shd.id);
 }
 
+void nt_gfx_destroy_program(nt_program_t prog) {
+    /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
+     * context loss and destroy them again at shutdown. Not an error. */
+    if (prog.id == 0) {
+        return;
+    }
+    /* A stale non-zero handle means the owner lost track of which programs it
+     * still holds -- the one mistake this ownership model cannot absorb. */
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
+    /* Dependent pipelines cannot draw again; reclaim their slots and VAOs now. */
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        if (s_gfx.pipeline_programs[i] != prog.id) {
+            continue;
+        }
+        nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
+    }
+    uint32_t slot = nt_pool_slot_index(prog.id);
+    nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
+    s_gfx.program_backends[slot] = 0;
+    nt_pool_free(&s_gfx.program_pool, prog.id);
+}
+
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
+    /* Program destruction may already have reclaimed this cached pipeline. */
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        NT_LOG_ERROR("destroy_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
@@ -1055,10 +1187,14 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     }
     nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[slot]);
     s_gfx.pipeline_backends[slot] = 0;
+    s_gfx.pipeline_programs[slot] = 0;
     nt_pool_free(&s_gfx.pipeline_pool, pip.id);
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+    if (buf.id == 0) {
+        return; /* invalid-zero is a first-class value, as for programs */
+    }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("destroy_buffer: invalid handle");
         return;
@@ -1141,6 +1277,24 @@ bool nt_gfx_render_target_ready(nt_render_target_t rt) {
     return s_gfx.render_target_metas[nt_pool_slot_index(rt.id)].complete;
 }
 
+bool nt_gfx_shader_ready(nt_shader_t shd) {
+    if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
+        return false;
+    }
+    return s_gfx.shader_backends[nt_pool_slot_index(shd.id)] != 0;
+}
+
+bool nt_gfx_program_valid(nt_program_t prog) { return nt_pool_valid(&s_gfx.program_pool, prog.id); }
+
+bool nt_gfx_pipeline_valid(nt_pipeline_t pip) { return nt_pool_valid(&s_gfx.pipeline_pool, pip.id); }
+
+bool nt_gfx_program_ready(nt_program_t prog) {
+    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        return false;
+    }
+    return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
+}
+
 bool nt_gfx_texture_ready(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;
@@ -1177,12 +1331,20 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        /* Clear both bind mirrors so later draws or buffer binds cannot reuse
+         * the previous pipeline's program and VAO. */
+        s_gfx.bound_pipeline = 0;
+        nt_gfx_backend_bind_pipeline(0);
         NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0); /* stale pipeline after context loss — must recreate */
+    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0 &&
+              "bind_pipeline: this pipeline outlived a context loss -- call the owning renderer's restore entry point (nt_*_renderer_restore_gpu) in the restored frame");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
+#ifdef NT_TEST_ACCESS
+    s_test_bound_pipeline = pip;
+#endif
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }
 
@@ -1491,10 +1653,15 @@ void nt_gfx_set_uniform_int(const char *name, int val) {
 
 /* ---- Draw calls ---- */
 
+/* Pre-frame readiness decisions may describe the lost context: rebuild on the
+ * restored frame and submit on the next. Pass clears remain legal. */
+static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md"); }
+
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1509,6 +1676,9 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(first_vertex, num_vertices, 0, 0, 1);
+#endif
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
@@ -1516,6 +1686,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     if (g_nt_gfx.context_lost) {
         return;
     }
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1532,6 +1703,9 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(first_vertex, num_vertices, 0, 0, instance_count);
+#endif
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
 }
 
@@ -1539,6 +1713,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     if (g_nt_gfx.context_lost) {
         return;
     }
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1554,6 +1729,9 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(0, num_vertices, first_index, num_indices, 1);
+#endif
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
 }
 
@@ -1561,6 +1739,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     if (g_nt_gfx.context_lost) {
         return;
     }
+    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -1578,6 +1757,9 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
+#ifdef NT_TEST_ACCESS
+    test_record_draw(0, num_vertices, first_index, num_indices, instance_count);
+#endif
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }
 
@@ -1632,18 +1814,6 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         return;
     }
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
-}
-
-void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot) {
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
-    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        NT_LOG_ERROR("set_uniform_block: invalid pipeline handle");
-        return;
-    }
-    uint32_t idx = nt_pool_slot_index(pip.id);
-    nt_gfx_backend_set_uniform_block(s_gfx.pipeline_backends[idx], block_name, slot);
 }
 
 /* ---- Buffer update ---- */

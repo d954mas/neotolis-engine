@@ -18,7 +18,12 @@ Renderer backend and render primitives belong to engine. Render pipeline belongs
 - draw mesh primitive
 - draw sprite primitive
 - GPU resource creation and binding
+- shader-stage compilation and program linking
 - material/shader binding helpers
+
+Each successful `nt_gfx_make_program` creates a new program; there is no
+deduplication. The game shares its handle across materials that use the same
+linked stages; see [Shader System](shader.md).
 
 ### Game decides
 
@@ -64,13 +69,36 @@ per-stream type/count/normalized, duplicate name hashes, and misaligned
 offsets/strides before any pipeline exists. Pipelines are cached, so the
 asserts are off the hot path.
 
+**Program / pipeline split.** A program is the linked (vertex, fragment) pair
+and owns everything that follows from linking: uniform locations, uniform
+values, and global UBO block bindings. A pipeline is a VAO plus fixed-function
+state that *borrows* a program handle. Two pipelines on one program therefore
+share every uniform value, and binding one does not reset what the other set —
+each consumer sets every uniform it needs on every draw. A uniform a material
+does not declare retains the value last written on that program; this applies
+to sampler units and material params. Planned fixes are fixed sampler-unit
+assignments per program (#359) and per-material param UBOs bound at material
+transitions (#133). Until both land, two materials sharing one program must
+declare the same params and texture slots. Destroying a program destroys its
+pipelines; renderers remove dead cache
+records during insertion after a miss or when resetting their caches.
+Moving vertex-input state out of the pipeline remains planned in #355.
+
 **Pipeline cache identity.** Renderers key their pipeline caches on a 64-bit
-hash of the full pipeline signature — vertex layout, shader pair, render state
-— and treat that hash as identity: descriptors are never compared on a hit.
+hash of the full pipeline signature — vertex layout, program handle, render
+state — and treat that hash as identity: descriptors are never compared on a
+hit. The cached pipelines borrow programs the game owns, so a cache entry never
+extends a program's lifetime.
 The hashed population is distinct layouts and material states, tens of values
 in a real game, so a 64-bit collision is not a practical risk, and a fixed
 array with a linear scan stays cheaper than a hash map at that scale. Every
 `nt_pipeline_desc_t` field a renderer varies must be folded into its key.
+
+A renderer whose descriptor is constant except for the program and the
+material's render state keys on those two alone — `nt_text_renderer` folds
+`program.id` with `nt_material_info_t.render_state_hash`. This key is complete
+while its vertex layout, depth function and label remain compile-time literals.
+Material identity would prevent sharing and fail to capture program replacement.
 
 ### Render targets
 

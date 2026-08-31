@@ -19,6 +19,7 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "render/nt_render_defs.h"
+#include "renderers/nt_renderer_shared.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "transform_comp/nt_transform_comp.h"
 
@@ -26,11 +27,6 @@
 #define NT_SPRITE_BASE_STRIDE 20
 
 // #region module state
-typedef struct {
-    uint64_t key;
-    nt_pipeline_t pipeline;
-} nt_sprite_pipeline_entry_t;
-
 typedef struct {
     nt_pipeline_t pipeline;
     nt_material_t material; /* handle for material-param lookup at flush; param values
@@ -49,7 +45,7 @@ typedef struct {
 static struct {
     bool initialized;
     uint16_t max_pipelines;
-    nt_sprite_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
+    nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
     uint16_t count;
 
     nt_buffer_t vbo; /* dynamic, sized for the worst single flush (staging_size) */
@@ -89,6 +85,12 @@ static struct {
 
     /* Material of the most recently opened cmd; reset on flush. */
     nt_material_t current_mat;
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is
+     * built, i.e. when something became drawable again. */
+    bool warned_program_not_ready;
+    /* The open cmd's pipeline was built on this program. A flat replace keeps the
+     * material handle, so the fence below must compare programs too. */
+    nt_program_t current_program;
 #ifdef NT_TEST_ACCESS
     /* Captured pre-flush so tests can read back the last emit. */
     uint32_t last_emit_vertex_count;
@@ -189,7 +191,7 @@ void nt_sprite_renderer_shutdown(void) {
     /* Destroy pipelines in cache */
     for (uint16_t i = 0; i < s_sprite.count; i++) {
         nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
-        s_sprite.entries[i] = (nt_sprite_pipeline_entry_t){0};
+        s_sprite.entries[i] = (nt_renderer_pipeline_entry_t){0};
     }
     s_sprite.count = 0;
     nt_gfx_destroy_buffer(s_sprite.vbo);
@@ -207,7 +209,11 @@ void nt_sprite_renderer_restore_gpu(void) {
     uint32_t saved_custom_v = s_sprite.custom_max_vertices;
     nt_sprite_renderer_shutdown();
     nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip, .max_vertices = saved_max_v, .max_indices = saved_max_i, .custom_max_vertices = saved_custom_v};
-    NT_ASSERT(nt_sprite_renderer_init(&desc) == NT_OK);
+    /* Outside the assert: NT_ASSERT does not evaluate its expression under OFF,
+     * which would leave the renderer shut down after every context restore. */
+    const nt_result_t res = nt_sprite_renderer_init(&desc);
+    NT_ASSERT(res == NT_OK);
+    (void)res;
 }
 // #endregion
 
@@ -282,30 +288,27 @@ static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
-    /* Pipeline signature: layout discriminator + vs/fs handles + render-state
-     * bits. The layout is folded UNCONDITIONALLY (base=0, custom=distinct) so a
-     * custom-attr material's extended layout never aliases the base 20 B
-     * pipeline. */
+    /* A recovered context may still have materials awaiting a new program. */
+    if (!nt_gfx_program_ready(mat_info->program)) {
+        /* The one choke point every caller passes through, so the immediate and
+         * draw_list paths both get told. */
+        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
+        return (nt_pipeline_t){0};
+    }
+    /* Include the layout discriminator even for the base layout (zero), so
+     * custom attributes cannot alias the base pipeline. */
     uint64_t key = nt_sprite_layout_hash(mat_info);
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
-    /* Linear scan for cached entry */
-    for (uint16_t i = 0; i < s_sprite.count; i++) {
-        if (s_sprite.entries[i].key == key) {
-            return s_sprite.entries[i].pipeline;
-        }
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, key);
+    if (cached.id != 0) {
+        return cached;
     }
-
-    /* Miss — create. Cache full is a configuration bug, not a runtime
-     * recovery case. */
-    NT_ASSERT(s_sprite.count < s_sprite.max_pipelines && "sprite pipeline cache exhausted; raise NT_SPRITE_RENDERER_MAX_PIPELINES or desc.max_pipelines");
 
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vertex_shader = (nt_shader_t){.id = mat_info->resolved_vs};
-    desc.fragment_shader = (nt_shader_t){.id = mat_info->resolved_fs};
+    desc.program = mat_info->program;
     desc.layout = build_sprite_layout(mat_info);
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
@@ -314,13 +317,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
-    NT_ASSERT(pip.id != 0);
-
-    s_sprite.entries[s_sprite.count].key = key;
-    s_sprite.entries[s_sprite.count].pipeline = pip;
-    s_sprite.count++;
-    return pip;
+    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
 }
 // #endregion
 
@@ -352,6 +349,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     c->pipeline = pip;
     c->material = mat;
     s_sprite.current_mat = mat;
+    s_sprite.current_program = mi->program;
     /* Expected custom-attr bytes for the bound material (one FLOAT4 per declared
      * attr) — bake asserts the caller's set_custom_attrs block matches. Set here
      * (not in set_material) so the ECS draw_list path, which calls open_cmd
@@ -458,10 +456,13 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     /* Validate BEFORE same-handle early return: stale handle (destroyed material,
      * bumped generation) must assert even if the id still matches the cached one. */
     const nt_material_info_t *mat_info = nt_material_get_info(mat);
-    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
+    /* Assignment, not liveness: on the frame the context dies the program is
+     * already dead here, and trapping on that would crash a recoverable event.
+     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+    NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
 
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
-    if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
+    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {
         return;
     }
 
@@ -476,6 +477,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
         s_sprite.cur_custom_bytes = 0;
     }
 
+    /* An invalid pipeline still opens a cmd; flush drops it. find_or_create_pipeline
+     * has already said why. */
     nt_pipeline_t pip = find_or_create_pipeline(mat_info);
     open_cmd(pip, mat_info, mat);
 }
@@ -1265,15 +1268,17 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         nt_entity_t leader = {.id = items[run_start].entity};
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
-        if (mat_info == NULL || !mat_info->ready || mat_info->resolved_vs == 0 || mat_info->resolved_fs == 0) {
-            /* Material not yet ready — skip the run silently (legitimate
-             * runtime state, not a bug). */
+        if (mat_info == NULL) { /* destroyed between item build and replay */
             run_start = run_end;
             continue;
         }
 
         /* Each batch_key boundary opens a fresh cmd. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+        if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
+            run_start = run_end;
+            continue;
+        }
         close_current_cmd();
         open_cmd(pip, mat_info, *mat);
 
@@ -1322,6 +1327,12 @@ void nt_sprite_renderer_flush(void) {
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
+        /* Context loss or program destruction can invalidate a queued pipeline. */
+        if (!nt_gfx_pipeline_valid(c->pipeline)) {
+            continue;
+        }
+
+        bool pipeline_changed = false;
         if (c->pipeline.id != bound_pipeline_id) {
             /* GL ordering: each pipeline owns a VAO, and GL_ELEMENT_ARRAY_BUFFER
              * is part of VAO state. So pipeline → VBO (re-applies attribs into
@@ -1331,12 +1342,10 @@ void nt_sprite_renderer_flush(void) {
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
             bound_ibo_id = 0;
-            /* Sampler uniforms ("u_tex0" etc) are program-scoped — the new
-             * program has fresh uniform locations defaulting to 0. Reset the
-             * tex/sampler tracking so the inner loop forces rebind +
-             * set_uniform_int for every slot, even if the texture id matches. */
-            memset(bound_tex_ids, 0, sizeof(bound_tex_ids));
-            memset(bound_sampler_ids, 0, sizeof(bound_sampler_ids));
+            /* Params and sampler uniforms belong to programs and need replay.
+             * Texture-unit bindings belong to the context and survive the switch. */
+            bound_mat_id = 0;
+            pipeline_changed = true;
         }
 
         if (s_sprite.ibo.id != bound_ibo_id) {
@@ -1344,12 +1353,9 @@ void nt_sprite_renderer_flush(void) {
             bound_ibo_id = s_sprite.ibo.id;
         }
 
-        /* Apply material params on material change. Most cmds in a flush share
-         * the same material (atlas page split / sampler split don't change it),
-         * so the lookup + uniform set runs only at run boundaries. If the
-         * material was destroyed between draw_list capture and flush replay,
-         * leave bound_mat_id unchanged so a later cmd with the same material
-         * can re-attempt the lookup once it's resolvable again. */
+        /* Destroyed materials contribute no params; queued commands retain
+         * their captured pipeline and texture bindings. */
+        bool material_applied = false;
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
             if (mi != NULL) {
@@ -1359,15 +1365,18 @@ void nt_sprite_renderer_flush(void) {
                     }
                 }
                 bound_mat_id = c->material.id;
+                material_applied = true;
             }
         }
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
+            /* Shared textures can use different sampler names across materials.
+             * Replay captured mappings even if the material was destroyed. */
+            if ((material_applied || pipeline_changed) && c->tex_names[t] != NULL) {
+                nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
+            }
             if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {
                 nt_gfx_bind_texture((nt_texture_t){.id = c->resolved_tex[t]}, t);
-                if (c->tex_names[t] != NULL) {
-                    nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
-                }
                 bound_tex_ids[t] = c->resolved_tex[t];
                 /* bind_texture also bound the texture's default sampler. */
                 bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
@@ -1403,6 +1412,7 @@ void nt_sprite_renderer_flush(void) {
     /* draw_list opens cmds per batch_key, not via current_mat. Reset
      * the fence so a following same-handle set_material() re-opens. */
     s_sprite.current_mat = (nt_material_t){0};
+    s_sprite.current_program = NT_PROGRAM_INVALID;
 }
 // #endregion
 
@@ -1411,7 +1421,7 @@ void nt_sprite_renderer_flush(void) {
 void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out) {
     NT_ASSERT(out != NULL);
     const nt_material_info_t *mi = nt_material_get_info(mat);
-    NT_ASSERT(mi != NULL && mi->ready);
+    NT_ASSERT(mi != NULL && mi->program.id != 0);
     nt_vertex_layout_t layout = build_sprite_layout(mi);
     memset(out, 0, sizeof(*out));
     out->stride = layout.stride;
@@ -1433,6 +1443,8 @@ void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_
 }
 
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
+
+uint32_t nt_sprite_renderer_test_cmd_count(void) { return s_sprite.cmd_count; }
 uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void) { return s_sprite.last_emit_vertex_count; }

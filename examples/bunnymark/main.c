@@ -30,6 +30,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "material_comp/nt_material_comp.h"
 #include "metrics/nt_metrics.h"
 #include "render/nt_render_defs.h"
@@ -75,8 +76,6 @@ static nt_hash32_t s_pack_id;
 static nt_hash32_t s_hd_pack_id;
 
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_vs_handle;
-static nt_resource_t s_fs_handle;
 
 /* HD/SD toggle state — demo starts in SD.
  *
@@ -99,6 +98,19 @@ static nt_material_t s_sprite_material;
 
 /* Stats overlay — separate material/font from sprites. */
 static nt_material_t s_text_material;
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
+}
 static nt_font_t s_overlay_font;
 
 /* Demo-level BunnyComponent payload. Engine rendering still goes through
@@ -273,6 +285,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
     nt_sprite_comp_sync_resources();
 
     /* Dump pack contents once, when ready. */
@@ -383,7 +396,7 @@ static void frame(void) {
 
     /* ---- Render ---- */
     const nt_material_info_t *mat_info = nt_material_get_info(s_sprite_material);
-    bool can_render = s_atlas_resolved && mat_info && mat_info->ready && s_bunny_count > 0;
+    bool can_render = s_atlas_resolved && mat_info && nt_gfx_program_ready(mat_info->program) && s_bunny_count > 0;
 
     nt_gfx_begin_frame();
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
@@ -396,7 +409,6 @@ static void frame(void) {
          * so the next frame's *_step calls re-resolve, recreate game-owned
          * GPU buffers, and restore both renderers. Skip rendering this
          * frame — it's safer than driving pipelines with stale handles. */
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo); /* free pool slot before reuse */
@@ -406,8 +418,13 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         can_render = false;
     }
 
@@ -453,7 +470,7 @@ static void frame(void) {
     nt_metrics_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
 
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    if (!g_nt_gfx.context_restored && text_info && text_info->ready) {
+    if (!g_nt_gfx.context_restored && text_info && nt_gfx_program_ready(text_info->program)) {
         const float overlay_size = 22.0F;
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);
@@ -602,15 +619,13 @@ int main(void) {
     s_hd_pack_id = nt_hash32_str("bunnymark_hd");
 
     /* Resource handles */
-    s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_BUNNIES, NT_ASSET_ATLAS);
     nt_resource_t atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_BUNNIES_TEX0, NT_ASSET_TEXTURE);
 
     /* Material — premultiplied-alpha blend, depth off. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_vs_handle,
-        .fs = s_fs_handle,
         .textures = {{.name = "u_texture", .resource = atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -621,11 +636,9 @@ int main(void) {
     });
 
     /* Stats overlay material (Slug shader) + Latin font for FPS / draws / bunnies HUD. */
-    nt_resource_t slug_vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    nt_resource_t slug_fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = slug_vs,
-        .fs = slug_fs,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -675,6 +688,8 @@ int main(void) {
     nt_entity_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

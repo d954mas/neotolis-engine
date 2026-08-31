@@ -19,6 +19,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "metrics/nt_metrics.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -97,14 +98,23 @@ static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
-static nt_resource_t s_sprite_vs_handle;
-static nt_resource_t s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
 
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program;
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
+}
 static nt_font_t s_font;
 
 static bool s_atlas_bound;
@@ -324,6 +334,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
 
     // #region input handling
     if (nt_input_key_is_pressed(NT_KEY_S)) {
@@ -391,7 +402,6 @@ static void frame(void) {
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -401,10 +411,17 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -416,7 +433,7 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -569,10 +586,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/slice9_demo.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_SLICE9_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SLICE9_DEMO_FONT, NT_ASSET_FONT);
@@ -581,8 +598,6 @@ int main(int argc, char *argv[]) {
     init_atlas_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -592,8 +607,6 @@ int main(int argc, char *argv[]) {
         .label = "slice9_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -637,6 +650,8 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

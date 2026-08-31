@@ -24,6 +24,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -69,6 +70,7 @@ static bool s_grabbed;
 
 static nt_font_t s_font;
 static nt_material_t s_text_material;
+static nt_program_ref_t s_text_program;
 static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_base_pack_id;
@@ -224,6 +226,9 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+    }
 
     /* Progressive loading: start CJK pack after base pack is ready */
     if (!s_cjk_loading && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
@@ -288,13 +293,16 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    bool can_render = true;
+    /* The program links only once both shader stages resolve, and the immediate-mode
+     * set_material asserts on a material without one -- so gate on readiness, not
+     * just on the restore flag. */
+    const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
+    bool can_render = text_info != NULL && nt_gfx_program_ready(text_info->program);
     nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
         can_render = false;
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_FONT);
 
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -304,7 +312,11 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -465,13 +477,11 @@ int main(void) {
     /* CJK pack loaded progressively in frame() after base is ready */
 
     /* 12. Request shader resources */
-    nt_resource_t vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 13. Create text material (shader pair, alpha blend for Slug) */
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = vs,
-        .fs = fs,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = false,
@@ -512,6 +522,7 @@ int main(void) {
     nt_font_destroy(s_font);
     nt_font_shutdown();
     nt_material_destroy(s_text_material);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

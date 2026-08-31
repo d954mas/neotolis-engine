@@ -52,6 +52,9 @@ API in `engine/material_comp/nt_material_comp.h`. There is no
 `MaterialComponent` struct — just one handle per entity. The `nt_material`
 module behind the handle is described in [Material System](material.md).
 
+The handle survives a GPU context restore: recovery destroys and relinks
+programs, not materials, so a component never needs re-binding.
+
 ## Sprite component
 
 The sprite component is a SoA module — there is no monolithic `SpriteComponent`

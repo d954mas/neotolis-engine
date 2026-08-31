@@ -85,6 +85,8 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
 
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
+/* Full reset: drops every queued draw command and every cached pipeline, then
+ * rebuilds the GPU-side buffers. */
 void nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
@@ -98,21 +100,16 @@ void nt_sprite_renderer_restore_gpu(void);
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
-/* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
- * staging. If you intend to keep emitting sprites with the same cmd state
- * (material, textures, samplers) after the flush, snapshot the currently
- * open cmd FIRST and restore via open_cmd_from_snapshot AFTER. See the
- * capacity-overflow path in emit_one for the canonical pattern. Calling
- * flush() without preservation either trips the "no open cmd" assert on
- * the next emit or silently drops the state binding. */
+/* Ends queued commands and clears staging; call set_material before emitting again.
+ * Internal capacity flushes preserve the command's pipeline and bindings. */
 void nt_sprite_renderer_flush(void);
 
-/* ---- Non-ECS public emit surface ----
+/* ---- Non-ECS public emit surface ---- */
+
+/* Requires a valid material with an assigned program; rechecks program identity even for the same material.
+ * May flush the open command. An unready program opens a command that flush skips.
  *
- * Bind material for subsequent emit_region calls. Auto-flushes staging
- * on change to a different .id (mirrors nt_text_renderer_set_material).
- * Same-handle reentry is a no-op. Asserts the material resolves with
- * .ready == true. */
+ * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Set the custom per-vertex attr block baked into every vertex of the next emit
@@ -195,6 +192,8 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
  * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
+/* Draw commands staged but not yet flushed. */
+uint32_t nt_sprite_renderer_test_cmd_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);
 /* Current staging vertex_count (resets on flush). */

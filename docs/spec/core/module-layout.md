@@ -114,16 +114,21 @@ layer.
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows ready source, temp, and destination handles for each call; their
-dimensions must match. The helper owns its shader, pipeline, and fullscreen
-primitive, but it does not allocate, resize, destroy, or retain caller handles.
+dimensions must match. The helper owns its shader stages, program, pipeline, and
+fullscreen primitive, but it does not allocate, resize, destroy, or retain
+caller handles.
 The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
 `RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
 `dest` are distinct ready `RGBA8` targets matching the source size. Scissor
-must be disabled for the call. The helper does not change or restore caller
-state.
-Blur arguments and GPU readiness are caller preconditions and assert when
-violated; initialization and context-restore GPU allocation failures return a
-result.
+must be disabled for the call. The helper leaves scissor disabled and does not
+restore prior graphics bindings.
+Blur arguments and readiness of caller-supplied GPU handles are preconditions
+and assert when violated, as does a link failure in the helper's program.
+Initialization and restore return `NT_ERR_INIT_FAILED` for shader, buffer, or
+pipeline backend creation failures, including failures with a live context, and
+when context loss prevents program or pipeline creation. A failed restore leaves
+the module initialized but unable to draw: passes skip until the game retries
+`nt_postfx_blur_restore_gpu` successfully.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

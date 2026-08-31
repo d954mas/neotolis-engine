@@ -14,6 +14,7 @@
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "render/nt_render_items.h"
 #include "render/nt_render_defs.h"
 #include "graphics/nt_gfx_internal.h"
@@ -25,7 +26,14 @@
 
 /* ---- Virtual pack counter (unique per test) ---- */
 
-static uint32_t s_vpack_counter;
+static uint32_t s_program_warnings;
+
+static void capture_program_warning(nt_log_level_t level, const char *domain, const char *message, void *user) {
+    (void)user;
+    if (level == NT_LOG_LEVEL_WARN && strcmp(domain, "mesh_renderer") == 0 && strstr(message, "program is not ready") != NULL) {
+        s_program_warnings++;
+    }
+}
 
 /* ---- Helper: build a minimal mesh blob and activate it via nt_gfx ---- */
 
@@ -75,15 +83,9 @@ static nt_mesh_t create_test_mesh(void) {
     return (nt_mesh_t){.id = handle};
 }
 
-/* ---- Helper: create a real GFX shader and register it as a resource, then create material ---- */
+/* ---- Helper: link a real GFX program, then create a material on it ---- */
 
-typedef struct {
-    nt_resource_t vs;
-    nt_resource_t fs;
-} test_shader_resources_t;
-
-static test_shader_resources_t create_test_shader_resources(void) {
-    /* Create actual GFX shader handles so pipeline creation validates them */
+static nt_program_t create_test_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,
         .source = "void main(){}",
@@ -94,37 +96,14 @@ static test_shader_resources_t create_test_shader_resources(void) {
         .source = "void main(){}",
         .label = "test_fs",
     });
-
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(vs_name, sizeof(vs_name), "test_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof(fs_name), "test_fs_%u", s_vpack_counter);
-
-    /* Create virtual pack and register shader resources with the real GFX handles */
-    char pack_name[64];
-    (void)snprintf(pack_name, sizeof(pack_name), "mat_pack_%u", s_vpack_counter++);
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    nt_resource_create_pack(pid, 0);
-    nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
-    nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-
-    nt_resource_step(); /* resolve virtual packs immediately */
-
-    return (test_shader_resources_t){.vs = vs_res, .fs = fs_res};
+    return nt_gfx_make_program(vs, fs);
 }
 
-static nt_material_t create_test_material_with_attr(test_shader_resources_t shaders, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
+static nt_material_t create_test_material_with_attr(nt_program_t program, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = shaders.vs;
-    desc.fs = shaders.fs;
+    desc.program = program;
     desc.attr_map[0].stream_name = stream_name;
     desc.attr_map[0].location = location;
     desc.attr_map_count = 1;
@@ -136,17 +115,15 @@ static nt_material_t create_test_material_with_attr(test_shader_resources_t shad
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
-
-    nt_material_step(); /* resolve shaders */
-
+    nt_material_step();
     return mat;
 }
 
-static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_shader_resources(), color_mode, "position", 0, nt_blend_opaque()); }
+static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_program(), color_mode, "position", 0, nt_blend_opaque()); }
 
 static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
 
-static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_shader_resources(), NT_COLOR_MODE_NONE, "position", 0, blend); }
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "position", 0, blend); }
 
 /* ---- Helper: create a fully-equipped test entity ---- */
 
@@ -179,9 +156,12 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
 /* ---- Unity setUp / tearDown ---- */
 
 void setUp(void) {
+    s_program_warnings = 0;
+    nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 32,
+        .max_programs = 64,
         .max_pipelines = 64,
         .max_buffers = 256,
         .max_textures = 32,
@@ -202,11 +182,10 @@ void setUp(void) {
     /* Enter frame/pass so draw calls don't assert */
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    s_vpack_counter = 0;
 }
 
 void tearDown(void) {
+    nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_mesh_renderer_shutdown();
@@ -239,6 +218,30 @@ void test_draw_list_empty(void) {
 }
 
 void test_draw_list_null_items_asserts_when_nonempty(void) { NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NULL, 1)); }
+
+void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_entity_t entity = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    nt_mesh_renderer_draw_list(&item, 1);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+
+    nt_program_t program = create_test_program();
+    nt_material_set_program(mat, program);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+
+    nt_gfx_destroy_program(program);
+    nt_mesh_renderer_draw_list(&item, 1);
+    nt_mesh_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, s_program_warnings);
+}
 
 void test_batch_key_packs_material_and_mesh_slots(void) {
     nt_material_t material = {.id = 0x00010001U};
@@ -341,6 +344,67 @@ void test_draw_list_same_material_mesh_batching(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_instance_total());
 }
 
+/* Skipping an unready run must still advance the instance offset for the next ready run. */
+void test_draw_list_skips_a_not_ready_run_and_offsets_the_next(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t not_ready = create_test_material();
+    nt_material_t ready = create_test_material();
+    nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
+
+    nt_entity_t e0 = create_test_entity(mesh, not_ready);
+    nt_entity_t e1 = create_test_entity(mesh, ready);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = nt_mesh_renderer_batch_key(not_ready, mesh);
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = nt_mesh_renderer_batch_key(ready, mesh);
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_update_buffer_offset() + NT_INSTANCE_STRIDE_NONE, nt_gfx_stub_test_last_instance_offset());
+}
+
+/* The restore window: the game destroyed its program and the material still
+ * names it. The gate asks liveness, not assignment, so the run is skipped --
+ * asking assignment here would reach make_pipeline's readiness assert. */
+void test_draw_list_skips_a_run_whose_program_was_destroyed(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_gfx_destroy_program(nt_material_get_info(mat)->program);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
+
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+}
+
+/* Same reset contract as the sprite renderer: a cached pipeline borrows the
+ * material's program, so it must not survive into the next epoch. */
+void test_reset_drops_cached_pipelines(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+
+    nt_mesh_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+}
+
 /* ---- Test 5: 2 items with different materials -> 2 draw calls ---- */
 
 void test_draw_list_different_materials(void) {
@@ -438,11 +502,80 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* Sampler units are program state, shared by every material on the program, so
+ * a declared slot must be written even when its texture has not resolved --
+ * otherwise the material inherits whatever unit the previous one set. */
+void test_declared_sampler_unit_written_without_texture(void) {
+    nt_mesh_t mesh = create_test_mesh();
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = create_test_program();
+    desc.textures[0].name = "u_unresolved";
+    desc.textures[0].resource = nt_resource_request(nt_hash64_str("never_registered"), NT_ASSET_TEXTURE);
+    desc.texture_count = 1;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map_count = 1;
+    desc.label = "unresolved_tex_material";
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_EQUAL_UINT32(0, info->resolved_tex[0]);
+
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_STRING("u_unresolved", nt_gfx_stub_test_uniform_int_name_at(0));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
+}
+
+/* Caching a failed pipeline would prevent a later frame from retrying creation. */
+void test_pipeline_cache_skips_failed_pipeline(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
+
+    /* Next frame retries and succeeds. */
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+}
+
+/* Manual dedup is the whole point of an explicit program: two materials on one
+ * program, same layout and state, must collapse to a single pipeline. */
+void test_pipeline_cache_shared_program_collapses(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t shared = create_test_program();
+    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_entity_t e0 = create_test_entity(mesh, mat_a);
+    nt_entity_t e1 = create_test_entity(mesh, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
+    };
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
-    test_shader_resources_t shaders = create_test_shader_resources();
-    nt_material_t mat_a = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shaders, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
+    nt_program_t shared = create_test_program();
+    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -483,6 +616,24 @@ void test_restore_gpu(void) {
 }
 
 /* ---- Test 10: stream -> vertex type mapping is total over all stream types ---- */
+
+/* The restore contract is "every ACTIVE renderer". Without the entry guard this
+ * re-inits from a zeroed desc and traps on max_instances == 0, so a game that
+ * restores all four renderers unconditionally would abort. */
+void test_restore_on_inactive_renderer_does_nothing(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_mesh_renderer_shutdown();
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+
+    nt_mesh_renderer_restore_gpu();
+
+    /* The live assertion: init would have set this. The trap on a zeroed desc
+     * aborts before ever reaching here, so it cannot be what pins the guard. */
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_stream_to_vertex_type_total(void) {
@@ -710,6 +861,7 @@ int main(void) {
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
+    RUN_TEST(test_unready_program_warns_once_and_rearms_after_pipeline_creation);
     RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
     RUN_TEST(test_batch_key_ignores_generation_bits);
     RUN_TEST(test_batch_key_distinguishes_old_hash_collision);
@@ -717,10 +869,16 @@ int main(void) {
     RUN_TEST(test_draw_list_single_item);
     RUN_TEST(test_mesh_renderer_forwards_material_blend_state);
     RUN_TEST(test_draw_list_same_material_mesh_batching);
+    RUN_TEST(test_draw_list_skips_a_not_ready_run_and_offsets_the_next);
+    RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);
+    RUN_TEST(test_reset_drops_cached_pipelines);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_declared_sampler_unit_written_without_texture);
+    RUN_TEST(test_pipeline_cache_skips_failed_pipeline);
+    RUN_TEST(test_pipeline_cache_shared_program_collapses);
     RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_restore_gpu);
     /* Color mode tests */
@@ -731,6 +889,7 @@ int main(void) {
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     RUN_TEST(test_ring_cursor_advances_and_wraps);
     RUN_TEST(test_ring_upload_and_draw_base_agree);
+    RUN_TEST(test_restore_on_inactive_renderer_does_nothing);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_vertex_type_total);
     RUN_TEST(test_vertex_type_sizes);

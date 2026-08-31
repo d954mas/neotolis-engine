@@ -73,13 +73,12 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         return; /* evicted/absent — keep existing view; PIN_BLOB winner is unpublishable while blob==NULL */
     }
     if (size < sizeof(NtFontAssetHeader)) {
-        /* Present but truncated: this pack is now the published winner, so the previous winner's pack is
-         * no longer pinned and may be evicted — stop viewing it. Degrade to tofu (control flow, not assert:
-         * malformed data is a runtime safety-net path, and NT_ASSERT is a no-op in shipping). */
+        /* The previous winner is no longer pinned; a truncated replacement must
+         * clear the old view before its pack can be evicted. */
         font_provider_clear(user_data);
         return;
     }
-    /* Runtime safety net — real guard, not assert-only (NT_ASSERT is a no-op in shipping). */
+    /* The runtime format guard remains active even with NT_ASSERT_MODE=OFF. */
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
@@ -1565,6 +1564,38 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
 
 /* ---- Lifecycle ---- */
 
+static void create_font_textures(nt_font_slot_t *slot) {
+    slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = slot->curve_tex_width,
+        .height = slot->curve_tex_height,
+        .format = NT_TEXTURE_FORMAT_RGBA16F,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = "font_curve",
+    });
+    slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = (uint16_t)(slot->band_count * 2),
+        .height = slot->band_tex_height,
+        .format = NT_TEXTURE_FORMAT_RG16UI,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .label = "font_band",
+    });
+}
+
+static void destroy_font_textures(nt_font_slot_t *slot) {
+    if (slot->curve_texture.id != 0) {
+        nt_gfx_destroy_texture(slot->curve_texture);
+    }
+    if (slot->band_texture.id != 0) {
+        nt_gfx_destroy_texture(slot->band_texture);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(!s_font.initialized);
@@ -1605,8 +1636,7 @@ void nt_font_shutdown(void) {
         free(slot->free_stack);
         free(slot->hash_table);
         free(slot->measure_cache.key_hashes); /* SoA base — frees all 4 sub-arrays; NULL-safe */
-        nt_gfx_destroy_texture(slot->curve_texture);
-        nt_gfx_destroy_texture(slot->band_texture);
+        destroy_font_textures(slot);
     }
     // #endregion
     free(s_font.slots);
@@ -1625,37 +1655,20 @@ void nt_font_step(void) {
     }
 
     // #region Context restore: re-create GPU textures
-    if (g_nt_gfx.context_restored) {
+    /* Derived from the textures, not latched on the one frame context_restored is
+     * set: the recovery contract asks a game to skip that frame, and a game that
+     * does would otherwise never rebuild and render blank text for good. */
+    if (!g_nt_gfx.context_lost) {
         for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
             if (!nt_pool_slot_alive(&s_font.pool, i)) {
                 continue;
             }
             nt_font_slot_t *slot = &s_font.slots[i];
-
-            nt_gfx_destroy_texture(slot->curve_texture);
-            nt_gfx_destroy_texture(slot->band_texture);
-
-            slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = slot->curve_tex_width,
-                .height = slot->curve_tex_height,
-                .format = NT_TEXTURE_FORMAT_RGBA16F,
-                .min_filter = NT_FILTER_NEAREST,
-                .mag_filter = NT_FILTER_NEAREST,
-                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-                .label = "font_curve",
-            });
-            slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = (uint16_t)(slot->band_count * 2),
-                .height = slot->band_tex_height,
-                .format = NT_TEXTURE_FORMAT_RG16UI,
-                .min_filter = NT_FILTER_NEAREST,
-                .mag_filter = NT_FILTER_NEAREST,
-                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-                .label = "font_band",
-            });
-
+            if (nt_gfx_texture_ready(slot->curve_texture) && nt_gfx_texture_ready(slot->band_texture)) {
+                continue;
+            }
+            destroy_font_textures(slot);
+            create_font_textures(slot);
             clear_glyph_cache(slot); /* textures recreated — old cache entries point at stale GPU regions */
         }
     }
@@ -1728,9 +1741,8 @@ void nt_font_step(void) {
             const bool vmetrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
                                         slot->metrics.line_gap == hdr->line_gap;
             if (slot->metrics_set && !vmetrics_match) {
-                /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
-                 * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is
-                 * a no-op in shipping, so gating the flush on it would keep caches baked against stale metrics. */
+                /* A single-provider hot-swap invalidates cached metrics; multiple
+                 * active providers must share builder-normalized metrics. */
                 NT_ASSERT(active_count == 1 && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
                 need_flush = true;
                 changed = true;
@@ -1884,31 +1896,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     slot->max_glyphs = desc->band_texture_height;
     // #endregion
 
-    // #region Create GPU textures (once, never resized)
-    slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = desc->curve_texture_width,
-        .height = desc->curve_texture_height,
-        .format = NT_TEXTURE_FORMAT_RGBA16F,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .data = NULL,
-        .label = "font_curve",
-    });
-
-    slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = (uint16_t)(band_count * 2), /* Y-bands + X-bands */
-        .height = desc->band_texture_height,
-        .format = NT_TEXTURE_FORMAT_RG16UI,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .data = NULL,
-        .label = "font_band",
-    });
-    // #endregion
+    create_font_textures(slot);
 
     // #region Allocate cache, free stack, hash table
     slot->cache = (nt_font_cache_slot_t *)calloc(desc->band_texture_height, sizeof(nt_font_cache_slot_t));
@@ -1938,8 +1926,7 @@ void nt_font_destroy(nt_font_t font) {
     free(slot->free_stack);
     free(slot->hash_table);
     free(slot->measure_cache.key_hashes); /* SoA base pointer — frees all 4 arrays in one block. NULL-safe. */
-    nt_gfx_destroy_texture(slot->curve_texture);
-    nt_gfx_destroy_texture(slot->band_texture);
+    destroy_font_textures(slot);
     memset(slot, 0, sizeof(*slot));
     nt_pool_free(&s_font.pool, font.id);
 }
@@ -1961,7 +1948,8 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     nt_font_slot_t *slot = get_slot(font);
     NT_ASSERT(slot->resource_count < NT_FONT_MAX_SOURCES_PER_FONT);
     for (uint8_t i = 0; i < slot->resource_count; i++) {
-        NT_ASSERT(slot->resources[i].id != resource.id); /* duplicate resource */
+        NT_ASSERT(slot->resources[i].id != resource.id &&
+                  "nt_font_add: this resource is already a source of this font -- a context loss is not a reason to re-add one, only the textures die and nt_font_step rebuilds them");
     }
 
     slot->resources[slot->resource_count] = resource;
@@ -2104,7 +2092,11 @@ int16_t nt_font_quantize_weight(float weight_units) {
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    return nt_font_lookup_glyph_in_slot(get_slot(font), codepoint);
+    nt_font_slot_t *slot = get_slot(font);
+    if (!nt_gfx_texture_ready(slot->curve_texture) || !nt_gfx_texture_ready(slot->band_texture)) {
+        return NULL;
+    }
+    return nt_font_lookup_glyph_in_slot(slot, codepoint);
 }
 
 /* ---- GPU texture access ---- */

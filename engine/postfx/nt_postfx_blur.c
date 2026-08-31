@@ -33,12 +33,16 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "uniform vec4 u_kernel4;\n"
                                    "in vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
+                                   /* Select then mask: i & 3 is provably 0..3, so no arm can constant-fold to
+                                      a negative index. NVIDIA inlines kernel_at(0), folds every arm, and
+                                      rejects u_kernel1[0 - 4] at link time though the guard makes it dead. */
                                    "float kernel_at(int i) {\n"
-                                   "    if (i < 4) { return u_kernel0[i]; }\n"
-                                   "    if (i < 8) { return u_kernel1[i - 4]; }\n"
-                                   "    if (i < 12) { return u_kernel2[i - 8]; }\n"
-                                   "    if (i < 16) { return u_kernel3[i - 12]; }\n"
-                                   "    return u_kernel4[i - 16];\n"
+                                   "    vec4 k = (i < 4)  ? u_kernel0\n"
+                                   "           : (i < 8)  ? u_kernel1\n"
+                                   "           : (i < 12) ? u_kernel2\n"
+                                   "           : (i < 16) ? u_kernel3\n"
+                                   "                      : u_kernel4;\n"
+                                   "    return k[i & 3];\n"
                                    "}\n"
                                    "void main() {\n"
                                    "    vec2 texel = vec2(1.0) / vec2(textureSize(u_source, 0));\n"
@@ -57,9 +61,13 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
 static struct {
     nt_shader_t vs;
     nt_shader_t fs;
+    nt_program_t program;
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
+    /* Logical life and GPU life are separate: a restore that fails leaves the
+     * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
+    bool gpu_ready;
 #ifdef NT_TEST_ACCESS
     uint32_t draw_count;
 #endif
@@ -132,8 +140,8 @@ static void destroy_gpu_resources(void) {
     if (s_blur.triangle_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_blur.triangle_vbo);
     }
-    if (s_blur.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_blur.pipeline);
+    if (s_blur.program.id != 0) {
+        nt_gfx_destroy_program(s_blur.program);
     }
     if (s_blur.fs.id != 0) {
         nt_gfx_destroy_shader(s_blur.fs);
@@ -143,6 +151,7 @@ static void destroy_gpu_resources(void) {
     }
     s_blur.triangle_vbo = (nt_buffer_t){0};
     s_blur.pipeline = (nt_pipeline_t){0};
+    s_blur.program = NT_PROGRAM_INVALID;
     s_blur.fs = (nt_shader_t){0};
     s_blur.vs = (nt_shader_t){0};
 }
@@ -158,9 +167,12 @@ static bool make_gpu_resources(void) {
     if (s_blur.vs.id == 0 || s_blur.fs.id == 0) {
         return false;
     }
+    s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
+    if (!nt_gfx_program_ready(s_blur.program)) {
+        return false;
+    }
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = s_blur.vs,
-        .fragment_shader = s_blur.fs,
+        .program = s_blur.program,
         .layout =
             {
                 .stride = sizeof(nt_postfx_blur_vertex_t),
@@ -199,6 +211,7 @@ nt_result_t nt_postfx_blur_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_blur.initialized = true;
+    s_blur.gpu_ready = true;
     return NT_OK;
 }
 
@@ -208,17 +221,19 @@ void nt_postfx_blur_shutdown(void) {
 }
 
 nt_result_t nt_postfx_blur_restore_gpu(void) {
-    NT_ASSERT(s_blur.initialized && "nt_postfx_blur_restore_gpu: module is not initialized");
+    /* Games may include inactive modules in their recovery sequence. */
     if (!s_blur.initialized) {
         return NT_ERR_INIT_FAILED;
     }
+    s_blur.gpu_ready = false;
     destroy_gpu_resources();
     if (!make_gpu_resources()) {
+        /* Stay initialized so the game can retry a failed rebuild. */
         NT_LOG_ERROR("postfx_blur restore failed");
         destroy_gpu_resources();
-        s_blur.initialized = false;
         return NT_ERR_INIT_FAILED;
     }
+    s_blur.gpu_ready = true;
     return NT_OK;
 }
 
@@ -231,7 +246,8 @@ typedef struct {
 static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
-    return s_blur.initialized && pass != NULL;
+    /* A failed rebuild is recoverable; skip until the game retries restore_gpu. */
+    return s_blur.initialized && s_blur.gpu_ready && pass != NULL;
 }
 
 static bool validate_scissor_state(void) {
@@ -391,6 +407,8 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
 uint32_t nt_postfx_blur_test_build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) { return build_kernel(radius, sigma, out_weights); }
 
 uint32_t nt_postfx_blur_test_draw_count(void) { return s_blur.draw_count; }
+
+const char *nt_postfx_blur_test_fs_source(void) { return s_blur_fs_src; }
 
 void nt_postfx_blur_test_reset_counters(void) { s_blur.draw_count = 0; }
 #endif

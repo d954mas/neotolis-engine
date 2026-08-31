@@ -171,6 +171,7 @@ static struct {
 
     /* CPU batch for non-instanced shapes (triangle, capsule, mesh) */
     nt_shader_t batch_vs;
+    nt_program_t batch_prog;
     nt_pipeline_t batch_pip_depth;
     nt_pipeline_t batch_pip_overlay;
     nt_pipeline_t batch_pip_active;
@@ -183,6 +184,7 @@ static struct {
 
     /* Instanced shapes (rect, cube, circle, sphere, cylinder) */
     nt_shader_t inst_vs;
+    nt_program_t inst_prog;
     nt_pipeline_t inst_pip_depth;
     nt_pipeline_t inst_pip_overlay;
     nt_pipeline_t inst_pip_active;
@@ -194,12 +196,14 @@ static struct {
 
     /* Capsule instancing (separate pipeline: vec4 template + hemisphere-tagged shader) */
     nt_shader_t cap_inst_vs;
+    nt_program_t cap_inst_prog;
     nt_pipeline_t cap_inst_pip_depth;
     nt_pipeline_t cap_inst_pip_overlay;
     nt_pipeline_t cap_inst_pip_active;
 
     /* Instanced lines */
     nt_shader_t line_vs;
+    nt_program_t line_prog;
     nt_pipeline_t line_pip_depth;
     nt_pipeline_t line_pip_overlay;
     nt_pipeline_t line_pip_active;
@@ -220,6 +224,10 @@ static struct {
     /* Sin/Cos lookup table (fixed NT_SHAPE_SEGMENTS) */
     float sin_lut[NT_SHAPE_SEGMENTS + 1];
     float cos_lut[NT_SHAPE_SEGMENTS + 1];
+    /* A restore whose re-init failed -- a second context loss landing mid-recovery
+     * -- must still be retried by the next one, or the module stays dark for the
+     * session. restore_gpu sets this after init(), so the memset does not eat it. */
+    bool restore_pending;
 } s_shape;
 
 /* ---- Helpers ---- */
@@ -234,8 +242,7 @@ static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabl
 
 static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.batch_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.batch_prog,
         .layout =
             {
                 .attr_count = 2,
@@ -260,8 +267,7 @@ static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
 
 static nt_pipeline_t make_line_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.line_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.line_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -293,8 +299,7 @@ static nt_pipeline_t make_line_pipeline(bool depth) {
 
 static nt_pipeline_t make_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.inst_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.inst_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -330,8 +335,7 @@ static nt_pipeline_t make_inst_pipeline(bool depth) {
 
 static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.cap_inst_vs,
-        .fragment_shader = s_shape.fs,
+        .program = s_shape.cap_inst_prog,
         .layout =
             {
                 .attr_count = 1,
@@ -654,6 +658,10 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
 
 void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
+    /* Set before anything is created: the failure paths below route cleanup
+     * through shutdown(), which no-ops while this is false and would strand
+     * every shader and program allocated so far. shutdown() re-clears it. */
+    s_shape.initialized = true;
 
     /* Shaders */
     s_shape.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_shape_fs_src, .label = "shape_fs"});
@@ -661,6 +669,23 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_inst_vs_src, .label = "shape_inst_vs"});
     s_shape.cap_inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_cap_inst_vs_src, .label = "shape_cap_inst_vs"});
     s_shape.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
+
+    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id) {
+        NT_LOG_ERROR("init failed -- shader creation error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
+
+    /* Programs -- one per vertex shader, shared by the depth and overlay pipelines */
+    s_shape.batch_prog = nt_gfx_make_program(s_shape.batch_vs, s_shape.fs);
+    s_shape.inst_prog = nt_gfx_make_program(s_shape.inst_vs, s_shape.fs);
+    s_shape.cap_inst_prog = nt_gfx_make_program(s_shape.cap_inst_vs, s_shape.fs);
+    s_shape.line_prog = nt_gfx_make_program(s_shape.line_vs, s_shape.fs);
+    if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog)) {
+        NT_LOG_ERROR("init failed -- program link error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
 
     /* Pipelines */
     s_shape.batch_pip_depth = make_batch_pipeline(true, true);
@@ -697,10 +722,9 @@ void nt_shape_renderer_init(void) {
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
 
     /* Verify all resources were created successfully */
-    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id || !s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id ||
-        !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id || !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id ||
-        !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id || !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id ||
-        !s_shape.line_instance_buf.id) {
+    if (!s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
+        !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id ||
+        !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id) {
         NT_LOG_ERROR("init failed -- resource creation error");
         nt_shape_renderer_shutdown();
         return;
@@ -712,10 +736,13 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_pip_active = s_shape.inst_pip_depth;
     s_shape.cap_inst_pip_active = s_shape.cap_inst_pip_depth;
     s_shape.line_pip_active = s_shape.line_pip_depth;
-    s_shape.initialized = true;
 }
 
 void nt_shape_renderer_shutdown(void) {
+    /* Before the early return: an explicit shutdown ends the module even if the
+     * last restore left it pending, so a later restore must not resurrect it.
+     * restore_gpu re-arms this after its own init. */
+    s_shape.restore_pending = false;
     if (!s_shape.initialized) {
         return;
     }
@@ -729,14 +756,10 @@ void nt_shape_renderer_shutdown(void) {
     }
     nt_gfx_destroy_buffer(s_shape.batch_ibo);
     nt_gfx_destroy_buffer(s_shape.batch_vbo);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.inst_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.inst_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.batch_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.batch_pip_depth);
+    nt_gfx_destroy_program(s_shape.line_prog);
+    nt_gfx_destroy_program(s_shape.cap_inst_prog);
+    nt_gfx_destroy_program(s_shape.inst_prog);
+    nt_gfx_destroy_program(s_shape.batch_prog);
     nt_gfx_destroy_shader(s_shape.line_vs);
     nt_gfx_destroy_shader(s_shape.cap_inst_vs);
     nt_gfx_destroy_shader(s_shape.inst_vs);
@@ -746,6 +769,12 @@ void nt_shape_renderer_shutdown(void) {
 }
 
 void nt_shape_renderer_restore_gpu(void) {
+    /* The contract is "every ACTIVE renderer": without this, restoring an
+     * unused shape renderer would silently init it and take 4 programs and 8
+     * pipelines from pools the game sized for itself. */
+    if (!s_shape.initialized && !s_shape.restore_pending) {
+        return;
+    }
     /* Save CPU-side state that survives context loss */
     float saved_vp[16];
     float saved_cam_pos[3];
@@ -766,6 +795,11 @@ void nt_shape_renderer_restore_gpu(void) {
     memcpy(s_shape.cam_pos, saved_cam_pos, sizeof(s_shape.cam_pos));
     s_shape.line_width = saved_line_width;
     s_shape.depth_enabled = saved_depth;
+    if (!s_shape.initialized) {
+        s_shape.restore_pending = true; /* after init()'s memset, so it survives */
+        return;
+    }
+    s_shape.restore_pending = false;
     s_shape.batch_pip_active = saved_depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
     s_shape.inst_pip_active = saved_depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
     s_shape.cap_inst_pip_active = saved_depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
@@ -773,6 +807,15 @@ void nt_shape_renderer_restore_gpu(void) {
 }
 
 void nt_shape_renderer_flush(void) {
+    /* A skipped flush must free CPU staging for the next emit. */
+    if (!s_shape.initialized) {
+        memset(s_shape.inst_counts, 0, sizeof(s_shape.inst_counts));
+        s_shape.vertex_count = 0;
+        s_shape.index_count = 0;
+        s_shape.line_count = 0;
+        return;
+    }
+
     /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
         uint32_t cnt = s_shape.inst_counts[t];
@@ -1442,6 +1485,8 @@ uint32_t nt_shape_renderer_test_instance_capacity(void) { return NT_SHAPE_RENDER
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
 uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
 uint32_t nt_shape_renderer_test_line_count(void) { return s_shape.line_count; }
+const float *nt_shape_renderer_test_vp(void) { return s_shape.vp; }
 const float *nt_shape_renderer_test_cam_pos(void) { return s_shape.cam_pos; }
 float nt_shape_renderer_test_line_width(void) { return s_shape.line_width; }
+bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }
 bool nt_shape_renderer_test_initialized(void) { return s_shape.initialized; }

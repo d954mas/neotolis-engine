@@ -56,8 +56,7 @@ static nt_resource_t register_test_resource(const char *name, uint8_t asset_type
 static nt_material_create_desc_t make_test_desc(void) {
     nt_material_create_desc_t d;
     memset(&d, 0, sizeof(d));
-    d.vs = (nt_resource_t){.id = 1};
-    d.fs = (nt_resource_t){.id = 2};
+    d.program = (nt_program_t){.id = 1};
     d.textures[0].name = "u_albedo";
     d.textures[0].resource = (nt_resource_t){.id = 3};
     d.texture_count = 1;
@@ -74,6 +73,17 @@ static nt_material_create_desc_t make_test_desc(void) {
     d.depth_write = true;
     d.cull_mode = NT_CULL_BACK;
     return d;
+}
+
+/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
 }
 
 static void assert_blend_rgb(nt_blend_state_t blend, nt_blend_factor_t src, nt_blend_factor_t dst, nt_blend_op_t op) {
@@ -359,121 +369,54 @@ void test_pool_full_returns_invalid(void) {
     }
 }
 
-/* ---- Test 15: step resolves shaders ---- */
+/* ---- Test 15: create stores the program handle ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_resolves_shaders(void) {
-    /* Use virtual packs to register resources with known runtime handles */
-    nt_resource_t vs_res = register_test_resource("test_vs", NT_ASSET_SHADER_CODE, 100);
-    nt_resource_t fs_res = register_test_resource("test_fs", NT_ASSET_SHADER_CODE, 200);
-    nt_resource_step();
-
-    /* Create material referencing those resource handles */
+void test_create_stores_program(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = (nt_program_t){.id = 77};
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(100, info->resolved_vs);
-    TEST_ASSERT_EQUAL_UINT32(200, info->resolved_fs);
+    TEST_ASSERT_EQUAL_UINT32(77, info->program.id);
 }
 
-/* ---- Test 16: ready true when both shaders resolved ---- */
+/* ---- Program assignment ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_ready_true_when_both_shaders(void) {
-    nt_resource_t vs_res = register_test_resource("ready_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("ready_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
+/* A material may be created without a program and pick one up later -- the
+ * first assignment and every later one are the same operation. */
+void test_set_program_assigns_from_invalid(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = NT_PROGRAM_INVALID;
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
-
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_TRUE(info->ready);
+
+    TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
+    nt_material_set_program(mat, (nt_program_t){.id = 9});
+    TEST_ASSERT_EQUAL_UINT32(9, info->program.id);
 }
 
-/* ---- Test 17: ready false when one shader missing ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_ready_false_when_missing_shader(void) {
-    /* VS is registered (will resolve to handle), FS is just a bare request (no pack entry) */
-    nt_resource_t vs_res = register_test_resource("miss_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = nt_resource_request(nt_hash64_str("miss_fs"), NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
+/* Flat replace: A -> B directly, no clearing step in between. Renderers key
+ * their caches on the program, so B never selects the entry built on A. */
+void test_set_program_replaces_a_with_b(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = (nt_program_t){.id = 1};
     nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
-
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_FALSE(info->ready);
+
+    nt_material_set_program(mat, (nt_program_t){.id = 2});
+    TEST_ASSERT_EQUAL_UINT32(2, info->program.id);
 }
 
-/* ---- Test 18: version increments on shader change ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_version_increments_on_change(void) {
-    nt_resource_t vs_res = register_test_resource("ver_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("ver_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
+/* Clearing is the same operation once more. */
+void test_set_program_clears_to_invalid(void) {
     nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
+    d.program = (nt_program_t){.id = 1};
     nt_material_t mat = nt_material_create(&d);
-
-    /* First step: version goes from 0 to 1 (handles change from initial 0 to 10/20) */
-    nt_material_step();
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    uint32_t v1 = info->version;
-    TEST_ASSERT_TRUE(v1 > 0);
 
-    /* Change the VS shader handle by re-registering with a different handle */
-    nt_hash32_t new_pid = nt_hash32_str("ver_vs_new");
-    nt_resource_create_pack(new_pid, 10); /* higher priority to override */
-    nt_resource_register(new_pid, nt_hash64_str("ver_vs"), NT_ASSET_SHADER_CODE, 99);
-    nt_resource_step();
-    nt_material_step();
-
-    TEST_ASSERT_TRUE(info->version > v1);
-}
-
-/* ---- Test 19: version stable when unchanged ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_version_stable_when_unchanged(void) {
-    nt_resource_t vs_res = register_test_resource("stab_vs", NT_ASSET_SHADER_CODE, 10);
-    nt_resource_t fs_res = register_test_resource("stab_fs", NT_ASSET_SHADER_CODE, 20);
-    nt_resource_step();
-
-    nt_material_create_desc_t d = make_test_desc();
-    d.vs = vs_res;
-    d.fs = fs_res;
-    nt_material_t mat = nt_material_create(&d);
-
-    nt_material_step();
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_NOT_NULL(info);
-    uint32_t v1 = info->version;
-
-    /* Step again without changing anything */
-    nt_material_step();
-    TEST_ASSERT_EQUAL_UINT32(v1, info->version);
+    nt_material_set_program(mat, NT_PROGRAM_INVALID);
+    TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
 }
 
 /* ---- Test 20: step resolves textures ---- */
@@ -594,17 +537,6 @@ void test_set_param_component_updates_one(void) {
     }
 }
 
-/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
-
-static jmp_buf s_assert_jmp;
-
-static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
-    (void)file;
-    (void)line;
-    longjmp(s_assert_jmp, 1);
-}
-
 /* ---- Test: set_param with invalid handle fires NT_ASSERT ---- */
 
 void test_set_param_invalid_handle(void) {
@@ -614,6 +546,25 @@ void test_set_param_invalid_handle(void) {
         nt_material_set_param(NT_MATERIAL_INVALID, "u_roughness", val);
         nt_assert_handler = NULL;
         TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire for invalid handle");
+    }
+    nt_assert_handler = NULL;
+    TEST_PASS();
+}
+
+/* ---- Test: set_program with a stale handle fires NT_ASSERT ---- */
+
+/* A stale handle silently doing nothing is how a material ends up with no
+ * program and nobody noticing until the screen is black. */
+void test_set_program_on_a_destroyed_material_asserts(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    nt_material_destroy(mat);
+
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) == 0) {
+        nt_material_set_program(mat, (nt_program_t){.id = 1});
+        nt_assert_handler = NULL;
+        TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire for a destroyed material");
     }
     nt_assert_handler = NULL;
     TEST_PASS();
@@ -656,12 +607,12 @@ int main(void) {
     /* Pool exhaustion */
     RUN_TEST(test_pool_full_returns_invalid);
 
-    /* Step: resolve + change detection */
-    RUN_TEST(test_step_resolves_shaders);
-    RUN_TEST(test_step_ready_true_when_both_shaders);
-    RUN_TEST(test_step_ready_false_when_missing_shader);
-    RUN_TEST(test_step_version_increments_on_change);
-    RUN_TEST(test_step_version_stable_when_unchanged);
+    /* Program storage and assignment */
+    RUN_TEST(test_create_stores_program);
+    RUN_TEST(test_set_program_assigns_from_invalid);
+    RUN_TEST(test_set_program_replaces_a_with_b);
+    RUN_TEST(test_set_program_clears_to_invalid);
+    RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
     RUN_TEST(test_step_resolves_textures);
 
     /* Query edge cases */

@@ -440,8 +440,7 @@ static void test_entity_query_all_any_none(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_entity_list_material_label(void) {
     nt_material_create_desc_t md = {0};
-    md.vs = (nt_resource_t){.id = 1};
-    md.fs = (nt_resource_t){.id = 2};
+    md.program = (nt_program_t){.id = 1};
     md.label = "hero_mat";
     nt_material_t mat = nt_material_create(&md);
     TEST_ASSERT_TRUE(nt_material_valid(mat));

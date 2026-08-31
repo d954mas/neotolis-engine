@@ -55,8 +55,8 @@ typedef struct {
 /* ---- Creation descriptor ---- */
 
 typedef struct {
-    nt_resource_t vs;
-    nt_resource_t fs;
+    /* Borrowed: the material never links, destroys or checks the program. */
+    nt_program_t program;
     nt_material_texture_desc_t textures[NT_MATERIAL_MAX_TEXTURES];
     uint8_t texture_count;
     nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
@@ -90,8 +90,10 @@ static inline nt_material_desc_t nt_material_desc_defaults(void) {
 /* ---- Material info (read-only query for render module) ---- */
 
 typedef struct {
-    uint32_t resolved_vs;
-    uint32_t resolved_fs;
+    /* Borrowed: the material never links, destroys or inspects it. May name a
+     * program that died with the GL context or that its owner destroyed -- ask
+     * nt_gfx_program_ready(program) before building a pipeline from it. */
+    nt_program_t program;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
     const char *tex_names[NT_MATERIAL_MAX_TEXTURES];         /* sampler uniform names (static storage) */
@@ -112,8 +114,6 @@ typedef struct {
     nt_cull_mode_t cull_mode;
     nt_color_mode_t color_mode;
     uint64_t render_state_hash;
-    uint32_t version;
-    bool ready;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
@@ -128,6 +128,11 @@ void nt_material_step(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
+/* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
+ * Neither program is owned or destroyed here. mat must be valid.
+ * Query readiness with
+ * nt_gfx_program_ready(nt_material_get_info(mat)->program). */
+void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
 /* ---- Runtime param mutation ---- */

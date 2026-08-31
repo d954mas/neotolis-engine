@@ -23,39 +23,13 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-/* Per-fixture counter so multiple ui_walker_fixture_make_material() calls
- * inside one test do not collide on virtual-pack ids. Reset to 0 by init
- * since tearDown destroys all materials and frees their packs. */
-static uint32_t s_vpack_counter;
-
 nt_material_t ui_walker_fixture_make_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
 
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "walker_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "walker_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "walker_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    const nt_hash32_t pid = nt_hash32_str(pack_name);
-    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-
-    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -71,11 +45,10 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     NT_ASSERT(fx != NULL);
     NT_ASSERT(arena != NULL);
     memset(fx, 0, sizeof *fx);
-    s_vpack_counter = 0;
 
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_mem_scratch_init((size_t)64U * 1024U); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_render_targets = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
     nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create >4 distinct stub fonts */

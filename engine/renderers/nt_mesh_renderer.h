@@ -30,6 +30,7 @@ static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { ret
 
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
+/* Reinitializes buffers and pipeline cache with the existing capacities. */
 void nt_mesh_renderer_restore_gpu(void);
 
 /* Contract: caller must pre-filter `items` by visibility — the renderer draws
@@ -48,6 +49,7 @@ uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
 uint32_t nt_mesh_renderer_test_ring_cursor(void);
+bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion
 

@@ -35,6 +35,7 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material/nt_program_ref.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "metrics/nt_metrics.h"
@@ -134,11 +135,6 @@ static bool s_debug_overlay;
 
 /* Resources. */
 static nt_hash32_t s_pack_id;
-static nt_resource_t s_sprite_vs_handle;
-static nt_resource_t s_sprite_fs_handle;
-static nt_resource_t s_sprite_cutoff_fs_handle; /* alpha-cutoff sprite variant for depth-writing UI */
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
@@ -147,6 +143,25 @@ static nt_material_t s_text_material;
 static nt_material_t s_text_material_3d;          /* world-space text that writes + tests depth */
 static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials for the F2 inspector */
 static nt_material_t s_inspector_text_material;
+static nt_program_ref_t s_sprite_cutoff_program;
+static nt_program_ref_t s_sprite_program;
+static nt_program_ref_t s_text_program; /* shared by the three text materials on this pair */
+
+/* Links each pair once both its stages are ready. The programs are ours:
+ * materials only borrow the handles, and context loss forces a relink. */
+static void link_programs(void) {
+    if (nt_program_ref_update(&s_sprite_cutoff_program)) {
+        nt_material_set_program(s_sprite_material, s_sprite_cutoff_program.program);
+    }
+    if (nt_program_ref_update(&s_sprite_program)) {
+        nt_material_set_program(s_inspector_sprite_material, s_sprite_program.program);
+    }
+    if (nt_program_ref_update(&s_text_program)) {
+        nt_material_set_program(s_text_material, s_text_program.program);
+        nt_material_set_program(s_text_material_3d, s_text_program.program);
+        nt_material_set_program(s_inspector_text_material, s_text_program.program);
+    }
+}
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
@@ -810,6 +825,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    link_programs();
     try_bind_resources();
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
@@ -847,7 +863,6 @@ static void frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_gfx_destroy_buffer(s_frame_ubo);
@@ -857,11 +872,25 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_shape_renderer_restore_gpu();
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_cutoff_program);
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        s_font_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
+        /* Everything decided before begin_frame described the dead context, so
+         * this frame draws nothing -- the next one is built from scratch. */
+        nt_gfx_end_segment();
+        nt_gfx_end_frame();
+        nt_window_swap_buffers();
+        return;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
@@ -880,7 +909,7 @@ static void frame(void) {
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
+    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (ui_can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
@@ -925,14 +954,19 @@ static void frame(void) {
     }
 
     /* HUD: ortho VP. */
-    if (text_info && text_info->ready) {
+    if (text_info && nt_gfx_program_ready(text_info->program)) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         draw_hud(fb_w, fb_h);
         nt_text_renderer_flush();
     }
 
-    if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
+    /* The inspector sprite uses a separate program that may become ready after the UI's. */
+    const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
+    const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
+    const bool inspector_can_render = insp_sprite && nt_gfx_program_ready(insp_sprite->program) && insp_text && nt_gfx_program_ready(insp_text->program);
+
+    if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho). */
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
@@ -1041,11 +1075,12 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/ui_3d_demo.ntpack");
 #endif
 
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_sprite_cutoff_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
+    s_sprite_cutoff_program.vs = s_sprite_program.vs; /* one vertex stage, two fragment variants */
+    s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_cutoff_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_3D_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
@@ -1057,8 +1092,6 @@ int main(int argc, char *argv[]) {
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
      * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_cutoff_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -1070,8 +1103,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = false,
@@ -1081,8 +1112,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_text",
     });
     s_text_material_3d = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = true,
         .depth_write = true,
@@ -1099,8 +1128,6 @@ int main(int argc, char *argv[]) {
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -1110,8 +1137,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_inspector_sprite",
     });
     s_inspector_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -1156,6 +1181,9 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_text_material_3d);
     nt_material_destroy(s_inspector_sprite_material);
     nt_material_destroy(s_inspector_text_material);
+    nt_program_ref_drop(&s_sprite_cutoff_program);
+    nt_program_ref_drop(&s_sprite_program);
+    nt_program_ref_drop(&s_text_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

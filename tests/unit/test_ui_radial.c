@@ -37,8 +37,6 @@ static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
  * a_radial @ 0..3 + a_layout @ 4..7 (walker fills a_layout by name; placeholders here). */
 static const float k_radial_attrs[8] = {0.25F, 1.75F, 0.5F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
-static uint32_t s_vpack_counter;
-
 /* Radial material: shares the fixture's vs/fs role but declares a_radial @ loc 4 +
  * a_layout @ loc 7 (walker-filled by name) so build_sprite_layout produces the
  * extended 32 B custom block (distinct pipeline). */
@@ -46,29 +44,9 @@ static nt_material_t make_radial_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "radial_fs"});
 
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "radial_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "radial_test_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "radial_test_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    const nt_hash32_t pid = nt_hash32_str(pack_name);
-    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -86,7 +64,6 @@ static nt_material_t make_radial_material(void) {
 }
 
 void setUp(void) {
-    s_vpack_counter = 0;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
@@ -464,27 +441,9 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     /* Build a material with the attr_map order reversed vs make_radial_material. */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "perm_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "perm_fs"});
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "perm_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "perm_test_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "perm_test_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-    const nt_hash32_t pid = nt_hash32_str(pack_name);
-    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
     desc.attr_map[0].stream_name = "a_layout"; /* a_layout FIRST (offset 0..3) */
@@ -574,29 +533,9 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "ri_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "ri_fs"});
 
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "ri_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "ri_test_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "ri_test_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    const nt_hash32_t pid = nt_hash32_str(pack_name);
-    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
+    desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;

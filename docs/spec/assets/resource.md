@@ -140,24 +140,69 @@ frame.
 
 When `context_restored` is true, the game:
 
-1. discards render decisions and draw lists prepared before
-   `nt_gfx_begin_frame()`
-2. calls `nt_resource_invalidate()` for each file-backed GPU asset type that it
-   uses
-3. destroys and recreates game-owned GPU objects, freeing their logical handle
-   slots before replacement
-4. calls the restore entry point of every active renderer
+- discards render decisions and draw lists prepared before
+  `nt_gfx_begin_frame()`, and draws nothing for this frame. Geometry draw entry
+  points assert; clearing through `nt_gfx_begin_pass` stays legal
+- destroys its own `nt_program_t` handles and sets each handle variable to
+  `NT_PROGRAM_INVALID`. Destroying a stale non-zero handle asserts
+- calls the restore entry point of every active renderer, and destroys and
+  recreates its own GPU objects, then calls `nt_resource_invalidate()` for the
+  shader-code asset type and every other file-backed GPU asset type it uses
+
+Program destruction and renderer restoration may occur in either order.
+Destroying a program destroys its pipelines, destroying a pipeline never consults
+its program, and restore entry points discard queued work without flushing.
+
+No step needs pool headroom over the steady state: every rebuild destroys before
+it recreates, whether it is a renderer relinking inside its own restore entry
+point or `nt_program_ref_update` reclaiming a dead handle before linking again.
+
+Restore entry points leave never-initialized or explicitly shut-down modules
+untouched, so a game may call all of them without activating unused renderers.
+
+`nt_shape_renderer` and `nt_postfx_blur` own their programs and relink embedded
+sources inside their restore entry points. A failed blur restore leaves the
+module initialized but unable to draw; the game must retry
+`nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
+`nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
+restore drops queued commands and pipeline caches, then the game relinks.
+
+Materials survive teardown and retain their old program handles. Destroying a
+program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
+reports false. Material handles remain unchanged; ECS components, the UI context,
+and game-side structures need no re-binding.
+
+A font keeps its `nt_font_add` source list of resource handles. Once the context
+is usable, `nt_font_step` recreates non-ready curve and band textures before its
+resource rescan; this does not require source-asset reactivation. Re-adding an
+existing source asserts on the duplicate. An atlas keeps its parsed regions and
+needs its page textures resolved again.
+
+Programs from file-backed stages come back over following frames: the
+shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
+activation budget, and the frame's `nt_resource_step()` has already run by the
+time `context_restored` is seen. The game links a new program once both stages
+resolve and assigns it with `nt_material_set_program`. Assigning the same handle
+is a no-op, so each material may be gated on its own program every frame without
+an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
+re-activate on the next step within the activation budget; an evicted pack must
+re-download first. Rebuild resource-dependent render state after publication.
+
+Both ECS `draw_list` paths skip a material whose program is not ready and warn
+once until a pipeline is built again. The skip is normal runtime state, not a
+caller error. The immediate-mode
+`nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
+assert only that a program was assigned, not that it is live. The game stops
+feeding them once its program gate goes false. During the UI walk, `nt_ui` calls
+those setters for declared widgets, so gate widget declarations on program
+availability.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,
 and published again with `nt_resource_register()`.
 
-The frame's `nt_resource_step()` has already run before
-`nt_gfx_begin_frame()` discovers the restore. File-backed assets therefore
-reactivate and republish no earlier than a later resource step. The game rebuilds
-resource-dependent render state after that publication instead of reusing the
-discarded list. Render targets are recreated by `nt_gfx` from retained
-descriptors, but their pixel contents must be redrawn.
+Render targets are recreated by `nt_gfx` from retained descriptors, but their
+pixel contents must be redrawn.
 
 ## Pack lifetime (mount / unmount)
 
