@@ -166,7 +166,7 @@ void test_vi_creation_asserts_webgl2_rules(void) {
     }));
     /* Attr-count caps */
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}, .vertex_buffer = vbo}));
-    EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}}));
+    EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS + 1, .stride = 4}}));
 }
 
 void test_vi_stride_255_boundary(void) {
@@ -309,7 +309,7 @@ void test_bind_instance_buffer_asserts_without_instance_layout(void) {
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0));
 }
 
-/* --- Draw invariants (transitional: enforced when a vertex input is bound) --- */
+/* --- Draw invariants --- */
 
 void test_draw_indexed_asserts_on_non_indexed_vi(void) {
     nt_buffer_t vbo = make_vbo();
@@ -342,8 +342,10 @@ void test_instanced_draw_asserts_before_instance_pointing(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    /* Enabled-but-unpointed instance attribs would fail silently in GL. */
+    /* Enabled-but-unpointed instance attribs would fail silently in GL --
+     * for ANY draw with this VAO, not only instanced ones. */
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    EXPECT_ASSERT(nt_gfx_draw(0, 3));
     nt_gfx_bind_instance_buffer(stream, 0);
     nt_gfx_draw_instanced(0, 3, 2);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());

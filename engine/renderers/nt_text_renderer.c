@@ -711,13 +711,14 @@ void nt_text_renderer_flush(void) {
     }
     /* Resolved when the batch opened. Re-checked rather than trusted: destroying
      * a program destroys the pipelines built on it, and that can happen between
-     * the first glyph and here. */
+     * the first glyph and here. The vertex input can be missing after a failed
+     * backend allocation in create_gpu_resources. */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
-    if (!nt_gfx_pipeline_valid(pipeline)) {
+    if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
         /* Unready programs were reported at batch open; destruction of a captured
          * pipeline or backend allocation failure still needs a warning. */
         if (!s_text.warned_no_pipeline) {
-            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
+            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline or vertex input -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }
         s_text.vertex_count = 0;

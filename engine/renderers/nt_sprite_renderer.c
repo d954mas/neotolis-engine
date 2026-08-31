@@ -53,8 +53,10 @@ static struct {
     uint16_t count;
 
     /* Vertex-input cache keyed by the layout hash (0 = base 20 B layout).
-     * All layouts bake over the one (vbo, ibo) pair; layout populations are a
-     * subset of pipeline populations, so the same hardcap bounds it. */
+     * All layouts bake over the one (vbo, ibo) pair. Bounded by distinct
+     * custom attr_map layouts -- one pipeline (program x render state) can
+     * host many of them, so this population is independent of the pipeline
+     * count; the hardcap is shared only as a sizing choice. */
     struct {
         uint64_t key;
         nt_vertex_input_t vi;
@@ -336,8 +338,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 }
 
 /* One vertex input per distinct layout, all baked over the shared (vbo, ibo)
- * pair. Cached handles are revalidated on lookup: context loss (or a buffer
- * cascade) kills them without notifying the renderer. */
+ * pair. Cached handles are revalidated on lookup: the destroy-buffer cascade
+ * (restore_gpu recreates vbo/ibo) kills them without notifying the renderer. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
     const uint64_t key = nt_sprite_layout_hash(mat_info);
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
@@ -355,6 +357,9 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
         return s_sprite.vi_entries[i].vi;
     }
     NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");
+    if (s_sprite.vi_count >= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP) {
+        return NT_VERTEX_INPUT_INVALID; /* OFF-mode guard, same as the mesh versions table */
+    }
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = build_sprite_layout(mat_info),
         .vertex_buffer = s_sprite.vbo,
@@ -1387,9 +1392,6 @@ void nt_sprite_renderer_flush(void) {
         if (c->pipeline.id != bound_pipeline_id) {
             nt_gfx_bind_pipeline(c->pipeline);
             bound_pipeline_id = c->pipeline.id;
-            /* bind_pipeline clears the bound vertex input (transitional rule),
-             * so re-bind it below even if the cmd's handle didn't change. */
-            bound_vi_id = 0;
             /* Params and sampler uniforms belong to programs and need replay.
              * Texture-unit bindings belong to the context and survive the switch. */
             bound_mat_id = 0;

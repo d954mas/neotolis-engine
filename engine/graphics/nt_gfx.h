@@ -95,7 +95,6 @@ typedef struct {
     uint8_t index_type;                        /* 0=none, 1=uint16, 2=uint32 */
     NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
     uint16_t stride;                           /* total vertex size in bytes */
-    uint64_t layout_hash;                      /* stream-descriptor hash; serves as pipeline-cache identity, hence 64-bit */
 } nt_gfx_mesh_info_t;
 
 /* ---- Enums ---- */
@@ -286,6 +285,9 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
+/* Instance layouts are capped tighter: the backend keeps a per-vertex-input
+ * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
+#define NT_GFX_MAX_INSTANCE_ATTRS 8
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
 
 typedef struct {
@@ -311,8 +313,9 @@ typedef struct {
     uint16_t max_buffers;   /* default: 128 */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
-    /* default: 528 = max_meshes(128) x mesh renderer max_mesh_layouts(4)
-     * worst case + 16 for fixed renderer-owned vertex inputs. */
+    /* default: 560 = max_meshes(128) x mesh renderer max_mesh_layouts(4)
+     * worst case + 48 for renderer-owned vertex inputs (shape ~13, text,
+     * blur, sprite custom layouts). */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     bool depth;                  /* request depth buffer (default: true) */
@@ -453,7 +456,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_buffers = 128,
         .max_textures = 64,
         .max_meshes = 128,
-        .max_vertex_inputs = 528,
+        .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .depth = true,
         .premultiplied_alpha = true,

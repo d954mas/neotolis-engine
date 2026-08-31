@@ -265,12 +265,16 @@ never reaches this descriptor. These cases, exhausted configured target
 capacity, stale handles, direct mutation of owned attachments, and
 render-target lifecycle calls inside an active pass are developer errors and
 assert. `nt_gfx_make_pipeline` follows the same split: a NULL descriptor, an
-unready program, an attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride
-over the WebGL2 cap of 255, and an exhausted pipeline pool all assert, so a
-returned invalid pipeline handle means a lost context or a failed backend
-allocation — the two recoverable outcomes, both retried on a later frame.
-Creating a pipeline preserves the currently bound pipeline and its vertex-input
-state; the caller does not need to rebind it after creating another pipeline.
+unready program, and an exhausted pipeline pool assert, so a returned invalid
+pipeline handle means a lost context or a failed backend allocation — the two
+recoverable outcomes, both retried on a later frame.
+`nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
+attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
+`NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned
+or duplicated attributes, mismatched buffers, and an exhausted pool all
+assert. Creating a pipeline or a vertex input preserves both current bindings
+(the bound pipeline and the bound vertex input); the caller does not need to
+rebind after creating another object.
 Backend allocation, framebuffer completeness, resize, and context-restore
 failures remain runtime failures reported through invalid handles, `false`, or
 readiness queries.

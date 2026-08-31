@@ -88,12 +88,15 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   const spriteRect = { x: Math.round(canvas!.x + field.x + field.w / 2 - 32), y: Math.round(canvas!.y + field.y - 5), width: 20, height: 10 };
   const textRect = { x: Math.round(canvas!.x + 24), y: Math.round(canvas!.y + 24), width: 230, height: 24 };
   // The wasm app's mesh probe: two instanced green quads in the bottom-right
-  // corner drawn through an owned vertex input (the WebGL2 VAO path).
+  // corner drawn through an owned vertex input (the WebGL2 VAO path). One rect
+  // per quad -- the second (y 688..728) fails if only instance 0 is drawn.
   const meshRect = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 };
+  const meshRect2 = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 696), width: 40, height: 24 };
   const spriteBaseline = await capturePixels(page, spriteRect);
   const textBaseline = await capturePixels(page, textRect);
   expectVisibleProbes(spriteBaseline, textBaseline);
   expectMeshProbe(await capturePixels(page, meshRect));
+  expectMeshProbe(await capturePixels(page, meshRect2));
 
   // These controls prove pixel-matcher sensitivity, not a simulated recovery failure.
   for (const mode of [1, 2]) {
@@ -133,6 +136,7 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
       const text = await capturePixels(page, textRect);
       expectVisibleProbes(sprite, text);
       expectMeshProbe(await capturePixels(page, meshRect));
+      expectMeshProbe(await capturePixels(page, meshRect2));
       expect(pixelsMatch(sprite, spriteBaseline), 'sprite pixels after restore').toBe(true);
       expect(pixelsMatch(text, textBaseline), 'text pixels after restore').toBe(true);
       expect(errors, 'unexpected browser/gfx errors').toEqual([]);

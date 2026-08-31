@@ -149,7 +149,7 @@ static struct {
     uint32_t bound_pipeline;     /* currently bound pipeline backend handle */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
-    uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
+    uint8_t bound_index_type; /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
@@ -322,8 +322,8 @@ void nt_gfx_shutdown(void) {
 
     /* The native context survives backend teardown, so release remaining GL objects.
      * Backend destroys clear entries; owned attachments and mesh buffers are safe
-     * to revisit. Pipelines
-     * own their VAOs, not their programs. */
+     * to revisit. Vertex inputs own the VAOs; pipelines own no GL objects and
+     * never their programs. */
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         nt_gfx_backend_destroy_vertex_input(s_gfx.vertex_input_backends[i]);
     }
@@ -952,7 +952,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
         return result;
     }
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
-    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
+    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "too many instance attrs (NT_GFX_MAX_INSTANCE_ATTRS)");
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
     NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
@@ -969,6 +969,9 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
         uint32_t vbo_slot = nt_pool_slot_index(desc->vertex_buffer.id);
         NT_ASSERT(s_gfx.buffer_metas[vbo_slot].type == NT_BUFFER_VERTEX && "make_vertex_input: vertex_buffer is not vertex type");
         vbo_backend = s_gfx.buffer_backends[vbo_slot];
+        /* A pool-valid buffer with no backend outlived a context loss; baking
+         * it would produce a VAO that silently draws nothing. */
+        NT_ASSERT(vbo_backend != 0 && "make_vertex_input: vertex_buffer has no live backend -- recreate it after context restore");
     }
     uint32_t ibo_backend = 0;
     uint8_t index_type = NT_INDEX_NONE;
@@ -980,6 +983,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
         /* Without the declared type the backend would silently draw UINT16. */
         NT_ASSERT(index_type != NT_INDEX_NONE && "make_vertex_input: index_buffer was created without an index_type");
         ibo_backend = s_gfx.buffer_backends[ibo_slot];
+        NT_ASSERT(ibo_backend != 0 && "make_vertex_input: index_buffer has no live backend -- recreate it after context restore");
     }
 
     uint32_t id = nt_pool_alloc(&s_gfx.vertex_input_pool);
@@ -1794,6 +1798,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
         return;
     }
     assert_vertex_input_bound();
+    assert_instance_attribs_pointed();
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
@@ -1850,6 +1855,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     }
     assert_vertex_input_bound();
     assert_indexed_draw_has_index_type();
+    assert_instance_attribs_pointed();
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
@@ -2484,9 +2490,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         stride += (uint16_t)(nt_stream_type_size(src_streams[i].type) * src_streams[i].count);
     }
     s_gfx.mesh_table[slot].stride = stride;
-
-    /* Compute layout_hash from stream descriptors for pipeline cache keying */
-    s_gfx.mesh_table[slot].layout_hash = nt_hash64(src_streams, (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc)).value;
 
     return mesh_id;
 }

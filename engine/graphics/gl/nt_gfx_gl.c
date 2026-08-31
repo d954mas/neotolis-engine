@@ -110,10 +110,13 @@ typedef struct {
 
 /* Owned vertex-input VAO. Static half (vertex attrs + element binding) is
  * baked at creation; instance pointers are re-specified into the bound VAO
- * by bind_instance_buffer, which needs the layout kept here. */
+ * by bind_instance_buffer, which needs the layout kept here. Compact copy:
+ * a full nt_vertex_layout_t per slot would cost ~200 B x max_vertex_inputs. */
 typedef struct {
     GLuint vao; /* 0 = free slot */
-    nt_vertex_layout_t instance_layout;
+    nt_vertex_attr_t instance_attrs[NT_GFX_MAX_INSTANCE_ATTRS];
+    uint8_t instance_attr_count;
+    uint16_t instance_stride;
 } nt_gfx_gl_vertex_input_t;
 
 /* ---- File-scope state ---- */
@@ -1243,7 +1246,11 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     gl_bind_vao(s_gl_cache.vao);
 
     s_vertex_inputs[slot].vao = vao;
-    s_vertex_inputs[slot].instance_layout = desc->instance_layout;
+    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
+        s_vertex_inputs[slot].instance_attrs[i] = desc->instance_layout.attrs[i];
+    }
+    s_vertex_inputs[slot].instance_attr_count = desc->instance_layout.attr_count;
+    s_vertex_inputs[slot].instance_stride = desc->instance_layout.stride;
     return slot;
 }
 
@@ -1393,14 +1400,11 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
     /* Re-specify the bound vertex input's instance pointers into its VAO. */
-    const nt_vertex_layout_t *layout = NULL;
     if (s_bound_vertex_input_slot != 0 && s_bound_vertex_input_slot <= s_init_desc.max_vertex_inputs) {
-        layout = &s_vertex_inputs[s_bound_vertex_input_slot].instance_layout;
-    }
-    if (layout != NULL) {
-        for (uint8_t i = 0; i < layout->attr_count; i++) {
-            const nt_vertex_attr_t *attr = &layout->attrs[i];
-            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
+        const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[s_bound_vertex_input_slot];
+        for (uint8_t i = 0; i < vi->instance_attr_count; i++) {
+            const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
+            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
                                   (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
 #ifdef NT_TEST_ACCESS
             s_test_instance_attrib_pointer_calls++;

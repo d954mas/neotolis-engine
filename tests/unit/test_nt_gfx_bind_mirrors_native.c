@@ -102,12 +102,30 @@ static void test_vertex_inputs_alternate_under_one_pipeline(void) {
     nt_gfx_end_frame();
 }
 
+/* Counts REAL glVertexAttribPointer calls via glad-pointer swap, so a
+ * reintroduced re-pointing path is caught even if it bypasses the source
+ * counters in nt_gfx_gl.c. */
+static uint32_t s_real_attrib_pointer_calls;
+static PFNGLVERTEXATTRIBPOINTERPROC s_saved_attrib_pointer;
+static void GLAD_API_PTR counting_vertex_attrib_pointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
+    s_real_attrib_pointer_calls++;
+    s_saved_attrib_pointer(index, size, type, normalized, stride, pointer);
+}
+
 /* Steady state: the static half of vertex-input setup is baked at creation, so
- * a whole frame of draws issues zero divisor-0 glVertexAttribPointer calls. */
+ * a whole frame of draws issues zero divisor-0 glVertexAttribPointer calls --
+ * the only pointer calls left are the per-draw instance re-points, and VAO
+ * binds stay one per vertex-input switch (delta-checked). */
 static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_pipeline_t pip = make_red_pipeline();
     nt_vertex_input_t vi_full = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_vertex_input_t vi_empty = make_vi(make_vbo(s_empty), (nt_buffer_t){0});
+    nt_vertex_input_t vi_inst = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos2_layout(),
+        .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .vertex_buffer = make_vbo(s_full),
+    });
+    nt_buffer_t inst_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
     nt_gfx_begin_frame();
     begin_black_pass();
@@ -118,6 +136,9 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_end_frame();
 
     nt_gfx_gl_test_reset_counters();
+    s_real_attrib_pointer_calls = 0;
+    s_saved_attrib_pointer = glad_glVertexAttribPointer;
+    glad_glVertexAttribPointer = counting_vertex_attrib_pointer;
     nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
@@ -125,9 +146,17 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_draw(0, 3);
     nt_gfx_bind_vertex_input(vi_empty);
     nt_gfx_draw(0, 3);
+    nt_gfx_bind_vertex_input(vi_inst);
+    nt_gfx_bind_instance_buffer(inst_buf, 0);
+    nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
+    /* begin_frame's cache reset (VAO 0) + one bind per vertex-input switch. */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_gl_test_vao_binds());
     nt_gfx_end_frame();
+    glad_glVertexAttribPointer = s_saved_attrib_pointer;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_static_attrib_pointer_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_instance_attrib_pointer_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
 }
 
 /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: data ops on OTHER index
@@ -147,9 +176,13 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     nt_gfx_draw_indexed(0, 3, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
 
-    /* Both data-op flavors on buffer B while A's vertex input stays bound. */
+    /* All three data-op flavors on other index buffers while A's vertex input
+     * stays bound: update, orphan, and creation-with-data. */
     nt_gfx_update_buffer(ibo_b, 0, s_degenerate_indices, sizeof(s_degenerate_indices));
     nt_gfx_orphan_buffer(ibo_b, s_degenerate_indices, sizeof(s_degenerate_indices));
+    nt_buffer_t ibo_c = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = s_degenerate_indices, .size = sizeof(s_degenerate_indices), .index_type = NT_INDEX_UINT16});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, ibo_c.id);
 
     nt_gfx_end_pass();
     begin_black_pass();

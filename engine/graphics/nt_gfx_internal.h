@@ -165,8 +165,8 @@ void nt_gfx_stub_test_reset(void);
 
 #ifdef NT_TEST_ACCESS
 /* GL-backend-only counters (defined in gl/nt_gfx_gl.c; link only from tests
- * using the real GL backend). Static = divisor-0 glVertexAttribPointer calls
- * (create-time and legacy per-bind re-pointing); instance = divisor-1 calls,
+ * using the real GL backend). Static = divisor-0 glVertexAttribPointer calls,
+ * issued only at vertex-input creation; instance = divisor-1 calls,
  * legitimately per-draw. Steady-state frames must show static == 0. */
 void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);

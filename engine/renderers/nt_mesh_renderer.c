@@ -236,10 +236,11 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
     const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info);
-    /* memset'd struct, so padding hashes deterministically; color_mode selects
-     * the instance layout, which the baked divisor state depends on. */
-    uint64_t key = nt_hash64(&layout, (uint32_t)sizeof(layout)).value;
-    key = key * 0x9E3779B97F4A7C15ULL + (uint64_t)mat_info->color_mode;
+    /* Hash only the used attrs (memset'd, so padding is deterministic; the
+     * unused tail would be pure noise). color_mode selects the instance
+     * layout, which the baked divisor state depends on. */
+    uint64_t key = nt_hash64(layout.attrs, (uint32_t)layout.attr_count * (uint32_t)sizeof(nt_vertex_attr_t)).value;
+    key = key * 0x9E3779B97F4A7C15ULL + ((uint64_t)layout.attr_count << 24 | (uint64_t)layout.stride << 8 | (uint64_t)mat_info->color_mode);
 
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= s_mesh_renderer.vi_mesh_capacity);
@@ -521,8 +522,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                     continue;
                 }
                 nt_gfx_bind_pipeline(pip);
-                /* Pipeline first: binding it clears the bound vertex input
-                 * while pipelines still own VAOs (transitional rule). */
                 nt_gfx_bind_vertex_input(vi);
 
                 /* Sampler units are program state shared with every other

@@ -97,7 +97,10 @@ keep the GL name, so baked attachments survive per-flush orphaning — and
 index-buffer data ops run with VAO 0 bound in the backend, because the
 element-array binding is VAO state and would otherwise be silently rewired
 into whichever vertex input is bound. Vertex inputs die with a lost context
-and are not auto-restored; renderer restore paths recreate them.
+and are not auto-restored; renderer restore paths recreate them. Loss alone
+does not fail `nt_gfx_vertex_input_valid` — pool slots live until the restore
+path's buffer destroys cascade through them; a bind that reaches a
+context-orphaned vertex input first traps on its zeroed backend.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
