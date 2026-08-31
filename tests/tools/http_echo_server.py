@@ -9,6 +9,7 @@ same contract: POST /echo (byte-exact echo + request headers reflected into
 X-Echo-* response headers), GET /hello, GET /status404, GET /slow (5 s stall
 for the timeout test).
 """
+import gzip
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,6 +49,7 @@ class Handler(BaseHTTPRequestHandler):
                 ("Content-Type", "application/octet-stream"),
                 ("X-Echo-Content-Type", self.headers.get("Content-Type", "")),
                 ("X-Echo-X-Nt-Test", self.headers.get("X-NT-Test", "")),
+                ("X-Echo-Accept-Encoding", self.headers.get("Accept-Encoding", "")),
             ],
         )
 
@@ -70,6 +72,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/hello301":
             # Lands here only when a redirected POST correctly became a GET
             self._reply(200, b"hello-neotolis")
+        elif self.path == "/gzip":
+            body = gzip.compress(b"gzip-payload-neotolis" * 8)
+            self._reply(200, body, [("Content-Type", "text/plain"), ("Content-Encoding", "gzip")])
         else:
             self._reply(404, b"")
 

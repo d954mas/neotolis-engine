@@ -105,6 +105,9 @@ static void test_post_echo_binary_body(void) {
     TEST_ASSERT_NOT_NULL(headers);
     TEST_ASSERT_NOT_NULL(strstr(headers, "x-echo-content-type: application/json"));
     TEST_ASSERT_NOT_NULL(strstr(headers, "x-echo-x-nt-test: neotolis"));
+    /* Compression negotiated like fetch() does (decoding proven by test_gzip_decoded) */
+    TEST_ASSERT_NOT_NULL(strstr(headers, "x-echo-accept-encoding: "));
+    TEST_ASSERT_NOT_NULL(strstr(headers, "gzip"));
 
     uint32_t size = 0;
     uint8_t *data = nt_http_take_data(req, &size);
@@ -180,6 +183,22 @@ static void test_bodiless_lowercase_post(void) {
     nt_http_free(req);
 }
 
+/* Content-Encoding: gzip must arrive DECODED — parity with fetch() (an ntpack served
+ * compressed would otherwise fail its magic check on native only) */
+static void test_gzip_decoded(void) {
+    nt_http_request_t req = nt_http_request(make_url("/gzip"));
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+
+    uint32_t size = 0;
+    uint8_t *data = nt_http_take_data(req, &size);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_EQUAL(strlen("gzip-payload-neotolis") * 8, size);
+    TEST_ASSERT_EQUAL(0, memcmp(data, "gzip-payload-neotolis", strlen("gzip-payload-neotolis")));
+    free(data);
+    nt_http_free(req);
+}
+
 static void test_timeout_fails(void) {
     nt_http_options_t opts = {.timeout_ms = 300};
     nt_http_request_t req = nt_http_request_ex(make_url("/slow"), &opts);
@@ -216,6 +235,7 @@ int main(void) {
     RUN_TEST(test_put_301_reissued_as_get);
     RUN_TEST(test_post_301_becomes_get);
     RUN_TEST(test_bodiless_lowercase_post);
+    RUN_TEST(test_gzip_decoded);
     RUN_TEST(test_timeout_fails);
     RUN_TEST(test_connection_refused_fails);
     RUN_TEST(test_cancel_in_flight);

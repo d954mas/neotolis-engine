@@ -132,12 +132,10 @@ native backend (curl `CURLFOLLOW_OBEYCODE`) re-issues as GET for **every** metho
 while browsers demote only POST and preserve PUT/DELETE/PATCH with their body.
 Avoid endpoints that redirect non-GET/POST requests if this difference matters.
 
-Content encoding: the native backend sends no `Accept-Encoding` and does no
-decompression (no bundled zlib) — a compliant server therefore answers with
-identity encoding. The browser's `fetch()` negotiates and decompresses
-transparently, so both backends hand the caller decoded bytes. A server that
-sends compressed data *unsolicited* violates HTTP and is not supported on
-native.
+Content encoding: both backends negotiate compression and hand the caller
+DECODED bytes — the browser's `fetch()` transparently, the native backend via
+`CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders (vendored
+`deps/zlib`, native exe only).
 
 Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
 

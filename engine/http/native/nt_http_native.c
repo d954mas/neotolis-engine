@@ -272,6 +272,9 @@ void nt_http_backend_request(uint16_t slot_index) {
      * CUSTOMREQUEST would resend a PUT after 301 without its body) */
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 16L);
+    /* "" = advertise and transparently decode every built-in encoding (gzip/deflate
+     * via vendored zlib) — parity with fetch(), which always negotiates compression */
+    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, native_on_body);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, xfer);

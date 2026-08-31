@@ -203,7 +203,11 @@ if(NOT EMSCRIPTEN)
         set(CURL_ENABLE_EXPORT_TARGET OFF)
         set(CURL_USE_LIBPSL OFF)
         set(CURL_USE_LIBSSH2 OFF)
-        set(CURL_ZLIB OFF)
+        # gzip/deflate content decoding: curl's find_package(ZLIB) is redirected to
+        # the vendored deps/zlib (native exe only; wasm uses the browser's decoder).
+        include(FetchContent)
+        FetchContent_Declare(ZLIB SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/zlib" OVERRIDE_FIND_PACKAGE)
+        set(CURL_ZLIB ON)
         set(CURL_BROTLI OFF)
         set(CURL_ZSTD OFF)
         set(USE_NGHTTP2 OFF)
@@ -225,7 +229,7 @@ if(NOT EMSCRIPTEN)
     nt_set_static_crt(glfw)
     # Both guarded: with SHARE_LIB_OBJECT the objects live in libcurl_object and the
     # static lib has no sources of its own — the object pin is the one that matters.
-    foreach(_curl_target libcurl_static libcurl_object)
+    foreach(_curl_target libcurl_static libcurl_object zlib_vendored)
         if(TARGET ${_curl_target})
             nt_set_static_crt(${_curl_target})
         endif()
