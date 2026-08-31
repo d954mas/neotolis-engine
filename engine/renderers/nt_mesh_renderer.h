@@ -24,9 +24,14 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
 typedef struct {
     uint16_t max_instances; /* max per single instanced draw call, default: 4096 */
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
+    /* Vertex-input versions kept per mesh (one per distinct derived layout x
+     * color mode drawing that mesh). Exceeding it ASSERTS -- silent eviction
+     * would hide re-creation thrash as an invisible perf regression; raise the
+     * knob instead. Default: 4 (3-4 versions is the expected population). */
+    uint16_t max_mesh_layouts;
 } nt_mesh_renderer_desc_t;
 
-static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64}; }
+static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64, .max_mesh_layouts = 4}; }
 
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
@@ -46,6 +51,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
+/* Live entries across the whole vertex-input versions table. */
+uint32_t nt_mesh_renderer_test_vertex_input_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
 uint32_t nt_mesh_renderer_test_ring_cursor(void);

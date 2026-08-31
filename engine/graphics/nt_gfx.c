@@ -2602,6 +2602,8 @@ void nt_gfx_deactivate_shader(uint32_t handle) {
 
 /* ---- Mesh info query ---- */
 
+uint16_t nt_gfx_max_meshes(void) { return s_gfx.mesh_pool.capacity; }
+
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
     if (!nt_pool_valid(&s_gfx.mesh_pool, mesh.id)) {
         return NULL;

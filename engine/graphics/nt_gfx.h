@@ -670,6 +670,9 @@ void nt_gfx_deactivate_shader(uint32_t handle);
 /* ---- Mesh info query ---- */
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
+/* Mesh pool capacity from nt_gfx_desc_t (valid after nt_gfx_init) -- sizes
+ * renderer-side per-mesh tables; mesh pool slots index [1..max]. */
+uint16_t nt_gfx_max_meshes(void);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

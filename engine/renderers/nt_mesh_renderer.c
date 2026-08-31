@@ -3,6 +3,7 @@
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
@@ -15,10 +16,24 @@
 
 /* ---- Module state ---- */
 
+/* One vertex-input version per (derived layout x color mode) drawing a mesh.
+ * mesh_id is the full generation-checked handle -- slot reuse must not alias
+ * a stale entry; key is the derived-layout hash (hash-as-identity, per the
+ * pipeline-cache standard). */
+typedef struct {
+    uint64_t key;
+    nt_vertex_input_t vi;
+    uint32_t mesh_id;
+} nt_mesh_vi_version_t;
+
 static struct {
     nt_renderer_pipeline_entry_t *entries; /* [max_pipelines] */
     uint16_t max_pipelines;
     uint16_t count;
+
+    nt_mesh_vi_version_t *vi_versions; /* [nt_gfx_max_meshes()][max_mesh_layouts] */
+    uint16_t max_mesh_layouts;
+    uint16_t vi_mesh_capacity; /* nt_gfx_max_meshes() at init time */
 
     nt_buffer_t instance_buf; /* dynamic vertex buffer for instance data */
 
@@ -149,30 +164,41 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 
 /* ---- Pipeline cache lookup/create ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
+static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* Sprite and text gate on readiness here; this renderer gates in draw_list, so
      * state the requirement where the pipeline is actually built. */
     NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
 
-    /* Full pipeline signature: layout + program + render state. The 64-bit hash
-     * IS the cache identity -- descriptors are never compared on a hit, so every
-     * nt_pipeline_desc_t field this renderer varies must be folded in here. */
-    uint64_t key = mesh_info->layout_hash;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_count;
-    for (uint8_t i = 0; i < mat_info->attr_map_count; i++) {
-        key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_hashes[i];
-        key = key * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[i];
-    }
+    /* Layouts live on the vertex-input versions; the pipeline signature is
+     * program x render state (the text-renderer pattern). render_state_hash
+     * folds color_mode, so pipelines still split per color mode -- an accepted
+     * over-split: nothing in the slimmed pipeline depends on it. */
+    const uint64_t key = ((uint64_t)mat_info->program.id * 0x9E3779B97F4A7C15ULL) + mat_info->render_state_hash;
 
     const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, key);
     if (cached.id != 0) {
         return cached;
     }
 
-    /* Build vertex layout from mesh streams + material attr_map */
+    nt_pipeline_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = mat_info->program;
+    desc.depth_test = mat_info->depth_test;
+    desc.depth_write = mat_info->depth_write;
+    desc.depth_func = NT_DEPTH_LESS;
+    desc.blend = mat_info->blend;
+    desc.cull_mode = (uint8_t)mat_info->cull_mode;
+    desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
+
+    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, key, &desc, &s_mesh_renderer.warned_program_not_ready);
+}
+
+/* ---- Vertex-input versions (Godot-style, one row per mesh pool slot) ---- */
+
+/* Derived layout = mesh streams x material attr_map: only mapped streams
+ * become attributes, so materials whose extra attr_map entries match none of
+ * this mesh's streams share a vertex input. */
+static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
     nt_vertex_layout_t layout;
     memset(&layout, 0, sizeof(layout));
     layout.stride = mesh_info->stride;
@@ -204,21 +230,54 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
         offset += stream_byte_size(stream);
     }
+    return layout;
+}
 
-    /* Create pipeline descriptor */
-    nt_pipeline_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = mat_info->program;
-    desc.layout = layout;
-    desc.instance_layout = s_instance_layouts[mat_info->color_mode];
-    desc.depth_test = mat_info->depth_test;
-    desc.depth_write = mat_info->depth_write;
-    desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = mat_info->blend;
-    desc.cull_mode = (uint8_t)mat_info->cull_mode;
-    desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
+    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info);
+    /* memset'd struct, so padding hashes deterministically; color_mode selects
+     * the instance layout, which the baked divisor state depends on. */
+    uint64_t key = nt_hash64(&layout, (uint32_t)sizeof(layout)).value;
+    key = key * 0x9E3779B97F4A7C15ULL + (uint64_t)mat_info->color_mode;
 
-    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, key, &desc, &s_mesh_renderer.warned_program_not_ready);
+    const uint32_t slot = nt_pool_slot_index(mesh.id);
+    NT_ASSERT(slot != 0 && slot <= s_mesh_renderer.vi_mesh_capacity);
+    nt_mesh_vi_version_t *row = &s_mesh_renderer.vi_versions[(size_t)(slot - 1) * s_mesh_renderer.max_mesh_layouts];
+
+    nt_mesh_vi_version_t *reusable = NULL;
+    for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
+        nt_mesh_vi_version_t *e = &row[i];
+        /* Exact mesh identity (generation-checked) + live handle: slot reuse
+         * and the destroy-buffer cascade both kill entries without notice. */
+        if (e->mesh_id == mesh.id && e->key == key && nt_gfx_vertex_input_valid(e->vi)) {
+            return e->vi;
+        }
+        if (reusable == NULL && (e->vi.id == 0 || !nt_gfx_vertex_input_valid(e->vi))) {
+            reusable = e;
+        }
+    }
+    /* Crash-early over silent eviction: 5+ layouts cycling on one mesh would
+     * re-create VAOs every frame as an invisible perf regression. */
+    NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise nt_mesh_renderer_desc_t.max_mesh_layouts");
+    if (reusable == NULL) {
+        return NT_VERTEX_INPUT_INVALID;
+    }
+
+    const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = layout,
+        .instance_layout = s_instance_layouts[mat_info->color_mode],
+        .vertex_buffer = mesh_info->vbo,
+        .index_buffer = mesh_info->ibo,
+        .label = "mesh_vi",
+    });
+    if (vi.id == 0) {
+        return vi; /* lost context / backend failure: caller skips the run */
+    }
+    reusable->key = key;
+    reusable->vi = vi;
+    reusable->mesh_id = mesh.id;
+    return vi;
 }
 
 /* ---- Lifecycle ---- */
@@ -229,11 +288,17 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_instances > 0);
     NT_ASSERT(desc->max_pipelines > 0);
+    NT_ASSERT(desc->max_mesh_layouts > 0);
 
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 
     s_mesh_renderer.max_instances = desc->max_instances;
     s_mesh_renderer.max_pipelines = desc->max_pipelines;
+    s_mesh_renderer.max_mesh_layouts = desc->max_mesh_layouts;
+    /* The capacity lives only in nt_gfx_desc_t; hardcoding it here would write
+     * out of bounds on bigger gfx configs. */
+    s_mesh_renderer.vi_mesh_capacity = nt_gfx_max_meshes();
+    NT_ASSERT(s_mesh_renderer.vi_mesh_capacity > 0 && "nt_mesh_renderer_init: nt_gfx_init must run first");
 
     /* Allocate pipeline cache */
     s_mesh_renderer.entries = (nt_renderer_pipeline_entry_t *)calloc(desc->max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
@@ -242,9 +307,20 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
+    /* Vertex-input versions table: one row per mesh pool slot */
+    s_mesh_renderer.vi_versions = (nt_mesh_vi_version_t *)calloc((size_t)s_mesh_renderer.vi_mesh_capacity * desc->max_mesh_layouts, sizeof(nt_mesh_vi_version_t));
+    if (!s_mesh_renderer.vi_versions) {
+        free(s_mesh_renderer.entries);
+        s_mesh_renderer.entries = NULL;
+        NT_LOG_ERROR("failed to allocate vertex-input versions");
+        return NT_ERR_INIT_FAILED;
+    }
+
     /* Allocate CPU staging byte buffer (worst-case stride) */
     s_mesh_renderer.instance_data = (uint8_t *)calloc(desc->max_instances, NT_INSTANCE_STRIDE_MAX);
     if (!s_mesh_renderer.instance_data) {
+        free(s_mesh_renderer.vi_versions);
+        s_mesh_renderer.vi_versions = NULL;
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
         NT_LOG_ERROR("failed to allocate instance data");
@@ -263,6 +339,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     if (s_mesh_renderer.instance_buf.id == 0) {
         free(s_mesh_renderer.instance_data);
         s_mesh_renderer.instance_data = NULL;
+        free(s_mesh_renderer.vi_versions);
+        s_mesh_renderer.vi_versions = NULL;
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
         NT_LOG_ERROR("failed to create instance buffer");
@@ -291,6 +369,13 @@ void nt_mesh_renderer_shutdown(void) {
         nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
     }
 
+    /* Destroy cached vertex inputs. Tolerant stale-destroy makes any
+     * deactivate-then-shutdown order safe (the cascade may have run first). */
+    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
+        nt_gfx_destroy_vertex_input(s_mesh_renderer.vi_versions[i].vi);
+    }
+    free(s_mesh_renderer.vi_versions);
+
     /* Free pipeline cache */
     free(s_mesh_renderer.entries);
 
@@ -308,8 +393,9 @@ void nt_mesh_renderer_restore_gpu(void) {
     }
     uint16_t saved_max = s_mesh_renderer.max_instances;
     uint16_t saved_pip = s_mesh_renderer.max_pipelines;
+    uint16_t saved_layouts = s_mesh_renderer.max_mesh_layouts;
     nt_mesh_renderer_shutdown();
-    nt_mesh_renderer_desc_t desc = {.max_instances = saved_max, .max_pipelines = saved_pip};
+    nt_mesh_renderer_desc_t desc = {.max_instances = saved_max, .max_pipelines = saved_pip, .max_mesh_layouts = saved_layouts};
     nt_result_t res = nt_mesh_renderer_init(&desc);
     NT_ASSERT(res == NT_OK); /* context alive but GPU alloc failed = fatal */
     (void)res;
@@ -425,15 +511,19 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 continue;
             }
 
-            /* Bind pipeline (if material or mesh changed) */
+            /* Bind pipeline + vertex input (if material or mesh changed) */
             if (run_mat.id != prev_mat.id || run_mesh.id != prev_mesh.id) {
-                nt_pipeline_t pip = find_or_create_pipeline(mat_info, mesh_info);
-                if (pip.id == 0) {
+                nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+                nt_vertex_input_t vi = (pip.id != 0) ? find_or_create_vertex_input(run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
+                if (pip.id == 0 || vi.id == 0) {
                     draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
                     run_start = run_end;
                     continue;
                 }
                 nt_gfx_bind_pipeline(pip);
+                /* Pipeline first: binding it clears the bound vertex input
+                 * while pipelines still own VAOs (transitional rule). */
+                nt_gfx_bind_vertex_input(vi);
 
                 /* Sampler units are program state shared with every other
                  * material on this program, so each declared slot is written
@@ -455,11 +545,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                     if (mat_info->param_names[p] != NULL) {
                         nt_gfx_set_uniform_vec4(mat_info->param_names[p], mat_info->params[p]);
                     }
-                }
-
-                nt_gfx_bind_vertex_buffer(mesh_info->vbo);
-                if (mesh_info->index_count > 0) {
-                    nt_gfx_bind_index_buffer(mesh_info->ibo);
                 }
 
                 prev_mat = run_mat;
@@ -488,6 +573,16 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 /* ---- Test accessors (always compiled; header guard controls visibility) ---- */
 
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void) { return s_mesh_renderer.count; }
+
+uint32_t nt_mesh_renderer_test_vertex_input_count(void) {
+    uint32_t live = 0;
+    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
+        if (nt_gfx_vertex_input_valid(s_mesh_renderer.vi_versions[i].vi)) {
+            live++;
+        }
+    }
+    return live;
+}
 
 uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.frame_draw_calls; }
 
