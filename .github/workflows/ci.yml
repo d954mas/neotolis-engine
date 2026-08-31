@@ -561,10 +561,11 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      # serve.mjs serves the devapi_host wasm output (NT_SHOWCASE_DIR override); the spec drives
-      # window.__devapi deterministically and asserts the deferred capture is a decodable non-blank PNG.
+      # The devapi-chromium project's server defaults to build/examples/devapi_host/wasm-debug
+      # (NT_DEVAPI_DIR overrides); the spec drives window.__devapi deterministically and asserts
+      # the deferred capture is a decodable non-blank PNG.
       - name: Run devapi web smoke test
-        run: cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/examples/devapi_host/wasm-debug" npx playwright test devapi.spec.ts
+        run: cd tests/browser && npx playwright test devapi.spec.ts
 
   lint:
     name: Format & Tidy
