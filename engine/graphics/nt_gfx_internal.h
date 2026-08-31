@@ -34,6 +34,13 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
+/* Bakes the desc's layouts and the given buffer backends into an owned VAO.
+ * Restores the previously bound VAO before returning. Returns 0 on failure. */
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend);
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
+/* 0 unbinds (VAO 0) and clears the backend's bound-vertex-input record. */
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
+
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
@@ -150,7 +157,22 @@ void nt_gfx_stub_test_set_context_lost(bool lost);
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void);
 uint32_t nt_gfx_stub_test_last_instance_offset(void);
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void);
+uint32_t nt_gfx_stub_test_vertex_input_create_count(void);
+uint32_t nt_gfx_stub_test_bind_vertex_input_count(void);
+uint32_t nt_gfx_stub_test_bound_vertex_input(void);
+void nt_gfx_stub_test_fail_next_vertex_input_create(void);
 void nt_gfx_stub_test_reset(void);
+#endif
+
+#ifdef NT_TEST_ACCESS
+/* GL-backend-only counters (defined in gl/nt_gfx_gl.c; link only from tests
+ * using the real GL backend). Static = divisor-0 glVertexAttribPointer calls
+ * (create-time and legacy per-bind re-pointing); instance = divisor-1 calls,
+ * legitimately per-draw. Steady-state frames must show static == 0. */
+void nt_gfx_gl_test_reset_counters(void);
+uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
+uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
+uint32_t nt_gfx_gl_test_vao_binds(void);
 #endif
 
 #ifdef NT_TEST_ACCESS

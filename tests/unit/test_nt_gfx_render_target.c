@@ -36,6 +36,7 @@ void setUp(void) {
         .max_buffers = 8,
         .max_textures = 8,
         .max_meshes = 4,
+        .max_vertex_inputs = 8,
         .max_render_targets = 4,
     });
     nt_gfx_stub_test_reset();

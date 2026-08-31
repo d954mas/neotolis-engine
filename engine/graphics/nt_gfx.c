@@ -59,6 +59,18 @@ typedef struct {
     uint32_t size;
 } nt_gfx_buffer_meta_t;
 
+/* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
+
+typedef struct {
+    uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
+    uint32_t ibo_id;
+    uint8_t index_type; /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint8_t instance_attr_count;
+    /* Enabled-but-unpointed instance attribs are invalid GL that fails
+     * silently -- draws assert this went through bind_instance_buffer once. */
+    bool instance_pointed;
+} nt_gfx_vertex_input_meta_t;
+
 /* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
 
 typedef struct {
@@ -105,6 +117,7 @@ static struct {
     nt_pool_t shader_pool;
     nt_pool_t program_pool;
     nt_pool_t pipeline_pool;
+    nt_pool_t vertex_input_pool;
     nt_pool_t buffer_pool;
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
@@ -113,12 +126,14 @@ static struct {
     uint32_t *program_backends;
     uint32_t *pipeline_backends;
     uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
+    uint32_t *vertex_input_backends;
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
     uint32_t *render_target_backends;
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
+    nt_gfx_vertex_input_meta_t *vertex_input_metas;
     nt_gfx_render_target_meta_t *render_target_metas;
 
     /* Sampler cache (dedup by descriptor; samplers are immutable after create
@@ -131,7 +146,8 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
-    uint32_t bound_pipeline; /* currently bound pipeline backend handle */
+    uint32_t bound_pipeline;     /* currently bound pipeline backend handle */
+    uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
     bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST */
@@ -223,6 +239,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -231,6 +248,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_pool_init(&s_gfx.program_pool, desc->max_programs);
     nt_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
+    nt_pool_init(&s_gfx.vertex_input_pool, desc->max_vertex_inputs);
     nt_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
     nt_pool_init(&s_gfx.texture_pool, desc->max_textures);
     nt_pool_init(&s_gfx.render_target_pool, max_render_targets);
@@ -239,11 +257,13 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
+    s_gfx.vertex_input_backends = (uint32_t *)calloc(desc->max_vertex_inputs + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
     s_gfx.render_target_backends = (uint32_t *)calloc(max_render_targets + 1, sizeof(uint32_t));
 
     s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
+    s_gfx.vertex_input_metas = (nt_gfx_vertex_input_meta_t *)calloc(desc->max_vertex_inputs + 1, sizeof(nt_gfx_vertex_input_meta_t));
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
     s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
 
@@ -304,6 +324,9 @@ void nt_gfx_shutdown(void) {
      * Backend destroys clear entries; owned attachments and mesh buffers are safe
      * to revisit. Pipelines
      * own their VAOs, not their programs. */
+    for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
+        nt_gfx_backend_destroy_vertex_input(s_gfx.vertex_input_backends[i]);
+    }
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[i]);
     }
@@ -325,6 +348,7 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.shader_pool);
     nt_pool_shutdown(&s_gfx.program_pool);
     nt_pool_shutdown(&s_gfx.pipeline_pool);
+    nt_pool_shutdown(&s_gfx.vertex_input_pool);
     nt_pool_shutdown(&s_gfx.buffer_pool);
     nt_pool_shutdown(&s_gfx.texture_pool);
     nt_pool_shutdown(&s_gfx.render_target_pool);
@@ -334,10 +358,12 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.program_backends);
     free(s_gfx.pipeline_backends);
     free(s_gfx.pipeline_programs);
+    free(s_gfx.vertex_input_backends);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.render_target_backends);
     free(s_gfx.buffer_metas);
+    free(s_gfx.vertex_input_metas);
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
@@ -543,6 +569,11 @@ void nt_gfx_begin_frame(void) {
         for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
             s_gfx.pipeline_backends[i] = 0;
         }
+        /* Vertex inputs die with the context and are not auto-restored --
+         * the zeroed backend makes a stale bind after recovery trap. */
+        for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
+            s_gfx.vertex_input_backends[i] = 0;
+        }
         for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
             s_gfx.buffer_backends[i] = 0;
         }
@@ -557,6 +588,8 @@ void nt_gfx_begin_frame(void) {
          * call deactivate_mesh() which returns slots to mesh pool.
          * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
         s_gfx.bound_pipeline = 0;
+        s_gfx.bound_vertex_input = 0;
+        s_gfx.bound_index_type = NT_INDEX_NONE;
         memset(s_gfx.bound_texture_ids, 0, sizeof(s_gfx.bound_texture_ids));
         /* Sampler cache: zero only the GL backend ids — keys, descs
          * and sampler_count stay so material-stored sampler.id values
@@ -618,6 +651,8 @@ void nt_gfx_begin_frame(void) {
     /* Backend resets its pipeline cache per frame; mirror it so the
      * bound-pipeline asserts stay truthful across frame boundaries. */
     s_gfx.bound_pipeline = 0;
+    s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_index_type = NT_INDEX_NONE;
     nt_gfx_backend_begin_frame();
 }
 
@@ -916,6 +951,68 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
+    /* Same contract as make_pipeline: caller errors trap, only a lost context
+     * or a failed backend allocation returns an invalid handle. */
+    nt_vertex_input_t result = {0};
+    NT_ASSERT(desc != NULL);
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        return result;
+    }
+    NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
+    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many instance attrs");
+    NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
+    /* After the attr_count asserts -- the loops read attr_count entries. */
+    assert_layout_webgl2_rules(&desc->layout);
+    assert_layout_webgl2_rules(&desc->instance_layout);
+    NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
+    /* attr_count 0 with no buffers is the attribute-less gl_VertexID path. */
+    NT_ASSERT((desc->layout.attr_count > 0) == (desc->vertex_buffer.id != 0) && "make_vertex_input: vertex_buffer is required iff layout has attrs");
+
+    uint32_t vbo_backend = 0;
+    if (desc->vertex_buffer.id != 0) {
+        NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, desc->vertex_buffer.id) && "make_vertex_input: invalid vertex_buffer handle");
+        uint32_t vbo_slot = nt_pool_slot_index(desc->vertex_buffer.id);
+        NT_ASSERT(s_gfx.buffer_metas[vbo_slot].type == NT_BUFFER_VERTEX && "make_vertex_input: vertex_buffer is not vertex type");
+        vbo_backend = s_gfx.buffer_backends[vbo_slot];
+    }
+    uint32_t ibo_backend = 0;
+    uint8_t index_type = NT_INDEX_NONE;
+    if (desc->index_buffer.id != 0) {
+        NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, desc->index_buffer.id) && "make_vertex_input: invalid index_buffer handle");
+        uint32_t ibo_slot = nt_pool_slot_index(desc->index_buffer.id);
+        NT_ASSERT(s_gfx.buffer_metas[ibo_slot].type == NT_BUFFER_INDEX && "make_vertex_input: index_buffer is not index type");
+        index_type = s_gfx.buffer_metas[ibo_slot].index_type;
+        /* Without the declared type the backend would silently draw UINT16. */
+        NT_ASSERT(index_type != NT_INDEX_NONE && "make_vertex_input: index_buffer was created without an index_type");
+        ibo_backend = s_gfx.buffer_backends[ibo_slot];
+    }
+
+    uint32_t id = nt_pool_alloc(&s_gfx.vertex_input_pool);
+    NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
+
+    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend);
+    if (backend == 0) {
+        NT_LOG_ERROR("backend vertex input creation failed");
+        nt_pool_free(&s_gfx.vertex_input_pool, id);
+        return result;
+    }
+
+    uint32_t slot = nt_pool_slot_index(id);
+    s_gfx.vertex_input_backends[slot] = backend;
+    s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
+        .vbo_id = desc->vertex_buffer.id,
+        .ibo_id = desc->index_buffer.id,
+        .index_type = index_type,
+        .instance_attr_count = desc->instance_layout.attr_count,
+        .instance_pointed = false,
+    };
+
+    result.id = id;
+    return result;
+}
+
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     nt_buffer_t result = {0};
     if (!desc) {
@@ -1191,6 +1288,23 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     nt_pool_free(&s_gfx.pipeline_pool, pip.id);
 }
 
+void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
+    /* The destroy_buffer cascade makes stale handles routine here, so both
+     * INVALID and stale are tolerated no-ops (same contract as pipelines). */
+    if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(vi.id);
+    if (s_gfx.bound_vertex_input == vi.id) {
+        s_gfx.bound_vertex_input = 0;
+        s_gfx.bound_index_type = NT_INDEX_NONE;
+    }
+    nt_gfx_backend_destroy_vertex_input(s_gfx.vertex_input_backends[slot]);
+    s_gfx.vertex_input_backends[slot] = 0;
+    memset(&s_gfx.vertex_input_metas[slot], 0, sizeof(nt_gfx_vertex_input_meta_t));
+    nt_pool_free(&s_gfx.vertex_input_pool, vi.id);
+}
+
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     if (buf.id == 0) {
         return; /* invalid-zero is a first-class value, as for programs */
@@ -1198,6 +1312,14 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("destroy_buffer: invalid handle");
         return;
+    }
+    /* Dependent vertex inputs baked this buffer into their VAO state and can
+     * never draw correctly again -- reclaim them now. Mesh deactivation
+     * reaches no renderer, so renderer caches rely on this cascade. */
+    for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
+        if (s_gfx.vertex_input_metas[i].vbo_id == buf.id || s_gfx.vertex_input_metas[i].ibo_id == buf.id) {
+            nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
+        }
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
@@ -1288,6 +1410,8 @@ bool nt_gfx_program_valid(nt_program_t prog) { return nt_pool_valid(&s_gfx.progr
 
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip) { return nt_pool_valid(&s_gfx.pipeline_pool, pip.id); }
 
+bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi) { return nt_pool_valid(&s_gfx.vertex_input_pool, vi.id); }
+
 bool nt_gfx_program_ready(nt_program_t prog) {
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         return false;
@@ -1330,6 +1454,10 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* Transitional while pipelines still own VAOs: binding one clobbers the
+     * bound vertex input, so the mirror must not survive (bind_instance_buffer
+     * would otherwise write foreign pointers into the pipeline's VAO). */
+    s_gfx.bound_vertex_input = 0;
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         /* Clear both bind mirrors so later draws or buffer binds cannot reuse
          * the previous pipeline's program and VAO. */
@@ -1346,6 +1474,27 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     s_test_bound_pipeline = pip;
 #endif
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
+}
+
+void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
+        /* Parallel to bind_pipeline's invalid path: clear the mirrors and
+         * bind VAO 0 so later draws cannot use stale vertex-input state. */
+        s_gfx.bound_vertex_input = 0;
+        s_gfx.bound_index_type = NT_INDEX_NONE;
+        nt_gfx_backend_bind_vertex_input(0);
+        NT_LOG_ERROR("bind_vertex_input: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(vi.id);
+    NT_ASSERT(s_gfx.vertex_input_backends[slot] != 0 && "bind_vertex_input: this vertex input outlived a context loss -- recreate it from the restored frame's resources");
+    s_gfx.bound_vertex_input = vi.id;
+    /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
+    s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;
+    nt_gfx_backend_bind_vertex_input(s_gfx.vertex_input_backends[slot]);
 }
 
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
@@ -1657,6 +1806,22 @@ void nt_gfx_set_uniform_int(const char *name, int val) {
  * restored frame and submit on the next. Pass clears remain legal. */
 static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md"); }
 
+/* Enabled-but-unpointed instance attribs are invalid GL that fails silently.
+ * Transitional: enforced only when a vertex input is bound -- the legacy
+ * pipeline-VAO path keeps its old checks until it is removed. */
+static void assert_instance_attribs_pointed(void) {
+    if (s_gfx.bound_vertex_input == 0) {
+        return;
+    }
+    NT_ASSERT(
+        (s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_pointed) &&
+        "instanced draw: bind_instance_buffer has not pointed the bound vertex input's instance attribs");
+}
+
+/* Transitional like above: a bound vertex input carries its own index type;
+ * NT_INDEX_NONE here means the caller draws indexed on a non-indexed input. */
+static void assert_indexed_draw_has_index_type(void) { NT_ASSERT((s_gfx.bound_vertex_input == 0 || s_gfx.bound_index_type != NT_INDEX_NONE) && "draw_indexed: bound vertex input is non-indexed"); }
+
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
@@ -1698,6 +1863,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
         NT_LOG_ERROR("draw_instanced called without bound pipeline");
         return;
     }
+    assert_instance_attribs_pointed();
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
@@ -1725,6 +1891,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
         NT_LOG_ERROR("draw_indexed called without bound pipeline");
         return;
     }
+    assert_indexed_draw_has_index_type();
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
@@ -1751,6 +1918,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
         NT_LOG_ERROR("draw_indexed_instanced called without bound pipeline");
         return;
     }
+    assert_indexed_draw_has_index_type();
+    assert_instance_attribs_pointed();
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
@@ -1782,10 +1951,17 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     }
     NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_instance_buffer: offset must be 4-byte aligned (WebGL2 attrib rule)");
-    NT_ASSERT(s_gfx.bound_pipeline != 0 && "bind_instance_buffer: requires a bound pipeline");
-    if (s_gfx.bound_pipeline == 0) {
-        NT_LOG_ERROR("bind_instance_buffer: no pipeline bound");
-        return;
+    if (s_gfx.bound_vertex_input != 0) {
+        uint32_t vi_slot = nt_pool_slot_index(s_gfx.bound_vertex_input);
+        NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
+        s_gfx.vertex_input_metas[vi_slot].instance_pointed = true;
+    } else {
+        /* Transitional fallback while pipelines still own instance layouts. */
+        NT_ASSERT(s_gfx.bound_pipeline != 0 && "bind_instance_buffer: requires a bound vertex input or pipeline");
+        if (s_gfx.bound_pipeline == 0) {
+            NT_LOG_ERROR("bind_instance_buffer: no pipeline bound");
+            return;
+        }
     }
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot], byte_offset);
 }

@@ -166,6 +166,7 @@ void setUp(void) {
         .max_buffers = 256,
         .max_textures = 32,
         .max_meshes = 32,
+        .max_vertex_inputs = 160,
         .max_render_targets = 16,
     });
     nt_resource_init(&(nt_resource_desc_t){0});

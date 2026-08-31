@@ -46,9 +46,18 @@ typedef struct {
     uint32_t id;
 } nt_mesh_t;
 
+/* Owned vertex-input object (GL: a VAO): vertex layout + optional instance
+ * layout baked against a VBO [+ IBO]. The static half (vertex attrs + index
+ * buffer) is immutable after creation; the instance attribute pointers are
+ * re-specified into the bound object by each nt_gfx_bind_instance_buffer. */
+typedef struct {
+    uint32_t id;
+} nt_vertex_input_t;
+
 #define NT_RENDER_TARGET_INVALID ((nt_render_target_t){0})
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 #define NT_PROGRAM_INVALID ((nt_program_t){0})
+#define NT_VERTEX_INPUT_INVALID ((nt_vertex_input_t){0})
 
 /* Sampler object — texture-side filter/wrap state decoupled from the texture
  * itself. One texture can be sampled with different filters in different
@@ -296,12 +305,15 @@ typedef struct {
 /* ---- Descriptor structs ---- */
 
 typedef struct {
-    uint16_t max_shaders;        /* default: 32 */
-    uint16_t max_programs;       /* default: 16 */
-    uint16_t max_pipelines;      /* default: 16 */
-    uint16_t max_buffers;        /* default: 128 */
-    uint16_t max_textures;       /* default: 64 */
-    uint16_t max_meshes;         /* default: 128 */
+    uint16_t max_shaders;   /* default: 32 */
+    uint16_t max_programs;  /* default: 16 */
+    uint16_t max_pipelines; /* default: 16 */
+    uint16_t max_buffers;   /* default: 128 */
+    uint16_t max_textures;  /* default: 64 */
+    uint16_t max_meshes;    /* default: 128 */
+    /* default: 528 = max_meshes(128) x mesh renderer max_mesh_layouts(4)
+     * worst case + 16 for fixed renderer-owned vertex inputs. */
+    uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     bool depth;                  /* request depth buffer (default: true) */
     bool stencil;                /* request stencil buffer (default: false) */
@@ -331,6 +343,14 @@ typedef struct {
     nt_vertex_layout_t instance_layout; /* per-instance vertex attributes (optional, divisor=1) */
     const char *label;
 } nt_pipeline_desc_t;
+
+typedef struct {
+    nt_vertex_layout_t layout;          /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
+    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; pointers set per draw by nt_gfx_bind_instance_buffer */
+    nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
+    nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
+    const char *label;                  /* debug name; static storage */
+} nt_vertex_input_desc_t;
 
 typedef struct {
     nt_buffer_type_t type;
@@ -433,6 +453,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_buffers = 128,
         .max_textures = 64,
         .max_meshes = 128,
+        .max_vertex_inputs = 528,
         .max_render_targets = 16,
         .depth = true,
         .premultiplied_alpha = true,
@@ -471,6 +492,13 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
+/* Bakes the vertex layout, buffers and index binding into an owned object.
+ * Caller errors (bad handles, invalid layouts) assert; INVALID is returned
+ * only on a lost context or backend allocation failure. Buffer CONTENTS may
+ * still change (update/orphan keep the GL name); replacing a buffer OBJECT
+ * means destroy + recreate the vertex input. Creation preserves the
+ * currently bound vertex input. */
+nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
@@ -489,6 +517,15 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_program(nt_program_t prog);
 /* Invalid and stale handles are no-ops because program destruction also destroys pipelines. */
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
+/* Invalid and stale handles are no-ops because buffer destruction also
+ * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
+void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
+/* Also destroys every vertex input referencing this buffer as its vertex or
+ * index buffer -- mesh deactivation reaches no renderer, so the cascade is
+ * what keeps cached vertex inputs from outliving mesh buffers. Instance
+ * buffers captured by nt_gfx_bind_instance_buffer are NOT cascade-tracked:
+ * destroying one while vertex inputs still point into it leaves zombie GL
+ * attachments until those vertex inputs die or re-point. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
 void nt_gfx_destroy_render_target(nt_render_target_t rt);
@@ -511,6 +548,9 @@ bool nt_gfx_shader_ready(nt_shader_t shd);
 bool nt_gfx_program_valid(nt_program_t prog);
 /* Reports a live pipeline slot; false after pipeline or program destruction. */
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
+/* Reports a live vertex-input slot; false after direct destruction or the
+ * destroy_buffer cascade. Renderer caches check this on lookup. */
+bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
@@ -522,6 +562,11 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 /* ---- Draw state ---- */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
+/* One backend bind selects the whole vertex-input state (layout + buffers +
+ * index binding) for the following draws. Transitional while pipelines still
+ * own vertex layouts: bind the pipeline FIRST, then the vertex input --
+ * nt_gfx_bind_pipeline clears the bound vertex input. */
+void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
@@ -573,9 +618,12 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 /* ---- Instance buffer ---- */
 
-/* Applies the bound pipeline's instance attrib pointers at byte_offset — a
- * pipeline must be bound first and the offset 4-byte aligned (WebGL2 rejects
- * unaligned attrib offsets); both asserted. Re-bind per draw to re-point. */
+/* Re-specifies instance attrib pointers at byte_offset into the bound vertex
+ * input (which must declare a nonempty instance_layout; asserted). With no
+ * vertex input bound it falls back to the bound pipeline's instance layout
+ * (transitional while pipelines still own layouts). The offset must be
+ * 4-byte aligned (WebGL2 rejects unaligned attrib offsets); asserted.
+ * Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 

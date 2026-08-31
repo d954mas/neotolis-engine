@@ -112,15 +112,25 @@ typedef struct {
     uint16_t height;
 } nt_gfx_gl_render_target_t;
 
+/* Owned vertex-input VAO. Static half (vertex attrs + element binding) is
+ * baked at creation; instance pointers are re-specified into the bound VAO
+ * by bind_instance_buffer, which needs the layout kept here. */
+typedef struct {
+    GLuint vao; /* 0 = free slot */
+    nt_vertex_layout_t instance_layout;
+} nt_gfx_gl_vertex_input_t;
+
 /* ---- File-scope state ---- */
 
-static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
+static uint32_t s_bound_pipeline_slot;     /* currently bound pipeline index */
+static uint32_t s_bound_vertex_input_slot; /* currently bound vertex-input index */
 
-static nt_gfx_gl_program_t *s_programs;   /* linked programs, indexed by slot */
-static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
-static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
-static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
-static GLuint *s_texture_gl;              /* GL texture names, indexed by slot */
+static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
+static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
+static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
+static GLuint *s_buffer_gl;                       /* GL buffer names, indexed by slot */
+static GLenum *s_buffer_targets;                  /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
+static GLuint *s_texture_gl;                      /* GL texture names, indexed by slot */
 static nt_gfx_gl_render_target_t *s_render_targets;
 static GLuint s_bound_framebuffer;
 
@@ -213,8 +223,35 @@ static GLint pipeline_get_uniform(const char *name) {
     return -1;
 }
 
+// #region test counters
+#ifdef NT_TEST_ACCESS
+static uint32_t s_test_static_attrib_pointer_calls;   /* divisor-0 glVertexAttribPointer */
+static uint32_t s_test_instance_attrib_pointer_calls; /* divisor-1 glVertexAttribPointer */
+static uint32_t s_test_vao_binds;
+
+void nt_gfx_gl_test_reset_counters(void) {
+    s_test_static_attrib_pointer_calls = 0;
+    s_test_instance_attrib_pointer_calls = 0;
+    s_test_vao_binds = 0;
+}
+
+uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void) { return s_test_static_attrib_pointer_calls; }
+uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void) { return s_test_instance_attrib_pointer_calls; }
+uint32_t nt_gfx_gl_test_vao_binds(void) { return s_test_vao_binds; }
+#endif
+// #endregion
+
+/* Every VAO bind goes through here so the test counter sees them all;
+ * s_gl_cache.vao bookkeeping stays at the call sites. */
+static void gl_bind_vao(GLuint vao) {
+#ifdef NT_TEST_ACCESS
+    s_test_vao_binds++;
+#endif
+    glBindVertexArray(vao);
+}
+
 static void nt_gfx_gl_cache_reset(void) {
-    glBindVertexArray(0);
+    gl_bind_vao(0);
     glUseProgram(0);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -418,12 +455,14 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
     s_programs = (nt_gfx_gl_program_t *)calloc(s_init_desc.max_programs + 1, sizeof(nt_gfx_gl_program_t));
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
+    s_vertex_inputs = (nt_gfx_gl_vertex_input_t *)calloc(s_init_desc.max_vertex_inputs + 1, sizeof(nt_gfx_gl_vertex_input_t));
     s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_targets = (nt_gfx_gl_render_target_t *)calloc(s_init_desc.max_render_targets + 1, sizeof(nt_gfx_gl_render_target_t));
 
     s_bound_pipeline_slot = 0;
+    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_reset();
 
@@ -442,6 +481,7 @@ void nt_gfx_backend_shutdown(void) {
 
     free(s_programs);
     free(s_pipelines);
+    free(s_vertex_inputs);
     free(s_buffer_gl);
     free(s_buffer_targets);
     free(s_texture_gl);
@@ -450,6 +490,7 @@ void nt_gfx_backend_shutdown(void) {
 
     s_programs = NULL;
     s_pipelines = NULL;
+    s_vertex_inputs = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
     s_texture_gl = NULL;
@@ -458,6 +499,7 @@ void nt_gfx_backend_shutdown(void) {
     s_transcode_buf_size = 0;
 
     s_bound_pipeline_slot = 0;
+    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
 
     nt_gfx_gl_ctx_destroy();
@@ -565,6 +607,7 @@ void nt_gfx_backend_begin_frame(void) {
      * the cache stale. */
     nt_gfx_gl_cache_reset();
     s_bound_pipeline_slot = 0;
+    s_bound_vertex_input_slot = 0;
 
     /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
      * GLES variants). Native ARB_timer_query has no disjoint concept — GPU
@@ -753,8 +796,10 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
  * The program cache still describes the actual GL binding. */
 static void unbind_pipeline_state(void) {
     s_bound_pipeline_slot = 0;
+    /* Transitional: the pipeline VAO replaced any bound vertex-input VAO. */
+    s_bound_vertex_input_slot = 0;
     if (s_gl_cache.vao != 0) {
-        glBindVertexArray(0);
+        gl_bind_vao(0);
         s_gl_cache.vao = 0;
     }
 }
@@ -776,9 +821,11 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     }
 
     if (s_gl_cache.vao != pip->vao) {
-        glBindVertexArray(pip->vao);
+        gl_bind_vao(pip->vao);
         s_gl_cache.vao = pip->vao;
     }
+    /* Transitional: the pipeline VAO replaced any bound vertex-input VAO. */
+    s_bound_vertex_input_slot = 0;
     GLuint program = s_programs[pip->program_slot].program;
     if (s_gl_cache.program != program) {
         glUseProgram(program);
@@ -1147,7 +1194,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     if (vao == 0) {
         return 0;
     }
-    glBindVertexArray(vao);
+    gl_bind_vao(vao);
     for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
         glEnableVertexAttribArray(desc->layout.attrs[i].location);
     }
@@ -1156,7 +1203,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         glEnableVertexAttribArray(loc);
         glVertexAttribDivisor(loc, 1);
     }
-    glBindVertexArray(s_gl_cache.vao);
+    gl_bind_vao(s_gl_cache.vao);
 
     /* Store pipeline data */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
@@ -1202,6 +1249,89 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
     memset(pip, 0, sizeof(*pip));
 }
 
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend) {
+    NT_ASSERT(desc != NULL);
+    uint32_t slot = 0;
+    for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs; i++) {
+        if (s_vertex_inputs[i].vao == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == 0) {
+        return 0; /* no free slots */
+    }
+
+    GLuint vao = 0;
+    glGenVertexArrays(1, &vao);
+    if (vao == 0) {
+        return 0;
+    }
+    gl_bind_vao(vao);
+    if (vbo_backend != 0 && vbo_backend <= s_init_desc.max_buffers) {
+        /* Buffer bound before the pointer calls -- satisfies the WebGL "no
+         * pointer without a bound ARRAY_BUFFER" rule at creation time. */
+        glBindBuffer(GL_ARRAY_BUFFER, s_buffer_gl[vbo_backend]);
+        for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
+            const nt_vertex_attr_t *attr = &desc->layout.attrs[i];
+            glEnableVertexAttribArray(attr->location);
+            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)desc->layout.stride,
+                                  (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+#ifdef NT_TEST_ACCESS
+            s_test_static_attrib_pointer_calls++;
+#endif
+        }
+    }
+    if (ibo_backend != 0 && ibo_backend <= s_init_desc.max_buffers) {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_buffer_gl[ibo_backend]); /* captured by the VAO */
+    }
+    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
+        GLuint loc = desc->instance_layout.attrs[i].location;
+        glEnableVertexAttribArray(loc);
+        glVertexAttribDivisor(loc, 1); /* pointers deferred to bind_instance_buffer */
+    }
+    gl_bind_vao(s_gl_cache.vao);
+
+    s_vertex_inputs[slot].vao = vao;
+    s_vertex_inputs[slot].instance_layout = desc->instance_layout;
+    return slot;
+}
+
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_vertex_inputs) {
+        return;
+    }
+    nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle];
+    /* Deleting the bound VAO reverts the GL binding to 0 -- mirror it. */
+    if (vi->vao && s_gl_cache.vao == vi->vao) {
+        s_gl_cache.vao = 0;
+    }
+    if (vi->vao) {
+        glDeleteVertexArrays(1, &vi->vao);
+    }
+    if (s_bound_vertex_input_slot == backend_handle) {
+        s_bound_vertex_input_slot = 0;
+    }
+    memset(vi, 0, sizeof(*vi));
+}
+
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_vertex_inputs || s_vertex_inputs[backend_handle].vao == 0) {
+        s_bound_vertex_input_slot = 0;
+        if (s_gl_cache.vao != 0) {
+            gl_bind_vao(0);
+            s_gl_cache.vao = 0;
+        }
+        return;
+    }
+    GLuint vao = s_vertex_inputs[backend_handle].vao;
+    if (s_gl_cache.vao != vao) {
+        gl_bind_vao(vao);
+        s_gl_cache.vao = vao;
+    }
+    s_bound_vertex_input_slot = backend_handle;
+}
+
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     glGenBuffers(1, &buf);
@@ -1221,8 +1351,18 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         break;
     }
     GLenum usage = map_buffer_usage(desc->usage);
+    /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: with a vertex-input VAO
+     * bound this data op would silently rewire its index binding, so run
+     * index-buffer data ops with VAO 0 bound (few extra binds, off hot path). */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+    if (unhook_vao) {
+        gl_bind_vao(0);
+    }
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
+    if (unhook_vao) {
+        gl_bind_vao(s_gl_cache.vao);
+    }
 
     /* Find free buffer slot */
     uint32_t slot = 0;
@@ -1260,8 +1400,16 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
+    /* Index-buffer data ops run with VAO 0 -- see create_buffer. */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+    if (unhook_vao) {
+        gl_bind_vao(0);
+    }
     glBindBuffer(target, buf);
     glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
+    if (unhook_vao) {
+        gl_bind_vao(s_gl_cache.vao);
+    }
 }
 
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
@@ -1270,6 +1418,11 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
+    /* Index-buffer data ops run with VAO 0 -- see create_buffer. */
+    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER && s_gl_cache.vao != 0;
+    if (unhook_vao) {
+        gl_bind_vao(0);
+    }
     glBindBuffer(target, buf);
     /* glBufferData with non-NULL data both orphans the existing storage and
      * uploads in one call. The driver may allocate fresh memory for the new
@@ -1277,6 +1430,9 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * avoiding the pipeline stall that glBufferSubData can introduce when
      * rewriting a buffer that's still in flight. */
     glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
+    if (unhook_vao) {
+        gl_bind_vao(s_gl_cache.vao);
+    }
 }
 
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
@@ -1295,6 +1451,9 @@ void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
             const nt_vertex_attr_t *attr = &layout->attrs[i];
             glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+#ifdef NT_TEST_ACCESS
+            s_test_static_attrib_pointer_calls++;
+#endif
         }
     }
 }
@@ -1314,13 +1473,22 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
-    /* Re-apply instance attribute pointers from the currently bound pipeline. */
-    if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
-        const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
+    /* The bound vertex input's instance layout wins; the bound pipeline's is
+     * the transitional fallback while pipelines still own layouts. */
+    const nt_vertex_layout_t *layout = NULL;
+    if (s_bound_vertex_input_slot != 0 && s_bound_vertex_input_slot <= s_init_desc.max_vertex_inputs) {
+        layout = &s_vertex_inputs[s_bound_vertex_input_slot].instance_layout;
+    } else if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
+        layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
+    }
+    if (layout != NULL) {
         for (uint8_t i = 0; i < layout->attr_count; i++) {
             const nt_vertex_attr_t *attr = &layout->attrs[i];
             glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
+#ifdef NT_TEST_ACCESS
+            s_test_instance_attrib_pointer_calls++;
+#endif
         }
     }
 }
@@ -1970,6 +2138,9 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_pipelines) {
         memset(s_pipelines, 0, (s_init_desc.max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
     }
+    if (s_vertex_inputs) {
+        memset(s_vertex_inputs, 0, (s_init_desc.max_vertex_inputs + 1) * sizeof(nt_gfx_gl_vertex_input_t));
+    }
     if (s_buffer_gl) {
         memset(s_buffer_gl, 0, (s_init_desc.max_buffers + 1) * sizeof(GLuint));
     }
@@ -1983,6 +2154,7 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         memset(s_render_targets, 0, (s_init_desc.max_render_targets + 1) * sizeof(nt_gfx_gl_render_target_t));
     }
     s_bound_pipeline_slot = 0;
+    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_reset();
     nt_gfx_gl_init_context_features();
