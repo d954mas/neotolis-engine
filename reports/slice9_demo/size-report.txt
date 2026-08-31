@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 1d3eb85
+# Commit: 71f9825
 
 ## WASM Section Sizes
 
@@ -7,16 +7,16 @@ Section                Size
 ---------------- ----------
 Type                 427 B
 Import               640 B
-Function             211 B
+Function             225 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  71 B
-Code              372873 B
-Data               14776 B
+Code              375932 B
+Data               14712 B
 ---------------- ----------
-TOTAL             389108 B
+TOTAL             392117 B
 
 ## Top 30 Functions by Size
 

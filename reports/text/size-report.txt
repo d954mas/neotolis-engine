@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: 1d3eb85
+# Commit: 71f9825
 
 ## WASM Section Sizes
 
@@ -7,16 +7,16 @@ Section                Size
 ---------------- ----------
 Type                 232 B
 Import               598 B
-Function             110 B
+Function             120 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  33 B
-Code               94757 B
-Data                8669 B
+Code               97497 B
+Data                8589 B
 ---------------- ----------
-TOTAL             104503 B
+TOTAL             107173 B
 
 ## Top 30 Functions by Size
 

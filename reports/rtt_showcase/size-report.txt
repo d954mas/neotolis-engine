@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 1d3eb85
+# Commit: 71f9825
 
 ## WASM Section Sizes
 
@@ -7,42 +7,41 @@ Section                Size
 ---------------- ----------
 Type                 397 B
 Import               633 B
-Function             233 B
+Function             246 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  70 B
-Code              390625 B
+Code              393904 B
 Data               19543 B
-Custom              7622 B
+Custom              7985 B
 ---------------- ----------
-TOTAL             419227 B
+TOTAL             422882 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-186504 B   frame
+186748 B   frame
 25118 B   nt_font_lookup_glyph_offset
-20655 B   dispatch_command
+20654 B   dispatch_command
+10566 B   main
 10387 B   declare_slider_control
-10037 B   main
- 9807 B   nt_shape_renderer_init
+ 9765 B   nt_shape_renderer_init
  7670 B   Clay__ConfigureOpenElementPtr
  6049 B   Clay__SizeContainersAlongAxis
  5644 B   Clay__InitializeEphemeralMemory
  4776 B   nt_ui_internal_scroll_pane_offset
  3950 B   Clay__MeasureTextCached
+ 3397 B   nt_sprite_renderer_set_material
  3341 B   Clay__CloseElement
- 3129 B   nt_sprite_renderer_set_material
  3009 B   fmt_fp
  2610 B   printf_core
  2525 B   nt_input_web_on_blur
  2164 B   Clay__OpenTextElement
  2124 B   Clay__RenderDebugViewColor
  2104 B   Clay__InitializePersistentMemory
- 2066 B   nt_gfx_make_pipeline
  1851 B   __rem_pio2f
  1784 B   poly_inradius_pole
  1747 B   nt_hash64
@@ -50,12 +49,13 @@ TOTAL             419227 B
  1717 B   nt_gfx_resize_render_target
  1658 B   atlas_on_resolve
  1652 B   Clay__RenderDebugLayoutSizing
+ 1436 B   nt_gfx_make_program
+ 1410 B   nt_gfx_make_pipeline
  1392 B   ui_hit_test
  1347 B   offset_with_joins
- 1345 B   nt_sprite_renderer_emit_geometry
 
-Total functions: 231
-Total code size: 390225 B
+Total functions: 244
+Total code size: 393488 B
 
 ## Built Engine Archives
 
@@ -76,11 +76,11 @@ libnt_core.a                2628 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       5530 B
 libnt_entity.a              6348 B
-libnt_font.a              415268 B
+libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                75332 B
-libnt_gfx_stub.a           48464 B
+libnt_gfx.a                78594 B
+libnt_gfx_stub.a           50090 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -90,34 +90,34 @@ libnt_introspect.a          5080 B
 libnt_log.a                11954 B
 libnt_log_ring.a          595390 B
 libnt_log_stub.a             746 B
-libnt_material.a            4790 B
+libnt_material.a            4816 B
 libnt_material_comp.a       2302 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2164 B
-libnt_mesh_renderer.a       8010 B
+libnt_mesh_renderer.a       8962 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         7226 B
+libnt_postfx_blur.a         7420 B
 libnt_render.a              7674 B
 libnt_resource.a          188716 B
-libnt_shape_renderer.a   1141498 B
+libnt_shape_renderer.a   1142366 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
-libnt_sprite_renderer.a    48284 B
-libnt_text_renderer.a    1240316 B
+libnt_sprite_renderer.a    50640 B
+libnt_text_renderer.a    1241940 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
-libnt_ui.a                614048 B
+libnt_ui.a                614044 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5921958 B
+TOTAL (archives)         5932988 B
 
 ## Data Segments Summary
 
