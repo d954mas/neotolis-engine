@@ -1,5 +1,7 @@
 #include "http/nt_http_internal.h"
 
+#include "core/nt_assert.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +36,116 @@ static NtHttpSlot *http_validate(nt_http_request_t req) {
     return &s_http.slots[index];
 }
 
+/* ---- Request copy helpers ---- */
+
+static char *http_strdup(const char *src) {
+    size_t len = strlen(src) + 1;
+    char *dst = malloc(len);
+    NT_ASSERT(dst != NULL);
+    memcpy(dst, src, len);
+    return dst;
+}
+
+static void http_free_slot_buffers(NtHttpSlot *slot) {
+    free(slot->url);
+    free(slot->method);
+    free(slot->body);
+    free(slot->headers);
+    free(slot->data);
+    free(slot->resp_headers);
+    slot->url = NULL;
+    slot->method = NULL;
+    slot->body = NULL;
+    slot->headers = NULL;
+    slot->data = NULL;
+    slot->resp_headers = NULL;
+}
+
+static bool http_iequals(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return false;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+/* Copies request headers into one blob of alternating NUL-terminated name,value
+ * strings, appending a Content-Type pair when a body is present and the caller
+ * did not already provide one. */
+static void http_copy_headers(NtHttpSlot *slot, const nt_http_options_t *opts, const char *content_type) {
+    size_t pairs = opts ? opts->header_count : 0;
+    size_t total = 0;
+    for (size_t i = 0; i < pairs * 2; i++) {
+        total += strlen(opts->headers[i]) + 1;
+    }
+    if (content_type != NULL) {
+        total += sizeof("Content-Type") + strlen(content_type) + 1;
+    }
+    if (total == 0) {
+        return;
+    }
+
+    char *blob = malloc(total);
+    NT_ASSERT(blob != NULL);
+    char *p = blob;
+    for (size_t i = 0; i < pairs * 2; i++) {
+        size_t len = strlen(opts->headers[i]) + 1;
+        memcpy(p, opts->headers[i], len);
+        p += len;
+    }
+    if (content_type != NULL) {
+        memcpy(p, "Content-Type", sizeof("Content-Type"));
+        p += sizeof("Content-Type");
+        memcpy(p, content_type, strlen(content_type) + 1);
+    }
+
+    slot->headers = blob;
+    slot->headers_size = (uint32_t)total;
+    slot->header_pairs = (uint32_t)pairs + (content_type != NULL ? 1U : 0U);
+}
+
+/* Copies method/body/headers/timeout out of opts so the caller keeps ownership. */
+static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_options_t *opts) {
+    slot->url = http_strdup(url);
+    slot->method = http_strdup(opts != NULL && opts->method != NULL ? opts->method : "GET");
+    slot->body = NULL;
+    slot->body_size = 0;
+    if (opts != NULL && opts->body != NULL && opts->body_size > 0) {
+        slot->body = malloc(opts->body_size);
+        NT_ASSERT(slot->body != NULL);
+        memcpy(slot->body, opts->body, opts->body_size);
+        slot->body_size = opts->body_size;
+    }
+
+    slot->headers = NULL;
+    slot->headers_size = 0;
+    slot->header_pairs = 0;
+    const char *content_type = NULL;
+    if (slot->body != NULL) {
+        content_type = (opts != NULL && opts->content_type != NULL) ? opts->content_type : "application/octet-stream";
+        for (size_t i = 0; opts != NULL && i < opts->header_count; i++) {
+            if (http_iequals(opts->headers[i * 2], "Content-Type")) {
+                content_type = NULL; /* caller already set one explicitly */
+                break;
+            }
+        }
+    }
+    http_copy_headers(slot, opts, content_type);
+
+    slot->timeout_ms = opts != NULL ? opts->timeout_ms : 0;
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_http_init(void) {
@@ -50,22 +162,30 @@ nt_result_t nt_http_init(void) {
     }
 
     s_http.initialized = true;
+    nt_http_backend_init();
     return NT_OK;
 }
 
 void nt_http_shutdown(void) {
-    /* Free any remaining slot data */
+    nt_http_backend_shutdown();
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
-        if (s_http.slots[i].data != NULL) {
-            free(s_http.slots[i].data);
-        }
+        http_free_slot_buffers(&s_http.slots[i]);
     }
     memset(&s_http, 0, sizeof(s_http));
 }
 
+void nt_http_update(void) {
+    if (!s_http.initialized) {
+        return;
+    }
+    nt_http_backend_update();
+}
+
 /* ---- Request management ---- */
 
-nt_http_request_t nt_http_request(const char *url) {
+nt_http_request_t nt_http_request(const char *url) { return nt_http_request_ex(url, NULL); }
+
+nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *opts) {
     if (!s_http.initialized || url == NULL || s_http.queue_top == 0) {
         return NT_HTTP_REQUEST_INVALID;
     }
@@ -82,14 +202,17 @@ nt_http_request_t nt_http_request(const char *url) {
         slot->generation = 1;
     }
 
+    http_copy_request(slot, url, opts);
+
     slot->data = NULL;
     slot->size = 0;
     slot->received = 0;
     slot->total = 0;
+    slot->resp_headers = NULL;
+    slot->status = 0;
     slot->state = (uint8_t)NT_HTTP_STATE_PENDING;
-    slot->_pad = 0;
 
-    nt_http_backend_request(index, url);
+    nt_http_backend_request(index);
 
     return http_make(index, slot->generation);
 }
@@ -100,6 +223,14 @@ nt_http_state_t nt_http_state(nt_http_request_t req) {
         return NT_HTTP_STATE_NONE;
     }
     return (nt_http_state_t)slot->state;
+}
+
+uint16_t nt_http_status(nt_http_request_t req) {
+    NtHttpSlot *slot = http_validate(req);
+    if (!slot) {
+        return 0;
+    }
+    return slot->status;
 }
 
 void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total) {
@@ -119,6 +250,14 @@ void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total
     if (total) {
         *total = slot->total;
     }
+}
+
+const char *nt_http_response_headers(nt_http_request_t req) {
+    NtHttpSlot *slot = http_validate(req);
+    if (!slot) {
+        return NULL;
+    }
+    return slot->resp_headers;
 }
 
 uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
@@ -148,23 +287,23 @@ void nt_http_free(nt_http_request_t req) {
         return;
     }
 
-    /* Cancel in-flight backend request (aborts fetch on web, noop on native/stub) */
+    /* Cancel in-flight backend request (aborts fetch on web, curl transfer on native) */
     if (slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
         nt_http_backend_cancel(index);
     }
 
-    /* Free any remaining data */
-    if (slot->data != NULL) {
-        free(slot->data);
-        slot->data = NULL;
-    }
+    http_free_slot_buffers(slot);
 
     /* Clear slot state */
+    slot->body_size = 0;
+    slot->headers_size = 0;
+    slot->header_pairs = 0;
+    slot->timeout_ms = 0;
     slot->size = 0;
     slot->received = 0;
     slot->total = 0;
+    slot->status = 0;
     slot->state = (uint8_t)NT_HTTP_STATE_NONE;
-    slot->_pad = 0;
 
     /* Increment generation so stale handles are rejected */
     slot->generation++;

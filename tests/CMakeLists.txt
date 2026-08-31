@@ -558,6 +558,26 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_http COMMAND test_http)
 
+    # Real-network acceptance for the native libcurl backend, loopback only: the
+    # python wrapper starts tests/tools/http_echo_server.py, runs the exe, stops it.
+    # Serial: the echo server binds a fixed local port.
+    if(NOT EMSCRIPTEN)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_executable(test_http_native_net unit/test_http_native_net.c)
+        target_link_libraries(test_http_native_net PRIVATE nt_http nt_log_stub unity)
+        target_compile_definitions(test_http_native_net PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_warning_flags(test_http_native_net)
+        nt_set_sanitizer_flags(test_http_native_net)
+        set_target_properties(test_http_native_net PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+        add_test(NAME test_http_native_net
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/tools/run_http_net_test.py"
+                    "$<TARGET_FILE:test_http_native_net>"
+        )
+        set_tests_properties(test_http_native_net PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+    endif()
+
     # cJSON standalone round-trip. Links cjson only (proves cjson works WITHOUT devapi),
     # so it must NOT sit behind the NT_DEVAPI_ENABLED gate — cjson is built unconditionally.
     add_executable(test_devapi_cjson unit/test_devapi_cjson.c)

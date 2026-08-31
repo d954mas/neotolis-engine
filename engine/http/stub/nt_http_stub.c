@@ -1,8 +1,13 @@
 #include "http/nt_http_internal.h"
 
 /* Stub backend — immediately fail all requests */
-void nt_http_backend_request(uint16_t slot_index, const char *url) {
-    (void)url;
+void nt_http_backend_init(void) {}
+
+void nt_http_backend_shutdown(void) {}
+
+void nt_http_backend_update(void) {}
+
+void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     if (slot) {
         slot->state = (uint8_t)NT_HTTP_STATE_FAILED;

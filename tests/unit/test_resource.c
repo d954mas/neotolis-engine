@@ -1966,9 +1966,10 @@ void test_load_url_native_fails(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_retry_policy(1, 100, 1000);
 
-    /* On native, nt_http_request immediately fails. load_url may return error
-     * (if request ID is 0) or OK (if request ID is non-zero but state is FAILED). */
-    nt_result_t r = nt_resource_load_url(pid, "http://example.com/test.ntpack");
+    /* Unsupported scheme: the native curl backend fails it on the first pump
+     * (inside nt_resource_step) without touching the network. load_url may
+     * return error (request ID 0) or OK (request issued, fails on the pump). */
+    nt_result_t r = nt_resource_load_url(pid, "xyz://invalid/test.ntpack");
     if (r == NT_OK) {
         nt_resource_step();
     }

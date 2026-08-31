@@ -20,8 +20,10 @@ def ctest_command_stems(lines):
         if "add_test(" not in line:
             continue
         tokens = _cmake_tokens(line)
-        if len(tokens) >= 2:
-            stems.add(os.path.splitext(os.path.basename(tokens[1]))[0])
+        # Wrapper-launched tests (e.g. python run_x.py <exe>) carry the target
+        # exe in a later token — collect stems from every command token.
+        for token in tokens[1:]:
+            stems.add(os.path.splitext(os.path.basename(token))[0])
     return stems
 
 

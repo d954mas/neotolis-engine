@@ -475,6 +475,9 @@ void nt_resource_step(void) {
         return;
     }
 
+    /* Native http transfers advance only when pumped (no-op on web/stub) */
+    nt_http_update();
+
     /* ===================================================
      *  Phase A: Poll I/O for loading packs + retry
      * =================================================== */
@@ -508,10 +511,15 @@ void nt_resource_step(void) {
                     pack->pack_state = NT_PACK_STATE_DOWNLOADING;
                     nt_http_progress(req, &pack->bytes_received, &pack->bytes_total);
                 } else if (st == NT_HTTP_STATE_DONE) {
-                    loaded_blob = nt_http_take_data(req, &loaded_size);
+                    /* DONE means a full response, any status — a 404 body is not a pack */
+                    if (nt_http_status(req) / 100 == 2) {
+                        loaded_blob = nt_http_take_data(req, &loaded_size);
+                        io_done = true;
+                    } else {
+                        io_failed = true;
+                    }
                     nt_http_free(req);
                     pack->io_request_id = 0;
-                    io_done = true;
                 } else if (st == NT_HTTP_STATE_FAILED) {
                     nt_http_free(req);
                     pack->io_request_id = 0;

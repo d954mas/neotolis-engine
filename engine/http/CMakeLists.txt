@@ -10,6 +10,9 @@ if(EMSCRIPTEN)
     # survives Closure, so no exe-level export list is needed.
 else()
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c native/nt_http_native.c nt_http.h)
+    # Static libcurl (deps/curl): PRIVATE keeps curl headers out of consumers,
+    # $<LINK_ONLY> still carries the archives into the final exe link.
+    target_link_libraries(nt_http PRIVATE CURL::libcurl)
 endif()
 target_link_libraries(nt_http PUBLIC nt_core nt_http_interface)
 
