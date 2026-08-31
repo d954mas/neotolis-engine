@@ -26,7 +26,9 @@ typedef struct {
     const void *body;   /* copied at call time, caller keeps ownership; NULL -> no body */
     uint32_t body_size;
     const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL */
-    const char *const *headers; /* alternating name,value strings ({"Authorization","Bearer x",...}) */
+    const char *const *headers; /* alternating name,value strings ({"Authorization","Bearer x",...});
+                                 * sent as raw bytes on both backends — encode non-ASCII values
+                                 * yourself (percent/base64) per usual HTTP practice */
     uint32_t header_count;      /* number of name/value PAIRS in headers */
     uint32_t timeout_ms;        /* 0 -> no timeout */
 } nt_http_options_t;

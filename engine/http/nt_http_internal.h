@@ -34,7 +34,7 @@ NtHttpSlot *nt_http_get_slot(uint16_t slot_index);
  * Request parameters are read from the slot's request fields, which stay valid
  * until nt_http_free / nt_http_shutdown. */
 
-void nt_http_backend_init(void);
+bool nt_http_backend_init(void); /* false -> nt_http_init fails with NT_ERR_INIT_FAILED */
 void nt_http_backend_shutdown(void);
 void nt_http_backend_request(uint16_t slot_index);
 void nt_http_backend_cancel(uint16_t slot_index);

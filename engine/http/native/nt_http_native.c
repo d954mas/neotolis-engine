@@ -183,12 +183,24 @@ static bool native_method_is(const char *method, const char *upper) {
     return *method == *upper;
 }
 
-void nt_http_backend_init(void) {
+bool nt_http_backend_init(void) {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
-        NT_LOG_ERROR("curl_global_init failed — all requests will fail");
-        return;
+        NT_LOG_ERROR("curl_global_init failed");
+        return false;
     }
     s_native.multi = curl_multi_init();
+    if (s_native.multi == NULL) {
+        NT_LOG_ERROR("curl_multi_init failed");
+        curl_global_cleanup();
+        return false;
+    }
+    /* A consumer-provided libcurl without async DNS would block nt_http_update
+     * (and the frame) on every hostname resolve; the vendored build has it. */
+    curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+    if (info != NULL && (info->features & CURL_VERSION_ASYNCHDNS) == 0) {
+        NT_LOG_ERROR("libcurl built without async DNS — hostname resolves will block the frame");
+    }
+    return true;
 }
 
 void nt_http_backend_shutdown(void) {
@@ -205,6 +217,13 @@ void nt_http_backend_shutdown(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansions
 static struct curl_slist *native_build_headers(const NtHttpSlot *slot) {
     struct curl_slist *headers = NULL;
+    if (slot->body == NULL && native_method_is(slot->method, "POST")) {
+        /* Empty POSTFIELDS makes curl invent x-www-form-urlencoded; fetch sends no
+         * Content-Type here. First in the list, so a caller's explicit pair (appended
+         * later) still re-adds one. */
+        headers = curl_slist_append(headers, "Content-Type:");
+        NT_ASSERT(headers != NULL);
+    }
     const char *p = slot->headers;
     for (uint32_t i = 0; i < slot->header_pairs; i++) {
         const char *name = p;
@@ -248,7 +267,10 @@ void nt_http_backend_request(uint16_t slot_index) {
 
     curl_easy_setopt(easy, CURLOPT_URL, slot->url);
     curl_easy_setopt(easy, CURLOPT_PRIVATE, xfer);
-    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L); /* parity with fetch() default */
+    /* OBEYCODE = RFC redirect semantics like fetch(): 303 -> GET, 301/302 -> GET only
+     * for POST; other methods keep their method AND body (plain FOLLOWLOCATION with
+     * CUSTOMREQUEST would resend a PUT after 301 without its body) */
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 16L);
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, native_on_body);
@@ -267,11 +289,16 @@ void nt_http_backend_request(uint16_t slot_index) {
          * _LARGE avoids the 32-bit long truncation on LLP64 for 2 GiB+ bodies. */
         curl_easy_setopt(easy, CURLOPT_POSTFIELDS, (const char *)slot->body);
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)slot->body_size);
+    } else if (native_method_is(slot->method, "POST")) {
+        /* A bodiless POST still needs POST mode + Content-Length: 0 (a bare
+         * CUSTOMREQUEST would send neither and many servers answer 411) */
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDS, "");
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)0);
     }
     if (native_method_is(slot->method, "HEAD")) {
         /* CUSTOMREQUEST "HEAD" would leave curl waiting for a body that never comes */
         curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
-    } else if (!native_method_is(slot->method, "GET") && !(slot->body != NULL && native_method_is(slot->method, "POST"))) {
+    } else if (!native_method_is(slot->method, "GET") && !native_method_is(slot->method, "POST")) {
         curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, slot->method);
     }
 

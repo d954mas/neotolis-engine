@@ -1,7 +1,7 @@
 #include "http/nt_http_internal.h"
 
 /* Stub backend — immediately fail all requests */
-void nt_http_backend_init(void) {}
+bool nt_http_backend_init(void) { return true; }
 
 void nt_http_backend_shutdown(void) {}
 

@@ -28,6 +28,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, status, location):
+        # Drain the request body first — an unread body corrupts the reused connection
+        n = int(self.headers.get("Content-Length", "0"))
+        if n > 0:
+            self.rfile.read(n)
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _echo(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(n)
+        self._reply(
+            200,
+            body,
+            [
+                ("Content-Type", "application/octet-stream"),
+                ("X-Echo-Content-Type", self.headers.get("Content-Type", "")),
+                ("X-Echo-X-Nt-Test", self.headers.get("X-NT-Test", "")),
+            ],
+        )
+
+    def do_PUT(self):
+        if self.path == "/echo":
+            self._echo()
+        elif self.path == "/r301hello":
+            self._redirect(301, "/hello301")
+        else:
+            self._reply(404, b"")
+
     def do_GET(self):
         if self.path == "/hello":
             self._reply(200, b"hello-neotolis", [("Content-Type", "text/plain"), ("X-NT-Server", "echo")])
@@ -36,22 +67,17 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/slow":
             time.sleep(5)
             self._reply(200, b"ok")
+        elif self.path == "/hello301":
+            # Lands here only when a redirected POST correctly became a GET
+            self._reply(200, b"hello-neotolis")
         else:
             self._reply(404, b"")
 
     def do_POST(self):
         if self.path == "/echo":
-            n = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(n)
-            self._reply(
-                200,
-                body,
-                [
-                    ("Content-Type", "application/octet-stream"),
-                    ("X-Echo-Content-Type", self.headers.get("Content-Type", "")),
-                    ("X-Echo-X-Nt-Test", self.headers.get("X-NT-Test", "")),
-                ],
-            )
+            self._echo()
+        elif self.path == "/r301hello":
+            self._redirect(301, "/hello301")
         else:
             self._reply(404, b"")
 

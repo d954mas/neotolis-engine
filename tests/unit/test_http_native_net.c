@@ -130,6 +130,56 @@ static void test_non_2xx_is_done_with_status(void) {
     nt_http_free(req);
 }
 
+/* Documented native contract (CURLFOLLOW_OBEYCODE): 301/302/303 re-issue as GET for
+ * EVERY method (plain FOLLOWLOCATION + CUSTOMREQUEST would resend a bodiless "PUT").
+ * Browsers keep non-POST methods on 301/302 — divergence documented in the spec. */
+static void test_put_301_reissued_as_get(void) {
+    uint8_t body[64];
+    for (uint32_t i = 0; i < sizeof(body); i++) {
+        body[i] = (uint8_t)(i + 1U);
+    }
+    nt_http_options_t opts = {.method = "PUT", .body = body, .body_size = (uint32_t)sizeof(body)};
+    nt_http_request_t req = nt_http_request_ex(make_url("/r301hello"), &opts);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+
+    /* /hello301 answers only a bodiless GET — reaching it proves the re-issue */
+    uint32_t size = 0;
+    uint8_t *data = nt_http_take_data(req, &size);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_EQUAL(strlen("hello-neotolis"), size);
+    free(data);
+    nt_http_free(req);
+}
+
+/* RFC redirect semantics: a POST answered with 301 is retried as a bodiless GET */
+static void test_post_301_becomes_get(void) {
+    uint8_t body[4] = {1, 2, 3, 4};
+    nt_http_options_t opts = {.method = "POST", .body = body, .body_size = (uint32_t)sizeof(body)};
+    nt_http_request_t req = nt_http_request_ex(make_url("/r301hello"), &opts);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+
+    uint32_t size = 0;
+    uint8_t *data = nt_http_take_data(req, &size);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_EQUAL(strlen("hello-neotolis"), size);
+    TEST_ASSERT_EQUAL(0, memcmp(data, "hello-neotolis", size));
+    free(data);
+    nt_http_free(req);
+}
+
+/* Bodiless POST must send POST + Content-Length: 0, and a lowercase standard
+ * method must be normalized (the python server dispatches on the exact wire verb:
+ * "post" would 501). */
+static void test_bodiless_lowercase_post(void) {
+    nt_http_options_t opts = {.method = "post"};
+    nt_http_request_t req = nt_http_request_ex(make_url("/echo"), &opts);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+    nt_http_free(req);
+}
+
 static void test_timeout_fails(void) {
     nt_http_options_t opts = {.timeout_ms = 300};
     nt_http_request_t req = nt_http_request_ex(make_url("/slow"), &opts);
@@ -163,6 +213,9 @@ int main(void) {
     RUN_TEST(test_get_hello);
     RUN_TEST(test_post_echo_binary_body);
     RUN_TEST(test_non_2xx_is_done_with_status);
+    RUN_TEST(test_put_301_reissued_as_get);
+    RUN_TEST(test_post_301_becomes_get);
+    RUN_TEST(test_bodiless_lowercase_post);
     RUN_TEST(test_timeout_fails);
     RUN_TEST(test_connection_refused_fails);
     RUN_TEST(test_cancel_in_flight);

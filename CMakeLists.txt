@@ -192,6 +192,12 @@ if(NOT EMSCRIPTEN)
         set(BUILD_MISC_DOCS OFF)
         set(ENABLE_CURL_MANUAL OFF)
         set(CMAKE_DISABLE_FIND_PACKAGE_Perl ON)
+        # A superproject may have found Perl already; curl gates add_subdirectory(docs)
+        # on Perl_FOUND and docs/ is stripped from the vendored tree — clear the
+        # inherited results (directory-scoped) so that branch can never run.
+        set(Perl_FOUND FALSE)
+        set(PERL_FOUND FALSE)
+        set(PERL_EXECUTABLE "")
         set(HTTP_ONLY ON)
         set(CURL_DISABLE_INSTALL ON)
         set(CURL_ENABLE_EXPORT_TARGET OFF)

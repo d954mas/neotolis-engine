@@ -116,17 +116,31 @@ static void http_copy_headers(NtHttpSlot *slot, const nt_http_options_t *opts, c
 }
 
 /* Content-Type to append for a body; NULL when there is no body or the caller
- * already passed one as an explicit header pair. */
-static const char *http_default_content_type(const NtHttpSlot *slot, const nt_http_options_t *opts) {
-    if (slot->body == NULL) {
+ * already passed one as an explicit header pair. Keyed off opts->body (caller
+ * intent), not the copied bytes — a zero-size body keeps its Content-Type. */
+static const char *http_default_content_type(const nt_http_options_t *opts) {
+    if (opts == NULL || opts->body == NULL) {
         return NULL;
     }
-    for (size_t i = 0; opts != NULL && i < opts->header_count; i++) {
+    for (size_t i = 0; i < opts->header_count; i++) {
         if (http_iequals(opts->headers[i * 2], "Content-Type")) {
             return NULL;
         }
     }
-    return (opts != NULL && opts->content_type != NULL) ? opts->content_type : "application/octet-stream";
+    return opts->content_type != NULL ? opts->content_type : "application/octet-stream";
+}
+
+/* fetch() normalizes these six methods to uppercase (and only these — PATCH is
+ * deliberately case-preserved by the spec); mirror it so both backends send the
+ * same bytes for method = "put" etc. */
+static const char *http_normalize_method(const char *method) {
+    static const char *const known[] = {"DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"};
+    for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (http_iequals(method, known[i])) {
+            return known[i];
+        }
+    }
+    return method;
 }
 
 /* Copies method/body/headers/timeout out of opts so the caller keeps ownership. */
@@ -134,7 +148,7 @@ static const char *http_default_content_type(const NtHttpSlot *slot, const nt_ht
 static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_options_t *opts) {
     NT_ASSERT(opts == NULL || opts->header_count == 0 || opts->headers != NULL);
     slot->url = http_strdup(url);
-    slot->method = http_strdup(opts != NULL && opts->method != NULL ? opts->method : "GET");
+    slot->method = http_strdup(http_normalize_method(opts != NULL && opts->method != NULL ? opts->method : "GET"));
     slot->body = NULL;
     slot->body_size = 0;
     if (opts != NULL && opts->body != NULL && opts->body_size > 0) {
@@ -150,7 +164,7 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     slot->headers = NULL;
     slot->headers_size = 0;
     slot->header_pairs = 0;
-    http_copy_headers(slot, opts, http_default_content_type(slot, opts));
+    http_copy_headers(slot, opts, http_default_content_type(opts));
 
     slot->timeout_ms = opts != NULL ? opts->timeout_ms : 0;
 }
@@ -170,8 +184,11 @@ nt_result_t nt_http_init(void) {
         s_http.free_queue[i] = (uint16_t)(NT_HTTP_MAX_REQUESTS - i);
     }
 
+    if (!nt_http_backend_init()) {
+        memset(&s_http, 0, sizeof(s_http));
+        return NT_ERR_INIT_FAILED;
+    }
     s_http.initialized = true;
-    nt_http_backend_init();
     return NT_OK;
 }
 

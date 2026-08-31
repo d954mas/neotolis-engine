@@ -12,7 +12,7 @@
  * export for wasmExports['malloc']; HEAPU8 is an always-present global (no dep). */
 EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")
 
-EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_ptr, const char *method_ptr,
+EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const char *url_ptr, const char *method_ptr,
                                 const uint8_t *body_ptr, int body_size, const char *headers_ptr, int headers_size,
                                 int timeout_ms), {
     var url = UTF8ToString(url_ptr);
@@ -22,22 +22,6 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
     }
     var controller = new AbortController();
     Module['_nt_http_controllers'][slot_index] = controller;
-
-    /* Quoted keys/calls survive Closure without relying on its fetch externs */
-    var init = { 'method': UTF8ToString(method_ptr), 'signal': controller.signal };
-    if (headers_size > 0) {
-        /* Blob of alternating NUL-terminated name,value strings (trailing NUL -> drop last split part).
-         * A real Headers object + append keeps duplicate names, matching the native backend. */
-        var parts = new TextDecoder().decode(HEAPU8.subarray(headers_ptr, headers_ptr + headers_size)).split('\0');
-        var headers = new Headers();
-        for (var i = 0; i + 1 < parts.length; i += 2) {
-            headers['append'](parts[i], parts[i + 1]);
-        }
-        init['headers'] = headers;
-    }
-    if (body_size > 0) {
-        init['body'] = HEAPU8.slice(body_ptr, body_ptr + body_size);
-    }
 
     var timer = 0;
     var status = 0;
@@ -52,18 +36,52 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
         if (Module['_nt_http_controllers'][slot_index] === controller) {
             delete Module['_nt_http_controllers'][slot_index];
         }
-        _nt_http_web_on_complete(slot_index, generation, ptr, size, status, hdrs, success);
+        _nt_http_web_on_complete(slot_index, generation, epoch, ptr, size, status, hdrs, success);
         hdrs = 0;
     }
     function headerBlock(response) {
         var s = "";
         response.headers.forEach(function(v, k) { s += k + ': ' + v + '\n'; });
-        var bytes = new TextEncoder().encode(s);
-        var p = wasmExports['malloc'](bytes.length + 1);
+        /* Headers values are ByteStrings (code units <= 0xFF): write the bytes
+         * directly — byte-exact parity with the native backend, no UTF-8 re-encode */
+        var p = wasmExports['malloc'](s.length + 1);
         if (!p) return 0;
-        HEAPU8.set(bytes, p);
-        HEAPU8[p + bytes.length] = 0;
+        for (var i = 0; i < s.length; i++) {
+            HEAPU8[p + i] = s.charCodeAt(i) & 0xFF;
+        }
+        HEAPU8[p + s.length] = 0;
         return p;
+    }
+
+    /* Quoted keys/calls survive Closure without relying on its fetch externs.
+     * Invalid caller input (bad header name, forbidden value bytes) throws from
+     * Headers/Request construction — fail the request instead of unwinding into C. */
+    var init;
+    try {
+        init = { 'method': UTF8ToString(method_ptr), 'signal': controller.signal };
+        if (headers_size > 0) {
+            /* Alternating NUL-terminated name,value byte strings. Bytes map 1:1 to
+             * code units (true Latin-1) so non-ASCII values stay ByteString-legal and
+             * reach the wire byte-exact; TextDecoder('latin1') would remap 0x80-0x9F. */
+            var raw = HEAPU8.subarray(headers_ptr, headers_ptr + headers_size);
+            var s = "";
+            for (var i = 0; i < raw.length; i++) {
+                s += String.fromCharCode(raw[i]);
+            }
+            var parts = s.split('\0');
+            var headers = new Headers();
+            for (var i = 0; i + 1 < parts.length; i += 2) {
+                headers['append'](parts[i], parts[i + 1]);
+            }
+            init['headers'] = headers;
+        }
+        if (body_size > 0) {
+            init['body'] = HEAPU8.slice(body_ptr, body_ptr + body_size);
+        }
+    } catch (e) {
+        console.error('ERROR [http] bad request options slot=' + slot_index, e);
+        finish(0, 0, 0);
+        return;
     }
 
     if (timeout_ms > 0) {
@@ -99,7 +117,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     var chunk = result.value;
                     chunks.push(chunk);
                     received += chunk.length;
-                    _nt_http_web_on_progress(slot_index, generation, received, total);
+                    _nt_http_web_on_progress(slot_index, generation, epoch, received, total);
                     pump();
                 }).catch(function(e) {
                     console.error('ERROR [http] stream error slot=' + slot_index, e);
@@ -136,9 +154,14 @@ EM_JS(void, nt_http_web_cancel, (int slot_index), {
 
 /* ---- EMSCRIPTEN_KEEPALIVE callbacks (called from JS) ---- */
 
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation, int received, int total) {
+/* Lifecycle epoch: bumped on every module init. Slot generations restart after a
+ * shutdown/init cycle, so (slot, generation) alone cannot reject a callback from a
+ * fetch that was started (and aborted) in a previous epoch of the module. */
+static int s_web_epoch;
+
+EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation, int epoch, int received, int total) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (!slot || slot->generation != (uint16_t)generation) {
+    if (epoch != s_web_epoch || !slot || slot->generation != (uint16_t)generation) {
         return;
     }
     slot->received = (uint32_t)received;
@@ -146,9 +169,9 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation
     slot->state = (uint8_t)NT_HTTP_STATE_DOWNLOADING;
 }
 
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, uint8_t *data, int size, int status, char *resp_headers, int success) {
+EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, int epoch, uint8_t *data, int size, int status, char *resp_headers, int success) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (!slot || slot->generation != (uint16_t)generation) {
+    if (epoch != s_web_epoch || !slot || slot->generation != (uint16_t)generation) {
         free(data);
         free(resp_headers);
         return;
@@ -162,10 +185,13 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation
 
 /* ---- Backend entry points ---- */
 
-void nt_http_backend_init(void) {}
+bool nt_http_backend_init(void) {
+    s_web_epoch++; /* callbacks from any previous epoch's fetches are now rejected */
+    return true;
+}
 
-/* Abort everything in flight: generations restart after a shutdown/init cycle, so a
- * surviving fetch could otherwise match a reused slot and deliver a stale response. */
+/* Abort everything in flight: their (already-scheduled) completions are rejected by
+ * the epoch check after the next init, freeing whatever they carry. */
 void nt_http_backend_shutdown(void) {
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         nt_http_web_cancel((int)i);
@@ -177,7 +203,7 @@ void nt_http_backend_update(void) {}
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     NT_ASSERT(slot != NULL);
-    nt_http_web_fetch((int)slot_index, (int)slot->generation, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
+    nt_http_web_fetch((int)slot_index, (int)slot->generation, s_web_epoch, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
 }
 
 void nt_http_backend_cancel(uint16_t slot_index) { nt_http_web_cancel((int)slot_index); }
