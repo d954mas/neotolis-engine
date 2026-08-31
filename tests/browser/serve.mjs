@@ -42,6 +42,24 @@ const server = createServer(async (req, res) => {
     res.end('bad request');
     return;
   }
+  // nt_http acceptance endpoints (http.spec.ts): byte-exact POST echo + a non-2xx probe.
+  if (req.method === 'POST' && urlPath === '/echo') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('X-Echo-Content-Type', req.headers['content-type'] || '');
+      res.setHeader('X-Echo-X-Nt-Test', req.headers['x-nt-test'] || '');
+      res.end(Buffer.concat(chunks));
+    });
+    return;
+  }
+  if (urlPath === '/status404') {
+    res.statusCode = 404;
+    res.end('missing');
+    return;
+  }
+
   if (urlPath === '/') urlPath = '/index.html';
   // Contain the path inside ROOT (no traversal). Compare against ROOT + sep so a SIBLING dir whose
   // name merely EXTENDS ROOT as a prefix (e.g. "<root>-evil") can't pass; allow exact ROOT too.
