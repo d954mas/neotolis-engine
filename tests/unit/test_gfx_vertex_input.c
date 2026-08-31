@@ -325,6 +325,50 @@ void test_attributeless_vi_draws(void) {
     nt_gfx_end_frame();
 }
 
+/* Transitional dual path: a migrated (vertex-input) draw and a legacy
+ * (pipeline-VAO) draw must coexist in one frame. bind_pipeline clears the
+ * bound vertex input, so the legacy instance bind falls back to the
+ * pipeline's instance layout instead of writing into the vertex input. */
+void test_interleave_migrated_then_legacy_in_one_frame(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_buffer_t ibo = make_ibo();
+    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_pipeline_t migrated_pip = make_test_pipeline();
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_pipeline_t legacy_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs), .layout = pos_layout(), .instance_layout = inst_layout()});
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+
+    /* Migrated renderer pattern: pipeline -> vertex input -> instance bind. */
+    nt_gfx_bind_pipeline(migrated_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(stream, 16);
+    nt_gfx_draw_instanced(0, 3, 2);
+
+    /* Legacy renderer in the same frame. */
+    nt_gfx_bind_pipeline(legacy_pip);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    nt_gfx_bind_vertex_buffer(vbo);
+    nt_gfx_bind_index_buffer(ibo);
+    nt_gfx_bind_instance_buffer(stream, 32); /* pipeline-layout fallback path */
+    TEST_ASSERT_EQUAL_UINT32(32, nt_gfx_stub_test_last_instance_offset());
+    nt_gfx_draw_indexed_instanced(0, 3, 3, 2);
+
+    /* Migrated again after the legacy draw. */
+    nt_gfx_bind_pipeline(migrated_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(stream, 48);
+    TEST_ASSERT_EQUAL_UINT32(48, nt_gfx_stub_test_last_instance_offset());
+    nt_gfx_draw_instanced(0, 3, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_get_frame_draw_calls());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 /* --- Context loss --- */
 
 void test_vi_make_during_context_loss_returns_invalid(void) {
@@ -373,6 +417,7 @@ int main(void) {
     RUN_TEST(test_draw_indexed_asserts_on_non_indexed_vi);
     RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
     RUN_TEST(test_attributeless_vi_draws);
+    RUN_TEST(test_interleave_migrated_then_legacy_in_one_frame);
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
     RUN_TEST(test_vi_bind_after_context_loss_asserts);
     return UNITY_END();

@@ -177,6 +177,7 @@ static struct {
     nt_pipeline_t batch_pip_active;
     nt_buffer_t batch_vbo;
     nt_buffer_t batch_ibo;
+    nt_vertex_input_t batch_vi;
     nt_shape_renderer_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES];
     nt_shape_index_t indices[NT_SHAPE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
@@ -191,6 +192,9 @@ static struct {
     nt_buffer_t inst_buf;      /* shared GPU instance buffer, reused per type */
     uint32_t inst_ring_cursor; /* next free byte; disjoint writes avoid driver copies of in-flight data */
     nt_shape_template_t templates[NT_SHAPE_TYPE_COUNT];
+    /* One vertex input per template (depth/overlay pipeline pairs share it);
+     * instance pointers are re-specified into it by each flush. */
+    nt_vertex_input_t template_vi[NT_SHAPE_TYPE_COUNT];
     nt_shape_instance_t inst_data[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_INSTANCES];
     uint32_t inst_counts[NT_SHAPE_TYPE_COUNT];
 
@@ -210,6 +214,7 @@ static struct {
     nt_buffer_t line_template_vbo;
     nt_buffer_t line_template_ibo;
     nt_buffer_t line_instance_buf;
+    nt_vertex_input_t line_vi;
     uint32_t line_ring_cursor;
     nt_shape_line_instance_t lines[NT_SHAPE_RENDERER_MAX_LINES];
     uint32_t line_count;
@@ -240,19 +245,74 @@ static nt_pipeline_t get_active_cap_inst_pipeline(void) { return s_shape.depth_e
 
 static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay; }
 
+/* Vertex/instance layouts now live on the vertex-input objects; the depth and
+ * overlay pipeline pair for each program shares one vertex input. */
+static nt_vertex_layout_t batch_vertex_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 2,
+        .stride = (uint16_t)sizeof(nt_shape_renderer_vertex_t),
+        .attrs =
+            {
+                {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
+            },
+    };
+}
+
+static nt_vertex_layout_t inst_template_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 1,
+        .stride = (uint16_t)(3 * sizeof(float)),
+        .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0}},
+    };
+}
+
+static nt_vertex_layout_t cap_template_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 1,
+        .stride = (uint16_t)(4 * sizeof(float)), /* vec4 template */
+        .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0}},
+    };
+}
+
+static nt_vertex_layout_t shape_instance_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 4,
+        .stride = (uint16_t)sizeof(nt_shape_instance_t),
+        .attrs =
+            {
+                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
+                {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
+            },
+    };
+}
+
+static nt_vertex_layout_t line_template_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 1,
+        .stride = (uint16_t)(2 * sizeof(float)),
+        .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}},
+    };
+}
+
+static nt_vertex_layout_t line_instance_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 3,
+        .stride = (uint16_t)sizeof(nt_shape_line_instance_t),
+        .attrs =
+            {
+                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                {.location = 3, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 24},
+            },
+    };
+}
+
 static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
     nt_pipeline_desc_t desc = {
         .program = s_shape.batch_prog,
-        .layout =
-            {
-                .attr_count = 2,
-                .stride = (uint16_t)sizeof(nt_shape_renderer_vertex_t),
-                .attrs =
-                    {
-                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                        {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
-                    },
-            },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -268,26 +328,6 @@ static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
 static nt_pipeline_t make_line_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
         .program = s_shape.line_prog,
-        .layout =
-            {
-                .attr_count = 1,
-                .stride = (uint16_t)(2 * sizeof(float)),
-                .attrs =
-                    {
-                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
-                    },
-            },
-        .instance_layout =
-            {
-                .attr_count = 3,
-                .stride = (uint16_t)sizeof(nt_shape_line_instance_t),
-                .attrs =
-                    {
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
-                        {.location = 3, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 24},
-                    },
-            },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -300,27 +340,6 @@ static nt_pipeline_t make_line_pipeline(bool depth) {
 static nt_pipeline_t make_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
         .program = s_shape.inst_prog,
-        .layout =
-            {
-                .attr_count = 1,
-                .stride = (uint16_t)(3 * sizeof(float)),
-                .attrs =
-                    {
-                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                    },
-            },
-        .instance_layout =
-            {
-                .attr_count = 4,
-                .stride = (uint16_t)sizeof(nt_shape_instance_t),
-                .attrs =
-                    {
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
-                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
-                    },
-            },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -336,27 +355,6 @@ static nt_pipeline_t make_inst_pipeline(bool depth) {
 static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
         .program = s_shape.cap_inst_prog,
-        .layout =
-            {
-                .attr_count = 1,
-                .stride = (uint16_t)(4 * sizeof(float)), /* vec4 template */
-                .attrs =
-                    {
-                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-                    },
-            },
-        .instance_layout =
-            {
-                .attr_count = 4,
-                .stride = (uint16_t)sizeof(nt_shape_instance_t),
-                .attrs =
-                    {
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
-                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
-                    },
-            },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -432,7 +430,8 @@ static nt_shape_template_t make_template_ex(const float *verts, uint32_t nv, uin
     t.num_vertices = nv;
     t.num_indices = ni;
     t.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = nv * components * (uint32_t)sizeof(float), .label = label});
-    t.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = idx, .size = ni * (uint32_t)sizeof(uint16_t), .label = label});
+    t.ibo = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = idx, .size = ni * (uint32_t)sizeof(uint16_t), .index_type = NT_INDEX_UINT16, .label = label});
     return t;
 }
 
@@ -716,16 +715,47 @@ void nt_shape_renderer_init(void) {
     s_shape.line_template_vbo =
         nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_verts, .size = sizeof(line_template_verts), .label = "shape_line_quad"});
     static const uint16_t line_template_indices[] = {0, 1, 2, 0, 2, 3};
-    s_shape.line_template_ibo =
-        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_indices, .size = sizeof(line_template_indices), .label = "shape_line_idx"});
+    s_shape.line_template_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_indices, .size = sizeof(line_template_indices), .index_type = NT_INDEX_UINT16, .label = "shape_line_idx"});
     s_shape.line_instance_buf = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
 
-    /* Verify all resources were created successfully */
+    /* Verify all buffers/pipelines were created successfully (the vertex
+     * inputs below trap on invalid buffer handles instead of skipping). */
     if (!s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
         !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id ||
         !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id) {
         NT_LOG_ERROR("init failed -- resource creation error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
+
+    /* Vertex inputs: one per template + batch + line; each depth/overlay
+     * pipeline pair shares one. */
+    s_shape.batch_vi =
+        nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = batch_vertex_layout(), .vertex_buffer = s_shape.batch_vbo, .index_buffer = s_shape.batch_ibo, .label = "shape_batch_vi"});
+    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
+        s_shape.template_vi[t] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+            .layout = (t == NT_SHAPE_CAPSULE) ? cap_template_layout() : inst_template_layout(),
+            .instance_layout = shape_instance_layout(),
+            .vertex_buffer = s_shape.templates[t].vbo,
+            .index_buffer = s_shape.templates[t].ibo,
+            .label = "shape_template_vi",
+        });
+    }
+    s_shape.line_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = line_template_layout(),
+        .instance_layout = line_instance_layout(),
+        .vertex_buffer = s_shape.line_template_vbo,
+        .index_buffer = s_shape.line_template_ibo,
+        .label = "shape_line_vi",
+    });
+    bool template_vis_ok = true;
+    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
+        template_vis_ok = template_vis_ok && s_shape.template_vi[t].id != 0;
+    }
+    if (!s_shape.batch_vi.id || !template_vis_ok || !s_shape.line_vi.id) {
+        NT_LOG_ERROR("init failed -- vertex input creation error");
         nt_shape_renderer_shutdown();
         return;
     }
@@ -746,6 +776,11 @@ void nt_shape_renderer_shutdown(void) {
     if (!s_shape.initialized) {
         return;
     }
+    nt_gfx_destroy_vertex_input(s_shape.line_vi);
+    for (int t = NT_SHAPE_TYPE_COUNT - 1; t >= 0; t--) {
+        nt_gfx_destroy_vertex_input(s_shape.template_vi[t]);
+    }
+    nt_gfx_destroy_vertex_input(s_shape.batch_vi);
     nt_gfx_destroy_buffer(s_shape.line_instance_buf);
     nt_gfx_destroy_buffer(s_shape.line_template_ibo);
     nt_gfx_destroy_buffer(s_shape.line_template_vbo);
@@ -831,8 +866,7 @@ void nt_shape_renderer_flush(void) {
         s_shape.inst_ring_cursor = inst_base + inst_bytes;
         nt_gfx_update_buffer(s_shape.inst_buf, inst_base, s_shape.inst_data[t], inst_bytes);
         nt_gfx_bind_pipeline(t == NT_SHAPE_CAPSULE ? s_shape.cap_inst_pip_active : s_shape.inst_pip_active);
-        nt_gfx_bind_vertex_buffer(s_shape.templates[t].vbo);
-        nt_gfx_bind_index_buffer(s_shape.templates[t].ibo);
+        nt_gfx_bind_vertex_input(s_shape.template_vi[t]);
         nt_gfx_bind_instance_buffer(s_shape.inst_buf, inst_base);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
@@ -848,8 +882,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_update_buffer(s_shape.batch_ibo, 0, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
 
         nt_gfx_bind_pipeline(s_shape.batch_pip_active);
-        nt_gfx_bind_vertex_buffer(s_shape.batch_vbo);
-        nt_gfx_bind_index_buffer(s_shape.batch_ibo);
+        nt_gfx_bind_vertex_input(s_shape.batch_vi);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
         nt_gfx_draw_indexed(0, s_shape.index_count, s_shape.vertex_count);
@@ -870,8 +903,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_update_buffer(s_shape.line_instance_buf, line_base, s_shape.lines, line_bytes);
 
         nt_gfx_bind_pipeline(s_shape.line_pip_active);
-        nt_gfx_bind_vertex_buffer(s_shape.line_template_vbo);
-        nt_gfx_bind_index_buffer(s_shape.line_template_ibo);
+        nt_gfx_bind_vertex_input(s_shape.line_vi);
         nt_gfx_bind_instance_buffer(s_shape.line_instance_buf, line_base);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
         float cp4[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0.0F};

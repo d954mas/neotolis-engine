@@ -131,6 +131,7 @@ static struct {
     nt_program_t quad_program;
     nt_pipeline_t quad_pipeline;
     nt_buffer_t quad_vbo;
+    nt_vertex_input_t quad_vi;
     uint16_t rt_width;
     uint16_t rt_height;
     bool large_target;
@@ -147,6 +148,7 @@ typedef enum {
 } rtt_resize_result_t;
 
 static void destroy_quad_resources(void) {
+    nt_gfx_destroy_vertex_input(s_demo.quad_vi);
     if (s_demo.quad_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_demo.quad_vbo);
     }
@@ -162,6 +164,7 @@ static void destroy_quad_resources(void) {
     if (s_demo.white.id != 0) {
         nt_gfx_destroy_texture(s_demo.white);
     }
+    s_demo.quad_vi = NT_VERTEX_INPUT_INVALID;
     s_demo.quad_vbo = (nt_buffer_t){0};
     s_demo.quad_pipeline = (nt_pipeline_t){0};
     s_demo.quad_program = NT_PROGRAM_INVALID;
@@ -183,16 +186,6 @@ static bool make_quad_resources(void) {
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,
-        .layout =
-            {
-                .stride = sizeof(rtt_quad_vertex_t),
-                .attr_count = 2,
-                .attrs =
-                    {
-                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
-                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
-                    },
-            },
         .depth_test = false,
         .depth_write = false,
         .depth_func = NT_DEPTH_ALWAYS,
@@ -205,6 +198,24 @@ static bool make_quad_resources(void) {
         .size = 6U * (uint32_t)sizeof(rtt_quad_vertex_t),
         .label = "rtt_quad_vbo",
     });
+    if (s_demo.quad_vbo.id != 0) {
+        /* Layout lives on the owned vertex input; update_buffer keeps the GL
+         * name, so the per-frame vertex rewrite leaves the binding intact. */
+        s_demo.quad_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+            .layout =
+                {
+                    .stride = sizeof(rtt_quad_vertex_t),
+                    .attr_count = 2,
+                    .attrs =
+                        {
+                            {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                            {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
+                        },
+                },
+            .vertex_buffer = s_demo.quad_vbo,
+            .label = "rtt_quad_vi",
+        });
+    }
     s_demo.white = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 1,
         .height = 1,
@@ -216,7 +227,7 @@ static bool make_quad_resources(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "rtt_white",
     });
-    return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.white.id != 0;
+    return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
 static nt_render_target_t make_target(const char *label, uint16_t width, uint16_t height, nt_render_target_depth_t depth) {
@@ -476,7 +487,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     };
     nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
-    nt_gfx_bind_vertex_buffer(s_demo.quad_vbo);
+    nt_gfx_bind_vertex_input(s_demo.quad_vi);
     nt_gfx_bind_texture(texture, 0);
     nt_gfx_set_uniform_int("u_texture", 0);
     nt_gfx_set_uniform_int("u_mode", mode);
