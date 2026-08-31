@@ -386,6 +386,41 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
 }
 
+/* The aftermath of a loss, not the loss itself: the context is back, the stage
+ * handles are still live, but their GPU objects are gone until the owner
+ * recreates them. That is recoverable, so linking rejects instead of trapping. */
+void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
+    nt_gfx_stub_test_reset();
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame(); /* wipes the backend tables, latches context_lost */
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame(); /* recovery completes; the stages stay unready */
+
+    /* Neither loss gate can explain the rejection below. */
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(nt_gfx_backend_is_context_lost());
+    TEST_ASSERT_FALSE(nt_gfx_shader_ready(vs));
+    TEST_ASSERT_FALSE(nt_gfx_shader_ready(fs));
+
+    const uint32_t links_before = nt_gfx_stub_test_program_create_count();
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) != 0) {
+        nt_assert_handler = NULL;
+        TEST_FAIL_MESSAGE("a stage left unready by a context loss must return invalid without asserting");
+    }
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_assert_handler = NULL;
+
+    TEST_ASSERT_EQUAL_UINT32(0, prog.id);
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
+    /* Rejected before the backend, so no GL program leaked on the way out. */
+    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_stub_test_program_create_count());
+    nt_gfx_end_frame();
+}
+
 void test_gfx_program_link_context_loss_releases_every_slot(void) {
     nt_gfx_stub_test_reset();
     nt_shader_t vs = make_test_vs();
@@ -2104,6 +2139,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_program_asserts_invalid_shader);
     RUN_TEST(test_gfx_make_program_asserts_on_link_failure);
     RUN_TEST(test_gfx_make_program_context_lost_returns_invalid);
+    RUN_TEST(test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss);
     RUN_TEST(test_gfx_program_link_context_loss_releases_every_slot);
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
     RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);

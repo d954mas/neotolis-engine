@@ -787,10 +787,12 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
 
     uint32_t vs_backend = s_gfx.shader_backends[nt_pool_slot_index(vs.id)];
     uint32_t fs_backend = s_gfx.shader_backends[nt_pool_slot_index(fs.id)];
-    /* Named separately from the link assert: a stage whose GPU object died with
-     * the context reads as a link failure otherwise, pointing at the wrong bug. */
-    NT_ASSERT(vs_backend != 0 && "make_program: vertex stage has no GPU object");
-    NT_ASSERT(fs_backend != 0 && "make_program: fragment stage has no GPU object");
+    /* Rejected, not trapped: a context loss leaves stage handles live but
+     * permanently unready, so this is recoverable state and not a caller error.
+     * The owner recreates the stages and links again. */
+    if (vs_backend == 0 || fs_backend == 0) {
+        return NT_PROGRAM_INVALID;
+    }
 
     /* Before the link, not after: the GL backend's program table has the same
      * capacity, so linking first makes exhaustion surface as a link failure. */

@@ -158,11 +158,14 @@ There is no per-program override. The registry borrows `name` without copying:
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
 survives context loss.
 
-A lost context is the only condition under which `nt_gfx_make_program` returns
-`NT_PROGRAM_INVALID`.
-This includes the interval after the browser recovers but before
-`nt_gfx_begin_frame` finishes resetting the backend tables. Linking waits until
-that recovery completes, even when newly created shader stages are ready.
+`nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
+loss leaves behind, and for nothing else. The first is the loss itself, including
+the interval after the browser recovers but before `nt_gfx_begin_frame` finishes
+resetting the backend tables: linking waits until that recovery completes, even
+when newly created shader stages are ready. The second is a stage handle that is
+still live but whose GPU object that loss discarded — permanently unready, so the
+owner recreates the stage and links again. Both are recoverable and neither
+asserts. A stale stage handle remains a developer error and traps.
 
 `nt_material_set_program` is the only setter for the borrowed handle, including assignment
 from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
