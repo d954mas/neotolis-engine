@@ -144,7 +144,7 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     return material;
 }
 
-/* Pipelines are resolved at flush, so a test that wants one built must draw. */
+/* The first staged quad resolves the pipeline; set_material alone does not. */
 static void draw_and_flush(void) {
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_gfx_begin_frame();
@@ -189,9 +189,7 @@ static void assert_text_draw(uint32_t index, nt_gfx_test_draw_t expected, uint32
     TEST_ASSERT_EQUAL_UINT32(1U, draw.instance_count);
 }
 
-/* A ref never hands out a program whose GPU object died, and never links from a
- * stage in the same state -- so a game that forgets drop() in its restore branch
- * loses a frame rather than the session. */
+/* A ref reclaims a program lost with the context and waits for ready stages before relinking. */
 void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
     nt_program_ref_t ref = {0};
     ref.vs = publish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
@@ -415,8 +413,7 @@ void test_draw_newline_advances_to_next_line(void) {
     TEST_ASSERT_TRUE(second_y < first_y);
 }
 
-/* Clearing the material's program must take the pipeline with it: the pipeline
- * was built on that program, and drawing through it would run dead code. */
+/* Clearing the material's program skips new batches without destroying the borrowed program or its pipelines. */
 void test_flush_stops_after_program_cleared(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
@@ -478,10 +475,8 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT16(2U, nt_text_renderer_test_pipeline_cache_count());
 }
 
-/* A destroyed program's pool slot comes back with a bumped generation, so the
- * successor's handle can never collide with the dead entry's key. The swap lands
- * on the same material handle, so set_material early-returns and flush is what
- * re-resolves -- that is the path a program change actually takes. */
+/* Reusing the program slot changes its generation. The first quad of a new batch
+ * must resolve the replacement even when the material handle is unchanged. */
 void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t dead = nt_material_get_info(mat)->program;
@@ -742,8 +737,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     }
 }
 
-/* UI text alternates between a context default and per-style overrides, so a
- * single pipeline slot rebuilt a VAO on every switch. */
+/* Alternating UI materials should reuse cached pipelines instead of rebuilding their VAOs. */
 void test_switching_back_to_a_material_reuses_its_pipeline(void) {
     nt_material_t a = create_test_material_with_blend(nt_blend_alpha());
     nt_material_t b = create_test_material_with_blend(nt_blend_opaque());
@@ -811,9 +805,7 @@ void test_flush_discards_glyphs_on_a_destroyed_program(void) {
     nt_gfx_end_frame();
 }
 
-/* The whole recovery contract in one pass: the material handle survives, the
- * renderer skips while the program is dead, and the same gate that built the
- * first pipeline builds the next one once the game relinks. */
+/* Restore preserves the material and clears staging; a relink rebuilds its pipeline and resumes drawing. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());

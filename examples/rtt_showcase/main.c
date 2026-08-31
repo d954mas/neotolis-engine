@@ -529,9 +529,8 @@ static void frame(void) {
         return;
     }
     if (g_nt_gfx.context_restored) {
-        /* Order does not matter here: nothing draws between these calls, and the
-         * materials keep their handles -- a destroyed program reads as not ready,
-         * so every renderer skips until the gate below relinks and re-assigns. */
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();

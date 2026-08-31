@@ -400,11 +400,8 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
 }
 
-/* test_nt_postfx_blur_native links these shaders for real, but only a driver that
- * folds branches before checking array bounds rejects the bad form -- NVIDIA does,
- * the Mesa/llvmpipe CI runs under does not. So the shape is pinned in source here,
- * where no driver and no display gets a vote: the kernel taps must stay separate
- * vec4 uniforms read through a masked index. */
+/* Separate vec4 uniforms and a masked index avoid driver-dependent array bounds
+ * rejection; checking the source also covers drivers that accept unsafe indexing. */
 static void test_blur_fs_keeps_the_masked_kernel_index(void) {
     const char *src = nt_postfx_blur_test_fs_source();
     TEST_ASSERT_NOT_NULL(src);

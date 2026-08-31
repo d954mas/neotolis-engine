@@ -288,20 +288,15 @@ static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
-    /* One query covers every state: no program yet, a program that died with the
-     * context, and a program its owner destroyed. Without it the restore window
-     * -- context alive, material still holding the old handle -- would reach
-     * make_pipeline's readiness assert and trap on recoverable state. */
+    /* A recovered context may still have materials awaiting a new program. */
     if (!nt_gfx_program_ready(mat_info->program)) {
         /* The one choke point every caller passes through, so the immediate and
          * draw_list paths both get told. */
         nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
-    /* Pipeline signature: layout discriminator + program handle + render-state
-     * bits. The layout is folded UNCONDITIONALLY (base=0, custom=distinct) so a
-     * custom-attr material's extended layout never aliases the base 20 B
-     * pipeline. */
+    /* Include the layout discriminator even for the base layout (zero), so
+     * custom attributes cannot alias the base pipeline. */
     uint64_t key = nt_sprite_layout_hash(mat_info);
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
@@ -1332,10 +1327,7 @@ void nt_sprite_renderer_flush(void) {
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
-        /* Zero: set_material opened a cmd while the context was dead. Stale: the
-         * owner destroyed the program under queued work, which destroys its
-         * pipelines. Both drop the cmd -- binding it would leave no pipeline
-         * bound and trap the draw with a message pointing at the wrong thing. */
+        /* Context loss or program destruction can invalidate a queued pipeline. */
         if (!nt_gfx_pipeline_valid(c->pipeline)) {
             continue;
         }
@@ -1350,10 +1342,8 @@ void nt_sprite_renderer_flush(void) {
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
             bound_ibo_id = 0;
-            /* Uniform values belong to the program, so the new pipeline may sit
-             * on one that never saw this material's params or sampler units.
-             * Texture units are context state -- glUseProgram does not touch
-             * them, so their mirrors survive the switch. */
+            /* Params and sampler uniforms belong to programs and need replay.
+             * Texture-unit bindings belong to the context and survive the switch. */
             bound_mat_id = 0;
             pipeline_changed = true;
         }
@@ -1363,12 +1353,8 @@ void nt_sprite_renderer_flush(void) {
             bound_ibo_id = s_sprite.ibo.id;
         }
 
-        /* Apply material params on material change. Most cmds in a flush share
-         * the same material (atlas page split / sampler split don't change it),
-         * so the lookup + uniform set runs only at run boundaries. A material
-         * destroyed between draw_list capture and flush replay leaves
-         * bound_mat_id alone, so a later cmd on it retries once it resolves --
-         * and applies none of its params meanwhile. */
+        /* Destroyed materials contribute no params; queued commands retain
+         * their captured pipeline and texture bindings. */
         bool material_applied = false;
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
@@ -1384,12 +1370,8 @@ void nt_sprite_renderer_flush(void) {
         }
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
-            /* Written on every material change, not only when the texture bind
-             * changes: two materials can share both pipeline and textures yet
-             * map different names onto the unit. On a pipeline change it goes
-             * out even if the material lookup failed -- the new program's
-             * sampler uniforms all default to unit 0, so skipping this would
-             * sample the wrong texture rather than draw nothing. */
+            /* Shared textures can use different sampler names across materials.
+             * Replay captured mappings even if the material was destroyed. */
             if ((material_applied || pipeline_changed) && c->tex_names[t] != NULL) {
                 nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
             }

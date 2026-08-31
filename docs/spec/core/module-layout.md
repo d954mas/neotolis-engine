@@ -120,13 +120,15 @@ caller handles.
 The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
 `RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
 `dest` are distinct ready `RGBA8` targets matching the source size. Scissor
-must be disabled for the call. The helper does not change or restore caller
-state.
-Blur arguments and GPU readiness are caller preconditions and assert when
-violated, as is a link failure in the program the helper owns. The helper checks
-readiness rather than distinguishing failure kinds: what still returns a result
-is a shader or buffer whose backend creation failed, and a program or pipeline
-that a lost context left unusable.
+must be disabled for the call. The helper leaves scissor disabled and does not
+restore prior graphics bindings.
+Blur arguments and readiness of caller-supplied GPU handles are preconditions
+and assert when violated, as does a link failure in the helper's program.
+Initialization and restore return `NT_ERR_INIT_FAILED` for shader, buffer, or
+pipeline backend creation failures, including failures with a live context, and
+when context loss prevents program or pipeline creation. A failed restore leaves
+the module initialized but unable to draw: passes skip until the game retries
+`nt_postfx_blur_restore_gpu` successfully.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

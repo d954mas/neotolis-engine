@@ -221,18 +221,14 @@ void nt_postfx_blur_shutdown(void) {
 }
 
 nt_result_t nt_postfx_blur_restore_gpu(void) {
-    /* Rejected, not trapped: a game restores every module it might own without
-     * tracking which ones it turned off, exactly as the four renderers allow. The
-     * return says nothing was rebuilt, which is what an inactive module owes. */
+    /* Games may include inactive modules in their recovery sequence. */
     if (!s_blur.initialized) {
         return NT_ERR_INIT_FAILED;
     }
     s_blur.gpu_ready = false;
     destroy_gpu_resources();
     if (!make_gpu_resources()) {
-        /* A second loss can land between begin_frame's recovery and this call.
-         * Stay initialized so the next restore rebuilds instead of the module
-         * going dark for the session. */
+        /* Stay initialized so the game can retry a failed rebuild. */
         NT_LOG_ERROR("postfx_blur restore failed");
         destroy_gpu_resources();
         return NT_ERR_INIT_FAILED;
@@ -250,8 +246,7 @@ typedef struct {
 static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
-    /* gpu_ready is not asserted: a rebuild still pending after a context loss is
-     * recoverable state, so the pass skips and retries on a later frame. */
+    /* A failed rebuild is recoverable; skip until the game retries restore_gpu. */
     return s_blur.initialized && s_blur.gpu_ready && pass != NULL;
 }
 

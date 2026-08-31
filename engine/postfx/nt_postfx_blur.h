@@ -23,10 +23,9 @@ nt_result_t nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
 /* Rebuilds GPU resources after context restore. */
 nt_result_t nt_postfx_blur_restore_gpu(void);
-/* Borrows ready handles with matching dimensions. Source must be an R8/RG8/
- * RGB8/RGBA8/RGBA16F/RGBA32F sampler2D color texture; integer and depth
- * formats are invalid. Scissor must be disabled. The helper never changes
- * caller state or creates, resizes, destroys, or stores the handles. */
+/* Borrows ready handles of matching dimensions; source must be R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D).
+ * Scissor must be disabled and is left unchanged; pass and binding state are not restored.
+ * The helper never creates, resizes, destroys, or stores caller handles. */
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 
 // #region test_access
@@ -34,7 +33,7 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 uint32_t nt_postfx_blur_test_build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]);
 uint32_t nt_postfx_blur_test_draw_count(void);
 void nt_postfx_blur_test_reset_counters(void);
-/* The fragment source, so a test can pin its shape on any driver. */
+/* Borrowed static fragment source; never freed or modified by the caller. */
 const char *nt_postfx_blur_test_fs_source(void);
 #endif
 // #endregion

@@ -5,26 +5,20 @@
 #include "graphics/nt_gfx.h"
 #include "resource/nt_resource.h"
 
-/* Links a program from two pack-loaded shader stages once both resolve, and owns
- * it on the game's behalf. Stores the resource handles, not the compiled stages:
- * only the handles survive a context loss. Rationale and the recovery contract
- * live in docs/spec/render/shader.md.
- *
- * Not a source of the nt_material target -- game-side glue over two public APIs;
- * the material module still never links, destroys or inspects a program. */
+/* Game-side owner of a program linked from two shader resources; release with drop().
+ * Stored resource handles let update() fetch replacement stages after context loss.
+ * The material module does
+ * not call this helper; recovery contract: docs/spec/render/shader.md. */
 typedef struct {
     nt_resource_t vs; /* set once by the game */
     nt_resource_t fs;
     nt_program_t program; /* filled by update(), cleared by drop() */
 } nt_program_ref_t;
 
-/* Links once both stages resolve. Returns true only on the frame it links, so a
- * caller can assign the program to its materials exactly once and needs no latch
- * of its own. Safe and free to call every frame.
+/* ref is required, with both stage resources assigned. Returns true only when a program is linked.
+ * Reclaims an unready owned program before retrying; linking waits for both stages to be ready.
  *
- * A ref never holds a dead program: one whose GPU object died with the context
- * is reclaimed here. Calling drop() in the restore branch is still the clear way
- * to say so, but forgetting it costs a frame rather than the session. */
+ * May be called each frame; the caller assigns ref->program to materials when true. */
 static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
@@ -32,8 +26,7 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
         if (nt_gfx_program_ready(ref->program)) {
             return false;
         }
-        /* Readiness is terminal, so this handle is a corpse -- reclaim it and
-         * relink below once the stages come back. */
+        /* Lost readiness is terminal; reclaim before linking a replacement. */
         nt_gfx_destroy_program(ref->program);
         ref->program = NT_PROGRAM_INVALID;
     }
@@ -52,17 +45,10 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     return ref->program.id != 0;
 }
 
-/* Destroys the program and clears the handle, which re-arms update().
- *
- * This is the ref's whole part of a context restore. The rest is not its
- * business and still belongs to the game: reset every renderer that drew these
- * materials (*_restore_gpu), and nt_resource_invalidate() the shader-code asset
- * type so the stages recompile.
- *
- * The ref is the program's only owner. Destroying ref.program directly, or
- * letting nt_gfx_shutdown outlive the ref, leaves a handle the pool no longer
- * knows -- and the next update() or drop() traps on it, which is the ownership
- * model working. Drop the ref before nt_gfx_shutdown. */
+/* ref is required. Destroys and clears its owned program; update() may link again.
+ * Call before nt_gfx_shutdown or discarding the ref; never destroy ref->program directly.
+ * Renderer resets and
+ * shader-resource invalidation remain the game's responsibility. */
 static inline void nt_program_ref_drop(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_drop: ref is required");
     nt_gfx_destroy_program(ref->program);

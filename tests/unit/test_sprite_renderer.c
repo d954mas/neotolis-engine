@@ -542,9 +542,7 @@ void test_sprite_renderer_pipeline_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
-/* The reset a material's program change requires: nothing built on the old
- * program may outlive it, and the renderer holds both a queued command and a
- * cached pipeline that borrow it. */
+/* Context restore drops queued commands and cached pipelines without destroying borrowed programs. */
 void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));

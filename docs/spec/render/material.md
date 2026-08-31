@@ -29,26 +29,21 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
 > planned types. A material does not reference shaders: it stores a borrowed
 > `nt_program_t` that the game links from `NT_ASSET_SHADER_CODE` stages or from
-> embedded sources. `nt_material_set_program` is the only way to change it, and
-> it is a flat replace: the first assignment, clearing to `NT_PROGRAM_INVALID`,
-> and swapping one live program for another are one operation under one rule.
-> Assigning the handle the material already holds is a no-op, so a per-frame
-> gate may call it unconditionally and needs no latch of its own. The material
-> module never links, destroys, or inspects the program.
+> embedded sources. `nt_material_set_program` replaces it, including assignment
+> from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
+> per-frame gate needs no assignment latch. The material module never links,
+> destroys, or inspects the program.
 >
-> A material has no readiness of its own. Whether it can draw is
-> `nt_gfx_program_ready(info->program)` — false before the first assignment,
-> false once the program died with the context or its owner destroyed it, true
-> when a pipeline can be built. One query covers every state, so there is no
-> cached readiness flag and no material version to keep in sync with one. The
-> handle a material holds is the same kind of survivor as a render target's:
-> the logical handle outlives a context loss, the GPU object behind it does not.
+> A material has no readiness field or version. Use
+> `nt_gfx_program_ready(info->program)` before building a pipeline: it is false
+> before assignment, after context loss is processed, or after program
+> destruction. The material survives recovery and retains its old program
+> handle until reassignment.
 >
-> Replacing program A with B keys out every pipeline entry cached on A: the new
-> handle never selects them again. Destroying A then reclaims them — the
-> pipelines go with the program, and each renderer drops the dead entry on its
-> next cache scan — so a replace-then-destroy costs nothing permanent, inside a
-> context restore or outside one.
+> Pipeline cache keys include the program handle. Destroying the replaced
+> program frees its pipelines; dead cache records are removed during insertion
+> after a miss or on cache reset. For staged-work behavior, see
+> [Program handles](../core/api-contracts.md#program-handles).
 
 ```c
 // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented

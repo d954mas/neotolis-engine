@@ -118,13 +118,7 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline cache
-/* Resolve the bound material's pipeline, building it on a miss. Key identity is
- * the pipeline signature, as in sprite and mesh: the program plus the material's
- * render state. The key is complete only while this renderer's vertex layout,
- * depth func and label stay compile-time literals -- folding a constant in would
- * discriminate nothing. Two materials on one program share an entry; a material
- * that swaps program keys out of the old one. Returns an invalid handle while
- * the material has no usable program -- flush discards the glyphs and retries. */
+/* The key omits layout, depth_func and label because they are constant here. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
@@ -236,7 +230,7 @@ void nt_text_renderer_restore_gpu(void) {
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
-    s_text.glyph_count = 0;  /* pipeline cache went with destroy_gpu_resources → flush rebuilds lazily */
+    s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
 }
 // #endregion
 
@@ -708,9 +702,8 @@ void nt_text_renderer_flush(void) {
      * the first glyph and here. */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
     if (!nt_gfx_pipeline_valid(pipeline)) {
-        /* Fallback only: a not-ready program was already named at batch open, so
-         * reaching here with the flag clear means a full cache or a failed
-         * backend allocation. */
+        /* Unready programs were reported at batch open; destruction of a captured
+         * pipeline or backend allocation failure still needs a warning. */
         if (!s_text.warned_no_pipeline) {
             NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;

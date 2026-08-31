@@ -18,14 +18,10 @@ typedef struct {
     uint32_t id;
 } nt_shader_t;
 
-/* Linked (vertex, fragment) pair. Owned by whoever called nt_gfx_make_program;
- * pipelines only borrow it: destroying the program destroys them too, and the
- * shader stages can go after that.
- * No dedup: two calls with the same pair produce two programs.
- *
- * Immutable: nothing relinks or edits a program after nt_gfx_make_program
- * returns, and no handle ever regains readiness once it loses it. A context
- * restore destroys the old program and links a new one under a new handle. */
+/* Linked stage pair owned by the caller; destroy with nt_gfx_destroy_program.
+ * Linking never deduplicates. Pipelines and materials borrow the handle.
+ * Linkage is immutable; context recovery
+ * requires a newly linked program. */
 typedef struct {
     uint32_t id;
 } nt_program_t;
@@ -74,7 +70,7 @@ typedef struct {
 #define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
-    const char *name; /* string literal, not owned */
+    const char *name; /* borrowed unchanged until nt_gfx_shutdown */
     uint32_t binding_slot;
     bool active;
 } nt_global_block_t;
@@ -321,7 +317,7 @@ typedef struct {
 } nt_shader_desc_t;
 
 typedef struct {
-    /* Borrowed, not owned. Outliving the program is caught at bind, not silently. */
+    /* Borrowed; destroying the program also destroys this pipeline. */
     nt_program_t program;
     nt_vertex_layout_t layout;
     bool depth_test;
@@ -445,9 +441,8 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
 
 /* ---- Global UBO block registration ---- */
 
-/* The registry is the single source of truth for block name -> binding slot.
- * Registration order does not matter: a block binds in every program linked so
- * far and in every program linked afterwards. */
+/* Registers the block binding for existing and future programs.
+ * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it. */
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
@@ -483,15 +478,14 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 
 /* ---- Resource destruction ---- */
 
+/* Already linked programs remain usable after their stages are destroyed. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
-/* Destroys the pipelines built from this program too: they could never be bound
- * or selected again, so leaving them would pin a pool slot and a VAO. A renderer
- * drops the dead cache entry on its next scan. Materials are untouched and keep
- * the handle, which now reports not ready.
- *
- * NT_PROGRAM_INVALID is the one accepted no-op — a stale non-zero handle asserts,
- * so clear the handle to NT_PROGRAM_INVALID at the point you destroy it. */
+/* Destroys the program and its pipelines; materials retain the now-unready handle.
+ * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
+ * Clear
+ * the caller's handle to NT_PROGRAM_INVALID after destruction. */
 void nt_gfx_destroy_program(nt_program_t prog);
+/* Invalid and stale handles are no-ops because program destruction also destroys pipelines. */
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -508,21 +502,15 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
-/* Handle still refers to a live slot. Says nothing about the GPU object:
- * after context loss handles stay valid while the GL program is gone. */
-/* The GL object behind the stage exists, which is what makes a relink safe to
- * attempt. Terminal per handle, as for programs: a context loss clears it for
- * good and re-activation publishes a NEW handle, so waiting on this one is a
- * wait forever -- re-read the handle from its resource. */
+/* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
+ * re-read the new handle from its resource after reactivation. */
 bool nt_gfx_shader_ready(nt_shader_t shd);
+/* Reports a live pool slot, independent of GPU readiness. */
 bool nt_gfx_program_valid(nt_program_t prog);
-/* Handle still refers to a live pipeline. False once its program was destroyed,
- * which destroys the pipelines built on it -- lets a renderer drop the cache
- * entry instead of keeping a slot pinned on a corpse. */
+/* Reports a live pipeline slot; false after pipeline or program destruction. */
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
-/* The GL program behind the handle exists. A lost context clears it for good:
- * no API relinks an existing handle, so false here is terminal for that handle.
- * nt_gfx_make_pipeline requires this. */
+/* Reports a live program backend, required by nt_gfx_make_pipeline.
+ * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);

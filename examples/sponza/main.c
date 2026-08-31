@@ -564,9 +564,8 @@ static void frame(void) {
             .size = sizeof(nt_lighting_t),
             .label = "lighting",
         });
-        /* Order does not matter here: nothing draws between these calls, and the
-         * materials keep their handles -- a destroyed program reads as not ready,
-         * so every renderer skips until the gate below relinks and re-assigns. */
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_mesh_renderer_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

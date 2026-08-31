@@ -287,8 +287,7 @@ void test_gfx_make_program_does_not_dedup(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, a.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
-    /* The backend counter is what proves it: equal handles alone would also
-     * come out of a hidden cache. */
+    /* Distinct handles must also produce distinct backend programs. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_program_create_count());
 
     nt_gfx_destroy_program(a);
@@ -304,15 +303,14 @@ void test_gfx_program_valid_and_ready(void) {
     nt_gfx_destroy_program(prog);
 }
 
-/* ---- Program: destroy invalidates, second destroy is a no-op ---- */
+/* ---- Program: destroy invalidates; a stale nonzero handle asserts ---- */
 
 void test_gfx_destroy_program_invalidates(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     nt_gfx_destroy_program(prog);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
-    /* Destroying it again is a stale handle now, not a tolerated no-op --
-     * test_gfx_destroy_program_asserts_on_a_stale_handle covers that. */
+    /* A second destroy requires clearing the owner's handle to NT_PROGRAM_INVALID. */
 }
 
 /* ---- Program: destroyed slot is reusable ---- */
@@ -454,8 +452,7 @@ void test_gfx_register_global_block_after_program_is_allowed(void) {
     nt_gfx_get_global_blocks(&blocks, &count);
     TEST_ASSERT_EQUAL_UINT32(1, count);
     TEST_ASSERT_EQUAL_STRING("Globals", blocks[0].name);
-    /* The GL-side effect on the existing program is pinned by the real-GL test
-     * test_global_block_registered_after_link_binds_in_that_program. */
+    /* The stub verifies registration only; block bindings require real GL. */
 }
 
 /* ---- Program: pipelines borrow it, they never link ---- */
@@ -1941,9 +1938,7 @@ void test_gfx_update_texture_invalid_handle(void) {
 
 /* ---- Per-frame draw call counter ---- */
 
-/* The restored frame is for rebuilding, not submitting: everything a draw is
- * built from was decided before begin_frame, under the dead context. The rule
- * used to live only in the spec, and two examples quietly broke it. */
+/* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
 void test_gfx_restored_frame_rejects_draws(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();

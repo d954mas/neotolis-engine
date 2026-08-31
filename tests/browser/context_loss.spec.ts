@@ -10,24 +10,10 @@ declare global {
       hide_probe(mode: number): void;
     };
     __ntLossExtension?: WEBGL_lose_context;
-    __ntReflectionLossInjected?: boolean;
   }
 }
 
 type Rect = { x: number; y: number; width: number; height: number };
-
-/* The two SDK reflection paths that call getActiveUniform more than once, named
- * by the frame the pinned emsdk puts on the stack. This is the one place these
- * names live: an emsdk bump that renames or inlines either one is a two-string
- * edit, and every test below asserts its hook armed so the bump fails saying so
- * instead of timing out like a flake. */
-const REFLECTION_FRAMES = {
-  'max-length': '_emscripten_glGetProgramiv',
-  'uniform-location': 'webglPrepareUniformLocationsBeforeFirstUse',
-} as const;
-
-const armedMessage = (query: keyof typeof REFLECTION_FRAMES) =>
-  `reflection hook never armed: no getActiveUniform call came through '${REFLECTION_FRAMES[query]}' -- the pinned emsdk likely renamed or inlined it`;
 
 test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 
@@ -142,82 +128,3 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
 
-for (const query of ['max-length', 'uniform-location'] as const) {
-  test('SDK reflection reports errors unrelated to context loss: ' + query, async ({ page }) => {
-    await page.goto('/index.html');
-    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
-    await page.evaluate((target) => {
-      const gl = document.querySelector('canvas')!.getContext('webgl2')!;
-      window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
-      const original = gl.getActiveUniform;
-      gl.getActiveUniform = function (program, index) {
-        const stack = new Error().stack ?? '';
-        if (stack.includes(target)) {
-          gl.getActiveUniform = original;
-          window.__ntReflectionLossInjected = true;
-          throw new Error('injected non-loss reflection error');
-        }
-        return original.call(this, program, index);
-      };
-      window.__ntLossExtension!.loseContext();
-    }, REFLECTION_FRAMES[query]);
-    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
-    const error = page.waitForEvent('pageerror', { timeout: 20_000 }).catch(() => null);
-    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-    const raised = await error;
-    /* Checked before the message: a rename in the pinned emsdk means the hook never
-     * armed, and without this that reads as an unexplained event timeout. */
-    expect(await page.evaluate(() => window.__ntReflectionLossInjected === true), armedMessage(query)).toBe(true);
-    expect(raised?.message).toBe('injected non-loss reflection error');
-    expect(await page.evaluate(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost())).toBe(false);
-  });
-
-  test('context loss inside SDK reflection: ' + query, async ({ page }) => {
-    test.setTimeout(90_000);
-    const errors: string[] = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-    page.on('console', (message) => {
-      const text = message.text();
-      if (text === 'ERROR [gfx] WebGL context lost') return;
-      if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
-    });
-    await page.goto('/index.html');
-    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready());
-    const drawnBefore = await page.evaluate(() => window.__nt!.drawn_frames());
-
-    await page.evaluate((target) => {
-      const gl = document.querySelector('canvas')!.getContext('webgl2')!;
-      window.__ntLossExtension = gl.getExtension('WEBGL_lose_context')!;
-      const original = gl.getActiveUniform;
-      gl.getActiveUniform = function (program, index) {
-        const stack = new Error().stack ?? '';
-        if (stack.includes(target)) {
-          gl.getActiveUniform = original;
-          window.__ntReflectionLossInjected = true;
-          window.__ntLossExtension!.loseContext();
-        }
-        return original.call(this, program, index);
-      };
-      window.__ntLossExtension!.loseContext();
-    }, REFLECTION_FRAMES[query]);
-    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
-    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-    await page.waitForFunction(() => window.__ntReflectionLossInjected === true, undefined, { timeout: 20_000 }).catch((cause: Error) => {
-      /* Keep the original: a crashed page or a closed context must not be
-       * misread as an emsdk rename and send the next reader to edit the const. */
-      throw new Error(`${armedMessage(query)} (underlying: ${cause.message})`);
-    });
-    await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready());
-    expect(errors, 'reflection interrupted by context loss must not throw').toEqual([]);
-
-    const stopped = await page.evaluate(() => window.__nt!.drawn_frames());
-    await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-    await page.waitForFunction((before) => window.__nt!.programs_ready() && window.__nt!.drawn_frames() > before, Math.max(drawnBefore, stopped));
-    const canvas = (await page.locator('canvas').boundingBox())!;
-    const field = await page.evaluate(() => window.__nt!.field_css());
-    const sprite = await capturePixels(page, { x: Math.round(canvas.x + field.x + field.w / 2 - 32), y: Math.round(canvas.y + field.y - 5), width: 20, height: 10 });
-    const text = await capturePixels(page, { x: Math.round(canvas.x + 24), y: Math.round(canvas.y + 24), width: 230, height: 24 });
-    expectVisibleProbes(sprite, text);
-    expect(errors, 'fresh frames after recovery must not report browser/gfx errors').toEqual([]);
-  });
-}

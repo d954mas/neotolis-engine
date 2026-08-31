@@ -1966,8 +1966,7 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
-    /* The radial program links on its own frame, so readiness -- not just the
-     * handle -- gates the body: the walker asserts on a not-ready material. */
+    /* Custom images require a program assignment; skip declaration until the radial program is ready. */
     const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
     if (!radial_info || !nt_gfx_program_ready(radial_info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
@@ -3736,9 +3735,8 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Order does not matter here: nothing draws between these calls, and the
-         * materials keep their handles -- a destroyed program reads as not ready,
-         * so every renderer skips until the gate below relinks and re-assigns. */
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
         nt_shape_renderer_restore_gpu();

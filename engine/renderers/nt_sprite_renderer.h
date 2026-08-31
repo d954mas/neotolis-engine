@@ -106,9 +106,9 @@ void nt_sprite_renderer_flush(void);
 
 /* ---- Non-ECS public emit surface ---- */
 
-/* Binds material and rechecks its program, including same-handle calls; may flush the open command.
- * Requires a resolved material with an assigned program; a dead program opens a command that flush
- * skips.
+/* Requires a valid material with an assigned program; rechecks program identity even for the same material.
+ * May flush the open command. An unready program opens a command that flush skips.
+ *
  * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
@@ -192,7 +192,7 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
  * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
-/* Draw commands staged but not yet flushed — a reset must leave none. */
+/* Draw commands staged but not yet flushed. */
 uint32_t nt_sprite_renderer_test_cmd_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);

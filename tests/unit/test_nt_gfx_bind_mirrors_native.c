@@ -1,11 +1,5 @@
-/* Real OpenGL: a rejected pipeline bind must clear the backend's slot mirrors.
- *
- * The stub backend cannot show this. bind_vertex_buffer re-applies the bound
- * pipeline's attribute pointers into the currently bound VAO, so a stale mirror
- * after a rejected bind rewires that VAO to whatever buffer comes next -- and
- * re-binding the same pipeline does not repair it, because the VAO is already
- * current and attributes are only written on a buffer bind. The corruption is
- * therefore persistent and only pixels reveal it. */
+/* A stale pipeline mirror lets the next buffer bind corrupt the live VAO.
+ * Real-GL pixels verify that a rejected bind preserves its vertex input. */
 
 #include "graphics/nt_gfx.h"
 #include "unity.h"

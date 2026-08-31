@@ -73,13 +73,12 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         return; /* evicted/absent — keep existing view; PIN_BLOB winner is unpublishable while blob==NULL */
     }
     if (size < sizeof(NtFontAssetHeader)) {
-        /* Present but truncated: this pack is now the published winner, so the previous winner's pack is
-         * no longer pinned and may be evicted — stop viewing it. Degrade to tofu (control flow, not assert:
-         * malformed data is a runtime safety-net path, and NT_ASSERT is a no-op in shipping). */
+        /* The previous winner is no longer pinned; a truncated replacement must
+         * clear the old view before its pack can be evicted. */
         font_provider_clear(user_data);
         return;
     }
-    /* Runtime safety net — real guard, not assert-only (NT_ASSERT is a no-op in shipping). */
+    /* The runtime format guard remains active even with NT_ASSERT_MODE=OFF. */
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
@@ -1742,9 +1741,8 @@ void nt_font_step(void) {
             const bool vmetrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
                                         slot->metrics.line_gap == hdr->line_gap;
             if (slot->metrics_set && !vmetrics_match) {
-                /* Single-provider mismatch = hot-swap; multi-provider mismatch breaks the shared-metrics
-                 * invariant (builder UPM-normalization prevents it). Flush on ANY mismatch — NT_ASSERT is
-                 * a no-op in shipping, so gating the flush on it would keep caches baked against stale metrics. */
+                /* A single-provider hot-swap invalidates cached metrics; multiple
+                 * active providers must share builder-normalized metrics. */
                 NT_ASSERT(active_count == 1 && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
                 need_flush = true;
                 changed = true;

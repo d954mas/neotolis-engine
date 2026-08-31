@@ -26,10 +26,6 @@ bool nt_gfx_gl_ctx_is_lost(void) {
     return false;
 }
 
-void nt_gfx_gl_ctx_get_programiv(uint32_t program, uint32_t query, int32_t *out_value) { glGetProgramiv(program, query, out_value); }
-
-int32_t nt_gfx_gl_ctx_get_uniform_location(uint32_t program, const char *name) { return glGetUniformLocation(program, name); }
-
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_bc7 = GLAD_GL_ARB_texture_compression_bptc != 0;

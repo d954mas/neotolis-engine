@@ -625,9 +625,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_destroy_shader(vertex_shader);
 }
 
-/* Global blocks are auto-bound at link time. The auto-bind moved from
- * create_pipeline to create_program; if that move broke, every UBO silently
- * unbinds and the whole scene shifts -- only real GL catches it. */
+/* Real GL must record the registered block binding when the program links. */
 static void test_global_block_registered_before_link_binds_in_the_program(void) {
     static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
                                        "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
@@ -732,9 +730,7 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
-/* The load-bearing claim of the whole model: a pipeline binds ITS OWN
- * program. Every other test puts both pipelines on one program, so pinning
- * the wrong program_slot would leave them all green. */
+/* Distinct output colors expose a pipeline binding the wrong program. */
 static void test_each_pipeline_binds_its_own_program(void) {
     static const char *vertex_source = "void main() {\n"
                                        "    float x = float((gl_VertexID << 1) & 2);\n"
@@ -801,10 +797,7 @@ static void test_each_pipeline_binds_its_own_program(void) {
     nt_gfx_destroy_shader(vs);
 }
 
-/* Destroying a pipeline must not touch the program it borrows. With two
- * pipelines on one program, deleting it with the first would leave the second
- * calling glUseProgram on a dead name: GL_INVALID_VALUE, an empty frame, and no
- * assert anywhere -- the failure class this whole object model exists to stop. */
+/* Destroying one pipeline must leave its shared program usable by the other. */
 static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     static const char *vertex_source = "void main() {\n"
                                        "    float x = float((gl_VertexID << 1) & 2);\n"
@@ -858,10 +851,7 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     nt_gfx_destroy_shader(vs);
 }
 
-/* Registration is retroactive: blocks bind at link time, so without the
- * registry reaching back into existing programs a late registration would
- * silently miss every one of them -- including those engine renderers link
- * during their own init, before a game gets to register anything. */
+/* Late block registration must reach programs linked before the game registered the binding. */
 static void test_global_block_registered_after_link_binds_in_that_program(void) {
     static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
                                        "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
@@ -874,7 +864,7 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
 
-    /* Link FIRST, register afterwards -- the reverse of the other block test. */
+    /* Registration must update this already-linked program. */
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
     nt_gfx_register_global_block("Globals", 5);

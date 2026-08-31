@@ -188,15 +188,13 @@ static void test_record_draw(uint32_t first_vertex, uint32_t num_vertices, uint3
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
     s_global_blocks[s_global_block_count].name = name;
     s_global_blocks[s_global_block_count].binding_slot = binding_slot;
     s_global_blocks[s_global_block_count].active = true;
     s_global_block_count++;
 
-    /* The registry is the single truth for name -> slot, so it applies to
-     * programs already linked as well as to future ones. Without this, blocks
-     * bind at link time only and a late registration would silently miss every
-     * existing program -- including the ones engine renderers link in init. */
+    /* Late registration must also bind blocks in programs already linked. */
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         if (s_gfx.program_backends[i] != 0) {
             nt_gfx_backend_set_uniform_block(s_gfx.program_backends[i], name, binding_slot);
@@ -268,8 +266,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    /* GL deletes MUST run before backend_shutdown — that destroys the
-     * GL context, after which any glDelete* call hits a dead context. */
+    /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
     /* Render targets own attachment texture handles. */
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
@@ -303,11 +300,10 @@ void nt_gfx_shutdown(void) {
         }
     }
 
-    /* Everything a caller still owns. backend_shutdown only frees its tables and
-     * the native context outlives it, so without this every live GL object of an
-     * init/shutdown cycle stays allocated. Every backend destroy zeroes its own
-     * entry, so the render-target and mesh passes above cannot double-delete.
-     * Pipelines before programs: a pipeline's VAO is its own, the program is not. */
+    /* The native context survives backend teardown, so release remaining GL objects.
+     * Backend destroys clear entries; owned attachments and mesh buffers are safe
+     * to revisit. Pipelines
+     * own their VAOs, not their programs. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[i]);
     }
@@ -924,9 +920,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
         return result;
     }
 
-    /* Exhaustion is a configuration error, as for programs, pipelines and
-     * textures. Degrading sent it up as a renderer init failure, which surfaced
-     * as a trap about restore rather than about max_buffers. */
+    /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
     NT_ASSERT(id != 0 && "buffer pool full -- raise nt_gfx_desc_t.max_buffers");
 
@@ -998,10 +992,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     // #endregion
 
     // #region allocate
-    /* Exhaustion is a configuration error, as for programs and pipelines: both
-     * texture formats the engine itself needs are core GL/WebGL2, so a create
-     * that fails here means max_textures is too small, not that the device said
-     * no. Degrading would hide that behind a font that silently renders nothing. */
+    /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
     NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
 
@@ -1170,10 +1161,7 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
-    /* A pipeline outlives its program only as a corpse: bind rejects it and no
-     * cache key can select it again, since every key folds the program handle.
-     * So destroying the program destroys them -- otherwise each one holds a pool
-     * slot and a GL VAO until the owning renderer is reset. */
+    /* Dependent pipelines cannot draw again; reclaim their slots and VAOs now. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (s_gfx.pipeline_programs[i] != prog.id) {
             continue;
@@ -1187,10 +1175,7 @@ void nt_gfx_destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    /* Zero and stale are both no-ops, and neither is an error: destroying a
-     * program destroys the pipelines built on it, so a cached handle going dead
-     * under its owner is the ownership model working, not a lost handle. That is
-     * what separates this from destroy_program, which asserts on a stale one. */
+    /* Program destruction may already have reclaimed this cached pipeline. */
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return;
     }
@@ -1344,10 +1329,8 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        /* draw only gates on bound_pipeline != 0, so leaving the previous bind
-         * live here would draw this pipeline's vertices through it. The backend
-         * needs the same news: bind_vertex_buffer re-applies attribs from its
-         * slot mirror, which would still name the old pipeline's VAO. */
+        /* Clear both bind mirrors so later draws or buffer binds cannot reuse
+         * the previous pipeline's program and VAO. */
         s_gfx.bound_pipeline = 0;
         nt_gfx_backend_bind_pipeline(0);
         NT_LOG_ERROR("bind_pipeline: invalid handle");
@@ -1668,10 +1651,8 @@ void nt_gfx_set_uniform_int(const char *name, int val) {
 
 /* ---- Draw calls ---- */
 
-/* Everything a draw is built from -- resolved handles, render items, the
- * caller's own readiness decisions -- was computed before begin_frame and
- * describes the dead context. Rebuild this frame, submit the next one.
- * Clearing through begin_pass stays legal; only geometry is refused. */
+/* Pre-frame readiness decisions may describe the lost context: rebuild on the
+ * restored frame and submit on the next. Pass clears remain legal. */
 static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md"); }
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {

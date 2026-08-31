@@ -344,10 +344,7 @@ void test_draw_list_same_material_mesh_batching(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_instance_total());
 }
 
-/* A material with no program yet is normal during async activation and the
- * context-restore window, so the run is skipped, not asserted (#381). The ready
- * run after it must still land at the right instance offset -- dropping the
- * advance would draw it with the skipped run's instance data. */
+/* Skipping an unready run must still advance the instance offset for the next ready run. */
 void test_draw_list_skips_a_not_ready_run_and_offsets_the_next(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t not_ready = create_test_material();
@@ -537,8 +534,7 @@ void test_declared_sampler_unit_written_without_texture(void) {
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
 }
 
-/* A pipeline that failed to create must not enter the cache: the key would
- * pin the invalid handle for the rest of the session (#362). */
+/* Caching a failed pipeline would prevent a later frame from retrying creation. */
 void test_pipeline_cache_skips_failed_pipeline(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();

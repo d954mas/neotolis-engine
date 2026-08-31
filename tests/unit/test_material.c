@@ -607,7 +607,7 @@ int main(void) {
     /* Pool exhaustion */
     RUN_TEST(test_pool_full_returns_invalid);
 
-    /* Step: resolve + change detection */
+    /* Program storage and assignment */
     RUN_TEST(test_create_stores_program);
     RUN_TEST(test_set_program_assigns_from_invalid);
     RUN_TEST(test_set_program_replaces_a_with_b);

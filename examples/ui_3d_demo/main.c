@@ -872,9 +872,8 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Order does not matter here: nothing draws between these calls, and the
-         * materials keep their handles -- a destroyed program reads as not ready,
-         * so every renderer skips until the gate below relinks and re-assigns. */
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_shape_renderer_restore_gpu();
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
@@ -962,8 +961,7 @@ static void frame(void) {
         nt_text_renderer_flush();
     }
 
-    /* The inspector's materials sit on a different program from the UI's, and the
-     * two link on different frames -- ui_can_render does not cover them. */
+    /* The inspector sprite uses a separate program that may become ready after the UI's. */
     const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
     const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
     const bool inspector_can_render = insp_sprite && nt_gfx_program_ready(insp_sprite->program) && insp_text && nt_gfx_program_ready(insp_text->program);

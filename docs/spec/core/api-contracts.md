@@ -130,49 +130,43 @@ runtime object represented by that handle.
 
 `nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:
 whoever called `nt_gfx_make_program`. Pipelines and materials store the handle
-without owning it. Destroying the program destroys the pipelines built from it --
-they could never be bound or selected again -- so the owner destroys the program,
-then the shader stages, and never has to walk the pipelines itself. Destroying a
-shader stage does not affect a program already linked from it.
+without owning it. Destroying the program destroys its pipelines; the owner
+does not need to walk them. Shader stages have independent lifetimes: destroying
+a stage does not affect a program already linked from it.
 
-A program is immutable. Nothing relinks or edits it after
-`nt_gfx_make_program` returns, so its identity and its GPU object are the same
-thing for the handle's whole life. A context restore does not repair a program;
-it destroys the old one and links a new one under a new handle.
+A program's linked executable and identity are immutable after
+`nt_gfx_make_program`; its uniform values and block bindings remain mutable.
+Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
-whether the GL program behind it exists. A lost context clears readiness while
+whether the GL program behind it exists. Processing context loss clears readiness while
 handles stay valid, and because no API relinks, a valid handle that is not ready
 never becomes ready again -- that state is terminal, not transitional.
 `nt_gfx_make_pipeline` requires readiness.
 
-`nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op, because games
-clear their handles on context loss and destroy them again at shutdown. Every
-other handle it does not recognise asserts: a stale non-zero handle means the
-owner lost track of what it still holds, which is the one mistake single
-ownership cannot absorb. Clear the handle variable to `NT_PROGRAM_INVALID` at
-the point you destroy it.
+`nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
+a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
+when destroying it.
 
 A link failure is a developer error and asserts, alongside an invalid stage
 handle, and an exhausted program pool.
 
-`nt_gfx_register_global_block` is the single source of truth for a block's
-name -> binding slot, and registration order does not matter: the block is bound
-in every program linked so far and in every program linked afterwards. Blocks
-bind at link time, so without the retroactive half a late registration would
-silently miss every existing program -- including those engine renderers link
-inside their own init, before the game runs. There is no per-program override. A lost context is the only
-condition under which `nt_gfx_make_program` returns `NT_PROGRAM_INVALID`.
+`nt_gfx_register_global_block` applies the global name -> binding slot registry
+to existing and future programs; registration may precede or follow linking.
+There is no per-program override. The registry borrows `name` without copying:
+the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
+survives context loss.
+
+A lost context is the only condition under which `nt_gfx_make_program` returns
+`NT_PROGRAM_INVALID`.
 This includes the interval after the browser recovers but before
 `nt_gfx_begin_frame` finishes resetting the backend tables. Linking waits until
 that recovery completes, even when newly created shader stages are ready.
 
-`nt_material_set_program` is the only way to change a material's program, and it
-is a flat replace: `NT_PROGRAM_INVALID` over a program, a program over
-`NT_PROGRAM_INVALID`, and program A over program B are one operation under one
-rule. Assigning the handle the material already holds changes nothing, so a
-per-frame gate may call it unconditionally and needs no latch.
+`nt_material_set_program` is the only setter for the borrowed handle, including assignment
+from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
+per-frame gate needs no assignment latch.
 
 A replace does not reach work already staged. Text captures its pipeline on the
 first quad of an empty staging buffer, including the first quad after an internal
@@ -189,28 +183,22 @@ batch is dropped instead -- there is nothing left to draw it through.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
-the first assignment and false once the program died with the context or was
-destroyed -- a destroyed program's slot generation is stale, so the query answers
-from the handle alone. The ECS `draw_list` paths skip unready programs and warn
-once until a pipeline is built again;
-the immediate-mode `nt_sprite_renderer_set_material` /
+the first assignment, after context loss is processed, or after program
+destruction. The ECS `draw_list` paths skip unready programs and warn once until
+a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
-assigned. Liveness is deliberately not their question: on the frame the context
-dies the program is already dead, and `nt_gfx_make_pipeline` polls the lost
-context before its own readiness assert, so the run skips instead of trapping.
+assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
+context loss before asserting readiness.
 
-Pipeline caches key on the program handle, so the entry built on the previous
-program is never selected again. Destroying the replaced program reclaims what
-it left behind: a pipeline outlives its program only as a corpse, so
-`nt_gfx_destroy_program` destroys the pipelines built on it, and each renderer
-drops the now-dead cache entry the next time it scans. A program kept alive but
-no longer assigned keeps its pipelines alive too -- that is the owner's choice,
-not a leak. `nt_gfx_destroy_pipeline` therefore treats a stale handle as a
-no-op rather than an error, unlike `nt_gfx_destroy_program`: a cached pipeline
-handle going dead under its owner is this model working, not a lost handle.
-Destroying a program does not touch materials, and does not need to:
-the material reports not ready from the stale handle, and the next assignment
-overwrites it.
+Pipeline cache keys include the program handle, so replacement selects a
+different entry. Destroying the old program frees its pipelines immediately;
+renderers remove their dead cache records on the next insertion after a miss,
+or when resetting the cache. Lookup validates a matching pipeline but does not
+remove records. An unassigned program kept alive by its owner keeps its pipelines
+alive too. `nt_gfx_destroy_pipeline` accepts stale handles as a no-op because
+program destruction can invalidate a renderer's cached handles.
+Materials retain the stale program handle until reassignment; readiness reports
+false without mutating the material.
 
 ### Texture descriptors
 

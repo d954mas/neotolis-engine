@@ -312,9 +312,8 @@ static void frame(void) {
             .size = sizeof(nt_frame_uniforms_t),
             .label = "frame_uniforms",
         });
-        /* Order does not matter here: nothing draws between these calls, and the
-         * materials keep their handles -- a destroyed program reads as not ready,
-         * so every renderer skips until the gate below relinks and re-assigns. */
+        /* Materials retain their handles; rendering waits for relinking on a later frame.
+         * Renderer reset and program destruction may run in either order without draws. */
         nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

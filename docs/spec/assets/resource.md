@@ -138,89 +138,71 @@ handles, and render items computed before that call still describe the previous
 GPU context. The game must discard them and skip dependent draws for the restored
 frame.
 
-When `context_restored` is true, the game does three things in the restored
-frame, all of them before it submits anything:
+When `context_restored` is true, the game:
 
 - discards render decisions and draw lists prepared before
-  `nt_gfx_begin_frame()`, and draws nothing for this frame. The draw entry points
-  assert on it rather than leaving the rule to prose: clearing through
-  `nt_gfx_begin_pass` stays legal, submitting geometry does not
+  `nt_gfx_begin_frame()`, and draws nothing for this frame. Geometry draw entry
+  points assert; clearing through `nt_gfx_begin_pass` stays legal
 - destroys its own `nt_program_t` handles and sets each handle variable to
-  `NT_PROGRAM_INVALID`. A stale non-zero handle asserts on the next destroy --
-  the one mistake single ownership cannot absorb
+  `NT_PROGRAM_INVALID`. Destroying a stale non-zero handle asserts
 - calls the restore entry point of every active renderer, and destroys and
   recreates its own GPU objects, then calls `nt_resource_invalidate()` for the
   shader-code asset type and every other file-backed GPU asset type it uses
 
-Their order among themselves does not matter, because nothing draws between
-them. Destroying a program clears the borrow record of every pipeline built on
-it, destroying a pipeline never consults its program, and no restore entry point
-flushes. What is load-bearing is that all three precede the frame's first draw.
+Program destruction and renderer restoration may occur in either order.
+Destroying a program destroys its pipelines, destroying a pipeline never consults
+its program, and restore entry points discard queued work without flushing.
 
 No step needs pool headroom over the steady state: every rebuild destroys before
 it recreates, whether it is a renderer relinking inside its own restore entry
 point or `nt_program_ref_update` reclaiming a dead handle before linking again.
 
-Restore is asked of ACTIVE renderers only, and every restore entry point makes
-that safe rather than assuming it: one whose module was never initialized returns
-without touching anything, so a game may call all of them unconditionally instead
-of tracking which modules it turned off. Without that, restoring an unused
-self-owned renderer would take program and pipeline slots the game sized for
-itself.
+Restore entry points leave never-initialized or explicitly shut-down modules
+untouched, so a game may call all of them without activating unused renderers.
 
-Two kinds of renderer answer that third bullet differently. One that owns its
-own program -- `nt_shape_renderer`, `nt_postfx_blur`, both linking from embedded
-sources -- relinks inside its restore entry point and needs nothing from the
-game. One that borrows a game material's program -- `nt_mesh_renderer`,
-`nt_sprite_renderer`, `nt_text_renderer` -- drops its queued commands and its
-pipeline cache there and waits for the game to relink.
+`nt_shape_renderer` and `nt_postfx_blur` own their programs and relink embedded
+sources inside their restore entry points. A failed blur restore leaves the
+module initialized but unable to draw; the game must retry
+`nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
+`nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
+restore drops queued commands and pipeline caches, then the game relinks.
 
-Materials are not part of the teardown. A material keeps the handle it was
-holding; destroying the program bumps that pool slot's generation, so
-`nt_gfx_program_ready(info->program)` reports false for it and every renderer
-skips it. Material handles never change across a restore, so ECS components, the
-UI context, and game-side structures need no re-binding.
+Materials survive teardown and retain their old program handles. Destroying a
+program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
+reports false. Material handles remain unchanged; ECS components, the UI context,
+and game-side structures need no re-binding.
 
-Objects that own GPU state split the same way, and the split decides what a game
-must redo. A font keeps its sources -- the `nt_font_add` list is plain resource
-handles -- while its curve and band textures die; `nt_font_step` rebuilds those
-itself once the asset re-activates, so re-adding a source after a restore is not
-just unnecessary but asserts on the duplicate. An atlas keeps its parsed regions
-and needs its page texture resolved again. The rule generalises: re-create what
-lived on the GPU, keep what merely referenced it.
+A font keeps its `nt_font_add` source list of resource handles. Once the context
+is usable, `nt_font_step` recreates non-ready curve and band textures before its
+resource rescan; this does not require source-asset reactivation. Re-adding an
+existing source asserts on the duplicate. An atlas keeps its parsed regions and
+needs its page textures resolved again.
 
-Programs come back over the following frames, not in the restored frame: the
+Programs from file-backed stages come back over following frames: the
 shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
 activation budget, and the frame's `nt_resource_step()` has already run by the
 time `context_restored` is seen. The game links a new program once both stages
-resolve -- never relinking an existing handle, which no API supports -- and
-assigns it with `nt_material_set_program`. Because assigning the same handle
-changes nothing, that gate is written to run every frame and carries
-no "already assigned" latch; a game whose materials sit on several programs gates
-each material on its own program. A blob-resident pack (the default,
-`NT_BLOB_KEEP`) re-activates on the next step; an evicted one re-downloads first,
-and the same gate simply waits longer.
+resolve and assigns it with `nt_material_set_program`. Assigning the same handle
+is a no-op, so each material may be gated on its own program every frame without
+an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
+re-activate on the next step within the activation budget; an evicted pack must
+re-download first. Rebuild resource-dependent render state after publication.
 
 Both ECS `draw_list` paths skip a material whose program is not ready and warn
 once until a pipeline is built again. The skip is normal runtime state, not a
 caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
-assert only that a program was assigned, not that it is live, so they survive the
-frame the context dies on; a game still stops feeding them once its own gate goes
-false. That includes the UI walk: once a widget is declared, `nt_ui` calls those
-setters unconditionally, so the gate belongs around the declaration, not around
-the draw.
+assert only that a program was assigned, not that it is live. The game stops
+feeding them once its program gate goes false. During the UI walk, `nt_ui` calls
+those setters for declared widgets, so gate widget declarations on program
+availability.
 
 `nt_resource_invalidate()` skips virtual packs. A game-owned GPU object published
 through a virtual pack must be destroyed, recreated from game-owned source data,
 and published again with `nt_resource_register()`.
 
-The frame's `nt_resource_step()` has already run before
-`nt_gfx_begin_frame()` discovers the restore. File-backed assets therefore
-reactivate and republish no earlier than a later resource step. The game rebuilds
-resource-dependent render state after that publication instead of reusing the
-discarded list. Render targets are recreated by `nt_gfx` from retained
-descriptors, but their pixel contents must be redrawn.
+Render targets are recreated by `nt_gfx` from retained descriptors, but their
+pixel contents must be redrawn.
 
 ## Pack lifetime (mount / unmount)
 

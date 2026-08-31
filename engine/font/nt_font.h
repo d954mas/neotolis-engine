@@ -121,19 +121,19 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
-/* Adds a source. Call it once per source and never again: a duplicate asserts,
- * and a context loss is not a reason to re-add. A font's sources outlive the GPU
- * context -- only its curve and band textures die, and nt_font_step rebuilds
- * those itself once nt_resource_invalidate(NT_ASSET_FONT) re-activates the data. */
+/* Sources survive context loss; adding the same source twice asserts.
+ * nt_font_step recreates unavailable curve/band textures once the context is usable,
+ * independently of font asset
+ * reactivation. */
 void nt_font_add(nt_font_t font, nt_resource_t resource);
 
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);
 nt_font_stats_t nt_font_get_stats(nt_font_t font);
 
-/* NULL while either font texture is unavailable. Otherwise points into the cache,
- * valid until next eviction/flush; copy immediately. Per-codepoint loops use
- * the slot variant in nt_font_hot.h
- * after checking both textures are ready. */
+/* Returns NULL while textures or font metrics are unavailable; missing glyphs use tofu.
+ * Borrowed cache entry, valid until eviction/clear or font destruction; copy immediately, never free.
+ *
+ * Per-codepoint loops use nt_font_hot.h after checking both textures are ready. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
 
 nt_texture_t nt_font_get_curve_texture(nt_font_t font);

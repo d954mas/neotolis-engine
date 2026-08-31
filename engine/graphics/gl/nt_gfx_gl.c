@@ -761,12 +761,8 @@ static void unbind_pipeline_state(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    /* Both rejections unbind everything: bind_vertex_buffer re-applies attribs
-     * from s_bound_pipeline_slot, so a stale one would push the old pipeline's
-     * layout into the old VAO for the new buffer. The VAO has to go too --
-     * bind_index_buffer is not gated on the slot, so leaving it current would
-     * rewrite the previous pipeline's recorded GL_ELEMENT_ARRAY_BUFFER, and
-     * re-binding that pipeline could not repair it. */
+    /* Clear both the slot mirror and VAO: later buffer binds must not rewrite
+     * the rejected pipeline's vertex attributes or element-buffer binding. */
     if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         unbind_pipeline_state();
         return;
@@ -1031,7 +1027,7 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
 static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, uint8_t *out_count) {
     *out_count = 0;
     GLint active_uniforms = -1;
-    nt_gfx_gl_ctx_get_programiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
     if (active_uniforms < 0) {
         return false;
     }
@@ -1039,7 +1035,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, u
         return true;
     }
     GLint max_name_length = 0;
-    nt_gfx_gl_ctx_get_programiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
+    glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
     if (max_name_length <= 0) {
         return false;
     }
@@ -1063,7 +1059,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, u
                 size_t suffix = (size_t)ulen - 3U;
                 nt_gfx_gl_write_array_index(uname + suffix, element);
             }
-            GLint loc = nt_gfx_gl_ctx_get_uniform_location(program, uname);
+            GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
                 if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
                     out[uniform_count].name_hash = nt_hash32_str(uname).value;

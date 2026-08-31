@@ -128,12 +128,9 @@ void nt_material_step(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
-/* Flat replace of the borrowed handle: the first assignment, clearing to
- * NT_PROGRAM_INVALID, and swapping one live program for another are one
- * operation under one rule. Assigning the handle the material already holds is a
- * no-op, so a per-frame gate may call this unconditionally and needs no latch.
- *
- * A material has no readiness of its own -- ask
+/* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
+ * Neither program is owned or destroyed here. mat must be valid.
+ * Query readiness with
  * nt_gfx_program_ready(nt_material_get_info(mat)->program). */
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);

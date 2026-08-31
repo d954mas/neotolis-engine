@@ -3,8 +3,11 @@
 #include <emscripten.h>
 #include <emscripten/html5_webgl.h>
 
-/* Keep every SDK helper reached by these EM_JS bodies through Closure. */
-EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,emscripten_glGetProgramiv,emscripten_glGetUniformLocation")
+/* The cap-probe EM_JS bodies below reach the Emscripten GL registry (GL.currentContext.GLctx). GL lives
+ * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
+ * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
+ * this file can't silently strip GL in release. */
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 
@@ -36,31 +39,6 @@ void nt_gfx_gl_ctx_destroy(void) {
 }
 
 bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_webgl_context_lost(s_gl_context) != 0; }
-
-/* The SDK's multi-query reflection can dereference null during context loss. */
-// clang-format off
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextra-semi"
-EM_JS(void, nt_gfx_gl_ctx_get_programiv, (uint32_t program, uint32_t query, int32_t *out_value), {
-    try {
-        _emscripten_glGetProgramiv(program, query, out_value);
-    } catch (error) {
-        var gl = GL.currentContext ? GL.currentContext.GLctx : null;
-        if (!gl || !gl.isContextLost()) throw error;
-    }
-});
-
-EM_JS(int32_t, nt_gfx_gl_ctx_get_uniform_location, (uint32_t program, const char *name), {
-    try {
-        return _emscripten_glGetUniformLocation(program, name);
-    } catch (error) {
-        var gl = GL.currentContext ? GL.currentContext.GLctx : null;
-        if (!gl || !gl.isContextLost()) throw error;
-        return -1;
-    }
-});
-#pragma clang diagnostic pop
-// clang-format on
 
 /* Detect GPU capability extensions via JavaScript.
  * gl.getExtension() both checks AND enables the extension.

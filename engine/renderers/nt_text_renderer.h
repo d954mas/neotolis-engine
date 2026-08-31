@@ -11,17 +11,12 @@
 #define NT_TEXT_RENDERER_MAX_GLYPHS 4096
 #endif
 
-/* One entry per (program, render state) the frame draws through. UI text
- * switches between a context default and per-style overrides, so a single slot
- * would rebuild a VAO on every switch. */
-/* One entry per distinct (program, render state) pair the frame draws through, so
- * blend/depth/cull variants multiply with programs rather than replacing them.
- * Raise it with -DNT_TEXT_RENDERER_MAX_PIPELINES=N; exhaustion asserts, it does
- * not evict. */
+/* Caches distinct (program, render state) pairs across frames; live entries persist until reset.
+ * Dead entries are removed on insertion. Exhaustion asserts without evicting live entries.
+ * Raise capacity with -DNT_TEXT_RENDERER_MAX_PIPELINES=N. */
 #ifndef NT_TEXT_RENDERER_MAX_PIPELINES
 #define NT_TEXT_RENDERER_MAX_PIPELINES 8
 #endif
-/* pipeline_count is uint16_t, as in sprite and mesh. */
 _Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 65535, "NT_TEXT_RENDERER_MAX_PIPELINES overflows the uint16 cache counter");
 
 #define NT_TEXT_RENDERER_MAX_VERTICES (NT_TEXT_RENDERER_MAX_GLYPHS * 4)
@@ -38,26 +33,19 @@ _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPH
 
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
-/* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. */
+/* Drops staged quads and cached pipelines, then rebuilds GPU buffers.
+ * Material, font and decoration state are preserved. */
 void nt_text_renderer_restore_gpu(void);
 
-/* Material must use the slug_text vs/fs, a blend compatible with its premultiplied output, and cull NONE. u_alpha_cutoff is an opt-in param:
- * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard. Declare it on
- * EVERY material sharing one program, or on none: uniforms live on the program, so a material that omits
- * it inherits whatever the last material on that program wrote (docs/spec/render/architecture.md). Both
- * setters auto-flush staging on change. */
+/* Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE; setters flush on handle changes.
+ * Declare u_alpha_cutoff on every material sharing the program or none: omitted uniforms retain prior values.
+ * NT_TEXT_ALPHA_CUTOFF_DEFAULT enables coverage discard. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
-/* NULL/len=0 → no-op. UTF-8 cut at `len` boundary → trailing partial
- * codepoint dropped (no over-read past utf8+len).
- * Unavailable font textures skip glyphs and decorations.
- *
- * letter_tracking: EXTRA px between glyphs (additive, NOT absolute).
- *   0 = font's natural advance. Positive = loose, negative = tight.
- * line_leading:    EXTRA px between lines on \n (additive, NOT absolute).
- *   0 = font's natural line advance. Positive = loose, negative = tight. */
+/* NULL or len=0 is a no-op; trailing partial UTF-8 codepoints are dropped without reading past utf8+len.
+ * Unavailable font textures skip glyphs and decorations. letter_tracking/line_leading add px to natural
+ * glyph/newline advances: 0 = natural, positive = looser, negative = tighter. */
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 
@@ -75,9 +63,9 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 void nt_text_renderer_set_oblique(float shear);
 
 /* ---- Sticky decoration state ---- */
-/* All five setters mirror set_oblique's lifetime: kept across restore_gpu, cleared on cold init/shutdown,
- * no flush (CPU emit). Float args use a REAL if (!isfinite) guard, NOT an assert — NT_ASSERT is a no-op
- * in shipping and a NaN would poison the offset/quantize math. Call reset_decoration() so state does not leak. */
+/* All five setters persist across restore_gpu, clear on cold init/shutdown, and do not flush.
+ * Non-finite inputs are rejected even with asserts disabled to protect offset/quantize math.
+ * Call reset_decoration() so state does not leak. */
 
 /* Synthetic weight in em units: subsequent fills emit an emboldened (positive) / thinned (negative)
  * glyph variant via the (codepoint, weight) glyph cache. 0 (default) = the font's natural weight. */
@@ -101,6 +89,8 @@ void nt_text_renderer_set_strikethrough(bool enabled);
  * single call the UI runs after a decorated run so nothing leaks onto the next. */
 void nt_text_renderer_reset_decoration(void);
 
+/* Uses the pipeline captured by the first quad of the batch; program replacement cannot redirect it.
+ * Destroying that program drops the batch. Numeric material params are read at flush. */
 void nt_text_renderer_flush(void);
 
 // #region test_access
@@ -139,10 +129,9 @@ float nt_text_renderer_test_max_weight(void);
 float nt_text_renderer_test_max_outline_width(void);
 bool nt_text_renderer_test_saw_underline(void);
 bool nt_text_renderer_test_saw_strike(void);
-/* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
+/* Selected material id (0 = none); selection does not imply a pipeline is ready. */
 uint32_t nt_text_renderer_test_material_id(void);
-/* Live entries in the pipeline cache — pins the key's identity (one entry per
- * program + render state, not per material). */
+/* Occupied cache entries, including dead pipelines not yet removed by insertion/reset. */
 uint16_t nt_text_renderer_test_pipeline_cache_count(void);
 #endif
 // #endregion
