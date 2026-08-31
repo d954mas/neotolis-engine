@@ -446,6 +446,9 @@ static void nt_gfx_gl_init_context_features(void) {
     s_active_segment = -1;
     /* Fresh context (init or restore): the previous upload VAO died with it. */
     glGenVertexArrays(1, &s_ebo_upload_vao);
+    /* 0 with a live context would silently break every index-buffer upload on
+     * core GL; 0 on an already-lost context is retried by the next restore. */
+    NT_ASSERT(s_ebo_upload_vao != 0 || nt_gfx_gl_ctx_is_lost());
 }
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
@@ -1339,6 +1342,10 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
+        /* Detach the EBO before leaving the upload VAO: GL keeps attached
+         * storage alive, so a dangling attachment would pin a deleted
+         * index buffer's memory until the next upload. */
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         gl_bind_vao(s_gl_cache.vao);
     }
 
@@ -1386,6 +1393,10 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     glBindBuffer(target, buf);
     glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
+        /* Detach the EBO before leaving the upload VAO: GL keeps attached
+         * storage alive, so a dangling attachment would pin a deleted
+         * index buffer's memory until the next upload. */
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         gl_bind_vao(s_gl_cache.vao);
     }
 }
@@ -1409,6 +1420,10 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * rewriting a buffer that's still in flight. */
     glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
     if (unhook_vao) {
+        /* Detach the EBO before leaving the upload VAO: GL keeps attached
+         * storage alive, so a dangling attachment would pin a deleted
+         * index buffer's memory until the next upload. */
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         gl_bind_vao(s_gl_cache.vao);
     }
 }
