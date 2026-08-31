@@ -24,6 +24,8 @@
 #include "unity.h"
 /* clang-format on */
 
+#define TEST_MAX_VERTEX_INPUTS 160
+
 /* ---- Virtual pack counter (unique per test) ---- */
 
 static uint32_t s_program_warnings;
@@ -196,7 +198,7 @@ void setUp(void) {
         .max_buffers = 256,
         .max_textures = 32,
         .max_meshes = 32,
-        .max_vertex_inputs = 160,
+        .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
         .max_render_targets = 16,
     });
     nt_resource_init(&(nt_resource_desc_t){0});
@@ -757,6 +759,12 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
         TEST_ASSERT_NOT_EQUAL(old_id, mesh.id);
         *nt_mesh_comp_handle(e) = mesh;
         *nt_mesh_comp_handle(e_colored) = mesh;
+    }
+
+    /* Two cached versions and the neighbor own three slots; all others must be free. */
+    for (uint32_t i = 3; i < TEST_MAX_VERTEX_INPUTS; i++) {
+        nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+        TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     }
 }
 
