@@ -29,6 +29,10 @@
 // #region module state
 typedef struct {
     nt_pipeline_t pipeline;
+    /* Snapshotted with the pipeline: two custom layouts can share one pipeline
+     * (pipelines no longer own layouts), so replay delta-binds the vertex
+     * input independently of pipeline changes. */
+    nt_vertex_input_t vertex_input;
     nt_material_t material; /* handle for material-param lookup at flush; param values
                                are NOT snapshotted — material info is stable within a
                                frame (nt_material_step ran before render) so we
@@ -47,6 +51,15 @@ static struct {
     uint16_t max_pipelines;
     nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
     uint16_t count;
+
+    /* Vertex-input cache keyed by the layout hash (0 = base 20 B layout).
+     * All layouts bake over the one (vbo, ibo) pair; layout populations are a
+     * subset of pipeline populations, so the same hardcap bounds it. */
+    struct {
+        uint64_t key;
+        nt_vertex_input_t vi;
+    } vi_entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
+    uint16_t vi_count;
 
     nt_buffer_t vbo; /* dynamic, sized for the worst single flush (staging_size) */
     nt_buffer_t ibo; /* dynamic, sized for max_indices * 2 (uint16 indices) */
@@ -194,6 +207,10 @@ void nt_sprite_renderer_shutdown(void) {
         s_sprite.entries[i] = (nt_renderer_pipeline_entry_t){0};
     }
     s_sprite.count = 0;
+    for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
+        nt_gfx_destroy_vertex_input(s_sprite.vi_entries[i].vi);
+    }
+    s_sprite.vi_count = 0;
     nt_gfx_destroy_buffer(s_sprite.vbo);
     nt_gfx_destroy_buffer(s_sprite.ibo);
     memset(&s_sprite, 0, sizeof(s_sprite));
@@ -295,10 +312,9 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
         nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
-    /* Include the layout discriminator even for the base layout (zero), so
-     * custom attributes cannot alias the base pipeline. */
-    uint64_t key = nt_sprite_layout_hash(mat_info);
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->program.id;
+    /* Layouts live on the vertex-input cache now, so two custom layouts can
+     * share one pipeline: the key is program x render state only. */
+    uint64_t key = (uint64_t)mat_info->program.id * 0x9E3779B97F4A7C15ULL;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 
     const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, key);
@@ -309,7 +325,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = mat_info->program;
-    desc.layout = build_sprite_layout(mat_info);
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
     desc.depth_func = NT_DEPTH_LESS;
@@ -318,6 +333,40 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
 
     return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
+}
+
+/* One vertex input per distinct layout, all baked over the shared (vbo, ibo)
+ * pair. Cached handles are revalidated on lookup: context loss (or a buffer
+ * cascade) kills them without notifying the renderer. */
+static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
+    const uint64_t key = nt_sprite_layout_hash(mat_info);
+    for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
+        if (s_sprite.vi_entries[i].key != key) {
+            continue;
+        }
+        if (!nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi)) {
+            s_sprite.vi_entries[i].vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+                .layout = build_sprite_layout(mat_info),
+                .vertex_buffer = s_sprite.vbo,
+                .index_buffer = s_sprite.ibo,
+                .label = "sprite_vi",
+            });
+        }
+        return s_sprite.vi_entries[i].vi;
+    }
+    NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = build_sprite_layout(mat_info),
+        .vertex_buffer = s_sprite.vbo,
+        .index_buffer = s_sprite.ibo,
+        .label = "sprite_vi",
+    });
+    if (vi.id != 0) {
+        s_sprite.vi_entries[s_sprite.vi_count].key = key;
+        s_sprite.vi_entries[s_sprite.vi_count].vi = vi;
+        s_sprite.vi_count++;
+    }
+    return vi;
 }
 // #endregion
 
@@ -347,6 +396,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
     memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
     c->pipeline = pip;
+    c->vertex_input = find_or_create_vertex_input(mi);
     c->material = mat;
     s_sprite.current_mat = mat;
     s_sprite.current_program = mi->program;
@@ -1318,7 +1368,7 @@ void nt_sprite_renderer_flush(void) {
     }
 
     uint32_t bound_pipeline_id = 0;
-    uint32_t bound_ibo_id = 0;
+    uint32_t bound_vi_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
     /* Tracked separately so override→no-override cmd transitions reset to default. */
     uint32_t bound_sampler_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
@@ -1327,30 +1377,30 @@ void nt_sprite_renderer_flush(void) {
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
-        /* Context loss or program destruction can invalidate a queued pipeline. */
-        if (!nt_gfx_pipeline_valid(c->pipeline)) {
+        /* Context loss or program destruction can invalidate a queued pipeline;
+         * the vertex input dies with the context or a buffer cascade. */
+        if (!nt_gfx_pipeline_valid(c->pipeline) || !nt_gfx_vertex_input_valid(c->vertex_input)) {
             continue;
         }
 
         bool pipeline_changed = false;
         if (c->pipeline.id != bound_pipeline_id) {
-            /* GL ordering: each pipeline owns a VAO, and GL_ELEMENT_ARRAY_BUFFER
-             * is part of VAO state. So pipeline → VBO (re-applies attribs into
-             * the new VAO) → IBO (binds the EBO into the new VAO). Reordering
-             * any of these breaks the next draw silently. */
             nt_gfx_bind_pipeline(c->pipeline);
-            nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
-            bound_ibo_id = 0;
+            /* bind_pipeline clears the bound vertex input (transitional rule),
+             * so re-bind it below even if the cmd's handle didn't change. */
+            bound_vi_id = 0;
             /* Params and sampler uniforms belong to programs and need replay.
              * Texture-unit bindings belong to the context and survive the switch. */
             bound_mat_id = 0;
             pipeline_changed = true;
         }
 
-        if (s_sprite.ibo.id != bound_ibo_id) {
-            nt_gfx_bind_index_buffer(s_sprite.ibo);
-            bound_ibo_id = s_sprite.ibo.id;
+        /* Geometry is one bind, independent of pipeline changes: two custom
+         * layouts can share a pipeline and still switch vertex inputs here. */
+        if (c->vertex_input.id != bound_vi_id) {
+            nt_gfx_bind_vertex_input(c->vertex_input);
+            bound_vi_id = c->vertex_input.id;
         }
 
         /* Destroyed materials contribute no params; queued commands retain
@@ -1443,6 +1493,7 @@ void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_
 }
 
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
+uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void) { return s_sprite.vi_count; }
 
 uint32_t nt_sprite_renderer_test_cmd_count(void) { return s_sprite.cmd_count; }
 uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }

@@ -807,11 +807,12 @@ void test_sprite_renderer_extended_layout_from_attr_map(void) {
     TEST_ASSERT_EQUAL_UINT32(4, ext_layout.locations[3]);
 }
 
-/* A base material and an attr_map material that share
- * vs/fs/state and differ ONLY in their vertex layout must resolve to TWO
- * distinct pipelines — proving the layout discriminator is folded into the
- * cache key (the base must never alias the extended pipeline). */
-void test_sprite_renderer_layout_in_pipeline_key(void) {
+/* A base material and an attr_map material that share vs/fs/state and differ
+ * ONLY in their vertex layout now SHARE one pipeline (layouts live on the
+ * owned vertex inputs, not the pipeline) and resolve to two distinct vertex
+ * inputs — the layout discriminator moved from the pipeline key to the
+ * vertex-input cache key. */
+void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
@@ -823,8 +824,9 @@ void test_sprite_renderer_layout_in_pipeline_key(void) {
     nt_sprite_renderer_set_material(mat_base);
     nt_sprite_renderer_set_material(mat_radial);
 
-    /* Same vs/fs/state, different layout → must NOT collide. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+    /* Same vs/fs/state: one pipeline; different layout: two vertex inputs. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
 /* The custom-attr emit path bakes the per-widget float block into
@@ -1231,7 +1233,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
-    RUN_TEST(test_sprite_renderer_layout_in_pipeline_key);
+    RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
