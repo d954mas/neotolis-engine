@@ -722,7 +722,11 @@ void nt_shape_renderer_init(void) {
 
     /* Verify all buffers/pipelines were created successfully (the vertex
      * inputs below trap on invalid buffer handles instead of skipping). */
-    if (!s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
+    bool template_bufs_ok = true;
+    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
+        template_bufs_ok = template_bufs_ok && s_shape.templates[t].vbo.id != 0 && s_shape.templates[t].ibo.id != 0;
+    }
+    if (!template_bufs_ok || !s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
         !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id ||
         !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id) {
         NT_LOG_ERROR("init failed -- resource creation error");

@@ -64,10 +64,11 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint8_t index_type; /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint32_t inst_buf_id; /* last buffer pointed by bind_instance_buffer; its destruction unpoints */
+    uint8_t index_type;   /* captured from the IBO; NT_INDEX_NONE for non-indexed */
     uint8_t instance_attr_count;
     /* Enabled-but-unpointed instance attribs are invalid GL that fails
-     * silently -- draws assert this went through bind_instance_buffer once. */
+     * silently -- draws assert the attribs currently point at a live buffer. */
     bool instance_pointed;
 } nt_gfx_vertex_input_meta_t;
 
@@ -1321,6 +1322,12 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         if (s_gfx.vertex_input_metas[i].vbo_id == buf.id || s_gfx.vertex_input_metas[i].ibo_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
+        } else if (s_gfx.vertex_input_metas[i].inst_buf_id == buf.id) {
+            /* Instance attachments are not destroy-tracked, but the pointed
+             * flag must not lie: the next instanced draw without a re-point
+             * traps instead of silently reading the dead buffer. */
+            s_gfx.vertex_input_metas[i].instance_pointed = false;
+            s_gfx.vertex_input_metas[i].inst_buf_id = 0;
         }
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
@@ -1919,6 +1926,9 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
         NT_LOG_ERROR("bind_instance_buffer: buffer is not vertex type");
         return;
     }
+    /* Pool slots survive context loss; pointing into a zeroed backend would
+     * silently draw garbage on the restored context. */
+    NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "bind_instance_buffer: buffer has no live backend -- recreate it after context restore");
     NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_instance_buffer: offset must be 4-byte aligned (WebGL2 attrib rule)");
     NT_ASSERT(s_gfx.bound_vertex_input != 0 && "bind_instance_buffer: requires a bound vertex input");
@@ -1929,6 +1939,7 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     uint32_t vi_slot = nt_pool_slot_index(s_gfx.bound_vertex_input);
     NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
     s_gfx.vertex_input_metas[vi_slot].instance_pointed = true;
+    s_gfx.vertex_input_metas[vi_slot].inst_buf_id = buf.id;
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot], byte_offset);
 }
 

@@ -526,9 +526,10 @@ void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
 /* Also destroys every vertex input referencing this buffer as its vertex or
  * index buffer -- mesh deactivation reaches no renderer, so the cascade is
  * what keeps cached vertex inputs from outliving mesh buffers. Instance
- * buffers captured by nt_gfx_bind_instance_buffer are NOT cascade-tracked:
- * destroying one while vertex inputs still point into it leaves zombie GL
- * attachments until those vertex inputs die or re-point. */
+ * buffers captured by nt_gfx_bind_instance_buffer are not cascade-destroyed,
+ * but destroying one UNPOINTS dependent vertex inputs: their next instanced
+ * draw asserts until bind_instance_buffer re-points them. The GL attachment's
+ * storage lingers until that re-point or the vertex input's death. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
 void nt_gfx_destroy_render_target(nt_render_target_t rt);

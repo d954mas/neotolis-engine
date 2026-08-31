@@ -90,9 +90,11 @@ keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
-buffer is *not* cascade-tracked: destroying one while vertex inputs still
-hold pointers into it leaves zombie GL attachments until those vertex inputs
-die or re-point. Buffer *contents* may change freely — `update`/`orphan`
+buffer is *not* cascade-destroyed, but destroying one clears the dependents'
+pointed flag: their next instanced draw asserts until
+`nt_gfx_bind_instance_buffer` re-points them, and the GL attachment's
+storage lingers until that re-point or the vertex input's death.
+Buffer *contents* may change freely — `update`/`orphan`
 keep the GL name, so baked attachments survive per-flush orphaning — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
