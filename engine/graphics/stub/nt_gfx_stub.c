@@ -36,7 +36,6 @@ static uint32_t s_stub_last_depth_texture_backend;
 static uint32_t s_stub_next_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
-static bool s_stub_fail_next_texture_create;
 static uint8_t s_stub_fail_texture_creates;
 static bool s_stub_fail_next_program_create;
 static bool s_stub_lose_context_on_program_create;
@@ -81,7 +80,6 @@ nt_texture_desc_t nt_gfx_stub_test_last_texture_desc(void) { return s_stub_last_
 uint32_t nt_gfx_stub_test_last_depth_texture_backend(void) { return s_stub_last_depth_texture_backend; }
 void nt_gfx_stub_test_fail_next_render_target_create(void) { s_stub_fail_next_render_target_create = true; }
 void nt_gfx_stub_test_fail_next_render_target_resize(void) { s_stub_fail_next_render_target_resize = true; }
-void nt_gfx_stub_test_fail_next_texture_create(void) { s_stub_fail_next_texture_create = true; }
 void nt_gfx_stub_test_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_stub_fail_texture_creates = mask;
@@ -125,7 +123,6 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_last_pipeline_blend = (nt_blend_state_t){0};
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
-    s_stub_fail_next_texture_create = false;
     s_stub_fail_texture_creates = 0;
     s_stub_fail_next_program_create = false;
     s_stub_lose_context_on_program_create = false;
@@ -262,10 +259,11 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 #ifdef NT_TEST_ACCESS
     s_stub_last_texture_desc = *desc;
     s_stub_texture_create_count++;
+    /* One bit per create, consumed in order: mask 1 fails the first, 2 the
+     * second, 3 both. */
     bool fail = (s_stub_fail_texture_creates & 1U) != 0;
     s_stub_fail_texture_creates >>= 1U;
-    if (s_stub_fail_next_texture_create || fail) {
-        s_stub_fail_next_texture_create = false;
+    if (fail) {
         return 0;
     }
     return ++s_stub_next_texture_backend;

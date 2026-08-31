@@ -169,7 +169,7 @@ static void test_resize_does_not_need_generic_texture_replacement(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_stub_test_fail_next_texture_create();
+    nt_gfx_stub_test_fail_texture_creates(1U);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_render_target_resize_count());
