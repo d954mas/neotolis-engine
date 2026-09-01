@@ -345,19 +345,27 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
 }
 
-/* The renderer owns both buffers and clears the cache before replacing them. */
+/* Entries are weak: a context loss frees vertex-input slots, so a hit
+ * validates and a dead entry recreates in place (the mesh-row pattern) --
+ * repeated losses must not grow the cache toward the hardcap. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
     const uint64_t key = nt_sprite_layout_hash(mat_info);
+    uint16_t idx = s_sprite.vi_count;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         if (s_sprite.vi_entries[i].key != key) {
             continue;
         }
-        NT_ASSERT(nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi));
-        return s_sprite.vi_entries[i].vi;
+        if (nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi)) {
+            return s_sprite.vi_entries[i].vi;
+        }
+        idx = i; /* dead entry: recreate in place */
+        break;
     }
-    NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");
-    if (s_sprite.vi_count >= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP) {
-        return NT_VERTEX_INPUT_INVALID; /* OFF-mode guard, same as the mesh versions table */
+    if (idx == s_sprite.vi_count) {
+        NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");
+        if (s_sprite.vi_count >= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP) {
+            return NT_VERTEX_INPUT_INVALID; /* OFF-mode guard, same as the mesh versions table */
+        }
     }
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = build_sprite_layout(mat_info),
@@ -366,9 +374,11 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
         .label = "sprite_vi",
     });
     if (vi.id != 0) {
-        s_sprite.vi_entries[s_sprite.vi_count].key = key;
-        s_sprite.vi_entries[s_sprite.vi_count].vi = vi;
-        s_sprite.vi_count++;
+        s_sprite.vi_entries[idx].key = key;
+        s_sprite.vi_entries[idx].vi = vi;
+        if (idx == s_sprite.vi_count) {
+            s_sprite.vi_count++;
+        }
     }
     return vi;
 }

@@ -570,10 +570,16 @@ void nt_gfx_begin_frame(void) {
         for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
             s_gfx.pipeline_backends[i] = 0;
         }
-        /* Vertex inputs die with the context and are not auto-restored --
-         * the zeroed backend makes a stale bind after recovery trap. */
+        /* Vertex inputs are baked objects with no re-fill path: loss frees
+         * their slots outright, so handles held across a loss go stale and
+         * renderer caches self-heal on their validity checks. Primary
+         * resources below stay as husks -- their owners destroy the handles. */
         for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
+            if (nt_pool_slot_alive(&s_gfx.vertex_input_pool, i)) {
+                nt_pool_free(&s_gfx.vertex_input_pool, s_gfx.vertex_input_pool.slots[i].id);
+            }
             s_gfx.vertex_input_backends[i] = 0;
+            memset(&s_gfx.vertex_input_metas[i], 0, sizeof(nt_gfx_vertex_input_meta_t));
         }
         for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
             s_gfx.buffer_backends[i] = 0;
@@ -1495,7 +1501,8 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(vi.id);
-    NT_ASSERT(s_gfx.vertex_input_backends[slot] != 0 && "bind_vertex_input: this vertex input outlived a context loss -- recreate it from the restored frame's resources");
+    /* Loss frees vertex-input slots, so a live slot always has a backend. */
+    NT_ASSERT(s_gfx.vertex_input_backends[slot] != 0 && "bind_vertex_input: live slot without backend");
     s_gfx.bound_vertex_input = vi.id;
     /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
     s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;

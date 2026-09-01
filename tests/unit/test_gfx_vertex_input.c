@@ -495,18 +495,33 @@ void test_bind_instance_buffer_asserts_on_stale_buffer(void) {
     nt_gfx_end_frame();
 }
 
-void test_vi_bind_after_context_loss_asserts(void) {
+/* Loss frees vertex-input slots outright: the handle goes stale, the bind is
+ * the ordinary invalid-handle path, and every slot is allocatable again. */
+void test_vi_slots_freed_by_context_loss(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
 
     nt_gfx_stub_test_set_context_lost(true);
-    nt_gfx_begin_frame(); /* latches the loss, wipes backend tables */
+    nt_gfx_begin_frame(); /* latches the loss, frees vertex-input slots */
     nt_gfx_stub_test_set_context_lost(false);
     nt_gfx_begin_frame(); /* recovery completes */
 
-    /* The pool slot survives the loss but its GPU object is gone. */
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
+    nt_gfx_bind_vertex_input(vi); /* stale: ordinary invalid path, no trap */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    nt_gfx_destroy_vertex_input(vi); /* stale: tolerated no-op */
+
+    /* Buffers survive as husks; recreate before baking new vertex inputs. */
+    nt_gfx_destroy_buffer(vbo);
+    nt_buffer_t fresh = make_vbo();
+    nt_vertex_input_t vis[TEST_MAX_VERTEX_INPUTS];
+    for (uint32_t i = 0; i < TEST_MAX_VERTEX_INPUTS; i++) {
+        vis[i] = make_vi(fresh, (nt_buffer_t){0});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, vis[i].id);
+    }
+    for (uint32_t i = 0; i < TEST_MAX_VERTEX_INPUTS; i++) {
+        nt_gfx_destroy_vertex_input(vis[i]);
+    }
     nt_gfx_end_frame();
 }
 
@@ -541,6 +556,6 @@ int main(void) {
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
     RUN_TEST(test_destroying_instance_buffer_unpoints_dependents);
     RUN_TEST(test_bind_instance_buffer_asserts_on_stale_buffer);
-    RUN_TEST(test_vi_bind_after_context_loss_asserts);
+    RUN_TEST(test_vi_slots_freed_by_context_loss);
     return UNITY_END();
 }

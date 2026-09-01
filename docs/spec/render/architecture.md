@@ -100,10 +100,13 @@ index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
 rejects the bind with VAO 0. Vertex inputs die with a lost context
-and are not auto-restored; renderer restore paths recreate them. Loss alone
-does not fail `nt_gfx_vertex_input_valid` — pool slots live until the restore
-path's buffer destroys cascade through them; a bind that reaches a
-context-orphaned vertex input first traps on its zeroed backend.
+and are not auto-restored: loss itself frees their pool slots, so a handle
+held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
+Renderer restore paths recreate them; caches validate on lookup and
+self-heal. This is the rule for baked objects, which have no re-fill path.
+Primary resources (buffers, textures, shaders, programs) instead survive a
+loss as husks — pool slot alive, backend gone — because the restore recipe
+has their owners destroy the old handles explicitly.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -155,9 +158,11 @@ thrash as an invisible perf regression.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
-A cache hit asserts handle validity; a miss creates the vertex input and
-caches it only on success. Recoverable creation failures leave the cache
-unchanged so the next lookup retries.
+Cache entries are weak: a hit validates the handle, and an entry whose
+vertex input died (context loss) is recreated in place, so repeated losses
+cannot grow the cache. A miss creates the vertex input and caches it only on
+success; recoverable creation failures leave the cache unchanged so the next
+lookup retries.
 
 ### Render targets
 

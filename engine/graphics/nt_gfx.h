@@ -553,8 +553,10 @@ bool nt_gfx_shader_ready(nt_shader_t shd);
 bool nt_gfx_program_valid(nt_program_t prog);
 /* Reports a live pipeline slot; false after pipeline or program destruction. */
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
-/* Reports a live vertex-input slot; false after direct destruction or the
- * destroy_buffer cascade. Renderer caches check this on lookup. */
+/* Reports a live vertex-input slot; false after direct destruction, the
+ * destroy_buffer cascade, or a context loss (loss frees every vertex-input
+ * slot -- they are baked objects with no re-fill path). Renderer caches
+ * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
