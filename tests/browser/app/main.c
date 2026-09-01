@@ -107,10 +107,8 @@ static nt_ui_input_style_t s_input_style; /* filled at init (defaults + visible 
 // #endregion
 
 // #region mesh probe (instanced VAO path)
-/* Two green quads in the bottom-right corner drawn through an owned vertex
- * input (baked VBO+IBO, per-draw instance re-pointing at a nonzero byte
- * offset) -- the WebGL2 VAO path the mesh renderer uses, exercised in the
- * browser where its validation actually lives. */
+/* Browser probe: two quads use a baked VBO/IBO and instance re-pointing at a
+ * nonzero offset, matching the mesh renderer's WebGL2 VAO path. */
 static nt_shader_t s_mesh_vs, s_mesh_fs;
 static nt_program_t s_mesh_program;
 static nt_pipeline_t s_mesh_pipeline;
@@ -354,10 +352,8 @@ static void render_rich(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region frame
-/* Retryable half of context recovery. A second loss during the restored frame
- * can fail any create here; the app then skips rendering and retries next
- * frame instead of trapping (double-loss thrash is a real mobile scenario the
- * smoke test must survive). Destroys are stale-/{0}-safe to re-run. */
+/* A second loss during recovery skips rendering and retries next frame.
+ * Destroy calls are stale-/{0}-safe, so the step may repeat. */
 static bool s_gpu_restore_pending;
 
 static bool gpu_restore_step(void) {

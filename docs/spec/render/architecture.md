@@ -52,9 +52,11 @@ renderer_draw_sprite(...);
 
 ### Vertex inputs
 
-Vertex-input state is an **owned public object**, `nt_vertex_input_t`: a
-vertex layout, an optional per-instance layout, and the vertex buffer
-[+ index buffer] baked together (GL: a VAO). One
+Vertex-input state is a public gfx object referenced by `nt_vertex_input_t`.
+The caller that creates it owns the handle and destroys it with
+`nt_gfx_destroy_vertex_input`; the object borrows its vertex and optional
+index buffer handles. It bakes those buffers together with a vertex layout
+and an optional per-instance layout (GL: a VAO). One
 `nt_gfx_bind_vertex_input` selects the whole geometry for the following
 draws; per mesh switch that is a single `glBindVertexArray` instead of
 buffer re-binds plus per-attribute `glVertexAttribPointer` rewrites. The
@@ -79,8 +81,9 @@ locations within the WebGL2-guaranteed 16): game-declared layouts never pass
 through the builder's validator, and desktop GL accepts what the browser
 rejects. Pack data never reaches those asserts: mesh activation hard-rejects
 invalid per-stream type/count/normalized, duplicate name hashes, and
-misaligned offsets/strides before any vertex input exists. Vertex inputs are
-created once and cached by their owners, so the asserts are off the hot path.
+misaligned offsets/strides before any vertex input exists. Renderer-owned
+vertex inputs are created on a cache miss and then reused, so validation is
+absent from the steady-state hot path.
 
 **Lifetime and the destroy cascade.** `nt_gfx_destroy_buffer` destroys every
 live vertex input referencing that buffer as its vertex or index buffer
@@ -91,9 +94,9 @@ revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
 buffer is *not* cascade-destroyed, but destroying one clears the dependents'
-pointed flag: their next instanced draw asserts until
-`nt_gfx_bind_instance_buffer` re-points them, and the GL attachment's
-storage lingers until that re-point or the vertex input's death.
+pointed flag: their next draw using that vertex input asserts until
+`nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
+lingers until that re-point or the vertex input's death.
 Buffer *contents* may change freely — `update`/`orphan`
 keep the GL name, so baked attachments survive per-flush orphaning — and
 index-buffer data ops run inside a service upload VAO in the backend,
@@ -138,13 +141,13 @@ in a real game, so a 64-bit collision is not a practical risk, and a fixed
 array with a linear scan stays cheaper than a hash map at that scale. Every
 `nt_pipeline_desc_t` field a renderer varies must be folded into its key.
 
-Every renderer now keys pipelines on `program.id` folded with
-`nt_material_info_t.render_state_hash` (the `nt_text_renderer` pattern) —
-layouts moved to the vertex-input objects, so materials differing only in
-layout share one pipeline. `render_state_hash` folds `color_mode`, so mesh
-pipelines still split per color mode even though nothing in the slimmed
-pipeline depends on it — an accepted over-split (removing it would touch the
-material module and every renderer).
+The material-driven mesh, sprite, and text renderer caches key pipelines on
+`program.id` folded with `nt_material_info_t.render_state_hash`. Layouts live
+on vertex-input objects, so materials differing only in layout share one
+pipeline. `render_state_hash` folds `color_mode`, so mesh pipelines still
+split per color mode even though nothing in the slimmed pipeline depends on
+it — an accepted over-split (removing it would touch the material module and
+all three caches).
 
 Vertex-input caches follow the same hash-as-identity standard for *derived*
 layouts. The mesh renderer keeps a per-mesh versions table

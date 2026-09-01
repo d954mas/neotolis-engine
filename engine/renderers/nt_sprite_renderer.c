@@ -29,9 +29,7 @@
 // #region module state
 typedef struct {
     nt_pipeline_t pipeline;
-    /* Snapshotted with the pipeline: two custom layouts can share one pipeline
-     * (pipelines no longer own layouts), so replay delta-binds the vertex
-     * input independently of pipeline changes. */
+    /* Captured independently because custom layouts may share a pipeline. */
     nt_vertex_input_t vertex_input;
     nt_material_t material; /* handle for material-param lookup at flush; param values
                                are NOT snapshotted — material info is stable within a
@@ -52,11 +50,8 @@ static struct {
     nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
     uint16_t count;
 
-    /* Vertex-input cache keyed by the layout hash (0 = base 20 B layout).
-     * All layouts bake over the one (vbo, ibo) pair. Bounded by distinct
-     * custom attr_map layouts -- one pipeline (program x render state) can
-     * host many of them, so this population is independent of the pipeline
-     * count; the hardcap is shared only as a sizing choice. */
+    /* Layout-hash cache over the shared VBO/IBO; custom layouts may share a
+     * pipeline. The pipeline hardcap is reused only as a capacity choice. */
     struct {
         uint64_t key;
         nt_vertex_input_t vi;
@@ -322,8 +317,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
         nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
-    /* Layouts live on the vertex-input cache now, so two custom layouts can
-     * share one pipeline: the key is program x render state only. */
+    /* Vertex-inputs own layouts, so the pipeline key is program x state. */
     uint64_t key = (uint64_t)mat_info->program.id * 0x9E3779B97F4A7C15ULL;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
 

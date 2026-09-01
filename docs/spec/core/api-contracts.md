@@ -272,12 +272,17 @@ recoverable outcomes, both retried on a later frame.
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
 `NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned
 or duplicated attributes, mismatched buffers, and an exhausted pool all
-assert. Creating a pipeline or a vertex input preserves both current bindings
-(the bound pipeline and the bound vertex input); the caller does not need to
-rebind after creating another object.
-Backend allocation, framebuffer completeness, resize, and context-restore
-failures remain runtime failures reported through invalid handles, `false`, or
-readiness queries.
+assert. The returned vertex input is caller-owned and destroyed with
+`nt_gfx_destroy_vertex_input`; it borrows the referenced buffers, whose
+destruction may invalidate it through the documented cascade. The descriptor
+and label are borrowed only for the call. Creating a pipeline or a vertex input
+preserves both current bindings (the bound pipeline and the bound vertex
+input); the caller does not need to rebind after creating another object.
+Allocation failures from public GPU-resource operations, framebuffer
+completeness, resize, and context restore remain runtime failures reported
+through invalid handles, `false`, or readiness queries. Mandatory backend
+setup objects are internal invariants: failure to create the GL service EBO
+upload VAO with a live context asserts.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
 Callers check readiness before beginning work that depends on restored GPU

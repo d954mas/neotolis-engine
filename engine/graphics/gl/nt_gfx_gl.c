@@ -108,10 +108,8 @@ typedef struct {
     uint16_t height;
 } nt_gfx_gl_render_target_t;
 
-/* Owned vertex-input VAO. Static half (vertex attrs + element binding) is
- * baked at creation; instance pointers are re-specified into the bound VAO
- * by bind_instance_buffer, which needs the layout kept here. Compact copy:
- * a full nt_vertex_layout_t per slot would cost ~200 B x max_vertex_inputs. */
+/* Static attrs and EBO are baked; instance pointers are re-pointed per draw.
+ * Keeping only the instance layout avoids ~200 B per vertex-input slot. */
 typedef struct {
     GLuint vao; /* 0 = free slot */
     nt_vertex_attr_t instance_attrs[NT_GFX_MAX_INSTANCE_ATTRS];
@@ -252,11 +250,8 @@ static void gl_bind_vao(GLuint vao) {
     glBindVertexArray(vao);
 }
 
-/* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: with a vertex-input VAO bound
- * a data op would silently rewire its index binding, and core profile rejects
- * the bind with VAO 0 -- so index-buffer data ops run inside the service
- * upload VAO. The EBO detaches on exit because GL keeps attached storage
- * alive: a dangling attachment would pin a deleted index buffer's memory. */
+/* The service VAO prevents EBO data operations from rewriting a draw VAO.
+ * Detaching on exit lets deletion release the uploaded buffer's storage. */
 static void ebo_upload_begin(void) { gl_bind_vao(s_ebo_upload_vao); }
 
 static void ebo_upload_end(void) {
@@ -1255,8 +1250,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     gl_bind_vao(s_gl_cache.vao);
 
     s_vertex_inputs[slot].vao = vao;
-    /* Clamped copy: the frontend asserts the cap, but OFF must not write past
-     * the compact array (the full-size source could not overflow, this can). */
     uint8_t inst_count = desc->instance_layout.attr_count;
     if (inst_count > NT_GFX_MAX_INSTANCE_ATTRS) {
         inst_count = NT_GFX_MAX_INSTANCE_ATTRS;

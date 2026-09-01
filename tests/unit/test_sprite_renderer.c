@@ -838,11 +838,8 @@ void test_sprite_renderer_extended_layout_from_attr_map(void) {
     TEST_ASSERT_EQUAL_UINT32(4, ext_layout.locations[3]);
 }
 
-/* A base material and an attr_map material that share vs/fs/state and differ
- * ONLY in their vertex layout now SHARE one pipeline (layouts live on the
- * owned vertex inputs, not the pipeline) and resolve to two distinct vertex
- * inputs — the layout discriminator moved from the pipeline key to the
- * vertex-input cache key. */
+/* Equal program/state share a pipeline; base and extended layouts use
+ * separate vertex inputs. */
 void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));

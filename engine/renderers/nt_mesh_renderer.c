@@ -19,9 +19,7 @@
 typedef struct {
     uint64_t key;
     nt_vertex_input_t vi;
-    uint32_t last_mat; /* memo: last material resolved to this entry; attr_map
-                        * and color_mode are immutable per material handle, so a
-                        * repeat (mesh, material) pair skips the layout rebuild. */
+    uint32_t last_mat; /* most recently resolved material for this VI version */
 } nt_mesh_vi_version_t;
 
 static struct {
@@ -274,8 +272,7 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_material_t mat, nt_mesh_
             reusable = e;
         }
     }
-    /* Crash-early over silent eviction: 5+ layouts cycling on one mesh would
-     * re-create VAOs every frame as an invisible perf regression. */
+    /* Crash early instead of hiding VAO churn behind version eviction. */
     NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise nt_mesh_renderer_desc_t.max_mesh_layouts");
     if (reusable == NULL) {
         return NT_VERTEX_INPUT_INVALID;

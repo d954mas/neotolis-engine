@@ -353,7 +353,7 @@ typedef struct {
     nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; pointers set per draw by nt_gfx_bind_instance_buffer */
     nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
     nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
-    const char *label;                  /* debug name; static storage */
+    const char *label;                  /* optional debug name; borrowed for the call */
 } nt_vertex_input_desc_t;
 
 typedef struct {
@@ -496,12 +496,9 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
-/* Bakes the vertex layout, buffers and index binding into an owned object.
- * Caller errors (bad handles, invalid layouts) assert; INVALID is returned
- * only on a lost context or backend allocation failure. Buffer CONTENTS may
- * still change (update/orphan keep the GL name); replacing a buffer OBJECT
- * means destroy + recreate the vertex input. Creation preserves the
- * currently bound vertex input. */
+/* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
+ * borrows its buffers; creation borrows desc/label and preserves the bound VI.
+ * INVALID means context loss or backend allocation failure; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
@@ -525,13 +522,9 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
-/* Also destroys every vertex input referencing this buffer as its vertex or
- * index buffer -- mesh deactivation reaches no renderer, so the cascade is
- * what keeps cached vertex inputs from outliving mesh buffers. Instance
- * buffers captured by nt_gfx_bind_instance_buffer are not cascade-destroyed,
- * but destroying one UNPOINTS dependent vertex inputs: their next instanced
- * draw asserts until bind_instance_buffer re-points them. The GL attachment's
- * storage lingers until that re-point or the vertex input's death. */
+/* Destroys VIs that borrow this vertex/index buffer. Destroying a captured
+ * instance buffer instead makes every draw assert until it is re-pointed;
+ * GL retains the old storage until that re-point or the VI's destruction. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
 void nt_gfx_destroy_render_target(nt_render_target_t rt);

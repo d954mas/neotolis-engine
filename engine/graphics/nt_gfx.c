@@ -67,8 +67,7 @@ typedef struct {
     uint32_t inst_buf_id; /* last buffer pointed by bind_instance_buffer; its destruction unpoints */
     uint8_t index_type;   /* captured from the IBO; NT_INDEX_NONE for non-indexed */
     uint8_t instance_attr_count;
-    /* Enabled-but-unpointed instance attribs are invalid GL that fails
-     * silently -- draws assert the attribs currently point at a live buffer. */
+    /* Every draw requires declared instance attrs to point at a live buffer. */
     bool instance_pointed;
 } nt_gfx_vertex_input_meta_t;
 
@@ -1333,9 +1332,8 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
         if (s_gfx.vertex_input_metas[i].vbo_id == buf.id || s_gfx.vertex_input_metas[i].ibo_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
         } else if (s_gfx.vertex_input_metas[i].inst_buf_id == buf.id) {
-            /* Instance attachments are not destroy-tracked, but the pointed
-             * flag must not lie: the next instanced draw without a re-point
-             * traps instead of silently reading the dead buffer. */
+            /* Instance storage stays attached, but no draw may reuse it after
+             * destruction without an explicit re-point. */
             s_gfx.vertex_input_metas[i].instance_pointed = false;
             s_gfx.vertex_input_metas[i].inst_buf_id = 0;
         }

@@ -245,8 +245,7 @@ static nt_pipeline_t get_active_cap_inst_pipeline(void) { return s_shape.depth_e
 
 static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay; }
 
-/* Vertex/instance layouts now live on the vertex-input objects; the depth and
- * overlay pipeline pair for each program shares one vertex input. */
+/* Matching depth/overlay layouts share one vertex input per program. */
 static nt_vertex_layout_t batch_vertex_layout(void) {
     return (nt_vertex_layout_t){
         .attr_count = 2,

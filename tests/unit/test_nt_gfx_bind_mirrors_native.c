@@ -1,7 +1,5 @@
-/* Real-GL pixel tests for owned vertex inputs: alternating binds under one
- * pipeline, index-data ops that must not rewire the bound VAO, orphaning
- * under a live vertex input, and bind-preservation across rejected or
- * failed operations. */
+/* Real-GL coverage for VI switching, isolated EBO data operations, orphaning,
+ * and binding preservation across rejected or failed operations. */
 
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"

@@ -622,9 +622,7 @@ void test_pipeline_cache_shared_program_collapses(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* Same program and state with different attr_maps used to split pipelines;
- * layouts now live on the vertex-input versions, so the pipeline collapses
- * to one and the derived layouts split vertex inputs instead. */
+/* Equal program/state share a pipeline; distinct attr_maps derive separate VIs. */
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();

@@ -152,9 +152,8 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 // #endregion
 
 // #region Lifecycle
-/* Buffer creation can fail only on a lost context; skip the vertex input
- * then (make_vertex_input traps on invalid buffer handles). Flush retries
- * this after a recoverable backend failure, like the lazy pipeline cache. */
+/* Missing buffers make VI creation invalid; restore reports their failure.
+ * A VI-only backend failure remains lazy and flush retries it. */
 static void create_vertex_input(void) {
     if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
         return;

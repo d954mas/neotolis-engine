@@ -170,9 +170,10 @@ restore drops queued commands and pipeline caches, then the game relinks.
 `nt_mesh_renderer_restore_gpu()`, `nt_sprite_renderer_restore_gpu()`, and
 `nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU
 allocations, configured capacities, and module initialization; only GPU
-buffers, cached pipelines/vertex inputs, and queued draw state are reset. An
-inactive module is a no-op returning `NT_OK` — this holds for every restore
-entry point, `nt_postfx_blur_restore_gpu` included. Failed GPU creation
+buffers, cached pipelines/vertex inputs, and queued draw state are reset.
+Every restore entry point is an inactive no-op. The `nt_result_t`-returning
+mesh, sprite, text, and blur functions return `NT_OK` in that case;
+`nt_shape_renderer_restore_gpu` returns void. Failed GPU creation
 returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
 is no automatic retry, with one narrow exception: the text renderer's vertex
