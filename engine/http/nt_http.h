@@ -22,7 +22,8 @@ typedef enum {
 } nt_http_state_t;
 
 typedef struct {
-    const char *method; /* NULL -> "GET"; a body requires a non-GET/HEAD method */
+    const char *method; /* NULL -> "GET"; a body requires a non-GET/HEAD method;
+                         * CONNECT/TRACE/TRACK are asserted out (fetch() forbids them) */
     const void *body;   /* copied at call time, caller keeps ownership; NULL -> no body */
     uint32_t body_size;
     const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL */
@@ -33,7 +34,7 @@ typedef struct {
                                  * and applies CORS, and fails the request on CR/LF in a value
                                  * where native sends the bytes verbatim */
     uint32_t header_count;      /* number of name/value PAIRS in headers */
-    uint32_t timeout_ms;        /* 0 -> no timeout */
+    uint32_t timeout_ms;        /* 0 -> no timeout; clamped to INT_MAX ms (~24 days) */
 } nt_http_options_t;
 
 nt_result_t nt_http_init(void);

@@ -20,8 +20,12 @@ elseif(NT_HTTP_CURL)
         target_include_directories(nt_http SYSTEM PRIVATE ${_curl_inc})
     endif()
 else()
-    # NT_HTTP_CURL=OFF: native nt_http is the always-fail stub backend
+    # NT_HTTP_CURL=OFF: native nt_http is the always-fail stub backend. Loud on both
+    # ends — the define makes nt_http_init WARN at runtime so a build without
+    # networking is diagnosable at init, not at the first FAILED request.
+    message(STATUS "nt_http: native backend is the always-fail stub (NT_HTTP_CURL=OFF)")
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c stub/nt_http_stub.c nt_http.h)
+    target_compile_definitions(nt_http PRIVATE NT_HTTP_STUB_IS_FALLBACK)
 endif()
 target_link_libraries(nt_http PUBLIC nt_core nt_http_interface)
 

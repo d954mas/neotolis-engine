@@ -112,8 +112,9 @@ multi / stub). `nt_http_request(url)` is the GET shorthand;
 `nt_http_request_ex(url, opts)` adds method, body (copied at call time),
 request-header pairs, an optional `content_type` (defaulted to
 `application/octet-stream` when a body is present and no Content-Type pair was
-given), and `timeout_ms`. A body on GET/HEAD is asserted out — backends would
-diverge otherwise.
+given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
+fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
+otherwise.
 
 State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
 body is data, not a transport error) — the caller checks `nt_http_status()`;

@@ -12,6 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* CURLFOLLOW_OBEYCODE (redirect contract) appeared in 8.13 — a consumer-provided
+ * older curl would fail on it with an unhelpful undeclared-identifier error */
+#if LIBCURL_VERSION_NUM < 0x080D00
+#error "nt_http native backend requires libcurl >= 8.13"
+#endif
+
 /* Native backend: libcurl multi interface, single-threaded. Transfers advance
  * only inside nt_http_backend_update (curl_multi_perform) — no locks needed. */
 
@@ -199,10 +205,16 @@ bool nt_http_backend_init(void) {
         return false;
     }
     /* A consumer-provided libcurl without async DNS would block nt_http_update
-     * (and the frame) on every hostname resolve; the vendored build has it. */
+     * (and the frame) on every hostname resolve, silently breaking the
+     * non-blocking frame contract — refuse init instead (the vendored build
+     * always has the threaded resolver). */
     curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
     if (info != NULL && (info->features & CURL_VERSION_ASYNCHDNS) == 0) {
-        NT_LOG_ERROR("libcurl built without async DNS — hostname resolves will block the frame");
+        NT_LOG_ERROR("libcurl built without async DNS — hostname resolves would block the frame");
+        curl_multi_cleanup(s_native.multi);
+        s_native.multi = NULL;
+        curl_global_cleanup();
+        return false;
     }
     return true;
 }

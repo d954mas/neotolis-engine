@@ -150,6 +150,9 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     NT_ASSERT(opts == NULL || opts->header_count == 0 || opts->headers != NULL);
     slot->url = http_strdup(url);
     slot->method = http_strdup(http_normalize_method(opts != NULL && opts->method != NULL ? opts->method : "GET"));
+    /* fetch() forbids these outright (web would FAIL, native curl would happily
+     * send them) — crash early instead of diverging per backend */
+    NT_ASSERT(!http_iequals(slot->method, "CONNECT") && !http_iequals(slot->method, "TRACE") && !http_iequals(slot->method, "TRACK"));
     slot->body = NULL;
     slot->body_size = 0;
     if (opts != NULL && opts->body != NULL && opts->body_size > 0) {
@@ -167,7 +170,12 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     slot->header_pairs = 0;
     http_copy_headers(slot, opts, http_default_content_type(opts));
 
+    /* Clamp to INT_MAX (~24 days): the value crosses int (EM_JS) and long (LLP64
+     * curl setopt) — a larger uint32 would go negative and silently disable the timeout */
     slot->timeout_ms = opts != NULL ? opts->timeout_ms : 0;
+    if (slot->timeout_ms > 0x7FFFFFFFU) {
+        slot->timeout_ms = 0x7FFFFFFFU;
+    }
 }
 
 /* ---- Lifecycle ---- */

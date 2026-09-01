@@ -176,8 +176,16 @@ if(NOT EMSCRIPTEN)
     # crypto. Vendored tree is stripped to the CMake lib build (no docs/tests/src),
     # so everything referencing the removed dirs stays OFF; disabling Perl also
     # kills curl's codegen target that writes into the vendored source tree.
-    # OFF drops the dependency: native nt_http becomes the always-fail stub.
-    option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
+    # OFF drops the dependency: native nt_http becomes the always-fail stub (loudly:
+    # configure STATUS + runtime WARN at nt_http_init). Subprojects default OFF so a
+    # consumer linking only nt_http_stub never pays the curl configure, which
+    # hard-requires OpenSSL headers off-Windows; linking real nt_http needs an
+    # explicit -DNT_HTTP_CURL=ON (or a pre-provided CURL::libcurl).
+    if(PROJECT_IS_TOP_LEVEL)
+        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
+    else()
+        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" OFF)
+    endif()
     if(NT_HTTP_CURL AND NOT TARGET CURL::libcurl)
         # block(): BUILD_* and CMAKE_DISABLE_* are generic names a consumer
         # superproject may own, and later add_subdirectory() calls in THIS file
