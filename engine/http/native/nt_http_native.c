@@ -148,8 +148,9 @@ static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
     curl_easy_getinfo(xfer->easy, CURLINFO_RESPONSE_CODE, &code);
     slot->status = (uint16_t)code;
 
-    /* Hand over the header block NUL-terminated (may exist even on failure) */
-    if (xfer->hdr != NULL) {
+    /* Hand over the header block NUL-terminated (may exist even on failure); a
+     * headerless success still hands over "" — web never returns NULL after DONE */
+    if (xfer->hdr != NULL || result == CURLE_OK) {
         char zero = '\0';
         if (native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, &zero, 1)) {
             slot->resp_headers = xfer->hdr;
@@ -215,6 +216,11 @@ bool nt_http_backend_init(void) {
         s_native.multi = NULL;
         curl_global_cleanup();
         return false;
+    }
+    /* No decoders -> curl simply never negotiates compression (correct, identity
+     * bytes) — warn about the web-parity gap, do not fail */
+    if (info != NULL && (info->features & CURL_VERSION_LIBZ) == 0) {
+        NT_LOG_WARN("libcurl built without zlib — compression will not be negotiated (fetch always does)");
     }
     return true;
 }
@@ -353,7 +359,22 @@ void nt_http_backend_update(void) {
         return;
     }
     int running = 0;
-    curl_multi_perform(s_native.multi, &running);
+    CURLMcode rc = curl_multi_perform(s_native.multi, &running);
+    if (rc != CURLM_OK) {
+        /* Multi machinery broke (OOM/internal error): without this the in-flight
+         * requests would sit PENDING forever with no signal */
+        NT_LOG_ERROR("curl_multi_perform: %s", curl_multi_strerror(rc));
+        for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
+            if (s_native.xfers[i].easy != NULL) {
+                NtHttpSlot *slot = nt_http_get_slot(i);
+                if (slot != NULL) {
+                    slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
+                }
+                nt_http_backend_cancel(i);
+            }
+        }
+        return;
+    }
 
     CURLMsg *msg = NULL;
     int msgs_left = 0;

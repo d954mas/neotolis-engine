@@ -236,6 +236,16 @@ if(NOT EMSCRIPTEN)
             set(CURL_USE_SCHANNEL ON)
         endif()
         add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
+        # CRT pins only for targets THIS block created — outside the guard the
+        # foreach would mutate a consumer's like-named targets (libcurl_static is
+        # curl's standard name). Both curl targets guarded: with SHARE_LIB_OBJECT
+        # the objects live in libcurl_object and the static lib has no sources of
+        # its own — the object pin is the one that matters.
+        foreach(_curl_target libcurl_static libcurl_object zlib_vendored)
+            if(TARGET ${_curl_target})
+                nt_set_static_crt(${_curl_target})
+            endif()
+        endforeach()
         endblock()
     endif()
 
@@ -248,13 +258,6 @@ if(NOT EMSCRIPTEN)
     # GLFW calls CRT functions (assert, sscanf, powf, wcscpy) that resolve to
     # __declspec(dllimport) stubs under the default -D_DLL flag — missing with a static UCRT.
     nt_set_static_crt(glfw)
-    # Both guarded: with SHARE_LIB_OBJECT the objects live in libcurl_object and the
-    # static lib has no sources of its own — the object pin is the one that matters.
-    foreach(_curl_target libcurl_static libcurl_object zlib_vendored)
-        if(TARGET ${_curl_target})
-            nt_set_static_crt(${_curl_target})
-        endif()
-    endforeach()
 endif()
 
 # Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the

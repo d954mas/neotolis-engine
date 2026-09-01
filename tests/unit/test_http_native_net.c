@@ -262,6 +262,14 @@ static void test_empty_body_done(void) {
     nt_http_free(req);
 }
 
+/* Divergence pin: web resolves relative URLs against the page origin; native has
+ * no base URL — the request must FAIL, not guess */
+static void test_relative_url_fails(void) {
+    nt_http_request_t req = nt_http_request("/no-base-url");
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    nt_http_free(req);
+}
+
 /* MAXREDIRS: a redirect loop must FAIL, not spin */
 static void test_redirect_loop_fails(void) {
     nt_http_request_t req = nt_http_request(make_url("/loop"));
@@ -299,6 +307,7 @@ int main(void) {
     RUN_TEST(test_gzip_decoded);
     RUN_TEST(test_truncated_body_fails);
     RUN_TEST(test_empty_body_done);
+    RUN_TEST(test_relative_url_fails);
     RUN_TEST(test_redirect_loop_fails);
     RUN_TEST(test_timeout_fails);
     RUN_TEST(test_timeout_mid_body_keeps_status);

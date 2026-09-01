@@ -140,7 +140,8 @@ advances the game's own requests as well (see
 The pack loader treats a non-2xx status and a 2xx response with an empty body as
 load failures (normal retry policy applies).
 
-Both backends follow redirects (303 → GET on both) and negotiate compression,
+Both backends follow redirects (303 → GET on both; a GET/HEAD request keeps
+its method) and negotiate compression,
 handing the caller DECODED bytes — the browser's `fetch()` transparently, the
 native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 (vendored `deps/zlib`, native exe only).
@@ -155,6 +156,7 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 | Request header validation | forbidden names (Host, Cookie, Origin, ...) silently dropped, CORS applies, CR/LF in a value throws → FAILED | sent verbatim, no validation |
 | obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
 | Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
+| Relative URL (`"/path"`) | resolved against the page origin | no base URL — the request FAILs |
 
 Progress numbers are transport-level best effort while DOWNLOADING on both
 backends; at DONE both report `received == total ==` decoded size.

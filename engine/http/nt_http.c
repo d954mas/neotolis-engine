@@ -131,6 +131,23 @@ static const char *http_default_content_type(const nt_http_options_t *opts) {
     return opts->content_type != NULL ? opts->content_type : "application/octet-stream";
 }
 
+/* RFC 7230 token — fetch() throws on anything else (space, CTL, separators),
+ * native curl would put the raw bytes on the wire. static inline: referenced
+ * only from NT_ASSERT, which vanishes in the OFF config. */
+static inline bool http_method_is_token(const char *m) {
+    if (*m == '\0') {
+        return false;
+    }
+    for (; *m; m++) {
+        char c = *m;
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("!#$%&'*+-.^_`|~", c) != NULL;
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* fetch() normalizes these six methods to uppercase (and only these — PATCH is
  * deliberately case-preserved by the spec); mirror it so both backends send the
  * same bytes for method = "put" etc. */
@@ -150,19 +167,24 @@ static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_o
     NT_ASSERT(opts == NULL || opts->header_count == 0 || opts->headers != NULL);
     slot->url = http_strdup(url);
     slot->method = http_strdup(http_normalize_method(opts != NULL && opts->method != NULL ? opts->method : "GET"));
-    /* fetch() forbids these outright (web would FAIL, native curl would happily
-     * send them) — crash early instead of diverging per backend */
+    /* fetch() rejects non-token methods and forbids CONNECT/TRACE/TRACK outright
+     * (native curl would happily send them) — crash early instead of diverging */
+    NT_ASSERT(http_method_is_token(slot->method));
     NT_ASSERT(!http_iequals(slot->method, "CONNECT") && !http_iequals(slot->method, "TRACE") && !http_iequals(slot->method, "TRACK"));
     slot->body = NULL;
     slot->body_size = 0;
-    if (opts != NULL && opts->body != NULL && opts->body_size > 0) {
+    if (opts != NULL && opts->body != NULL) {
         /* A body on GET/HEAD is a caller bug: fetch rejects it, curl would silently
-         * reinterpret it as POST — crash early instead of diverging per backend. */
+         * reinterpret it as POST — crash early instead of diverging per backend.
+         * ANY non-NULL body pointer counts: zero-size still signals body intent
+         * (it keeps its Content-Type). */
         NT_ASSERT(!http_iequals(slot->method, "GET") && !http_iequals(slot->method, "HEAD"));
-        slot->body = malloc(opts->body_size);
-        NT_ASSERT(slot->body != NULL);
-        memcpy(slot->body, opts->body, opts->body_size);
-        slot->body_size = opts->body_size;
+        if (opts->body_size > 0) {
+            slot->body = malloc(opts->body_size);
+            NT_ASSERT(slot->body != NULL);
+            memcpy(slot->body, opts->body, opts->body_size);
+            slot->body_size = opts->body_size;
+        }
     }
 
     slot->headers = NULL;
