@@ -19,6 +19,9 @@
 typedef struct {
     uint64_t key;
     nt_vertex_input_t vi;
+    uint32_t last_mat; /* memo: last material resolved to this entry; attr_map
+                        * and color_mode are immutable per material handle, so a
+                        * repeat (mesh, material) pair skips the layout rebuild. */
 } nt_mesh_vi_version_t;
 
 static struct {
@@ -231,14 +234,7 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
-    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info);
-    /* Hash only the used attrs (memset'd, so padding is deterministic; the
-     * unused tail would be pure noise). color_mode selects the instance
-     * layout, which the baked divisor state depends on. */
-    uint64_t key = nt_hash64(layout.attrs, (uint32_t)layout.attr_count * (uint32_t)sizeof(nt_vertex_attr_t)).value;
-    key = key * 0x9E3779B97F4A7C15ULL + ((uint64_t)layout.attr_count << 24 | (uint64_t)layout.stride << 8 | (uint64_t)mat_info->color_mode);
-
+static nt_vertex_input_t find_or_create_vertex_input(nt_material_t mat, nt_mesh_t mesh, const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= s_mesh_renderer.vi_mesh_capacity);
     nt_mesh_vi_version_t *row = &s_mesh_renderer.vi_versions[(size_t)(slot - 1) * s_mesh_renderer.max_mesh_layouts];
@@ -250,12 +246,28 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
         }
         s_mesh_renderer.vi_meshes[slot - 1] = mesh;
     }
+    /* Memo fast path: the generational mat.id pins attr_map + color_mode, so a
+     * hit needs no layout rebuild or hash. Misses (first sight, entry stolen by
+     * a same-key sharing material, cascade-killed vi) fall through. */
+    for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
+        if (row[i].last_mat == mat.id && nt_gfx_vertex_input_valid(row[i].vi)) {
+            return row[i].vi;
+        }
+    }
+
+    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info);
+    /* Hash only the used attrs (memset'd, so padding is deterministic; the
+     * unused tail would be pure noise). color_mode selects the instance
+     * layout, which the baked divisor state depends on. */
+    uint64_t key = nt_hash64(layout.attrs, (uint32_t)layout.attr_count * (uint32_t)sizeof(nt_vertex_attr_t)).value;
+    key = key * 0x9E3779B97F4A7C15ULL + ((uint64_t)layout.attr_count << 24 | (uint64_t)layout.stride << 8 | (uint64_t)mat_info->color_mode);
 
     nt_mesh_vi_version_t *reusable = NULL;
     for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
         nt_mesh_vi_version_t *e = &row[i];
         const bool live = nt_gfx_vertex_input_valid(e->vi);
         if (e->key == key && live) {
+            e->last_mat = mat.id;
             return e->vi;
         }
         if (reusable == NULL && !live) {
@@ -283,6 +295,7 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_mesh_t mesh, const nt_ma
     }
     reusable->key = key;
     reusable->vi = vi;
+    reusable->last_mat = mat.id;
     return vi;
 }
 
@@ -530,7 +543,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             /* Bind pipeline + vertex input (if material or mesh changed) */
             if (run_mat.id != prev_mat.id || run_mesh.id != prev_mesh.id) {
                 nt_pipeline_t pip = find_or_create_pipeline(mat_info);
-                nt_vertex_input_t vi = (pip.id != 0) ? find_or_create_vertex_input(run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
+                nt_vertex_input_t vi = (pip.id != 0) ? find_or_create_vertex_input(run_mat, run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
                 if (pip.id == 0 || vi.id == 0) {
                     draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
                     run_start = run_end;

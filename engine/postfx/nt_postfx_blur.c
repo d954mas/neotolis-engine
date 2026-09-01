@@ -233,7 +233,7 @@ void nt_postfx_blur_shutdown(void) {
 nt_result_t nt_postfx_blur_restore_gpu(void) {
     /* Games may include inactive modules in their recovery sequence. */
     if (!s_blur.initialized) {
-        return NT_ERR_INIT_FAILED;
+        return NT_OK;
     }
     s_blur.gpu_ready = false;
     destroy_gpu_resources();

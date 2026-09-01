@@ -442,9 +442,10 @@ void test_flush_retries_vertex_input_after_backend_failure(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
 
-    /* Buffers recreate fine; the vertex input creation fails once. */
+    /* Buffers recreate fine; the vertex input creation fails once. A failed
+     * vertex-input bake alone does not fail the restore -- flush retries it. */
     nt_gfx_stub_test_fail_next_vertex_input_create();
-    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -852,7 +853,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     /* Restore frame: reset the renderer, drop the program, keep the material. */
     nt_gfx_stub_test_set_context_lost(false);
     nt_gfx_begin_frame();
-    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_gfx_destroy_program(first);
     nt_gfx_end_frame();

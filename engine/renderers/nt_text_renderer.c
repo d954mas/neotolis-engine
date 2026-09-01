@@ -238,9 +238,9 @@ void nt_text_renderer_shutdown(void) {
     memset(&s_text, 0, sizeof(s_text));
 }
 
-void nt_text_renderer_restore_gpu(void) {
+nt_result_t nt_text_renderer_restore_gpu(void) {
     if (!s_text.initialized) {
-        return;
+        return NT_OK;
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
      * glyph_depth_bias, oblique, sticky decoration) is left untouched, so it survives by default — no
@@ -249,6 +249,8 @@ void nt_text_renderer_restore_gpu(void) {
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
     s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
+    /* The vertex input is not part of the verdict: flush retries it lazily. */
+    return (s_text.vbo.id != 0 && s_text.ibo.id != 0) ? NT_OK : NT_ERR_INIT_FAILED;
 }
 // #endregion
 

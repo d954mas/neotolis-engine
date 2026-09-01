@@ -127,7 +127,9 @@ static const char *s_mesh_fs_src = "precision mediump float;\n"
                                    "out vec4 frag_color;\n"
                                    "void main() { frag_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
 
-static void mesh_probe_create(void) {
+/* False when the context is (still) lost mid-restore: the caller retries on a
+ * later frame; partial handles are {0}-safe for mesh_probe_destroy. */
+static bool mesh_probe_create(void) {
     /* Unit quad, one float3 position stream, uint16 indices. */
     static const float verts[12] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
     static const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
@@ -150,7 +152,9 @@ static void mesh_probe_create(void) {
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts), indices, sizeof(indices));
 
     s_mesh_handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
-    NT_ASSERT(s_mesh_handle != 0);
+    if (s_mesh_handle == 0) {
+        return false; /* lost context during activation */
+    }
     const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info((nt_mesh_t){s_mesh_handle});
     s_mesh_index_count = info->index_count;
     s_mesh_vertex_count = info->vertex_count;
@@ -167,6 +171,7 @@ static void mesh_probe_create(void) {
         .label = "mesh_probe_vi",
     });
     s_mesh_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64, .label = "mesh_probe_inst"});
+    return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_instance_buf.id != 0;
 }
 
 static void mesh_probe_destroy(void) {
@@ -349,6 +354,29 @@ static void render_rich(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region frame
+/* Retryable half of context recovery. A second loss during the restored frame
+ * can fail any create here; the app then skips rendering and retries next
+ * frame instead of trapping (double-loss thrash is a real mobile scenario the
+ * smoke test must survive). Destroys are stale-/{0}-safe to re-run. */
+static bool s_gpu_restore_pending;
+
+static bool gpu_restore_step(void) {
+    nt_gfx_destroy_buffer(s_frame_ubo);
+    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = sizeof(nt_frame_uniforms_t),
+        .label = "frame_uniforms",
+    });
+    bool ok = s_frame_ubo.id != 0;
+    ok = (nt_sprite_renderer_restore_gpu() == NT_OK) && ok;
+    ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
+    /* The probe's mesh and vertex input died with the context. */
+    mesh_probe_destroy();
+    ok = mesh_probe_create() && ok;
+    return ok;
+}
+
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
@@ -389,30 +417,21 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
+        /* One-shot per restored event; the GPU recreation below may retry. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials retain their handles; rendering waits for relinking on a later frame.
          * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_text_renderer_restore_gpu();
-        /* The probe's mesh and vertex input died with the context. */
-        mesh_probe_destroy();
-        mesh_probe_create();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         /* Font sources survive restore; adding them again asserts on duplicates.
          * nt_font_step rebuilds textures after the font assets reactivate. */
+        s_gpu_restore_pending = true;
+    }
+    if (s_gpu_restore_pending) {
+        s_gpu_restore_pending = !gpu_restore_step();
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -424,7 +443,10 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
+    /* A pending restore means renderer buffers may be missing; submitting
+     * sprites then asserts by contract, so rendering waits it out. */
+    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info &&
+                            nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -554,7 +576,9 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
-    mesh_probe_create();
+    const bool probe_ok = mesh_probe_create();
+    NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
+    (void)probe_ok;
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();

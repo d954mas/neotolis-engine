@@ -558,7 +558,7 @@ static void frame(void) {
         });
         restored = s_frame_ubo.id != 0 && restored;
         restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
-        nt_text_renderer_restore_gpu();
+        restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);

@@ -314,8 +314,9 @@ typedef struct {
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
     /* default: 560 = max_meshes(128) x mesh renderer max_mesh_layouts(4)
-     * worst case + 48 for renderer-owned vertex inputs (shape ~13, text,
-     * blur, sprite custom layouts). */
+     * worst case + 48 for renderer-owned vertex inputs (shape ~14, text,
+     * blur, ~32 sprite custom layouts). Scale it together with max_meshes;
+     * raise it near the sprite custom-layout hardcap (64). */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     bool depth;                  /* request depth buffer (default: true) */
