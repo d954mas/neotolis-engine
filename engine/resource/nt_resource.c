@@ -512,11 +512,12 @@ void nt_resource_step(void) {
                     nt_http_progress(req, &pack->bytes_received, &pack->bytes_total);
                 } else if (st == NT_HTTP_STATE_DONE) {
                     /* DONE means a full response, any status — a 404 body is not a pack */
-                    if (nt_http_status(req) / 100 == 2) {
+                    uint16_t status = nt_http_status(req);
+                    if (status / 100 == 2) {
                         loaded_blob = nt_http_take_data(req, &loaded_size);
                         io_done = true;
                     } else {
-                        NT_LOG_ERROR("pack 0x%08X http status %u", pack->pack_id, nt_http_status(req));
+                        NT_LOG_ERROR("pack 0x%08X http status %u", pack->pack_id, status);
                         io_failed = true;
                     }
                     nt_http_free(req);
@@ -551,7 +552,8 @@ void nt_resource_step(void) {
                 io_failed = true;
             }
 
-            if (io_done && loaded_blob != NULL) {
+            /* Guarded above: io_done now implies a non-NULL, non-empty blob */
+            if (io_done) {
                 NT_LOG_INFO("pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
 
                 /* Check if asset entries already exist (re-download after blob eviction).

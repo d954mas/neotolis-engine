@@ -216,7 +216,7 @@ nt_result_t nt_http_init(void) {
     }
 
     if (!nt_http_backend_init()) {
-        memset(&s_http, 0, sizeof(s_http));
+        /* initialized stays false — the only gate every entry point checks */
         return NT_ERR_INIT_FAILED;
     }
     s_http.initialized = true;
@@ -247,11 +247,12 @@ void nt_http_update(void) {
 nt_http_request_t nt_http_request(const char *url) { return nt_http_request_ex(url, NULL); }
 
 nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *opts) {
-    if (!s_http.initialized || url == NULL || s_http.queue_top == 0) {
-        /* Pool exhaustion is a silent INVALID otherwise — indistinguishable from bad args */
-        if (s_http.initialized && url != NULL) {
-            NT_LOG_WARN("all %d request slots busy, dropping %s", NT_HTTP_MAX_REQUESTS, url);
-        }
+    if (!s_http.initialized || url == NULL) {
+        return NT_HTTP_REQUEST_INVALID;
+    }
+    if (s_http.queue_top == 0) {
+        /* Pool exhaustion would be a silent INVALID otherwise — indistinguishable from bad args */
+        NT_LOG_WARN("all %d request slots busy, dropping %s", NT_HTTP_MAX_REQUESTS, url);
         return NT_HTTP_REQUEST_INVALID;
     }
 
@@ -363,18 +364,10 @@ void nt_http_free(nt_http_request_t req) {
         nt_http_backend_cancel(index);
     }
 
+    /* No scalar clearing needed: after the generation bump below the slot is
+     * unreachable through any handle, and every field is re-initialized on the
+     * next allocation (http_copy_request + nt_http_request_ex). */
     http_free_slot_buffers(slot);
-
-    /* Clear slot state */
-    slot->body_size = 0;
-    slot->headers_size = 0;
-    slot->header_pairs = 0;
-    slot->timeout_ms = 0;
-    slot->size = 0;
-    slot->received = 0;
-    slot->total = 0;
-    slot->status = 0;
-    slot->state = (uint8_t)NT_HTTP_STATE_NONE;
 
     /* Increment generation so stale handles are rejected */
     slot->generation++;

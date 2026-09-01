@@ -19,17 +19,22 @@
 #endif
 
 /* Native backend: libcurl multi interface, single-threaded. Transfers advance
- * only inside nt_http_backend_update (curl_multi_perform) — no locks needed. */
+ * only inside nt_http_backend_update (curl_multi_perform) — no locks needed.
+ * The core guarantees backend entry points run only between a successful
+ * backend_init and backend_shutdown, and slot->method arrives fetch-normalized
+ * (canonical uppercase for the six known methods) — plain strcmp suffices. */
+
+typedef struct {
+    uint8_t *data;
+    uint32_t size;
+    uint32_t cap;
+} NtHttpBuf;
 
 typedef struct {
     CURL *easy;
     struct curl_slist *req_headers;
-    uint8_t *buf;
-    uint32_t buf_size;
-    uint32_t buf_cap;
-    char *hdr;
-    uint32_t hdr_size;
-    uint32_t hdr_cap;
+    NtHttpBuf body;
+    NtHttpBuf hdr;
 } NtHttpNativeXfer;
 
 static struct {
@@ -41,34 +46,38 @@ static struct {
 
 /* false on realloc failure or a response outgrowing uint32 sizes — the caller must
  * abort the transfer (return 0 to curl) so a short buffer is never published as DONE. */
-static bool native_buf_append(uint8_t **buf, uint32_t *size, uint32_t *cap, const void *src, size_t n) {
-    uint64_t need = (uint64_t)*size + n;
+static bool native_buf_append(NtHttpBuf *b, const void *src, size_t n) {
+    if (n == 0) {
+        return true; /* memcpy on a still-NULL buffer would be UB even with n=0 */
+    }
+    uint64_t need = (uint64_t)b->size + n;
     if (need > 0xFFFFFFFFULL) {
         return false;
     }
-    if (need > *cap) {
-        uint64_t new_cap = *cap ? *cap : 1024;
+    if (need > b->cap) {
+        uint64_t new_cap = b->cap ? b->cap : 1024;
         while (new_cap < need) {
             new_cap *= 2;
         }
         if (new_cap > 0xFFFFFFFFULL) {
             new_cap = 0xFFFFFFFFULL;
         }
-        uint8_t *grown = realloc(*buf, (size_t)new_cap);
+        uint8_t *grown = realloc(b->data, (size_t)new_cap);
         if (grown == NULL) {
             return false;
         }
-        *buf = grown;
-        *cap = (uint32_t)new_cap;
+        b->data = grown;
+        b->cap = (uint32_t)new_cap;
     }
-    memcpy(*buf + *size, src, n);
-    *size += (uint32_t)n;
+    NT_ASSERT(b->data != NULL); /* n > 0 forces the grow branch while data is NULL */
+    memcpy(b->data + b->size, src, n);
+    b->size += (uint32_t)n;
     return true;
 }
 
 static void native_xfer_free_buffers(NtHttpNativeXfer *xfer) {
-    free(xfer->buf);
-    free(xfer->hdr);
+    free(xfer->body.data);
+    free(xfer->hdr.data);
     memset(xfer, 0, sizeof(*xfer));
 }
 
@@ -78,7 +87,7 @@ static size_t native_on_body(char *ptr, size_t size, size_t nmemb, void *userdat
     NtHttpNativeXfer *xfer = userdata;
     size_t n = size * nmemb;
     /* 0 -> CURLE_WRITE_ERROR -> FAILED: never deliver a truncated body as DONE */
-    return native_buf_append(&xfer->buf, &xfer->buf_size, &xfer->buf_cap, ptr, n) ? n : 0;
+    return native_buf_append(&xfer->body, ptr, n) ? n : 0;
 }
 
 static size_t native_on_header(char *line, size_t size, size_t nmemb, void *userdata) {
@@ -87,7 +96,7 @@ static size_t native_on_header(char *line, size_t size, size_t nmemb, void *user
 
     /* New status line (redirect / 100-continue): previous response's headers are obsolete */
     if (n >= 5 && strncmp(line, "HTTP/", 5) == 0) {
-        xfer->hdr_size = 0;
+        xfer->hdr.size = 0;
         return n;
     }
 
@@ -107,20 +116,19 @@ static size_t native_on_header(char *line, size_t size, size_t nmemb, void *user
         value_len--;
     }
 
-    /* Append "name: value\n" with the name lowercased (parity with the web backend).
-     * Any failed append aborts the transfer (0 -> CURLE_WRITE_ERROR) so a half-written
-     * name can never survive into a published header block. */
-    bool ok = true;
-    for (size_t i = 0; ok && i < name_len; i++) {
-        char c = line[i];
-        if (c >= 'A' && c <= 'Z') {
-            c = (char)(c + ('a' - 'A'));
+    /* Append "name: value\n" with the name lowercased in place (parity with the web
+     * backend). Any failed append aborts the transfer (0 -> CURLE_WRITE_ERROR), so a
+     * partial line never survives into a published header block. */
+    uint32_t name_off = xfer->hdr.size;
+    bool ok = native_buf_append(&xfer->hdr, line, name_len);
+    for (uint32_t i = name_off; ok && i < xfer->hdr.size; i++) {
+        if (xfer->hdr.data[i] >= 'A' && xfer->hdr.data[i] <= 'Z') {
+            xfer->hdr.data[i] = (uint8_t)(xfer->hdr.data[i] + ('a' - 'A'));
         }
-        ok = native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, &c, 1);
     }
-    ok = ok && native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, ": ", 2);
-    ok = ok && native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, value, value_len);
-    ok = ok && native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, "\n", 1);
+    ok = ok && native_buf_append(&xfer->hdr, ": ", 2);
+    ok = ok && native_buf_append(&xfer->hdr, value, value_len);
+    ok = ok && native_buf_append(&xfer->hdr, "\n", 1);
     return ok ? n : 0;
 }
 
@@ -150,18 +158,18 @@ static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
 
     /* Hand over the header block NUL-terminated (may exist even on failure); a
      * headerless success still hands over "" — web never returns NULL after DONE */
-    if (xfer->hdr != NULL || result == CURLE_OK) {
+    if (xfer->hdr.data != NULL || result == CURLE_OK) {
         char zero = '\0';
-        if (native_buf_append((uint8_t **)&xfer->hdr, &xfer->hdr_size, &xfer->hdr_cap, &zero, 1)) {
-            slot->resp_headers = xfer->hdr;
-            xfer->hdr = NULL;
+        if (native_buf_append(&xfer->hdr, &zero, 1)) {
+            slot->resp_headers = (char *)xfer->hdr.data;
+            xfer->hdr.data = NULL;
         } /* else: unterminated block stays in xfer and is freed below */
     }
 
     if (result == CURLE_OK) {
-        slot->data = xfer->buf;
-        slot->size = xfer->buf_size;
-        xfer->buf = NULL;
+        slot->data = xfer->body.data;
+        slot->size = xfer->body.size;
+        xfer->body.data = NULL;
         /* Mid-transfer progress counts wire (possibly compressed) bytes; settle on
          * the decoded size so received==total==size holds for a completed request */
         slot->received = slot->size;
@@ -179,20 +187,6 @@ static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
 }
 
 /* ---- Backend entry points ---- */
-
-/* Case-insensitive method compare: fetch() normalizes method casing, curl does not */
-static bool native_method_is(const char *method, const char *upper) {
-    for (; *method && *upper; method++, upper++) {
-        char c = *method;
-        if (c >= 'a' && c <= 'z') {
-            c = (char)(c - ('a' - 'A'));
-        }
-        if (c != *upper) {
-            return false;
-        }
-    }
-    return *method == *upper;
-}
 
 bool nt_http_backend_init(void) {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
@@ -226,20 +220,19 @@ bool nt_http_backend_init(void) {
 }
 
 void nt_http_backend_shutdown(void) {
+    NT_ASSERT(s_native.multi != NULL);
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         nt_http_backend_cancel(i);
     }
-    if (s_native.multi != NULL) {
-        curl_multi_cleanup(s_native.multi);
-        s_native.multi = NULL;
-    }
+    curl_multi_cleanup(s_native.multi);
+    s_native.multi = NULL;
     curl_global_cleanup();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansions
 static struct curl_slist *native_build_headers(const NtHttpSlot *slot) {
     struct curl_slist *headers = NULL;
-    if (slot->body == NULL && native_method_is(slot->method, "POST")) {
+    if (slot->body == NULL && strcmp(slot->method, "POST") == 0) {
         /* Empty POSTFIELDS makes curl invent x-www-form-urlencoded; fetch sends no
          * Content-Type here. First in the list, so a caller's explicit pair (appended
          * later) still re-adds one. */
@@ -276,13 +269,11 @@ static struct curl_slist *native_build_headers(const NtHttpSlot *slot) {
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     NT_ASSERT(slot != NULL);
+    NT_ASSERT(s_native.multi != NULL);
     NtHttpNativeXfer *xfer = &s_native.xfers[slot_index];
 
     CURL *easy = curl_easy_init();
-    if (easy == NULL || s_native.multi == NULL) {
-        if (easy != NULL) {
-            curl_easy_cleanup(easy);
-        }
+    if (easy == NULL) {
         slot->state = (uint8_t)NT_HTTP_STATE_FAILED;
         return;
     }
@@ -315,16 +306,16 @@ void nt_http_backend_request(uint16_t slot_index) {
          * _LARGE avoids the 32-bit long truncation on LLP64 for 2 GiB+ bodies. */
         curl_easy_setopt(easy, CURLOPT_POSTFIELDS, (const char *)slot->body);
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)slot->body_size);
-    } else if (native_method_is(slot->method, "POST")) {
+    } else if (strcmp(slot->method, "POST") == 0) {
         /* A bodiless POST still needs POST mode + Content-Length: 0 (a bare
          * CUSTOMREQUEST would send neither and many servers answer 411) */
         curl_easy_setopt(easy, CURLOPT_POSTFIELDS, "");
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)0);
     }
-    if (native_method_is(slot->method, "HEAD")) {
+    if (strcmp(slot->method, "HEAD") == 0) {
         /* CUSTOMREQUEST "HEAD" would leave curl waiting for a body that never comes */
         curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
-    } else if (!native_method_is(slot->method, "GET") && !native_method_is(slot->method, "POST")) {
+    } else if (strcmp(slot->method, "GET") != 0 && strcmp(slot->method, "POST") != 0) {
         curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, slot->method);
     }
 
@@ -355,9 +346,7 @@ void nt_http_backend_cancel(uint16_t slot_index) {
 }
 
 void nt_http_backend_update(void) {
-    if (s_native.multi == NULL) {
-        return;
-    }
+    NT_ASSERT(s_native.multi != NULL);
     int running = 0;
     CURLMcode rc = curl_multi_perform(s_native.multi, &running);
     if (rc != CURLM_OK) {
