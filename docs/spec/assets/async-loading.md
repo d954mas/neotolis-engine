@@ -165,22 +165,24 @@ Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
 
 ```c
 // Called from C → JS (request parameters read from the slot)
-void nt_http_web_fetch(int slot, int generation, int epoch, const char *url,
+void nt_http_web_fetch(int slot, int generation, const char *url,
                        const char *method, const uint8_t *body, int body_size,
                        const char *headers, int headers_size, int timeout_ms);
 
-// Called from JS → C (generation- AND epoch-checked against the slot)
+// Called from JS → C (generation-checked against the slot)
 EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_progress(int slot, int generation, int epoch, int received, int total);
+void nt_http_web_on_progress(int slot, int generation, int received, int total);
 
 EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_complete(int slot, int generation, int epoch, uint8_t *data, int size,
+void nt_http_web_on_complete(int slot, int generation, uint8_t *data, int size,
                              int status, char *resp_headers, int success);
 ```
 
-`epoch` is bumped on every module init: slot generations restart after a
-shutdown/init cycle, so `(slot, generation)` alone cannot reject a callback from
-a fetch started in a previous lifecycle of the module — the epoch check does.
+The `(slot, generation)` pair is the single staleness mechanism: freeing a slot
+bumps its generation, and `nt_http_shutdown` bumps and PRESERVES every
+generation across shutdown/init, so a callback from a fetch started in a
+previous lifecycle of the module always mismatches (its payload is freed on
+rejection).
 
 ## Asset activation strategy
 

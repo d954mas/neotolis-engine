@@ -207,9 +207,9 @@ nt_result_t nt_http_init(void) {
         return NT_ERR_INIT_FAILED;
     }
 
-    memset(&s_http, 0, sizeof(s_http));
-
-    /* Fill free queue: stack with lowest index on top (first alloc gets 1) */
+    /* Slots are NOT cleared here: nt_http_shutdown left them zeroed with their
+     * generations bumped and preserved, so a callback from a previous lifecycle
+     * of the module can never match a new handle (first boot: static zero). */
     s_http.queue_top = NT_HTTP_MAX_REQUESTS;
     for (uint16_t i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
         s_http.free_queue[i] = (uint16_t)(NT_HTTP_MAX_REQUESTS - i);
@@ -229,10 +229,19 @@ void nt_http_shutdown(void) {
         return;
     }
     nt_http_backend_shutdown();
+    /* Bump and PRESERVE every generation: completions of fetches aborted above are
+     * already scheduled on the web backend and fire later — after the bump they
+     * mismatch, across any number of shutdown/init cycles. One staleness mechanism
+     * (the generation) covers both slot reuse and module re-init. */
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
-        http_free_slot_buffers(&s_http.slots[i]);
+        NtHttpSlot *slot = &s_http.slots[i];
+        http_free_slot_buffers(slot);
+        uint16_t gen = (uint16_t)(slot->generation + 1);
+        memset(slot, 0, sizeof(*slot));
+        slot->generation = gen != 0 ? gen : 1;
     }
-    memset(&s_http, 0, sizeof(s_http));
+    s_http.queue_top = 0;
+    s_http.initialized = false;
 }
 
 void nt_http_update(void) {

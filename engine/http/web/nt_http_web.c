@@ -12,7 +12,7 @@
  * export for wasmExports['malloc']; HEAPU8 is an always-present global (no dep). */
 EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")
 
-EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const char *url_ptr, const char *method_ptr,
+EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_ptr, const char *method_ptr,
                                 const uint8_t *body_ptr, int body_size, const char *headers_ptr, int headers_size,
                                 int timeout_ms), {
     var url = UTF8ToString(url_ptr);
@@ -36,7 +36,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
         if (Module['_nt_http_controllers'][slot_index] === controller) {
             delete Module['_nt_http_controllers'][slot_index];
         }
-        _nt_http_web_on_complete(slot_index, generation, epoch, ptr, size, status, hdrs, success);
+        _nt_http_web_on_complete(slot_index, generation, ptr, size, status, hdrs, success);
         hdrs = 0;
     }
     function headerBlock(response) {
@@ -119,7 +119,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
                     chunks.push(chunk);
                     received += chunk.length;
                     /* Clamp: the int params would wrap past 2^31 (huge bodies fail later at malloc anyway) */
-                    _nt_http_web_on_progress(slot_index, generation, epoch,
+                    _nt_http_web_on_progress(slot_index, generation,
                                              received > 0x7FFFFFFF ? 0x7FFFFFFF : received,
                                              total > 0x7FFFFFFF ? 0x7FFFFFFF : total);
                     pump();
@@ -166,14 +166,12 @@ EM_JS(void, nt_http_web_cancel, (int slot_index), {
 
 /* ---- EMSCRIPTEN_KEEPALIVE callbacks (called from JS) ---- */
 
-/* Lifecycle epoch: bumped on every module init. Slot generations restart after a
- * shutdown/init cycle, so (slot, generation) alone cannot reject a callback from a
- * fetch that was started (and aborted) in a previous epoch of the module. */
-static int s_web_epoch;
-
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation, int epoch, int received, int total) {
+/* Staleness: the (slot, generation) pair alone rejects late callbacks — slot reuse
+ * bumps the generation on free, and nt_http_shutdown bumps AND preserves every
+ * generation, so fetches from a previous lifecycle of the module mismatch too. */
+EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation, int received, int total) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (epoch != s_web_epoch || !slot || slot->generation != (uint16_t)generation) {
+    if (!slot || slot->generation != (uint16_t)generation) {
         return;
     }
     slot->received = (uint32_t)received;
@@ -181,9 +179,9 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation
     slot->state = (uint8_t)NT_HTTP_STATE_DOWNLOADING;
 }
 
-EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, int epoch, uint8_t *data, int size, int status, char *resp_headers, int success) {
+EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, uint8_t *data, int size, int status, char *resp_headers, int success) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
-    if (epoch != s_web_epoch || !slot || slot->generation != (uint16_t)generation) {
+    if (!slot || slot->generation != (uint16_t)generation) {
         free(data);
         free(resp_headers);
         return;
@@ -203,13 +201,10 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation
 
 /* ---- Backend entry points ---- */
 
-bool nt_http_backend_init(void) {
-    s_web_epoch++; /* callbacks from any previous epoch's fetches are now rejected */
-    return true;
-}
+bool nt_http_backend_init(void) { return true; }
 
 /* Abort everything in flight: their (already-scheduled) completions are rejected by
- * the epoch check after the next init, freeing whatever they carry. */
+ * the generation bump nt_http_shutdown performs right after, freeing what they carry. */
 void nt_http_backend_shutdown(void) {
     for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
         nt_http_web_cancel((int)i);
@@ -221,7 +216,7 @@ void nt_http_backend_update(void) {}
 void nt_http_backend_request(uint16_t slot_index) {
     NtHttpSlot *slot = nt_http_get_slot(slot_index);
     NT_ASSERT(slot != NULL);
-    nt_http_web_fetch((int)slot_index, (int)slot->generation, s_web_epoch, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
+    nt_http_web_fetch((int)slot_index, (int)slot->generation, slot->url, slot->method, slot->body, (int)slot->body_size, slot->headers, (int)slot->headers_size, (int)slot->timeout_ms);
 }
 
 void nt_http_backend_cancel(uint16_t slot_index) { nt_http_web_cancel((int)slot_index); }
