@@ -1098,6 +1098,26 @@ void test_load_file_transitions_state(void) {
     (void)remove("build/test_pack_load.ntpack");
 }
 
+/* A 0-byte pack (empty file, or a 204/empty 2xx over http) must fail the load,
+ * not park the pack in REQUESTED forever with io_request_id 0 */
+void test_load_file_empty_pack_fails(void) {
+    nt_hash32_t pid = nt_hash32_str("empty_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_retry_policy(1, 100, 1000);
+
+    FILE *f = fopen("build/test_empty.ntpack", "wb");
+    if (f) {
+        (void)fclose(f);
+    }
+
+    nt_result_t r = nt_resource_load_file(pid, "build/test_empty.ntpack");
+    if (r == NT_OK) {
+        nt_resource_step();
+    }
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
+    (void)remove("build/test_empty.ntpack");
+}
+
 void test_load_file_nonexistent(void) {
     nt_hash32_t pid = nt_hash32_str("load_nofile_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
@@ -2902,6 +2922,7 @@ int main(void) {
 
     /* Pack loading tests */
     RUN_TEST(test_load_file_transitions_state);
+    RUN_TEST(test_load_file_empty_pack_fails);
     RUN_TEST(test_load_file_nonexistent);
     RUN_TEST(test_pack_state_api);
     RUN_TEST(test_pack_progress);

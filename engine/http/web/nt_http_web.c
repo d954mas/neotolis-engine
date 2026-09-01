@@ -91,6 +91,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
     fetch(url, init).then(function(response) {
         status = response.status;
         hdrs = headerBlock(response);
+        if (!hdrs) { finish(0, 0, 0); return; } /* OOM: FAILED — native aborts on the same OOM */
 
         /* Try ReadableStream for progress, fall back to arrayBuffer */
         if (response.body && typeof response.body.getReader === 'function') {
@@ -117,7 +118,10 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
                     var chunk = result.value;
                     chunks.push(chunk);
                     received += chunk.length;
-                    _nt_http_web_on_progress(slot_index, generation, epoch, received, total);
+                    /* Clamp: the int params would wrap past 2^31 (huge bodies fail later at malloc anyway) */
+                    _nt_http_web_on_progress(slot_index, generation, epoch,
+                                             received > 0x7FFFFFFF ? 0x7FFFFFFF : received,
+                                             total > 0x7FFFFFFF ? 0x7FFFFFFF : total);
                     pump();
                 }).catch(function(e) {
                     console.error('ERROR [http] stream error slot=' + slot_index, e);
@@ -139,7 +143,12 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
         }
     }).catch(function(err) {
         /* Covers network errors, aborts (cancel/timeout) and throws after headerBlock —
-         * finish still owns hdrs, so the block is handed over, never leaked. */
+         * finish still owns hdrs, so the block is handed over, never leaked. Log
+         * non-abort failures (CORS/mixed-content are otherwise invisible) — parity
+         * with the native backend's NT_LOG_ERROR. */
+        if (!err || err.name !== 'AbortError') {
+            console.error('ERROR [http] fetch failed slot=' + slot_index, err);
+        }
         finish(0, 0, 0);
     });
 })
@@ -180,6 +189,12 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation
     slot->size = (uint32_t)size;
     slot->status = (uint16_t)status;
     slot->resp_headers = resp_headers;
+    if (success) {
+        /* Mid-transfer progress counts stream (decoded) bytes vs a possibly compressed
+         * Content-Length; settle on received==total==size for a completed request */
+        slot->received = slot->size;
+        slot->total = slot->size;
+    }
     slot->state = success ? (uint8_t)NT_HTTP_STATE_DONE : (uint8_t)NT_HTTP_STATE_FAILED;
 }
 

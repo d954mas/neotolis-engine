@@ -121,38 +121,48 @@ body is data, not a transport error) — the caller checks `nt_http_status()`;
 `nt_http_response_headers()` returns lowercased `"name: value\n"` lines, valid
 until `nt_http_free`/`nt_http_shutdown`. `nt_http_update()` pumps native
 transfers (no-op on web/stub) — call it once per frame while requests are in
-flight; `nt_resource_step()` pumps it itself for its packs (see
+flight; `nt_resource_step()` calls it too, and the pump is global, so it
+advances the game's own requests as well (see
 [frame lifecycle](../runtime/frame-lifecycle.md)).
 
 The pack loader treats a non-2xx status and a 2xx response with an empty body as
 load failures (normal retry policy applies).
 
 Redirects: both backends follow them. On 303 both re-issue as GET; on 301/302 the
-native backend (curl `CURLFOLLOW_OBEYCODE`) re-issues as GET for **every** method,
+native backend (curl `CURLFOLLOW_OBEYCODE`) re-issues as GET **any request carrying
+a body** (sent via POSTFIELDS, curl's POST mode — so PUT/PATCH+body demote too),
 while browsers demote only POST and preserve PUT/DELETE/PATCH with their body.
-Avoid endpoints that redirect non-GET/POST requests if this difference matters.
+Bodiless non-POST methods keep their verb on 301/302 on both backends. Avoid
+endpoints that redirect bodied non-POST requests if this difference matters.
 
 Content encoding: both backends negotiate compression and hand the caller
 DECODED bytes — the browser's `fetch()` transparently, the native backend via
 `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders (vendored
-`deps/zlib`, native exe only).
+`deps/zlib`, native exe only). Transport truncation (Content-Length mismatch)
+FAILs on both. A corrupt gzip stream that still satisfies its Content-Length
+diverges: curl tolerates it (partial decoded bytes, DONE — upstream behavior
+for broken servers), browsers fail the fetch.
 
 Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
 
 ```c
 // Called from C → JS (request parameters read from the slot)
-void nt_http_web_fetch(int slot, int generation, const char *url, const char *method,
-                       const uint8_t *body, int body_size, const char *headers,
-                       int headers_size, int timeout_ms);
+void nt_http_web_fetch(int slot, int generation, int epoch, const char *url,
+                       const char *method, const uint8_t *body, int body_size,
+                       const char *headers, int headers_size, int timeout_ms);
 
-// Called from JS → C (generation-checked against the slot)
+// Called from JS → C (generation- AND epoch-checked against the slot)
 EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_progress(int slot, int generation, int received, int total);
+void nt_http_web_on_progress(int slot, int generation, int epoch, int received, int total);
 
 EMSCRIPTEN_KEEPALIVE
-void nt_http_web_on_complete(int slot, int generation, uint8_t *data, int size,
+void nt_http_web_on_complete(int slot, int generation, int epoch, uint8_t *data, int size,
                              int status, char *resp_headers, int success);
 ```
+
+`epoch` is bumped on every module init: slot generations restart after a
+shutdown/init cycle, so `(slot, generation)` alone cannot reject a callback from
+a fetch started in a previous lifecycle of the module — the epoch check does.
 
 ## Asset activation strategy
 

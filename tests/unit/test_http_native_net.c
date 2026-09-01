@@ -76,6 +76,16 @@ static void test_get_hello(void) {
     TEST_ASSERT_EQUAL(strlen("hello-neotolis"), size);
     TEST_ASSERT_EQUAL(0, memcmp(data, "hello-neotolis", size));
     free(data);
+
+    /* Progress settles on the decoded size once DONE; a second take is NULL/0 */
+    uint32_t received = 0;
+    uint32_t total = 0;
+    nt_http_progress(req, &received, &total);
+    TEST_ASSERT_EQUAL((int32_t)size, (int32_t)received);
+    TEST_ASSERT_EQUAL((int32_t)size, (int32_t)total);
+    uint32_t size2 = 999;
+    TEST_ASSERT_NULL(nt_http_take_data(req, &size2));
+    TEST_ASSERT_EQUAL(0, size2);
     nt_http_free(req);
 }
 
@@ -133,9 +143,10 @@ static void test_non_2xx_is_done_with_status(void) {
     nt_http_free(req);
 }
 
-/* Documented native contract (CURLFOLLOW_OBEYCODE): 301/302/303 re-issue as GET for
- * EVERY method (plain FOLLOWLOCATION + CUSTOMREQUEST would resend a bodiless "PUT").
- * Browsers keep non-POST methods on 301/302 — divergence documented in the spec. */
+/* Documented native contract (CURLFOLLOW_OBEYCODE): 301/302 re-issue as GET any
+ * request CARRYING A BODY (POSTFIELDS = curl POST mode, so PUT+body demotes too;
+ * bodiless custom verbs keep their verb). Browsers preserve PUT with its body on
+ * 301/302 — divergence documented in the spec. */
 static void test_put_301_reissued_as_get(void) {
     uint8_t body[64];
     for (uint32_t i = 0; i < sizeof(body); i++) {
@@ -180,6 +191,10 @@ static void test_bodiless_lowercase_post(void) {
     nt_http_request_t req = nt_http_request_ex(make_url("/echo"), &opts);
     TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
     TEST_ASSERT_EQUAL(200, nt_http_status(req));
+    /* The wire really carried Content-Length: 0 (echoed back) — not just no 411 */
+    const char *headers = nt_http_response_headers(req);
+    TEST_ASSERT_NOT_NULL(headers);
+    TEST_ASSERT_NOT_NULL(strstr(headers, "x-echo-content-length: 0"));
     nt_http_free(req);
 }
 
@@ -225,6 +240,52 @@ static void test_cancel_in_flight(void) {
     nt_http_free(again);
 }
 
+/* Transport truncation (Content-Length mismatch + close) must FAIL, never publish
+ * a short body as DONE. NOTE: a CORRUPT gzip stream that still satisfies its
+ * Content-Length is tolerated by curl (partial decoded bytes, DONE) — inherent
+ * divergence from browsers, documented in the spec. */
+static void test_truncated_body_fails(void) {
+    nt_http_request_t req = nt_http_request(make_url("/truncated"));
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+    nt_http_free(req);
+}
+
+/* Empty 200 body: DONE with take_data NULL/0 — canonical on both backends */
+static void test_empty_body_done(void) {
+    nt_http_request_t req = nt_http_request(make_url("/empty"));
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+    uint32_t size = 999;
+    TEST_ASSERT_NULL(nt_http_take_data(req, &size));
+    TEST_ASSERT_EQUAL(0, size);
+    nt_http_free(req);
+}
+
+/* MAXREDIRS: a redirect loop must FAIL, not spin */
+static void test_redirect_loop_fails(void) {
+    nt_http_request_t req = nt_http_request(make_url("/loop"));
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    nt_http_free(req);
+}
+
+/* Documented contract: a FAILED request may still carry a status (timeout mid-body) */
+static void test_timeout_mid_body_keeps_status(void) {
+    nt_http_options_t opts = {.timeout_ms = 300};
+    nt_http_request_t req = nt_http_request_ex(make_url("/slowbody"), &opts);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, pump_to_completion(req));
+    TEST_ASSERT_EQUAL(200, nt_http_status(req));
+    nt_http_free(req);
+}
+
+/* Leaves the transfer in flight on purpose: tearDown's nt_http_shutdown must
+ * cancel a live easy handle and clean up the multi without leaks or crashes */
+static void test_shutdown_with_inflight(void) {
+    nt_http_request_t req = nt_http_request(make_url("/slow"));
+    TEST_ASSERT_NOT_EQUAL(0, req.id);
+    nt_http_update();
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -236,8 +297,13 @@ int main(void) {
     RUN_TEST(test_post_301_becomes_get);
     RUN_TEST(test_bodiless_lowercase_post);
     RUN_TEST(test_gzip_decoded);
+    RUN_TEST(test_truncated_body_fails);
+    RUN_TEST(test_empty_body_done);
+    RUN_TEST(test_redirect_loop_fails);
     RUN_TEST(test_timeout_fails);
+    RUN_TEST(test_timeout_mid_body_keeps_status);
     RUN_TEST(test_connection_refused_fails);
     RUN_TEST(test_cancel_in_flight);
+    RUN_TEST(test_shutdown_with_inflight);
     return UNITY_END();
 }

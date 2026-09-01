@@ -543,7 +543,7 @@ void nt_resource_step(void) {
 
             /* A completed load with no bytes (204, empty file) is a failure — without
              * this the pack would sit in REQUESTED forever with io_request_id 0.
-             * Checked by size too: web malloc(0) returns a non-NULL pointer. */
+             * Size checked too: nt_fs may hand over a non-NULL empty buffer. */
             if (io_done && (loaded_blob == NULL || loaded_size == 0)) {
                 free(loaded_blob);
                 loaded_blob = NULL;

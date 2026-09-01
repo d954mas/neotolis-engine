@@ -550,7 +550,7 @@ if(NOT EMSCRIPTEN)
 
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
-    target_link_libraries(test_http PRIVATE nt_http_stub unity)
+    target_link_libraries(test_http PRIVATE nt_http_stub nt_log_stub unity)
     nt_set_warning_flags(test_http)
     nt_set_sanitizer_flags(test_http)
     set_target_properties(test_http PROPERTIES

@@ -6,8 +6,9 @@ Then: build/tests/<preset>/test_http_native_net
 
 Endpoints mirror tests/browser/serve.mjs so both acceptance tests assert the
 same contract: POST /echo (byte-exact echo + request headers reflected into
-X-Echo-* response headers), GET /hello, GET /status404, GET /slow (5 s stall
-for the timeout test).
+X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
+/slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
+/r301hello + /hello301 (redirect probes).
 """
 import gzip
 import sys
@@ -48,6 +49,7 @@ class Handler(BaseHTTPRequestHandler):
             [
                 ("Content-Type", "application/octet-stream"),
                 ("X-Echo-Content-Type", self.headers.get("Content-Type", "")),
+                ("X-Echo-Content-Length", self.headers.get("Content-Length", "")),
                 ("X-Echo-X-Nt-Test", self.headers.get("X-NT-Test", "")),
                 ("X-Echo-Accept-Encoding", self.headers.get("Accept-Encoding", "")),
             ],
@@ -75,6 +77,26 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/gzip":
             body = gzip.compress(b"gzip-payload-neotolis" * 8)
             self._reply(200, body, [("Content-Type", "text/plain"), ("Content-Encoding", "gzip")])
+        elif self.path == "/truncated":
+            # Content-Length 100, 7 bytes, close: transport truncation must FAIL
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"partial")
+            self.wfile.flush()
+            self.close_connection = True
+        elif self.path == "/empty":
+            self._reply(200, b"")
+        elif self.path == "/loop":
+            self._redirect(302, "/loop")
+        elif self.path == "/slowbody":
+            # Headers + partial body, then stall: a timeout here must FAIL with status 200
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"partial")
+            self.wfile.flush()
+            time.sleep(5)
         else:
             self._reply(404, b"")
 

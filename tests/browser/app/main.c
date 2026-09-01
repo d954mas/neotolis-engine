@@ -191,6 +191,11 @@ EMSCRIPTEN_KEEPALIVE void nt_test_http_post_echo(void) {
     s_nt_http_req = nt_http_request_ex("/echo", &opts);
 }
 EMSCRIPTEN_KEEPALIVE void nt_test_http_get_404(void) { s_nt_http_req = nt_http_request("/status404"); }
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
+    nt_http_options_t opts = {.timeout_ms = 300};
+    s_nt_http_req = nt_http_request_ex("/slow", &opts);
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_http_headers(void) {
@@ -242,6 +247,8 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; },
         'http_post_echo': function() { _nt_test_http_post_echo(); },
         'http_get_404': function() { _nt_test_http_get_404(); },
+        'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
+        'http_get_slow': function() { _nt_test_http_get_slow(); },
         'http_state': function() { return _nt_test_http_state(); },
         'http_status': function() { return _nt_test_http_status(); },
         'http_headers': function() { return UTF8ToString(_nt_test_http_headers()); },

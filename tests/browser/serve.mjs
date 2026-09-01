@@ -59,6 +59,11 @@ const server = createServer(async (req, res) => {
     res.end('missing');
     return;
   }
+  if (urlPath === '/slow') {
+    // Stalls 5 s: the timeout/cancel browser tests abort long before this fires.
+    setTimeout(() => res.end('ok'), 5000);
+    return;
+  }
 
   if (urlPath === '/') urlPath = '/index.html';
   // Contain the path inside ROOT (no traversal). Compare against ROOT + sep so a SIBLING dir whose

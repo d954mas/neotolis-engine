@@ -179,10 +179,12 @@ if(NOT EMSCRIPTEN)
     # OFF drops the dependency: native nt_http becomes the always-fail stub.
     option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
     if(NT_HTTP_CURL AND NOT TARGET CURL::libcurl)
-        # Directory-scoped only (no CACHE FORCE): BUILD_* and CMAKE_DISABLE_* are
-        # generic names a consumer superproject may own — same policy as the GLFW
-        # block above. curl pins CMake 3.18+, so CMP0077 is NEW there and its
-        # option() calls honor these normal variables.
+        # block(): BUILD_* and CMAKE_DISABLE_* are generic names a consumer
+        # superproject may own, and later add_subdirectory() calls in THIS file
+        # must not inherit them either — same policy as the GLFW block above.
+        # curl pins CMake 3.18+, so CMP0077 is NEW there and its option() calls
+        # honor these normal variables.
+        block(SCOPE_FOR VARIABLES)
         set(BUILD_CURL_EXE OFF)
         set(BUILD_SHARED_LIBS OFF)
         set(BUILD_STATIC_LIBS ON)
@@ -194,19 +196,28 @@ if(NOT EMSCRIPTEN)
         set(CMAKE_DISABLE_FIND_PACKAGE_Perl ON)
         # A superproject may have found Perl already; curl gates add_subdirectory(docs)
         # on Perl_FOUND and docs/ is stripped from the vendored tree — clear the
-        # inherited results (directory-scoped) so that branch can never run.
+        # inherited results (block-scoped) so that branch can never run.
         set(Perl_FOUND FALSE)
         set(PERL_FOUND FALSE)
         set(PERL_EXECUTABLE "")
         set(HTTP_ONLY ON)
+        # HTTP_ONLY drops non-HTTP protocols only; nt_http exposes none of these
+        # features either — compile them out of the native exe.
+        set(CURL_DISABLE_ALTSVC ON)
+        set(CURL_DISABLE_HSTS ON)
+        set(CURL_DISABLE_DOH ON)
+        set(CURL_DISABLE_COOKIES ON)
+        set(CURL_DISABLE_AWS ON)
         set(CURL_DISABLE_INSTALL ON)
         set(CURL_ENABLE_EXPORT_TARGET OFF)
         set(CURL_USE_LIBPSL OFF)
         set(CURL_USE_LIBSSH2 OFF)
-        # gzip/deflate content decoding: curl's find_package(ZLIB) is redirected to
-        # the vendored deps/zlib (native exe only; wasm uses the browser's decoder).
-        include(FetchContent)
-        FetchContent_Declare(ZLIB SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/zlib" OVERRIDE_FIND_PACKAGE)
+        # gzip/deflate content decoding: curl's find_package(ZLIB) resolves to the
+        # vendored deps/zlib through a module-path shim (native exe only; wasm uses
+        # the browser's decoder). CMAKE_MODULE_PATH is scope-local, unlike
+        # FetchContent OVERRIDE_FIND_PACKAGE whose redirect is build-global and
+        # would hijack a consumer superproject's own find_package(ZLIB).
+        list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/find_shims")
         set(CURL_ZLIB ON)
         set(CURL_BROTLI OFF)
         set(CURL_ZSTD OFF)
@@ -216,6 +227,7 @@ if(NOT EMSCRIPTEN)
             set(CURL_USE_SCHANNEL ON)
         endif()
         add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
+        endblock()
     endif()
 
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)

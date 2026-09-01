@@ -23,6 +23,8 @@ try:
             break
         except OSError:
             time.sleep(0.05)
+    else:
+        sys.exit(f"echo server on port {port} never accepted a connection")
     # An inherited http_proxy/ALL_PROXY would route the loopback requests through a
     # proxy while the readiness probe above connected directly — bypass it explicitly.
     env = dict(

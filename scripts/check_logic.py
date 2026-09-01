@@ -23,11 +23,13 @@ def ctest_command_stems(lines):
         if len(tokens) < 2:
             continue
         # tokens[0] is the test NAME — never registration evidence. The command
-        # (tokens[1]) always counts; later args count only when they point into
-        # the test output dir (wrapper-launched exes: python run_x.py <exe>), so
-        # a test exe merely passed as data to another test cannot satisfy the gate.
+        # (tokens[1]) always counts. Later args count only for python-wrapper
+        # commands AND only when they point into the test output dir (wrapper-
+        # launched exes: python run_x.py <exe>) — an exe passed as data to a
+        # non-wrapper test can never satisfy the gate.
         stems.add(os.path.splitext(os.path.basename(tokens[1]))[0])
-        for token in tokens[2:]:
+        command_is_wrapper = os.path.basename(tokens[1]).startswith("python")
+        for token in tokens[2:] if command_is_wrapper else []:
             if "/build/tests/" in token.replace("\\", "/"):
                 stems.add(os.path.splitext(os.path.basename(token))[0])
     return stems

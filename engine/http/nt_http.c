@@ -1,6 +1,7 @@
 #include "http/nt_http_internal.h"
 
 #include "core/nt_assert.h"
+#include "log/nt_log.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -217,6 +218,10 @@ nt_http_request_t nt_http_request(const char *url) { return nt_http_request_ex(u
 
 nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *opts) {
     if (!s_http.initialized || url == NULL || s_http.queue_top == 0) {
+        /* Pool exhaustion is a silent INVALID otherwise — indistinguishable from bad args */
+        if (s_http.initialized && url != NULL) {
+            NT_LOG_WARN("all %d request slots busy, dropping %s", NT_HTTP_MAX_REQUESTS, url);
+        }
         return NT_HTTP_REQUEST_INVALID;
     }
 
@@ -303,6 +308,12 @@ uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     uint32_t sz = slot->size;
     slot->data = NULL;
     slot->size = 0;
+    /* Canonical empty contract: web hands over malloc(0) (non-NULL under emmalloc),
+     * native hands over NULL — normalize so both backends return NULL/0 */
+    if (sz == 0) {
+        free(ptr);
+        ptr = NULL;
+    }
 
     if (out_size) {
         *out_size = sz;

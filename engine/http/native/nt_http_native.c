@@ -155,6 +155,10 @@ static void native_finish(NtHttpNativeXfer *xfer, CURLcode result) {
         slot->data = xfer->buf;
         slot->size = xfer->buf_size;
         xfer->buf = NULL;
+        /* Mid-transfer progress counts wire (possibly compressed) bytes; settle on
+         * the decoded size so received==total==size holds for a completed request */
+        slot->received = slot->size;
+        slot->total = slot->size;
         slot->state = (uint8_t)NT_HTTP_STATE_DONE;
     } else {
         NT_LOG_ERROR("request failed: %s (%s)", curl_easy_strerror(result), slot->url);
@@ -267,9 +271,10 @@ void nt_http_backend_request(uint16_t slot_index) {
 
     curl_easy_setopt(easy, CURLOPT_URL, slot->url);
     curl_easy_setopt(easy, CURLOPT_PRIVATE, xfer);
-    /* OBEYCODE = RFC redirect semantics like fetch(): 303 -> GET, 301/302 -> GET only
-     * for POST; other methods keep their method AND body (plain FOLLOWLOCATION with
-     * CUSTOMREQUEST would resend a PUT after 301 without its body) */
+    /* OBEYCODE = RFC redirect semantics: 303 -> GET always; 301/302 -> GET for any
+     * request in POST mode, i.e. anything sent via POSTFIELDS (so PUT+body demotes
+     * too — browsers keep it; divergence documented in the spec); bodiless custom
+     * methods keep their verb on 301/302 */
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 16L);
     /* "" = advertise and transparently decode every built-in encoding (gzip/deflate

@@ -10,6 +10,8 @@ declare global {
       ready: boolean;
       http_post_echo(): void;
       http_get_404(): void;
+      http_get_slow_timeout(): void;
+      http_get_slow(): void;
       http_state(): number; // nt_http_state_t: 3 = DONE, 4 = FAILED
       http_status(): number;
       http_headers(): string;
@@ -20,6 +22,7 @@ declare global {
 }
 
 const DONE = 3;
+const FAILED = 4;
 
 test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', async ({ page }) => {
   await page.goto('/index.html');
@@ -46,4 +49,26 @@ test('http: POST body arrives verbatim, headers/status surface, 404 is DONE', as
     .toBe(DONE);
   expect(await page.evaluate(() => window.__nt!.http_status())).toBe(404);
   await page.evaluate(() => window.__nt!.http_free());
+});
+
+test('http: timeout aborts to FAILED; free mid-download cancels and the slot is reusable', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+
+  // timeout_ms=300 against /slow (5 s stall): the AbortController path must end FAILED.
+  await page.evaluate(() => window.__nt!.http_get_slow_timeout());
+  await expect
+    .poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 })
+    .toBe(FAILED);
+  await page.evaluate(() => window.__nt!.http_free());
+
+  // Cancel: free while the fetch is in flight, then reuse the slot for a real request.
+  // The aborted fetch's late callback must not touch the reused slot (generation guard).
+  await page.evaluate(() => window.__nt!.http_get_slow());
+  await page.evaluate(() => window.__nt!.http_free());
+  await page.evaluate(() => window.__nt!.http_post_echo());
+  await expect
+    .poll(() => page.evaluate(() => window.__nt!.http_state()), { timeout: 10_000 })
+    .toBe(DONE);
+  expect(await page.evaluate(() => window.__nt!.http_verify_echo())).toBe(1);
 });

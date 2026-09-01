@@ -1,8 +1,8 @@
 # zlib 1.3.1 (vendored, sources only) -- thin wrapper like deps/cjson.
 # Upstream's own CMakeLists is deliberately absent: it renames zconf.h inside
 # the source tree during configure. The stock zconf.h works as shipped.
-# Consumed by deps/curl through find_package(ZLIB) redirected via
-# FetchContent OVERRIDE_FIND_PACKAGE (see the curl block in the root CMakeLists).
+# Consumed by deps/curl through find_package(ZLIB) resolved by the
+# cmake/find_shims/FindZLIB.cmake shim (see the curl block in the root CMakeLists).
 
 add_library(zlib_vendored STATIC
     adler32.c
@@ -25,5 +25,6 @@ target_include_directories(zlib_vendored PUBLIC $<BUILD_INTERFACE:${CMAKE_CURREN
 if(WIN32)
     target_compile_definitions(zlib_vendored PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 endif()
-
-add_library(ZLIB::ZLIB ALIAS zlib_vendored)
+# No ZLIB::ZLIB alias here: an alias of a non-imported target is global and would
+# collide with a consumer's real find_package(ZLIB). The find shim creates a
+# directory-scoped IMPORTED ZLIB::ZLIB for curl instead.
