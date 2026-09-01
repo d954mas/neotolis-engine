@@ -249,8 +249,13 @@ nt_result_t nt_text_renderer_restore_gpu(void) {
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
     s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
+    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
+        /* Restore contract: failure releases partial GPU resources. */
+        destroy_gpu_resources();
+        return NT_ERR_INIT_FAILED;
+    }
     /* The vertex input is not part of the verdict: flush retries it lazily. */
-    return (s_text.vbo.id != 0 && s_text.ibo.id != 0) ? NT_OK : NT_ERR_INIT_FAILED;
+    return NT_OK;
 }
 // #endregion
 

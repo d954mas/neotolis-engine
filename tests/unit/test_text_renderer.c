@@ -456,6 +456,24 @@ void test_flush_retries_vertex_input_after_backend_failure(void) {
     nt_gfx_end_frame();
 }
 
+/* Restore contract: failure releases partial GPU resources (resource.md). */
+void test_failed_restore_releases_partial_buffers(void) {
+    nt_gfx_stub_test_fail_buffer_creates(2); /* vbo succeeds, ibo fails */
+    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_text_renderer_restore_gpu());
+
+    /* The orphaned vbo would hold one of the 16 buffer pool slots. */
+    nt_buffer_t buffers[16];
+    for (uint32_t i = 0; i < 16; i++) {
+        buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
+    }
+    for (uint32_t i = 0; i < 16; i++) {
+        nt_gfx_destroy_buffer(buffers[i]);
+    }
+
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
+}
+
 /* Two materials on one program and one render state are one pipeline: the key is
  * the pipeline signature, not the material's identity. */
 void test_materials_sharing_a_program_share_one_pipeline(void) {
@@ -1331,6 +1349,7 @@ int main(void) {
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
     RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
+    RUN_TEST(test_failed_restore_releases_partial_buffers);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);
     RUN_TEST(test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);

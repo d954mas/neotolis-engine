@@ -413,10 +413,11 @@ static void frame(void) {
         });
         /* Materials retain their handles; rendering waits for relinking on a later frame.
          * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
+        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
-        nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
