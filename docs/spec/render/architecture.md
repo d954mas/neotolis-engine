@@ -103,10 +103,13 @@ rejects the bind with VAO 0. Vertex inputs die with a lost context
 and are not auto-restored: loss itself frees their pool slots, so a handle
 held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
 Renderer restore paths recreate them; caches validate on lookup and
-self-heal. This is the rule for baked objects, which have no re-fill path.
-Primary resources (buffers, textures, shaders, programs) instead survive a
-loss as husks — pool slot alive, backend gone — because the restore recipe
-has their owners destroy the old handles explicitly.
+self-heal. This is the rule for baked objects — pipelines and vertex
+inputs, both assembled from other handles with no re-fill path: a context
+loss frees their pool slots outright. Primary resources (buffers, textures,
+shaders, programs) instead survive a loss as husks — pool slot alive,
+backend gone — because per-frame code keeps operating on them through the
+loss window and the restore recipe has their owners destroy the old handles
+explicitly.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -121,8 +124,9 @@ to sampler units and material params. Planned fixes are fixed sampler-unit
 assignments per program (#359) and per-material param UBOs bound at material
 transitions (#133). Until both land, two materials sharing one program must
 declare the same params and texture slots. Destroying a program destroys its
-pipelines; renderers remove dead cache
-records during insertion after a miss or when resetting their caches.
+pipelines, and a context loss frees every pipeline slot; renderers remove
+dead cache records during insertion after a miss or when resetting their
+caches.
 
 **Cache identity.** Renderers key their pipeline caches on a 64-bit
 hash of the pipeline signature — program handle and render

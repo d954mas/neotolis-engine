@@ -567,13 +567,17 @@ void nt_gfx_begin_frame(void) {
         for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
             s_gfx.program_backends[i] = 0;
         }
+        /* Pipelines and vertex inputs are baked objects with no re-fill path:
+         * loss frees their slots outright, so handles held across a loss go
+         * stale and the weak renderer caches self-heal on their validity
+         * checks. Primary resources stay as husks -- owners destroy them. */
         for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+            if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
+                nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
+            }
             s_gfx.pipeline_backends[i] = 0;
+            s_gfx.pipeline_programs[i] = 0;
         }
-        /* Vertex inputs are baked objects with no re-fill path: loss frees
-         * their slots outright, so handles held across a loss go stale and
-         * renderer caches self-heal on their validity checks. Primary
-         * resources below stay as husks -- their owners destroy the handles. */
         for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
             if (nt_pool_slot_alive(&s_gfx.vertex_input_pool, i)) {
                 nt_pool_free(&s_gfx.vertex_input_pool, s_gfx.vertex_input_pool.slots[i].id);
@@ -1478,8 +1482,8 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0 &&
-              "bind_pipeline: this pipeline outlived a context loss -- call the owning renderer's restore entry point (nt_*_renderer_restore_gpu) in the restored frame");
+    /* Loss frees pipeline slots, so a live slot always has a backend. */
+    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0 && "bind_pipeline: live slot without backend");
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
 #ifdef NT_TEST_ACCESS
     s_test_bound_pipeline = pip;

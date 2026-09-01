@@ -1816,6 +1816,36 @@ void test_gfx_update_texture_invalid_handle(void) {
     nt_gfx_update_texture(tex, 0, 0, 1, 1, data); /* should log error, not crash */
 }
 
+/* Pipelines are baked objects: loss frees their slots outright (the vertex-
+ * input rule), the handle goes stale, the bind is the ordinary invalid path,
+ * and every slot is allocatable again. */
+void test_gfx_pipeline_slots_freed_by_context_loss(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame(); /* latches the loss, frees pipeline slots */
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame(); /* recovery completes */
+
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip));
+    nt_gfx_bind_pipeline(pip);    /* stale: ordinary invalid path, no trap */
+    nt_gfx_destroy_pipeline(pip); /* stale: tolerated no-op */
+
+    /* Programs survive as husks; relink before building new pipelines. */
+    nt_gfx_destroy_program(prog);
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pips[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        pips[i] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = fresh});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pips[i].id);
+    }
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_gfx_destroy_pipeline(pips[i]);
+    }
+    nt_gfx_end_frame();
+}
+
 /* ---- Per-frame draw call counter ---- */
 
 /* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
@@ -2081,6 +2111,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_valid);
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
+    RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_restored_frame_rejects_draws);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);

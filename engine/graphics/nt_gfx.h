@@ -519,7 +519,8 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
  * Clear
  * the caller's handle to NT_PROGRAM_INVALID after destruction. */
 void nt_gfx_destroy_program(nt_program_t prog);
-/* Invalid and stale handles are no-ops because program destruction also destroys pipelines. */
+/* Invalid and stale handles are no-ops: program destruction also destroys
+ * pipelines, and a context loss frees every pipeline slot. */
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
@@ -551,7 +552,9 @@ bool nt_gfx_texture_ready(nt_texture_t tex);
 bool nt_gfx_shader_ready(nt_shader_t shd);
 /* Reports a live pool slot, independent of GPU readiness. */
 bool nt_gfx_program_valid(nt_program_t prog);
-/* Reports a live pipeline slot; false after pipeline or program destruction. */
+/* Reports a live pipeline slot; false after pipeline or program destruction,
+ * or a context loss (loss frees every pipeline slot -- pipelines are baked
+ * objects, like vertex inputs). Renderer caches check this on lookup. */
 bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
 /* Reports a live vertex-input slot; false after direct destruction, the
  * destroy_buffer cascade, or a context loss (loss frees every vertex-input
