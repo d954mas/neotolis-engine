@@ -252,6 +252,18 @@ static void gl_bind_vao(GLuint vao) {
     glBindVertexArray(vao);
 }
 
+/* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: with a vertex-input VAO bound
+ * a data op would silently rewire its index binding, and core profile rejects
+ * the bind with VAO 0 -- so index-buffer data ops run inside the service
+ * upload VAO. The EBO detaches on exit because GL keeps attached storage
+ * alive: a dangling attachment would pin a deleted index buffer's memory. */
+static void ebo_upload_begin(void) { gl_bind_vao(s_ebo_upload_vao); }
+
+static void ebo_upload_end(void) {
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    gl_bind_vao(s_gl_cache.vao);
+}
+
 static void nt_gfx_gl_cache_reset(void) {
     gl_bind_vao(0);
     glUseProgram(0);
@@ -1165,22 +1177,12 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
 }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
     if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
         return 0;
     }
-
-    /* Find free pipeline slot */
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_pipelines; i++) {
-        if (s_pipelines[i].program_slot == 0) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == 0) {
-        return 0; /* no free slots */
-    }
+    /* The frontend pool owns slot allocation; the backend table mirrors it. */
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_pipelines && s_pipelines[slot].program_slot == 0);
 
     /* Store pipeline data (fixed-function state + borrowed program only) */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
@@ -1216,18 +1218,11 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
     memset(&s_pipelines[backend_handle], 0, sizeof(s_pipelines[backend_handle]));
 }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     NT_ASSERT(desc != NULL);
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs; i++) {
-        if (s_vertex_inputs[i].vao == 0) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == 0) {
-        return 0; /* no free slots */
-    }
+    /* The frontend pool owns slot allocation; the backend table mirrors it. */
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_vertex_inputs && s_vertex_inputs[slot].vao == 0);
 
     GLuint vao = 0;
     glGenVertexArrays(1, &vao);
@@ -1331,22 +1326,14 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         break;
     }
     GLenum usage = map_buffer_usage(desc->usage);
-    /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: with a vertex-input VAO
-     * bound this data op would silently rewire its index binding, and core
-     * profile rejects the bind with VAO 0. All index-buffer data ops run
-     * inside the service upload VAO (few extra binds, off hot path). */
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(s_ebo_upload_vao);
+        ebo_upload_begin();
     }
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
-        /* Detach the EBO before leaving the upload VAO: GL keeps attached
-         * storage alive, so a dangling attachment would pin a deleted
-         * index buffer's memory until the next upload. */
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        gl_bind_vao(s_gl_cache.vao);
+        ebo_upload_end();
     }
 
     /* Find free buffer slot */
@@ -1385,19 +1372,14 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
-    /* Index-buffer data ops run inside the upload VAO -- see create_buffer. */
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(s_ebo_upload_vao);
+        ebo_upload_begin();
     }
     glBindBuffer(target, buf);
     glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
-        /* Detach the EBO before leaving the upload VAO: GL keeps attached
-         * storage alive, so a dangling attachment would pin a deleted
-         * index buffer's memory until the next upload. */
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        gl_bind_vao(s_gl_cache.vao);
+        ebo_upload_end();
     }
 }
 
@@ -1407,10 +1389,9 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     }
     GLuint buf = s_buffer_gl[backend_handle];
     GLenum target = s_buffer_targets[backend_handle];
-    /* Index-buffer data ops run inside the upload VAO -- see create_buffer. */
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
-        gl_bind_vao(s_ebo_upload_vao);
+        ebo_upload_begin();
     }
     glBindBuffer(target, buf);
     /* glBufferData with non-NULL data both orphans the existing storage and
@@ -1420,11 +1401,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * rewriting a buffer that's still in flight. */
     glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
     if (unhook_vao) {
-        /* Detach the EBO before leaving the upload VAO: GL keeps attached
-         * storage alive, so a dangling attachment would pin a deleted
-         * index buffer's memory until the next upload. */
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        gl_bind_vao(s_gl_cache.vao);
+        ebo_upload_end();
     }
 }
 

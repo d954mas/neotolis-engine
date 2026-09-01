@@ -50,7 +50,6 @@ static nt_blend_state_t s_stub_last_pipeline_blend;
 static uint32_t s_stub_vertex_input_create_count;
 static uint32_t s_stub_bind_vertex_input_count;
 static uint32_t s_stub_bound_vertex_input; /* mirrors the GL backend's bound slot */
-static uint32_t s_stub_next_vertex_input_backend;
 static bool s_stub_fail_next_vertex_input_create;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
@@ -138,7 +137,6 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_vertex_input_create_count = 0;
     s_stub_bind_vertex_input_count = 0;
     s_stub_bound_vertex_input = 0;
-    s_stub_next_vertex_input_backend = 0;
     s_stub_fail_next_vertex_input_create = false;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
@@ -251,7 +249,7 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
 #ifdef NT_TEST_ACCESS
     if (s_stub_fail_next_pipeline_create) {
         s_stub_fail_next_pipeline_create = false;
@@ -263,12 +261,12 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     (void)desc;
 #endif
     (void)program_backend;
-    return 1;
+    return slot;
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend) {
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     (void)desc;
     (void)vbo_backend;
     (void)ibo_backend;
@@ -278,10 +276,8 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
         s_stub_fail_next_vertex_input_create = false;
         return 0;
     }
-    return ++s_stub_next_vertex_input_backend;
-#else
-    return 1;
 #endif
+    return slot;
 }
 
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {

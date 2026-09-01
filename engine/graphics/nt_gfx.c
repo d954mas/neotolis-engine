@@ -937,15 +937,15 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
+    uint32_t slot = nt_pool_slot_index(id);
     uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
-    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend);
+    uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
         nt_pool_free(&s_gfx.pipeline_pool, id);
         return result;
     }
 
-    uint32_t slot = nt_pool_slot_index(id);
     s_gfx.pipeline_backends[slot] = backend;
     s_gfx.pipeline_programs[slot] = desc->program.id;
 
@@ -1000,14 +1000,14 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     uint32_t id = nt_pool_alloc(&s_gfx.vertex_input_pool);
     NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
 
-    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend);
+    uint32_t slot = nt_pool_slot_index(id);
+    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
     if (backend == 0) {
         NT_LOG_ERROR("backend vertex input creation failed");
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return result;
     }
 
-    uint32_t slot = nt_pool_slot_index(id);
     s_gfx.vertex_input_backends[slot] = backend;
     s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
         .vbo_id = desc->vertex_buffer.id,

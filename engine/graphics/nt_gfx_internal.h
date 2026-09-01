@@ -31,12 +31,14 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend);
+/* `slot` is the frontend pool slot: the pool owns allocation, the backend
+ * table mirrors it 1:1 (create_* returns the slot, or 0 on failure). */
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 /* Bakes the desc's layouts and the given buffer backends into an owned VAO.
  * Restores the previously bound VAO before returning. Returns 0 on failure. */
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend);
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
 /* 0 unbinds (VAO 0) and clears the backend's bound-vertex-input record. */
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
