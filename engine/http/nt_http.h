@@ -1,6 +1,9 @@
 #ifndef NT_HTTP_H
 #define NT_HTTP_H
 
+/* Reference semantics = the web backend (fetch()); native approximates it with
+ * libcurl. Canonical divergence table: docs/spec/assets/async-loading.md. */
+
 #include "core/nt_types.h"
 
 #ifndef NT_HTTP_MAX_REQUESTS
@@ -29,10 +32,9 @@ typedef struct {
     const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL */
     const char *const *headers; /* alternating name,value strings ({"Authorization","Bearer x",...});
                                  * sent as raw bytes — encode non-ASCII values yourself
-                                 * (percent/base64) per usual HTTP practice. Backend asymmetry:
-                                 * the browser drops forbidden names (Host, Cookie, Origin, ...)
-                                 * and applies CORS, and fails the request on CR/LF in a value
-                                 * where native sends the bytes verbatim */
+                                 * (percent/base64) per usual HTTP practice. Validation differs
+                                 * per backend (forbidden names, CORS, CR/LF) — see the spec's
+                                 * divergence table */
     uint32_t header_count;      /* number of name/value PAIRS in headers */
     uint32_t timeout_ms;        /* 0 -> no timeout; clamped to INT_MAX ms (~24 days) */
 } nt_http_options_t;
@@ -56,8 +58,8 @@ uint16_t nt_http_status(nt_http_request_t req);
 void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total);
 /* Response headers as "name: value\n" lines, names lowercased; NULL until the request
  * completes (and on a completion OOM). Pointer valid until nt_http_free or
- * nt_http_shutdown. Backend asymmetry: the browser combines duplicate headers into
- * one comma-joined line and hides Set-Cookie; native reports lines in wire order. */
+ * nt_http_shutdown. Block shape differs per backend (duplicates, order, Set-Cookie)
+ * — see the spec's divergence table. */
 const char *nt_http_response_headers(nt_http_request_t req);
 /* Transfers the completed response buffer to the caller; caller frees with free().
  * out_size may be NULL; when non-NULL it receives size or 0 on no transfer.

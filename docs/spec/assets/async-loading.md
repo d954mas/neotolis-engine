@@ -116,6 +116,17 @@ given), and `timeout_ms`. A body on GET/HEAD is asserted out, as are the
 fetch()-forbidden methods CONNECT/TRACE/TRACK — backends would diverge
 otherwise.
 
+**Reference semantics: the web backend.** `nt_http` behaves like `fetch()`; the
+native backend approximates that with libcurl and is NOT byte-identical. The
+guarantees both backends share are the ones in this chapter (state semantics,
+decoded bytes, transport truncation → FAILED, empty body → `take_data` NULL/0,
+progress settling on the decoded size at DONE, method normalization,
+copy-at-call ownership). Everything else follows fetch() only approximately;
+the known divergences live in the table below. A newly found divergence is
+added to the table and pinned by a test — it is not a bug unless it breaks a
+shared guarantee, and it is not silently "fixed" toward either side unless
+parity is cheap.
+
 State semantics: **DONE = a full response arrived with ANY HTTP status** (a 404
 body is data, not a transport error) — the caller checks `nt_http_status()`;
 **FAILED = transport error, timeout or cancel** (a status may still be recorded).
@@ -129,20 +140,24 @@ advances the game's own requests as well (see
 The pack loader treats a non-2xx status and a 2xx response with an empty body as
 load failures (normal retry policy applies).
 
-Redirects: both backends follow them. On 303 both re-issue as GET; on 301/302 the
-native backend (curl `CURLFOLLOW_OBEYCODE`) re-issues as GET **any request carrying
-a body** (sent via POSTFIELDS, curl's POST mode — so PUT/PATCH+body demote too),
-while browsers demote only POST and preserve PUT/DELETE/PATCH with their body.
-Bodiless non-POST methods keep their verb on 301/302 on both backends. Avoid
-endpoints that redirect bodied non-POST requests if this difference matters.
+Both backends follow redirects (303 → GET on both) and negotiate compression,
+handing the caller DECODED bytes — the browser's `fetch()` transparently, the
+native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
+(vendored `deps/zlib`, native exe only).
 
-Content encoding: both backends negotiate compression and hand the caller
-DECODED bytes — the browser's `fetch()` transparently, the native backend via
-`CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders (vendored
-`deps/zlib`, native exe only). Transport truncation (Content-Length mismatch)
-FAILs on both. A corrupt gzip stream that still satisfies its Content-Length
-diverges: curl tolerates it (partial decoded bytes, DONE — upstream behavior
-for broken servers), browsers fail the fetch.
+### Web/native divergences (canonical list)
+
+| Area | Web (reference) | Native (libcurl) |
+| --- | --- | --- |
+| 301/302 of a bodied non-POST (PUT/PATCH+body) | keeps method and body | re-issues as GET (`CURLFOLLOW_OBEYCODE`: anything sent via POSTFIELDS is curl POST mode) |
+| Corrupt gzip that still satisfies Content-Length | fetch FAILs (`ERR_CONTENT_DECODING_FAILED`) | tolerated: DONE with partial decoded bytes (curl upstream behavior for broken servers) |
+| Response header block shape | duplicates combined into one `", "`-joined line, names sorted, `Set-Cookie` hidden | wire order, one line per header |
+| Request header validation | forbidden names (Host, Cookie, Origin, ...) silently dropped, CORS applies, CR/LF in a value throws → FAILED | sent verbatim, no validation |
+| obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
+| Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
+
+Progress numbers are transport-level best effort while DOWNLOADING on both
+backends; at DONE both report `received == total ==` decoded size.
 
 Web bridge (EM_JS in `engine/http/web/nt_http_web.c`):
 
