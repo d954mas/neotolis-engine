@@ -180,7 +180,8 @@ if(NOT EMSCRIPTEN)
     # configure STATUS + runtime WARN at nt_http_init). Subprojects default OFF so a
     # consumer linking only nt_http_stub never pays the curl configure, which
     # hard-requires OpenSSL headers off-Windows; linking real nt_http needs an
-    # explicit -DNT_HTTP_CURL=ON (or a pre-provided CURL::libcurl).
+    # explicit -DNT_HTTP_CURL=ON (a pre-provided CURL::libcurl then skips the
+    # vendored configure but does not replace the ON).
     if(PROJECT_IS_TOP_LEVEL)
         option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
     else()

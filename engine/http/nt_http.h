@@ -29,7 +29,8 @@ typedef struct {
                          * CONNECT/TRACE/TRACK are asserted out (fetch() forbids them) */
     const void *body;   /* copied at call time, caller keeps ownership; NULL -> no body */
     uint32_t body_size;
-    const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL */
+    const char *content_type;   /* NULL -> "application/octet-stream" when body != NULL;
+                                 * ignored when body == NULL — pass it as a headers pair */
     const char *const *headers; /* alternating name,value strings ({"Authorization","Bearer x",...});
                                  * sent as raw bytes — encode non-ASCII values yourself
                                  * (percent/base64) per usual HTTP practice. Validation differs

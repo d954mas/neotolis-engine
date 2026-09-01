@@ -124,7 +124,10 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, int epoch, const
                                              total > 0x7FFFFFFF ? 0x7FFFFFFF : total);
                     pump();
                 }).catch(function(e) {
-                    console.error('ERROR [http] stream error slot=' + slot_index, e);
+                    /* Abort here = deliberate cancel/timeout after headers — not an error */
+                    if (!e || e.name !== 'AbortError') {
+                        console.error('ERROR [http] stream error slot=' + slot_index, e);
+                    }
                     finish(0, 0, 0);
                 });
             }
