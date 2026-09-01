@@ -37,6 +37,7 @@ static uint32_t s_stub_next_texture_backend;
 static bool s_stub_context_lost;
 static bool s_stub_backend_missing;
 static uint8_t s_stub_fail_texture_creates;
+static uint8_t s_stub_fail_buffer_creates;
 static bool s_stub_fail_next_program_create;
 static bool s_stub_lose_context_on_program_create;
 static bool s_stub_fail_next_pipeline_create;
@@ -46,6 +47,10 @@ static bool s_stub_fail_next_render_target_resize;
 static uint32_t s_stub_last_update_buffer_offset;
 static uint32_t s_stub_last_instance_offset;
 static nt_blend_state_t s_stub_last_pipeline_blend;
+static uint32_t s_stub_vertex_input_create_count;
+static uint32_t s_stub_bind_vertex_input_count;
+static uint32_t s_stub_bound_vertex_input; /* mirrors the GL backend's bound slot */
+static bool s_stub_fail_next_vertex_input_create;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_STUB_MAX_SLOTS) {
@@ -84,6 +89,10 @@ void nt_gfx_stub_test_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_stub_fail_texture_creates = mask;
 }
+void nt_gfx_stub_test_fail_buffer_creates(uint8_t mask) {
+    NT_ASSERT(mask <= 3);
+    s_stub_fail_buffer_creates = mask;
+}
 void nt_gfx_stub_test_fail_next_program_create(void) { s_stub_fail_next_program_create = true; }
 void nt_gfx_stub_test_lose_context_on_program_create(void) { s_stub_lose_context_on_program_create = true; }
 void nt_gfx_stub_test_fail_next_pipeline_create(void) { s_stub_fail_next_pipeline_create = true; }
@@ -92,6 +101,10 @@ void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; 
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
 uint32_t nt_gfx_stub_test_last_instance_offset(void) { return s_stub_last_instance_offset; }
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void) { return s_stub_last_pipeline_blend; }
+uint32_t nt_gfx_stub_test_vertex_input_create_count(void) { return s_stub_vertex_input_create_count; }
+uint32_t nt_gfx_stub_test_bind_vertex_input_count(void) { return s_stub_bind_vertex_input_count; }
+uint32_t nt_gfx_stub_test_bound_vertex_input(void) { return s_stub_bound_vertex_input; }
+void nt_gfx_stub_test_fail_next_vertex_input_create(void) { s_stub_fail_next_vertex_input_create = true; }
 
 void nt_gfx_stub_test_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_STUB_MAX_SLOTS; i++) {
@@ -121,9 +134,14 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_last_update_buffer_offset = 0;
     s_stub_last_instance_offset = 0;
     s_stub_last_pipeline_blend = (nt_blend_state_t){0};
+    s_stub_vertex_input_create_count = 0;
+    s_stub_bind_vertex_input_count = 0;
+    s_stub_bound_vertex_input = 0;
+    s_stub_fail_next_vertex_input_create = false;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
     s_stub_fail_texture_creates = 0;
+    s_stub_fail_buffer_creates = 0;
     s_stub_fail_next_program_create = false;
     s_stub_lose_context_on_program_create = false;
     s_stub_fail_next_pipeline_create = false;
@@ -231,7 +249,7 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend) {
+uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
 #ifdef NT_TEST_ACCESS
     if (s_stub_fail_next_pipeline_create) {
         s_stub_fail_next_pipeline_create = false;
@@ -243,13 +261,54 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     (void)desc;
 #endif
     (void)program_backend;
-    return 1;
+    return slot;
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
+    (void)desc;
+    (void)vbo_backend;
+    (void)ibo_backend;
+#ifdef NT_TEST_ACCESS
+    s_stub_vertex_input_create_count++;
+    if (s_stub_fail_next_vertex_input_create) {
+        s_stub_fail_next_vertex_input_create = false;
+        return 0;
+    }
+#endif
+    return slot;
+}
+
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
+#ifdef NT_TEST_ACCESS
+    /* Mirror the GL backend: destroying the bound vertex input unbinds it. */
+    if (backend_handle != 0 && s_stub_bound_vertex_input == backend_handle) {
+        s_stub_bound_vertex_input = 0;
+    }
+#else
+    (void)backend_handle;
+#endif
+}
+
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
+#ifdef NT_TEST_ACCESS
+    s_stub_bind_vertex_input_count++;
+    s_stub_bound_vertex_input = backend_handle;
+#else
+    (void)backend_handle;
+#endif
+}
+
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     (void)desc;
+#ifdef NT_TEST_ACCESS
+    bool fail = (s_stub_fail_buffer_creates & 1U) != 0;
+    s_stub_fail_buffer_creates >>= 1U;
+    if (fail) {
+        return 0;
+    }
+#endif
     return 1;
 }
 
@@ -427,10 +486,6 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 }
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) { (void)backend_handle; }
-
-void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) { (void)backend_handle; }
-
-void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
     (void)backend_handle;

@@ -96,7 +96,7 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 
 ## Render state and material
 
-Material stores render state (blend state, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state + mesh vertex layout at render time.
+Material stores render state (blend state, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state at render time; the mesh vertex layout is baked into a separately bound vertex-input object (see render/architecture.md).
 
 `nt_blend_state_t` is the public, backend-neutral fixed-function blend state. It
 contains separate source and destination factors and operations for RGB and

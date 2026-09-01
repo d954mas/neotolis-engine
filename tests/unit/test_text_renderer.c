@@ -243,7 +243,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_stub_test_reset();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
@@ -434,6 +434,44 @@ void test_flush_stops_after_program_cleared(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+}
+
+/* A recoverable vertex-input creation failure must not disable text until the
+ * next restore: flush retries the creation lazily, like the pipeline cache. */
+void test_flush_retries_vertex_input_after_backend_failure(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(material);
+
+    /* Buffers recreate fine; the vertex input creation fails once. A failed
+     * vertex-input bake alone does not fail the restore -- flush retries it. */
+    nt_gfx_stub_test_fail_next_vertex_input_create();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_flush(); /* without the retry this discards the glyphs */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* Restore contract: failure releases partial GPU resources (resource.md). */
+void test_failed_restore_releases_partial_buffers(void) {
+    nt_gfx_stub_test_fail_buffer_creates(2); /* vbo succeeds, ibo fails */
+    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_text_renderer_restore_gpu());
+
+    /* The orphaned vbo would hold one of the 16 buffer pool slots. */
+    nt_buffer_t buffers[16];
+    for (uint32_t i = 0; i < 16; i++) {
+        buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
+    }
+    for (uint32_t i = 0; i < 16; i++) {
+        nt_gfx_destroy_buffer(buffers[i]);
+    }
+
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
 }
 
 /* Two materials on one program and one render state are one pipeline: the key is
@@ -833,7 +871,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     /* Restore frame: reset the renderer, drop the program, keep the material. */
     nt_gfx_stub_test_set_context_lost(false);
     nt_gfx_begin_frame();
-    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_gfx_destroy_program(first);
     nt_gfx_end_frame();
@@ -1310,6 +1348,8 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
+    RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
+    RUN_TEST(test_failed_restore_releases_partial_buffers);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);
     RUN_TEST(test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);

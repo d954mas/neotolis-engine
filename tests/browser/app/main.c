@@ -18,6 +18,7 @@
 #include "material/nt_program_ref.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
+#include "nt_mesh_format.h" /* in-code mesh blob for the instanced VAO probe */
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
 #include "render/nt_render_defs.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -103,6 +104,106 @@ static uint32_t s_id_input_cyrillic; /* nt_ui_id, resolved once */
 static const nt_ui_label_style_t s_caption = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
 static const nt_ui_label_style_t s_body = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
 static nt_ui_input_style_t s_input_style; /* filled at init (defaults + visible bg/border) */
+// #endregion
+
+// #region mesh probe (instanced VAO path)
+/* Browser probe: two quads use a baked VBO/IBO and instance re-pointing at a
+ * nonzero offset, matching the mesh renderer's WebGL2 VAO path. */
+static nt_shader_t s_mesh_vs, s_mesh_fs;
+static nt_program_t s_mesh_program;
+static nt_pipeline_t s_mesh_pipeline;
+static nt_vertex_input_t s_mesh_vi;
+static nt_buffer_t s_mesh_instance_buf;
+static uint32_t s_mesh_handle;
+static uint32_t s_mesh_index_count, s_mesh_vertex_count;
+
+static const char *s_mesh_vs_src = "precision mediump float;\n"
+                                   "layout(location = 0) in vec3 a_position;\n"
+                                   "layout(location = 4) in vec2 i_offset;\n"
+                                   "void main() { gl_Position = vec4(a_position.xy * 0.1 + i_offset, 0.0, 1.0); }\n";
+static const char *s_mesh_fs_src = "precision mediump float;\n"
+                                   "out vec4 frag_color;\n"
+                                   "void main() { frag_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
+
+/* False when the context is (still) lost mid-restore: the caller retries on a
+ * later frame; partial handles are {0}-safe for mesh_probe_destroy. */
+static bool mesh_probe_create(void) {
+    /* Unit quad, one float3 position stream, uint16 indices. */
+    static const float verts[12] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    static const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts) + sizeof(indices)];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = NT_INDEX_UINT16;
+    hdr->vertex_count = 4;
+    hdr->index_count = 6;
+    hdr->vertex_data_size = sizeof(verts);
+    hdr->index_data_size = sizeof(indices);
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = nt_hash32_str("position").value;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+    memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc), verts, sizeof(verts));
+    memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts), indices, sizeof(indices));
+
+    s_mesh_handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    if (s_mesh_handle == 0) {
+        return false; /* lost context during activation */
+    }
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info((nt_mesh_t){s_mesh_handle});
+    s_mesh_index_count = info->index_count;
+    s_mesh_vertex_count = info->vertex_count;
+
+    s_mesh_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_mesh_vs_src, .label = "mesh_probe_vs"});
+    s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
+    s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs);
+    s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
+    s_mesh_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .vertex_buffer = info->vbo,
+        .index_buffer = info->ibo,
+        .label = "mesh_probe_vi",
+    });
+    s_mesh_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64, .label = "mesh_probe_inst"});
+    return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_instance_buf.id != 0;
+}
+
+static void mesh_probe_destroy(void) {
+    nt_gfx_destroy_vertex_input(s_mesh_vi); /* also stale-safe after a context loss */
+    s_mesh_vi = NT_VERTEX_INPUT_INVALID;
+    if (s_mesh_handle != 0) {
+        nt_gfx_deactivate_mesh(s_mesh_handle);
+        s_mesh_handle = 0;
+    }
+    nt_gfx_destroy_buffer(s_mesh_instance_buf);
+    s_mesh_instance_buf = (nt_buffer_t){0};
+    nt_gfx_destroy_pipeline(s_mesh_pipeline);
+    s_mesh_pipeline = (nt_pipeline_t){0};
+    nt_gfx_destroy_program(s_mesh_program);
+    s_mesh_program = NT_PROGRAM_INVALID;
+    nt_gfx_destroy_shader(s_mesh_fs);
+    nt_gfx_destroy_shader(s_mesh_vs);
+    s_mesh_fs = (nt_shader_t){0};
+    s_mesh_vs = (nt_shader_t){0};
+}
+
+static void mesh_probe_draw(void) {
+    if (s_mesh_vi.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
+        return;
+    }
+    /* Instance data at byte offset 8: proves the nonzero-offset re-pointing
+     * the mesh renderer's ring allocator relies on. Two stacked quads. */
+    float inst[6] = {0.0F, 0.0F, 0.85F, -0.95F, 0.85F, -0.82F};
+    nt_gfx_update_buffer(s_mesh_instance_buf, 0, inst, sizeof(inst));
+    nt_gfx_bind_pipeline(s_mesh_pipeline);
+    nt_gfx_bind_vertex_input(s_mesh_vi);
+    nt_gfx_bind_instance_buffer(s_mesh_instance_buf, 8);
+    nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
+}
 // #endregion
 
 // #region resource binding
@@ -251,6 +352,27 @@ static void render_rich(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region frame
+/* A second loss during recovery skips rendering and retries next frame.
+ * Destroy calls are stale-/{0}-safe, so the step may repeat. */
+static bool s_gpu_restore_pending;
+
+static bool gpu_restore_step(void) {
+    nt_gfx_destroy_buffer(s_frame_ubo);
+    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = sizeof(nt_frame_uniforms_t),
+        .label = "frame_uniforms",
+    });
+    bool ok = s_frame_ubo.id != 0;
+    ok = (nt_sprite_renderer_restore_gpu() == NT_OK) && ok;
+    ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
+    /* The probe's mesh and vertex input died with the context. */
+    mesh_probe_destroy();
+    ok = mesh_probe_create() && ok;
+    return ok;
+}
+
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
@@ -291,25 +413,21 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
+        /* One-shot per restored event; the GPU recreation below may retry. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials retain their handles; rendering waits for relinking on a later frame.
          * Renderer reset and program destruction may run in either order without draws. */
-        nt_sprite_renderer_restore_gpu();
-        nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         /* Font sources survive restore; adding them again asserts on duplicates.
          * nt_font_step rebuilds textures after the font assets reactivate. */
+        s_gpu_restore_pending = true;
+    }
+    if (s_gpu_restore_pending) {
+        s_gpu_restore_pending = !gpu_restore_step();
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -321,7 +439,10 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
+    /* A pending restore means renderer buffers may be missing; submitting
+     * sprites then asserts by contract, so rendering waits it out. */
+    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info &&
+                            nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -396,6 +517,7 @@ static void frame(void) {
 #endif /* __EMSCRIPTEN__ */
 
         nt_text_renderer_flush();
+        mesh_probe_draw(); /* on top of the UI so the spec can pixel-probe it */
 #ifdef __EMSCRIPTEN__
         /* Count frames that actually submitted geometry: reaching the draw path
          * proves nothing if every renderer skipped. */
@@ -450,6 +572,9 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
+    const bool probe_ok = mesh_probe_create();
+    NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
+    (void)probe_ok;
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
@@ -585,6 +710,7 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
+    mesh_probe_destroy();
     nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();

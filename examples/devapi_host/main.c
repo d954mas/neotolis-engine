@@ -298,7 +298,8 @@ int main(void) {
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
     /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
        The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .max_render_targets = 16, .depth = true});
+    nt_gfx_init(&(nt_gfx_desc_t){
+        .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .max_vertex_inputs = 64, .max_render_targets = 16, .depth = true});
 #endif
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.

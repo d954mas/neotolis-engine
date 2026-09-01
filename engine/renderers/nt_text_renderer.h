@@ -33,9 +33,12 @@ _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPH
 
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
-/* Drops staged quads and cached pipelines, then rebuilds GPU buffers.
- * Material, font and decoration state are preserved. */
-void nt_text_renderer_restore_gpu(void);
+/* Drops staged quads and cached pipelines, then rebuilds GPU buffers; material,
+ * font and decoration state are preserved. Failure returns NT_ERR_INIT_FAILED:
+ * retry, or shut down (flush discards glyphs meanwhile instead of asserting; a
+ * failed vertex-input bake alone is retried lazily in flush and reports NT_OK).
+ * Inactive modules are unchanged and return NT_OK. */
+nt_result_t nt_text_renderer_restore_gpu(void);
 
 /* Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE; setters flush on handle changes.
  * Declare u_alpha_cutoff on every material sharing the program or none: omitted uniforms retain prior values.

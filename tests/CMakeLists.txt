@@ -254,6 +254,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
+    # --- Vertex-input object tests (lifecycle, cascade, bind mirrors) ---
+    add_executable(test_gfx_vertex_input unit/test_gfx_vertex_input.c)
+    target_link_libraries(test_gfx_vertex_input PRIVATE nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
+    nt_set_warning_flags(test_gfx_vertex_input)
+    nt_set_sanitizer_flags(test_gfx_vertex_input)
+    set_target_properties(test_gfx_vertex_input PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_gfx_vertex_input COMMAND test_gfx_vertex_input)
+
     # --- Graphics readback tests (nt_gfx_read_pixels) ---
     # nt_gfx_stub bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
     # with the synthetic readback backend, so it alone proves the readback contract headless.

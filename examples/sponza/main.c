@@ -566,7 +566,9 @@ static void frame(void) {
         });
         /* Materials retain their handles; rendering waits for relinking on a later frame.
          * Renderer reset and program destruction may run in either order without draws. */
-        nt_mesh_renderer_restore_gpu();
+        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
@@ -645,6 +647,8 @@ int main(void) {
     gfx_desc.max_textures = 256;
     gfx_desc.max_buffers = 512;
     gfx_desc.max_meshes = 256;
+    /* The vertex-input default is derived from max_meshes(128); scale it too. */
+    gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */

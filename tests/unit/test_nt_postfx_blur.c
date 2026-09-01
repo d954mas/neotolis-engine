@@ -51,6 +51,7 @@ void setUp(void) {
         .max_buffers = 8,
         .max_textures = 12,
         .max_meshes = 4,
+        .max_vertex_inputs = 8,
         .max_render_targets = 4,
     });
     nt_gfx_stub_test_reset();
@@ -359,7 +360,7 @@ static void test_blur_lifecycle_misuse_asserts(void) {
     nt_postfx_blur_shutdown();
     /* Restoring an inactive module is a no-op, not a trap: a game restores every
      * module it might own without tracking which ones it turned off. */
-    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
 }
 

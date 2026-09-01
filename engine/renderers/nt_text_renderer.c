@@ -47,8 +47,9 @@ static struct {
     /* GPU resources */
     nt_renderer_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
     uint16_t pipeline_count;
-    nt_buffer_t vbo; /* dynamic vertex buffer */
-    nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
+    nt_buffer_t vbo;                /* dynamic vertex buffer */
+    nt_buffer_t ibo;                /* immutable index buffer (pre-generated quad pattern) */
+    nt_vertex_input_t vertex_input; /* slug layout baked over vbo+ibo */
 
     /* CPU staging buffer (compile-time arrays) */
     nt_text_vertex_t vertices[NT_TEXT_RENDERER_MAX_VERTICES];
@@ -118,7 +119,8 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline cache
-/* The key omits layout, depth_func and label because they are constant here. */
+/* The key omits depth_func and label because they are constant here; vertex
+ * input is a separate owned object, not pipeline state. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
@@ -135,25 +137,9 @@ static nt_pipeline_t find_or_create_pipeline(void) {
         return cached;
     }
 
-    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
-    nt_vertex_layout_t layout = {
-        .attr_count = 6,
-        .stride = 72,
-        .attrs =
-            {
-                {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
-                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
-                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
-                {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
-                {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
-                {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
-            },
-    };
-
     /* Read render state from material — same pattern as mesh_renderer */
     const nt_pipeline_desc_t desc = {
         .program = program,
-        .layout = layout,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -166,6 +152,34 @@ static nt_pipeline_t find_or_create_pipeline(void) {
 // #endregion
 
 // #region Lifecycle
+/* Missing buffers make VI creation invalid; restore reports their failure.
+ * A VI-only backend failure remains lazy and flush retries it. */
+static void create_vertex_input(void) {
+    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
+        return;
+    }
+    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
+    s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout =
+            {
+                .attr_count = 6,
+                .stride = 72,
+                .attrs =
+                    {
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
+                    },
+            },
+        .vertex_buffer = s_text.vbo,
+        .index_buffer = s_text.ibo,
+        .label = "text_vi",
+    });
+}
+
 /* GPU resources only — pipelines are built lazily on a cache miss, so this owns just the buffers +
  * index pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
 static void create_gpu_resources(void) {
@@ -184,6 +198,7 @@ static void create_gpu_resources(void) {
         .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
+    create_vertex_input();
 }
 
 static void destroy_gpu_resources(void) {
@@ -193,8 +208,10 @@ static void destroy_gpu_resources(void) {
     }
     s_text.pipeline_count = 0;
     s_text.batch_pipeline = (nt_pipeline_t){0}; /* the cache it pointed into is gone */
+    nt_gfx_destroy_vertex_input(s_text.vertex_input);
     nt_gfx_destroy_buffer(s_text.vbo);
     nt_gfx_destroy_buffer(s_text.ibo);
+    s_text.vertex_input = NT_VERTEX_INPUT_INVALID;
     s_text.vbo = (nt_buffer_t){0};
     s_text.ibo = (nt_buffer_t){0};
 }
@@ -220,9 +237,9 @@ void nt_text_renderer_shutdown(void) {
     memset(&s_text, 0, sizeof(s_text));
 }
 
-void nt_text_renderer_restore_gpu(void) {
+nt_result_t nt_text_renderer_restore_gpu(void) {
     if (!s_text.initialized) {
-        return;
+        return NT_OK;
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
      * glyph_depth_bias, oblique, sticky decoration) is left untouched, so it survives by default — no
@@ -231,6 +248,13 @@ void nt_text_renderer_restore_gpu(void) {
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
     s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
+    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
+        /* Restore contract: failure releases partial GPU resources. */
+        destroy_gpu_resources();
+        return NT_ERR_INIT_FAILED;
+    }
+    /* The vertex input is not part of the verdict: flush retries it lazily. */
+    return NT_OK;
 }
 // #endregion
 
@@ -697,15 +721,21 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
+    /* A recoverable creation failure (backend VAO alloc) must not disable
+     * text until the next restore -- retry lazily, like the pipeline cache. */
+    if (!nt_gfx_vertex_input_valid(s_text.vertex_input)) {
+        create_vertex_input();
+    }
     /* Resolved when the batch opened. Re-checked rather than trusted: destroying
      * a program destroys the pipelines built on it, and that can happen between
-     * the first glyph and here. */
+     * the first glyph and here. The vertex input stays invalid when the retry
+     * above failed (context still lost / backend failure). */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
-    if (!nt_gfx_pipeline_valid(pipeline)) {
+    if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
         /* Unready programs were reported at batch open; destruction of a captured
          * pipeline or backend allocation failure still needs a warning. */
         if (!s_text.warned_no_pipeline) {
-            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline -- discarding %u glyphs", s_text.glyph_count);
+            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline or vertex input -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }
         s_text.vertex_count = 0;
@@ -720,8 +750,7 @@ void nt_text_renderer_flush(void) {
     nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
     nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_bind_vertex_buffer(s_text.vbo);
-    nt_gfx_bind_index_buffer(s_text.ibo);
+    nt_gfx_bind_vertex_input(s_text.vertex_input);
 
     /* Bind font textures */
     if (s_text.font.id != 0) {
@@ -757,6 +786,8 @@ void nt_text_renderer_flush(void) {
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
     s_text.batch_pipeline = (nt_pipeline_t){0};
+    /* Recovered: a later distinct failure warns again instead of going silent. */
+    s_text.warned_no_pipeline = false;
 }
 // #endregion
 

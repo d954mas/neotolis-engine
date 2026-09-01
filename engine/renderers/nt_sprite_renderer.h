@@ -85,9 +85,10 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
 
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
-/* Full reset: drops every queued draw command and every cached pipeline, then
- * rebuilds the GPU-side buffers. */
-void nt_sprite_renderer_restore_gpu(void);
+/* Retains CPU storage and initialization; drops queued draws and GPU caches.
+ * Failure returns NT_ERR_INIT_FAILED: retry before drawing/setting materials, or shut down.
+ * Inactive modules are unchanged and return NT_OK. */
+nt_result_t nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
  *   1. Atlas page texture binds to slot 0; material may override sampler.
@@ -192,6 +193,7 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
  * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
+uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 /* Draw commands staged but not yet flushed. */
 uint32_t nt_sprite_renderer_test_cmd_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */

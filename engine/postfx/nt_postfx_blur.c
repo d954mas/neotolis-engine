@@ -64,6 +64,7 @@ static struct {
     nt_program_t program;
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
+    nt_vertex_input_t vertex_input;
     /* Logical life and GPU life are separate: a restore that fails leaves the
      * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
@@ -137,6 +138,7 @@ static void pack_kernel_pairs(const float weights[NT_POSTFX_BLUR_MAX_KERNEL], ui
 }
 
 static void destroy_gpu_resources(void) {
+    nt_gfx_destroy_vertex_input(s_blur.vertex_input);
     if (s_blur.triangle_vbo.id != 0) {
         nt_gfx_destroy_buffer(s_blur.triangle_vbo);
     }
@@ -149,6 +151,7 @@ static void destroy_gpu_resources(void) {
     if (s_blur.vs.id != 0) {
         nt_gfx_destroy_shader(s_blur.vs);
     }
+    s_blur.vertex_input = NT_VERTEX_INPUT_INVALID;
     s_blur.triangle_vbo = (nt_buffer_t){0};
     s_blur.pipeline = (nt_pipeline_t){0};
     s_blur.program = NT_PROGRAM_INVALID;
@@ -173,16 +176,6 @@ static bool make_gpu_resources(void) {
     }
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_blur.program,
-        .layout =
-            {
-                .stride = sizeof(nt_postfx_blur_vertex_t),
-                .attr_count = 2,
-                .attrs =
-                    {
-                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
-                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
-                    },
-            },
         .depth_test = false,
         .depth_write = false,
         .depth_func = NT_DEPTH_ALWAYS,
@@ -196,7 +189,24 @@ static bool make_gpu_resources(void) {
         .size = sizeof(verts),
         .label = "postfx_blur_triangle",
     });
-    return s_blur.pipeline.id != 0 && s_blur.triangle_vbo.id != 0;
+    if (s_blur.triangle_vbo.id == 0) {
+        return false;
+    }
+    s_blur.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout =
+            {
+                .stride = sizeof(nt_postfx_blur_vertex_t),
+                .attr_count = 2,
+                .attrs =
+                    {
+                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
+                    },
+            },
+        .vertex_buffer = s_blur.triangle_vbo,
+        .label = "postfx_blur_vi",
+    });
+    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0;
 }
 
 nt_result_t nt_postfx_blur_init(void) {
@@ -223,7 +233,7 @@ void nt_postfx_blur_shutdown(void) {
 nt_result_t nt_postfx_blur_restore_gpu(void) {
     /* Games may include inactive modules in their recovery sequence. */
     if (!s_blur.initialized) {
-        return NT_ERR_INIT_FAILED;
+        return NT_OK;
     }
     s_blur.gpu_ready = false;
     destroy_gpu_resources();
@@ -376,7 +386,7 @@ static void upload_kernel(uint32_t radius, const float packed[20]) {
 static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const float direction[4], uint32_t radius, const float packed[20]) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
-    nt_gfx_bind_vertex_buffer(s_blur.triangle_vbo);
+    nt_gfx_bind_vertex_input(s_blur.vertex_input);
     nt_gfx_bind_texture(source, 0);
     nt_gfx_set_uniform_int("u_source", 0);
     nt_gfx_set_uniform_vec4("u_direction", direction);

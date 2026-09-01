@@ -180,7 +180,7 @@ typedef struct {
 
 static uint8_t ramp_at(const uint8_t *row, int column) { return row[(size_t)(unsigned)column * 4U]; }
 
-static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, bool depth_write, const nt_vertex_layout_t *layout) {
+static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, bool depth_write) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -188,7 +188,6 @@ static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fs.id);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = *layout,
         .depth_test = depth_write,
         .depth_write = depth_write,
         .depth_func = NT_DEPTH_ALWAYS,
@@ -196,6 +195,15 @@ static nt_pipeline_t make_test_pipeline(const char *vs_src, const char *fs_src, 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     return pip;
 }
+
+static nt_vertex_input_t make_test_vertex_input(const nt_vertex_layout_t *layout, nt_buffer_t vbo) {
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = *layout, .vertex_buffer = vbo});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, vi.id);
+    return vi;
+}
+
+/* gl_VertexID draws still need a bound vertex input: the empty one. */
+static void bind_empty_vertex_input(void) { nt_gfx_bind_vertex_input(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0})); }
 
 static void test_custom_blend_state_reaches_gl_unchanged(void) {
     nt_blend_state_t blend = nt_blend_alpha();
@@ -334,7 +342,6 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = prog,
-        .layout = layout,
         .blend = nt_blend_multiply(),
     });
     nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -343,6 +350,7 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
         .data = fullscreen_tri,
         .size = sizeof(fullscreen_tri),
     });
+    nt_vertex_input_t vertex_input = make_test_vertex_input(&layout, vertices);
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
         .height = 4,
@@ -361,7 +369,7 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.2F, 0.4F, 0.8F, 0.6F}});
     nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_bind_vertex_buffer(vertices);
+    nt_gfx_bind_vertex_input(vertex_input);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     nt_gfx_end_pass();
@@ -369,6 +377,7 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
 
     assert_rgba(pixels, 16, 26, 26, 153, 153);
     nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_vertex_input(vertex_input);
     nt_gfx_destroy_buffer(vertices);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
@@ -425,9 +434,11 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     };
     nt_buffer_t depth_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = right_half_quad, .size = sizeof(right_half_quad)});
     nt_buffer_t fullscreen_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = fullscreen_tri, .size = sizeof(fullscreen_tri)});
-    nt_pipeline_t depth_pip = make_test_pipeline(s_depth_vs, s_depth_fs, true, &depth_layout);
-    nt_pipeline_t shadow_pip = make_test_pipeline(s_fullscreen_vs, s_shadow_fs, false, &fullscreen_layout);
-    nt_pipeline_t raw_pip = make_test_pipeline(s_fullscreen_vs, s_raw_fs, false, &fullscreen_layout);
+    nt_pipeline_t depth_pip = make_test_pipeline(s_depth_vs, s_depth_fs, true);
+    nt_pipeline_t shadow_pip = make_test_pipeline(s_fullscreen_vs, s_shadow_fs, false);
+    nt_pipeline_t raw_pip = make_test_pipeline(s_fullscreen_vs, s_raw_fs, false);
+    nt_vertex_input_t depth_vi = make_test_vertex_input(&depth_layout, depth_vbo);
+    nt_vertex_input_t fullscreen_vi = make_test_vertex_input(&fullscreen_layout, fullscreen_vbo);
 
     nt_sampler_t comparison = nt_gfx_make_sampler(&(nt_sampler_desc_t){
         .min_filter = NT_FILTER_LINEAR,
@@ -450,7 +461,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = shadow_map, .clear_color = {0, 0, 0, 1}, .clear_depth = 0.2F});
     nt_gfx_bind_pipeline(depth_pip);
-    nt_gfx_bind_vertex_buffer(depth_vbo);
+    nt_gfx_bind_vertex_input(depth_vi);
     nt_gfx_draw(0, 6);
     nt_gfx_end_pass();
 
@@ -460,7 +471,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(shadow_pip);
-    nt_gfx_bind_vertex_buffer(fullscreen_vbo);
+    nt_gfx_bind_vertex_input(fullscreen_vi);
     nt_gfx_bind_texture(depth_tex, 0);
     nt_gfx_bind_sampler(comparison, 0);
     nt_gfx_set_uniform_int("u_shadow", 0);
@@ -487,7 +498,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(raw_pip);
-    nt_gfx_bind_vertex_buffer(fullscreen_vbo);
+    nt_gfx_bind_vertex_input(fullscreen_vi);
     nt_gfx_bind_texture(depth_tex, 0);
     nt_gfx_bind_sampler(raw, 0);
     nt_gfx_set_uniform_int("u_depth", 0);
@@ -714,6 +725,7 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     nt_gfx_set_uniform_vec4("u_color", green);
     nt_gfx_bind_pipeline(pip_b);
+    bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
 
     uint8_t pixels[4 * 4 * 4] = {0};
@@ -774,6 +786,7 @@ static void test_each_pipeline_binds_its_own_program(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_red);
+    bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 255, 0, 0, 255);
@@ -781,6 +794,7 @@ static void test_each_pipeline_binds_its_own_program(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_blue);
+    bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 0, 0, 255, 255);
@@ -838,6 +852,7 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_b);
+    bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 0, 255, 0, 255);
