@@ -122,13 +122,18 @@ static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const
             continue;
         }
         const nt_texture_t tex = {.id = v->resolved_tex[t]};
+        uint32_t want = v->resolved_sampler[t].id;
         if (v->resolved_tex[t] != b->tex[t]) {
+            const uint32_t def = nt_gfx_get_texture_default_sampler(tex).id;
             nt_gfx_bind_texture(tex, t);
             b->tex[t] = v->resolved_tex[t];
-            /* bind_texture also installed the texture's asset-baked default. */
-            b->sampler[t] = nt_gfx_get_texture_default_sampler(tex).id;
+            b->sampler[t] = def; /* bind_texture also installed the asset-baked default */
+            if (want == 0) {
+                want = def;
+            }
+        } else if (want == 0) {
+            want = nt_gfx_get_texture_default_sampler(tex).id;
         }
-        const uint32_t want = (v->resolved_sampler[t].id != 0) ? v->resolved_sampler[t].id : nt_gfx_get_texture_default_sampler(tex).id;
         if (want != b->sampler[t]) {
             nt_gfx_bind_sampler((nt_sampler_t){.id = want}, t);
             b->sampler[t] = want;

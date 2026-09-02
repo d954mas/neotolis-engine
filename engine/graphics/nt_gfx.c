@@ -1779,13 +1779,33 @@ void nt_gfx_set_uniform_int_h(nt_hash32_t name, int val) {
     nt_gfx_backend_set_uniform_int(name.value, val);
 }
 
-void nt_gfx_set_uniform_mat4(const char *name, const float *matrix) { nt_gfx_set_uniform_mat4_h(nt_hash32_str(name), matrix); }
+void nt_gfx_set_uniform_mat4(const char *name, const float *matrix) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_uniform_mat4(nt_hash32_str(name).value, matrix);
+}
 
-void nt_gfx_set_uniform_vec4(const char *name, const float *vec) { nt_gfx_set_uniform_vec4_h(nt_hash32_str(name), vec); }
+void nt_gfx_set_uniform_vec4(const char *name, const float *vec) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_uniform_vec4(nt_hash32_str(name).value, vec);
+}
 
-void nt_gfx_set_uniform_float(const char *name, float val) { nt_gfx_set_uniform_float_h(nt_hash32_str(name), val); }
+void nt_gfx_set_uniform_float(const char *name, float val) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_uniform_float(nt_hash32_str(name).value, val);
+}
 
-void nt_gfx_set_uniform_int(const char *name, int val) { nt_gfx_set_uniform_int_h(nt_hash32_str(name), val); }
+void nt_gfx_set_uniform_int(const char *name, int val) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_uniform_int(nt_hash32_str(name).value, val);
+}
 
 /* ---- Draw calls ---- */
 

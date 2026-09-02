@@ -109,7 +109,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
         slot->tex_resources[i] = desc->textures[i].resource;
         slot->info.tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
-        slot->info.tex_names[i] = desc->textures[i].name; /* must be static storage */
         slot->info.resolved_sampler[i] = desc->textures[i].sampler;
     }
 
@@ -120,7 +119,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         NT_ASSERT(desc->params[i].name != NULL && "material param needs a uniform name");
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
         slot->info.param_name_hashes[i] = nt_hash32_str(desc->params[i].name).value;
-        slot->info.param_names[i] = desc->params[i].name;
     }
 
     /* Attr map */

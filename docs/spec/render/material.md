@@ -20,8 +20,9 @@ Rule: float uses `.x`, vec2 uses `.xy`, vec3 uses `.xyz`, vec4 uses `.xyzw`.
 
 Benefits: simple layout, simple alignment, easy future GPU block packing, no per-type runtime complexity.
 
-Every declared param and every declared texture slot carries the uniform name
-it binds to; `nt_material_create` asserts a non-NULL name for both. A slot or
+Every declared param and every declared texture slot names the uniform it binds
+to; `nt_material_create` asserts a non-NULL name for both and keeps its
+`nt_hash32_str` hash, which is what the backend lookup is keyed on. A slot or
 param without a name is a declaration nothing can bind, so presence is decided
 by `index < count` and consumers never test the name for NULL.
 

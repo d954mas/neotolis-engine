@@ -444,15 +444,16 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
 /* Atlas page is the texture source of truth — split cmd if a run crosses pages. */
 static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     NT_ASSERT(s_sprite.cmd_count > 0 && "sprite emit called with no open cmd");
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    /* Analytic-coverage shaders never sample the page: no substitution, no split, and
+     * an unresolved page must not hold the emit back. */
+    if (c->tex_count == 0) {
+        return true;
+    }
     if (page_tex == 0) {
         return false;
     }
 
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    /* Analytic-coverage shaders never sample the page: no substitution, no split. */
-    if (c->tex_count == 0) {
-        return true;
-    }
     if (c->resolved_tex[0] == page_tex) {
         return true;
     }
@@ -1395,11 +1396,11 @@ void nt_sprite_renderer_flush(void) {
         for (uint8_t t = 0; t < c->tex_count; t++) {
             /* nt_resource_set_placeholder_texture exists to keep slots resolvable
              * through async load races, so an unresolved slot is a developer bug. */
-            NT_ASSERT((c->resolved_sampler[t].id != 0 || c->resolved_tex[t] != 0) && "sprite cmd slot has no resolved texture — register a placeholder via nt_resource_set_placeholder_texture");
+            NT_ASSERT(c->resolved_tex[t] != 0 && "sprite cmd slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
         }
 
-        /* Sampler units and params come from the cmd's captured hashes, so a cmd
-         * whose material died still replays them. */
+        /* Sampler-unit hashes come from the cmd, so a cmd whose material died still
+         * replays them; params are read from the live material. */
         const nt_material_info_t *mi = nt_material_get_info(c->material);
         const nt_renderer_material_view_t view = {
             .tex_count = c->tex_count,

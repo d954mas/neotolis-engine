@@ -855,6 +855,59 @@ void test_sprite_renderer_textureless_material_ignores_page_change(void) {
     nt_gfx_test_draw_trace_reset(false);
 }
 
+/* An analytic-coverage material takes no page, so an unresolved page must not
+ * hold its emit back. */
+void test_sprite_renderer_textureless_material_emits_without_page(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE3ULL);
+    /* Unpublish the page texture: the atlas stays ready, its page does not resolve. */
+    nt_resource_unregister(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE0_RID});
+    nt_resource_step();
+    nt_resource_t page0 = nt_atlas_get_page_resource(s_atlas_res, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(page0));
+
+    nt_material_t mat = create_test_material_textureless();
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    nt_gfx_test_draw_trace_reset(false);
+}
+
+/* The cmd captured its sampler-unit hashes, so it still writes them after the
+ * material died; params come from the material and are simply dropped. */
+void test_sprite_renderer_dead_material_cmd_replays_sampler_units(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE4ULL);
+    nt_material_t mat = create_test_material();
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+
+    nt_material_destroy(mat);
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_vec4_count());
+    nt_gfx_test_draw_trace_reset(false);
+}
+
 /* ---- Test: polygon emit ----
  *
  * A region with vertex_count=6 / index_count=12 produces 6 vertices in
@@ -1435,6 +1488,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
+    RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
+    RUN_TEST(test_sprite_renderer_dead_material_cmd_replays_sampler_units);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
