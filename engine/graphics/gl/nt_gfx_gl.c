@@ -625,11 +625,6 @@ void nt_gfx_backend_end_segment(void) {
 // #endregion
 
 void nt_gfx_backend_begin_frame(void) {
-    /* Reset GL state cache so all pipeline binds re-issue GL calls.
-     * Required because window resize (Windows modal loop) or driver
-     * may change GL state without going through nt_gfx API, leaving
-     * the cache stale. */
-    nt_gfx_gl_cache_ground_state();
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
 
@@ -765,15 +760,13 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     glViewport(0, 0, viewport_w, viewport_h);
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);
-    /* Pass clears must not inherit the previous pipeline's depth-write mask. */
-    bool restore_depth_write = !s_gl_cache.depth_write_enabled;
-    if (restore_depth_write) {
+    /* The clear must not inherit the previous pipeline's depth-write mask, and
+     * leaves it on: the pass's first pipeline bind re-applies its own. */
+    if (!s_gl_cache.depth_write_enabled) {
         glDepthMask(GL_TRUE);
+        s_gl_cache.depth_write_enabled = true;
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if (restore_depth_write) {
-        glDepthMask(GL_FALSE);
-    }
 }
 
 void nt_gfx_backend_end_pass(void) {

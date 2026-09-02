@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -22,6 +23,19 @@ static const char *s_vs_src = "precision mediump float;\n"
 static const char *s_fs_src = "precision mediump float;\n"
                               "out vec4 frag_color;\n"
                               "void main() { frag_color = vec4(1.0, 0.0, 0.0, 1.0); }\n";
+
+/* Clip-space z is baked into the shader so near/far placement needs no uniform. */
+static const char *s_vs_near_src = "precision mediump float;\n"
+                                   "layout(location = 0) in vec2 a_position;\n"
+                                   "void main() { gl_Position = vec4(a_position, -0.5, 1.0); }\n";
+
+static const char *s_vs_far_src = "precision mediump float;\n"
+                                  "layout(location = 0) in vec2 a_position;\n"
+                                  "void main() { gl_Position = vec4(a_position, 0.5, 1.0); }\n";
+
+static const char *s_fs_green_src = "precision mediump float;\n"
+                                    "out vec4 frag_color;\n"
+                                    "void main() { frag_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
 
 /* Covers the whole viewport. */
 static const float s_full[6] = {-1.0F, -1.0F, 3.0F, -1.0F, -1.0F, 3.0F};
@@ -128,7 +142,125 @@ static uint8_t center_red(void) {
     return px[0];
 }
 
+static nt_pipeline_t make_pipeline_ex(const char *vs_src, const char *fs_src, bool depth_test, bool depth_write, bool blend) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
+    return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = nt_gfx_make_program(vs, fs),
+        .depth_test = depth_test,
+        .depth_write = depth_write,
+        .blend = blend ? nt_blend_alpha() : nt_blend_opaque(),
+    });
+}
+
 static void begin_black_pass(void) { nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F}); }
+
+/* Counts the state calls a bind emits, straight off the glad pointers, so a
+ * dedup claim is measured on real GL traffic rather than on source counters. */
+static struct {
+    uint32_t use_program;
+    uint32_t bind_vao;
+    uint32_t depth_mask;
+    uint32_t depth_mask_false;
+    uint32_t enable;
+    uint32_t enable_blend;
+    uint32_t disable;
+    uint32_t disable_blend;
+    uint32_t blend_func_separate;
+    uint32_t active_texture;
+    uint32_t bind_texture;
+} s_gl_calls;
+
+static PFNGLUSEPROGRAMPROC s_saved_use_program;
+static PFNGLBINDVERTEXARRAYPROC s_saved_bind_vao;
+static PFNGLDEPTHMASKPROC s_saved_depth_mask;
+static PFNGLENABLEPROC s_saved_enable;
+static PFNGLDISABLEPROC s_saved_disable;
+static PFNGLBLENDFUNCSEPARATEPROC s_saved_blend_func_separate;
+static PFNGLACTIVETEXTUREPROC s_saved_active_texture;
+static PFNGLBINDTEXTUREPROC s_saved_state_bind_texture;
+
+static void GLAD_API_PTR counting_use_program(GLuint program) {
+    s_gl_calls.use_program++;
+    s_saved_use_program(program);
+}
+
+static void GLAD_API_PTR counting_bind_vao(GLuint array) {
+    s_gl_calls.bind_vao++;
+    s_saved_bind_vao(array);
+}
+
+static void GLAD_API_PTR counting_depth_mask(GLboolean flag) {
+    s_gl_calls.depth_mask++;
+    if (flag == GL_FALSE) {
+        s_gl_calls.depth_mask_false++;
+    }
+    s_saved_depth_mask(flag);
+}
+
+static void GLAD_API_PTR counting_enable(GLenum cap) {
+    s_gl_calls.enable++;
+    if (cap == GL_BLEND) {
+        s_gl_calls.enable_blend++;
+    }
+    s_saved_enable(cap);
+}
+
+static void GLAD_API_PTR counting_disable(GLenum cap) {
+    s_gl_calls.disable++;
+    if (cap == GL_BLEND) {
+        s_gl_calls.disable_blend++;
+    }
+    s_saved_disable(cap);
+}
+
+static void GLAD_API_PTR counting_blend_func_separate(GLenum src_rgb, GLenum dst_rgb, GLenum src_alpha, GLenum dst_alpha) {
+    s_gl_calls.blend_func_separate++;
+    s_saved_blend_func_separate(src_rgb, dst_rgb, src_alpha, dst_alpha);
+}
+
+static void GLAD_API_PTR counting_active_texture(GLenum unit) {
+    s_gl_calls.active_texture++;
+    s_saved_active_texture(unit);
+}
+
+static void GLAD_API_PTR counting_state_bind_texture(GLenum target, GLuint texture) {
+    s_gl_calls.bind_texture++;
+    s_saved_state_bind_texture(target, texture);
+}
+
+/* nt_gfx_init reloads glad, so this must run after the init under test. */
+static void install_state_counters(void) {
+    memset(&s_gl_calls, 0, sizeof(s_gl_calls));
+    s_saved_use_program = glad_glUseProgram;
+    s_saved_bind_vao = glad_glBindVertexArray;
+    s_saved_depth_mask = glad_glDepthMask;
+    s_saved_enable = glad_glEnable;
+    s_saved_disable = glad_glDisable;
+    s_saved_blend_func_separate = glad_glBlendFuncSeparate;
+    s_saved_active_texture = glad_glActiveTexture;
+    s_saved_state_bind_texture = glad_glBindTexture;
+    glad_glUseProgram = counting_use_program;
+    glad_glBindVertexArray = counting_bind_vao;
+    glad_glDepthMask = counting_depth_mask;
+    glad_glEnable = counting_enable;
+    glad_glDisable = counting_disable;
+    glad_glBlendFuncSeparate = counting_blend_func_separate;
+    glad_glActiveTexture = counting_active_texture;
+    glad_glBindTexture = counting_state_bind_texture;
+}
+
+/* Must run before any assert -- a failure longjmps past the restore. */
+static void remove_state_counters(void) {
+    glad_glUseProgram = s_saved_use_program;
+    glad_glBindVertexArray = s_saved_bind_vao;
+    glad_glDepthMask = s_saved_depth_mask;
+    glad_glEnable = s_saved_enable;
+    glad_glDisable = s_saved_disable;
+    glad_glBlendFuncSeparate = s_saved_blend_func_separate;
+    glad_glActiveTexture = s_saved_active_texture;
+    glad_glBindTexture = s_saved_state_bind_texture;
+}
 
 /* One glBindVertexArray selects the whole geometry: two meshes alternate under
  * a single pipeline with no per-switch attribute re-pointing. */
@@ -212,8 +344,8 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_end_frame();
     /* Restore before any assert -- a failure longjmps past this line. */
     glad_glVertexAttribPointer = s_saved_attrib_pointer;
-    /* begin_frame's cache reset (VAO 0) + one bind per vertex-input switch. */
-    TEST_ASSERT_EQUAL_UINT32(4, frame_vao_binds);
+    /* The carried-over VAO dedups the first bind; one bind per vertex-input switch. */
+    TEST_ASSERT_EQUAL_UINT32(2, frame_vao_binds);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_static_attrib_pointer_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_instance_attrib_pointer_calls());
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
@@ -247,6 +379,7 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     nt_gfx_end_pass();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi_a);
     nt_gfx_draw_indexed(0, 3, 3); /* still A's triangle indices, not B */
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
@@ -272,6 +405,7 @@ static void test_orphan_under_live_vertex_input_renders(void) {
 
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
     nt_gfx_orphan_buffer(vbo, s_empty, sizeof(s_empty));
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 0, center_red());
@@ -300,8 +434,6 @@ static void test_rejected_pipeline_bind_preserves_vertex_input(void) {
 
     nt_gfx_bind_pipeline(stale); /* rejected: drops the pipeline only */
 
-    nt_gfx_end_pass();
-    begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_draw(0, 3); /* no vertex-input re-bind needed */
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
@@ -456,6 +588,192 @@ static void test_ground_state_disables_scissor(void) {
     TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
+/* The cache survives end_frame, so a frame that repeats the previous one reaches
+ * GL with no state calls at all. */
+static void test_identical_second_frame_issues_no_bind_calls(void) {
+    static const uint8_t pixel[4] = {255, 255, 255, 255};
+    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_texture(tex, 0);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    install_state_counters();
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_texture(tex, 0);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    remove_state_counters();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.use_program);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_vao);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.depth_mask);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.enable);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.disable);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.blend_func_separate);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+}
+
+/* Deduplication is a diff, not a mute: a pipeline that really changes state
+ * still emits, and GL ends up holding the second pipeline's state. */
+static void test_state_change_mid_frame_still_emits(void) {
+    nt_pipeline_t pip_a = make_pipeline_ex(s_vs_src, s_fs_src, true, true, false);
+    nt_pipeline_t pip_b = make_pipeline_ex(s_vs_src, s_fs_src, true, false, true);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    install_state_counters();
+    nt_gfx_bind_pipeline(pip_a);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_bind_pipeline(pip_b);
+    nt_gfx_draw(0, 3);
+    remove_state_counters();
+    GLboolean depth_write_enabled = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
+    GLboolean blend_enabled = glIsEnabled(GL_BLEND);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.depth_mask);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.depth_mask_false);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.blend_func_separate);
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)depth_write_enabled);
+    TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)blend_enabled);
+}
+
+/* The pass clear forces the depth mask on and leaves it on: the depth really
+ * clears after a depth_write=false pipeline, and the pipeline that wants the
+ * mask off has to say so again inside the new pass. */
+static void test_pass_clear_after_depth_write_off(void) {
+    nt_pipeline_t near_pip = make_pipeline_ex(s_vs_near_src, s_fs_src, true, true, false);
+    nt_pipeline_t far_pip = make_pipeline_ex(s_vs_far_src, s_fs_green_src, true, true, false);
+    nt_pipeline_t no_write_pip = make_pipeline_ex(s_vs_near_src, s_fs_src, true, false, false);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(near_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_bind_pipeline(no_write_pip);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+
+    install_state_counters();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(far_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    /* One glDepthMask(GL_TRUE) for the clear, and none for the bind: a mask put
+     * back to GL_FALSE after the clear would cost two more. */
+    uint32_t depth_mask_through_far_bind = s_gl_calls.depth_mask;
+    uint8_t px[4] = {0, 0, 0, 0};
+    bool read_ok = nt_gfx_read_pixels(8, 8, 1, 1, px, sizeof(px));
+
+    nt_gfx_bind_pipeline(no_write_pip);
+    remove_state_counters();
+    GLboolean depth_write_enabled = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* The far quad only survives the LESS test if the clear reset depth to 1.0. */
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_UINT8_WITHIN(1, 0, px[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, px[1]);
+    TEST_ASSERT_EQUAL_UINT32(1, depth_mask_through_far_bind);
+    TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.depth_mask);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.depth_mask_false);
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)depth_write_enabled);
+}
+
+/* Bound state is pass-scoped but the GL cache is not: re-binding the same
+ * pipeline and vertex input in the next pass costs nothing. */
+static void test_same_pipeline_across_passes_rebinds_for_free(void) {
+    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+
+    begin_black_pass();
+    install_state_counters();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    remove_state_counters();
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.use_program);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_vao);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.depth_mask);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.enable);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.disable);
+}
+
+/* Without a per-frame reset, init is the only grounding: state a previous gfx
+ * lifetime left on the shared native context must be off again, and the fresh
+ * cache must agree with GL rather than re-issue what is already right. */
+static void test_ground_state_after_reinit(void) {
+    nt_pipeline_t blend_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(blend_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
+
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+    TEST_ASSERT_TRUE(g_nt_gfx.initialized);
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_BLEND));
+
+    nt_pipeline_t opaque_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
+    nt_pipeline_t alpha_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
+    nt_vertex_input_t fresh_vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    install_state_counters();
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(opaque_pip);
+    uint32_t disable_blend_after_opaque = s_gl_calls.disable_blend;
+    nt_gfx_bind_pipeline(alpha_pip);
+    nt_gfx_bind_vertex_input(fresh_vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    remove_state_counters();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, disable_blend_after_opaque);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
@@ -468,5 +786,10 @@ int main(void) {
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
     RUN_TEST(test_failed_compressed_upload_keeps_texture_cache_truthful);
     RUN_TEST(test_ground_state_disables_scissor);
+    RUN_TEST(test_identical_second_frame_issues_no_bind_calls);
+    RUN_TEST(test_state_change_mid_frame_still_emits);
+    RUN_TEST(test_pass_clear_after_depth_write_off);
+    RUN_TEST(test_same_pipeline_across_passes_rebinds_for_free);
+    RUN_TEST(test_ground_state_after_reinit);
     return UNITY_END();
 }

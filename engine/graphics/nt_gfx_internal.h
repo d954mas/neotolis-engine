@@ -189,6 +189,9 @@ uint32_t nt_gfx_gl_test_vao_binds(void);
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
+/* Pass-scoped bound state, read from its owner: the front-end. */
+uint32_t nt_gfx_test_bound_pipeline_backend(void);
+uint32_t nt_gfx_test_bound_vertex_input(void);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

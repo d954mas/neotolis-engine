@@ -658,11 +658,6 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
-    /* Backend resets its pipeline cache per frame; mirror it so the
-     * bound-pipeline asserts stay truthful across frame boundaries. */
-    s_gfx.bound_pipeline = 0;
-    s_gfx.bound_vertex_input = 0;
-    s_gfx.bound_index_type = NT_INDEX_NONE;
     nt_gfx_backend_begin_frame();
 }
 
@@ -774,6 +769,10 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_PASS;
+    /* Bound state is pass-scoped: the pass clear touches draw state. */
+    s_gfx.bound_pipeline = 0;
+    s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_index_type = NT_INDEX_NONE;
     nt_gfx_backend_begin_pass(desc, render_target_backend);
 }
 
@@ -1471,6 +1470,11 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_pipeline: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("bind_pipeline called outside PASS state");
+        return;
+    }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         /* Clear the mirror so later draws cannot reuse the previous
          * pipeline's program. The bound vertex input is orthogonal state. */
@@ -1491,6 +1495,11 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
     if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("bind_vertex_input called outside PASS state");
         return;
     }
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
@@ -1573,6 +1582,10 @@ void nt_gfx_test_viewport_rect(int out[4]) {
     out[2] = s_gfx.viewport_rect[2];
     out[3] = s_gfx.viewport_rect[3];
 }
+
+uint32_t nt_gfx_test_bound_pipeline_backend(void) { return s_gfx.bound_pipeline; }
+
+uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 #endif
 
 /* ---- Sampler (deduplicated cache) ---- */
@@ -1755,12 +1768,22 @@ void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_mat4: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("set_uniform_mat4 called outside PASS state");
+        return;
+    }
     NT_ASSERT(matrix != NULL);
     nt_gfx_backend_set_uniform_mat4(name.value, matrix);
 }
 
 void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
     if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_vec4: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("set_uniform_vec4 called outside PASS state");
         return;
     }
     NT_ASSERT(vec != NULL);
@@ -1771,11 +1794,21 @@ void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_float: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("set_uniform_float called outside PASS state");
+        return;
+    }
     nt_gfx_backend_set_uniform_float(name.value, val);
 }
 
 void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_int: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("set_uniform_int called outside PASS state");
         return;
     }
     nt_gfx_backend_set_uniform_int(name.value, val);
@@ -1925,6 +1958,11 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_instance_buffer: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("bind_instance_buffer called outside PASS state");
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {

@@ -124,7 +124,9 @@ share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO and
-texture binds, while sampler binds and uniform writes are always issued. A uniform a material
+texture binds, while sampler binds and uniform writes are always issued. The
+backend GL cache persists across passes and frames; ground state is issued once
+at backend init and at context restore. A uniform a material
 does not declare retains the value last written on that program; this applies
 to sampler units and material params. Planned fixes are fixed sampler-unit
 assignments per program (#359) and per-material param UBOs bound at material
@@ -209,7 +211,10 @@ bind or unbind render-target state outside the pass descriptor.
 
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
-state; pipeline write masks affect draws, not the next pass initialization.
+state; pipeline write masks affect draws, not the next pass initialization. Bound
+pipeline and vertex input are pass-scoped: `begin_pass` discards them; binds,
+uniform writes and draws outside a pass assert. The clear forces the depth mask
+on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
 `nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay

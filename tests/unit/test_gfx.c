@@ -1829,7 +1829,9 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip));
-    nt_gfx_bind_pipeline(pip);    /* stale: ordinary invalid path, no trap */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip); /* stale: ordinary invalid path, no trap */
+    nt_gfx_end_pass();
     nt_gfx_destroy_pipeline(pip); /* stale: tolerated no-op */
 
     /* Programs survive as husks; relink before building new pipelines. */
@@ -1984,10 +1986,17 @@ void test_gfx_frame_draw_calls(void) {
 /* The setter must reach the backend with the caller's key and value unchanged. */
 void test_gfx_uniform_records_hash_and_value(void) {
     const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
     nt_gfx_stub_test_reset();
     nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_stub_test_uniform_int_hash_at(0));
@@ -2002,6 +2011,47 @@ void test_gfx_uniform_records_hash_and_value(void) {
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_INT32((int32_t)vec[i], (int32_t)recorded[i]);
     }
+}
+
+/* Bound state is pass-scoped: a bind or uniform write with no pass open has no
+ * draw to reach, so it traps instead of silently landing on the next pass. */
+void test_gfx_binds_outside_a_pass_trap(void) {
+    static const float verts[9] = {0};
+    const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .vertex_buffer = vbo,
+    });
+
+    nt_gfx_begin_frame();
+    EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
+    EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
+    nt_gfx_end_frame();
+}
+
+/* The pass clear touches draw state, so begin_pass discards the bound pipeline
+ * and vertex input rather than letting the next pass inherit them. */
+void test_gfx_begin_pass_discards_bound_state(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    bind_test_vertex_input();
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline_backend());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline_backend());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 int main(void) {
@@ -2139,5 +2189,7 @@ int main(void) {
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     RUN_TEST(test_gfx_uniform_records_hash_and_value);
+    RUN_TEST(test_gfx_binds_outside_a_pass_trap);
+    RUN_TEST(test_gfx_begin_pass_discards_bound_state);
     return UNITY_END();
 }

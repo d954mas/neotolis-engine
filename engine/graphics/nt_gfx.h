@@ -564,11 +564,13 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 /* ---- Draw state ---- */
 
+/* Bind inside a pass; nt_gfx_begin_pass discards bound state. */
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
  * index binding) for the following draws. Orthogonal to pipeline binding --
  * either may change without re-binding the other. Every draw requires a bound
- * vertex input (asserted); attribute-less draws bind an empty one. */
+ * vertex input (asserted); attribute-less draws bind an empty one. Bind inside
+ * a pass; nt_gfx_begin_pass discards bound state. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 /* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
@@ -594,7 +596,8 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
- * at init with nt_hash32_str, or inline where the cost does not matter. */
+ * at init with nt_hash32_str, or inline where the cost does not matter. Write
+ * inside a pass; nt_gfx_begin_pass discards bound state. */
 
 void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
 void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);
@@ -623,7 +626,8 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 /* Re-specifies instance attrib pointers at byte_offset into the bound vertex
  * input, which must declare a nonempty instance_layout; both asserted. The
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
- * asserted. Re-bind per draw to re-point. */
+ * asserted. Re-bind per draw to re-point. Call inside a pass;
+ * nt_gfx_begin_pass discards bound state. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
