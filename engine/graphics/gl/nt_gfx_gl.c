@@ -181,6 +181,10 @@ static uint32_t s_transcode_buf_idle = 0;
  * Every direct GL call that changes a field here mirrors it or invalidates the
  * entry at the call site; ground state only at init and context restore. */
 
+/* Uploads bind here instead of on a sampling unit. WebGL2 and GL 3.3 both
+ * guarantee at least 16 fragment texture units, so this one always exists. */
+#define NT_GFX_GL_UPLOAD_TEXTURE_UNIT ((GLenum)(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS))
+
 static struct {
     GLuint vao;
     GLuint program;
@@ -200,7 +204,8 @@ static struct {
     float polygon_offset_factor;
     float polygon_offset_units;
     GLenum active_texture_unit;
-    GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
+    /* GL name per sampling slot; uploads use the scratch unit and never touch these. */
+    GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS];
     int viewport[4];
     float clear_color[4];
     float clear_depth;
@@ -1513,13 +1518,6 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
     }
 }
 
-static void nt_gfx_gl_invalidate_active_texture_binding(void) {
-    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
-    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
-        s_gl_cache.bound_textures[active_slot] = 0;
-    }
-}
-
 static void nt_gfx_gl_forget_texture(GLuint tex) {
     for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
         if (s_gl_cache.bound_textures[i] == tex) {
@@ -1528,11 +1526,14 @@ static void nt_gfx_gl_forget_texture(GLuint tex) {
     }
 }
 
-/* Invalidation belongs at the bind: a later early return can then never leave the
- * cache naming a texture the active unit no longer has bound. */
+/* Data and parameter ops go to the scratch unit, so no sampling slot is disturbed
+ * and the cache stays truthful without invalidation. */
 static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
+    if (s_gl_cache.active_texture_unit != NT_GFX_GL_UPLOAD_TEXTURE_UNIT) {
+        glActiveTexture(NT_GFX_GL_UPLOAD_TEXTURE_UNIT);
+        s_gl_cache.active_texture_unit = NT_GFX_GL_UPLOAD_TEXTURE_UNIT;
+    }
     glBindTexture(GL_TEXTURE_2D, tex);
-    nt_gfx_gl_invalidate_active_texture_binding();
 }
 
 /* For upload paths that check glGetError afterwards — a stale error would be

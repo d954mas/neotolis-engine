@@ -580,16 +580,21 @@ static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void)
     nt_gfx_end_frame();
 }
 
-static uint32_t s_real_bind_texture_calls;
-static PFNGLBINDTEXTUREPROC s_saved_bind_texture;
-static void GLAD_API_PTR counting_bind_texture(GLenum target, GLuint texture) {
-    s_real_bind_texture_calls++;
-    s_saved_bind_texture(target, texture);
+/* Reads a sampling unit without leaving the backend's active-unit mirror stale:
+ * the unit that was active is restored before returning. */
+static GLint texture_name_on_unit(uint32_t slot) {
+    GLint prev_unit = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &prev_unit);
+    glActiveTexture(GL_TEXTURE0 + slot);
+    GLint name = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &name);
+    glActiveTexture((GLenum)prev_unit);
+    return name;
 }
 
-/* A compressed create that fails after binding its own texture leaves GL with a
- * different binding than before: the cache must not still name the old one, or
- * the next bind of it is skipped and the draw samples the wrong texture. */
+/* A compressed create that fails after binding its own texture uploads on the
+ * scratch unit, so slot 0 still holds A in GL and in the cache: re-binding A
+ * costs nothing and a draw still samples A. */
 static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
     static const uint8_t pixel[4] = {255, 0, 0, 255};
     nt_texture_t tex_a = nt_gfx_make_texture(&(nt_texture_desc_t){
@@ -610,16 +615,13 @@ static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
                                                                (uint32_t)NT_BASISU_FORMAT_RGBA32);
     TEST_ASSERT_EQUAL_UINT32(0, failed);
 
-    s_real_bind_texture_calls = 0;
-    s_saved_bind_texture = glad_glBindTexture;
-    glad_glBindTexture = counting_bind_texture;
+    install_state_counters();
     nt_gfx_bind_texture(tex_a, 0);
-    /* Restore before any assert -- a failure longjmps past this line. */
-    glad_glBindTexture = s_saved_bind_texture;
+    remove_state_counters();
 
-    GLint bound = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
-    TEST_ASSERT_EQUAL_UINT32(1, s_real_bind_texture_calls);
+    GLint bound = texture_name_on_unit(0);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_INT(name_a, bound);
 }
 
@@ -1054,8 +1056,6 @@ static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, keep.id);
 
     nt_gfx_bind_texture(tex_a, 0);
-    /* Parking the active unit elsewhere keeps the upload-time invalidation of
-     * the new texture off slot 0, so only the destroy can clear it. */
     nt_gfx_bind_texture(keep, 1);
 
     nt_gfx_destroy_texture(tex_a);
@@ -1069,34 +1069,77 @@ static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
-/* update_texture uploads on the active unit, so it invalidates that slot: the
- * next bind of the texture that used to live there has to reach GL again. */
-static void test_update_texture_mid_pass_then_bind_reaches_gl(void) {
+/* update_texture uploads on the scratch unit, so the texture sampling slot 0
+ * holds stays bound there and re-binding it mid-pass costs no GL call. */
+static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     static const uint8_t white[4] = {255, 255, 255, 255};
     static const uint8_t grey[4] = {128, 128, 128, 255};
     nt_texture_t tex_1 = make_pixel_texture(white);
     GLint name_1 = current_texture_name();
     nt_texture_t tex_2 = make_pixel_texture(grey);
+    GLint name_2 = current_texture_name();
     TEST_ASSERT_NOT_EQUAL_INT(0, name_1);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_2.id);
+    TEST_ASSERT_NOT_EQUAL_INT(name_1, name_2);
 
     nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_texture(tex_1, 0);
     nt_gfx_update_texture(tex_2, 0, 0, 1, 1, white);
 
-    s_real_bind_texture_calls = 0;
-    s_saved_bind_texture = glad_glBindTexture;
-    glad_glBindTexture = counting_bind_texture;
+    GLint upload_unit = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &upload_unit);
+    GLint upload_bound = current_texture_name();
+    GLint slot0 = texture_name_on_unit(0);
+
+    install_state_counters();
     nt_gfx_bind_texture(tex_1, 0);
-    /* Restore before any assert -- a failure longjmps past this line. */
-    glad_glBindTexture = s_saved_bind_texture;
-    GLint bound = current_texture_name();
+    remove_state_counters();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(1, s_real_bind_texture_calls);
-    TEST_ASSERT_EQUAL_INT(name_1, bound);
+    TEST_ASSERT_EQUAL_INT(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS, upload_unit);
+    TEST_ASSERT_EQUAL_INT(name_2, upload_bound);
+    TEST_ASSERT_EQUAL_INT(name_1, slot0);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
+}
+
+/* A burst of uploads switches to the scratch unit once and stays there; the
+ * sampling slot it left behind still needs no GL call to re-bind. */
+static void test_upload_burst_costs_one_active_texture_switch(void) {
+    static const uint8_t white[4] = {255, 255, 255, 255};
+    static const uint8_t grey[4] = {128, 128, 128, 255};
+    static const uint8_t black[4] = {0, 0, 0, 255};
+    nt_texture_t tex_1 = make_pixel_texture(white);
+    GLint name_1 = current_texture_name();
+    nt_texture_t tex_2 = make_pixel_texture(grey);
+    nt_texture_t tex_3 = make_pixel_texture(black);
+    TEST_ASSERT_NOT_EQUAL_INT(0, name_1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_2.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_3.id);
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_texture(tex_1, 0);
+
+    install_state_counters();
+    nt_gfx_update_texture(tex_2, 0, 0, 1, 1, white);
+    nt_gfx_update_texture(tex_3, 0, 0, 1, 1, white);
+    nt_gfx_update_texture(tex_2, 0, 0, 1, 1, grey);
+    remove_state_counters();
+    uint32_t burst_active = s_gl_calls.active_texture;
+    uint32_t burst_bind = s_gl_calls.bind_texture;
+
+    install_state_counters();
+    nt_gfx_bind_texture(tex_1, 0);
+    remove_state_counters();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, burst_active);
+    TEST_ASSERT_EQUAL_UINT32(3, burst_bind);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
 }
 
 /* Destroying the current program clears the cached name: a relink that reuses it
@@ -1160,7 +1203,8 @@ int main(void) {
     RUN_TEST(test_recreate_all_resources_grounds_cache);
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_vertex_input);
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_texture);
-    RUN_TEST(test_update_texture_mid_pass_then_bind_reaches_gl);
+    RUN_TEST(test_update_texture_mid_pass_leaves_sampling_slot_bound);
+    RUN_TEST(test_upload_burst_costs_one_active_texture_switch);
     RUN_TEST(test_destroy_current_program_then_relink_reissues_use_program);
     return UNITY_END();
 }
