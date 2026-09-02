@@ -41,8 +41,6 @@ typedef struct {
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
-/* Extra material backed by a fresh virtual pack -- unique vs/fs per call. */
-nt_material_t ui_walker_fixture_make_material(void);
 
 #ifdef __cplusplus
 }

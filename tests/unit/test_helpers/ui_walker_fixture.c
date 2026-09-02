@@ -3,6 +3,7 @@
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,7 +24,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-nt_material_t ui_walker_fixture_make_material(void) {
+static nt_material_t make_material(bool with_page_sampler) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
 
@@ -34,8 +35,12 @@ nt_material_t ui_walker_fixture_make_material(void) {
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
+    /* Sprite materials sample the atlas page at slot 0; text materials declare nothing
+     * (units 0/1 are the font's). */
+    if (with_page_sampler) {
+        desc.textures[0].name = "u_texture";
+        desc.texture_count = 1;
+    }
     desc.label = "walker_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
@@ -73,8 +78,8 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * fixture calls. */
 
     fx->atlas = minimal_ui_atlas_create();
-    fx->sprite_material = ui_walker_fixture_make_material();
-    fx->text_material = ui_walker_fixture_make_material();
+    fx->sprite_material = make_material(true);
+    fx->text_material = make_material(false);
 
     /* Stub font: valid pool slot, no resource attached. nt_font_valid() is
      * true so walker's contract assert passes, but units_per_em stays 0 so

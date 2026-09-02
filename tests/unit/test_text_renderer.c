@@ -372,6 +372,28 @@ void test_vertex_count_4_per_glyph(void) {
     TEST_ASSERT_EQUAL_UINT32(8, nt_text_renderer_test_vertex_count());
 }
 
+/* Units 0 and 1 carry the font's curve and band textures, so a text material
+ * that declares its own would have them silently overwritten. */
+void test_text_material_with_textures_asserts_at_flush(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
+        .program = nt_gfx_make_program(vs, fs),
+        .cull_mode = NT_CULL_NONE,
+        .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
+        .texture_count = 1,
+    });
+    nt_material_step();
+
+    nt_text_renderer_set_material(textured);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 /* ---- Test 9: Flush resets counts (TEXT-05) ---- */
 
 void test_flush_resets_counts(void) {
@@ -1344,6 +1366,7 @@ int main(void) {
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_stride_72);
     RUN_TEST(test_vertex_count_4_per_glyph);
+    RUN_TEST(test_text_material_with_textures_asserts_at_flush);
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
