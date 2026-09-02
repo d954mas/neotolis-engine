@@ -9,6 +9,7 @@
 #define NT_GFX_STUB_HISTORY_CAPACITY 16
 static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
 static uint32_t s_stub_bind_sampler_count;
+static uint32_t s_stub_set_scissor_enabled_count;
 static uint32_t s_stub_last_pass_target;
 static uint32_t s_stub_pass_targets[NT_GFX_STUB_HISTORY_CAPACITY];
 static uint32_t s_stub_pass_target_count;
@@ -64,6 +65,7 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
 }
 
 uint32_t nt_gfx_stub_test_bind_sampler_count(void) { return s_stub_bind_sampler_count; }
+uint32_t nt_gfx_stub_test_set_scissor_enabled_count(void) { return s_stub_set_scissor_enabled_count; }
 uint32_t nt_gfx_stub_test_last_pass_target(void) { return s_stub_last_pass_target; }
 uint32_t nt_gfx_stub_test_pass_target_count(void) { return s_stub_pass_target_count; }
 uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index) { return index < s_stub_pass_target_count ? s_stub_pass_targets[index] : 0; }
@@ -124,6 +126,7 @@ void nt_gfx_stub_test_reset(void) {
         s_stub_last_sampler[i] = 0;
     }
     s_stub_bind_sampler_count = 0;
+    s_stub_set_scissor_enabled_count = 0;
     s_stub_last_pass_target = 0;
     s_stub_pass_target_count = 0;
     s_stub_bound_texture_count = 0;
@@ -208,7 +211,12 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
     (void)h;
 }
 
-void nt_gfx_backend_set_scissor_enabled(bool enabled) { (void)enabled; }
+void nt_gfx_backend_set_scissor_enabled(bool enabled) {
+    (void)enabled;
+#ifdef NT_TEST_ACCESS
+    s_stub_set_scissor_enabled_count++;
+#endif
+}
 
 void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
     (void)x;

@@ -76,6 +76,8 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
  * Backend implementations:
  *   - gl/nt_gfx_gl.c: glScissor + glEnable/glDisable(GL_SCISSOR_TEST) + glViewport
  *   - stub/nt_gfx_stub.c: no-op (state cached in shared nt_gfx.c for test probes)
+ * One owner per state: the scissor-enable dedup is front-end (nt_gfx.c mirrors it),
+ * the viewport and clear-value dedup is the backend GL cache.
  */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h);
 void nt_gfx_backend_set_scissor_enabled(bool enabled);
@@ -128,6 +130,7 @@ void nt_gfx_backend_drop_timer_segments(void);
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
+uint32_t nt_gfx_stub_test_set_scissor_enabled_count(void);
 uint32_t nt_gfx_stub_test_last_pass_target(void);
 uint32_t nt_gfx_stub_test_pass_target_count(void);
 uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index);

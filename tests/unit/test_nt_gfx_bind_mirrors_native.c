@@ -169,6 +169,9 @@ static struct {
     uint32_t blend_func_separate;
     uint32_t active_texture;
     uint32_t bind_texture;
+    uint32_t viewport;
+    uint32_t clear_color;
+    uint32_t clear_depth;
 } s_gl_calls;
 
 static PFNGLUSEPROGRAMPROC s_saved_use_program;
@@ -179,6 +182,9 @@ static PFNGLDISABLEPROC s_saved_disable;
 static PFNGLBLENDFUNCSEPARATEPROC s_saved_blend_func_separate;
 static PFNGLACTIVETEXTUREPROC s_saved_active_texture;
 static PFNGLBINDTEXTUREPROC s_saved_state_bind_texture;
+static PFNGLVIEWPORTPROC s_saved_viewport;
+static PFNGLCLEARCOLORPROC s_saved_clear_color;
+static PFNGLCLEARDEPTHPROC s_saved_clear_depth;
 
 static void GLAD_API_PTR counting_use_program(GLuint program) {
     s_gl_calls.use_program++;
@@ -229,6 +235,21 @@ static void GLAD_API_PTR counting_state_bind_texture(GLenum target, GLuint textu
     s_saved_state_bind_texture(target, texture);
 }
 
+static void GLAD_API_PTR counting_viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
+    s_gl_calls.viewport++;
+    s_saved_viewport(x, y, width, height);
+}
+
+static void GLAD_API_PTR counting_clear_color(GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
+    s_gl_calls.clear_color++;
+    s_saved_clear_color(r, g, b, a);
+}
+
+static void GLAD_API_PTR counting_clear_depth(GLdouble depth) {
+    s_gl_calls.clear_depth++;
+    s_saved_clear_depth(depth);
+}
+
 /* nt_gfx_init reloads glad, so this must run after the init under test. */
 static void install_state_counters(void) {
     memset(&s_gl_calls, 0, sizeof(s_gl_calls));
@@ -240,6 +261,9 @@ static void install_state_counters(void) {
     s_saved_blend_func_separate = glad_glBlendFuncSeparate;
     s_saved_active_texture = glad_glActiveTexture;
     s_saved_state_bind_texture = glad_glBindTexture;
+    s_saved_viewport = glad_glViewport;
+    s_saved_clear_color = glad_glClearColor;
+    s_saved_clear_depth = glad_glClearDepth;
     glad_glUseProgram = counting_use_program;
     glad_glBindVertexArray = counting_bind_vao;
     glad_glDepthMask = counting_depth_mask;
@@ -248,6 +272,9 @@ static void install_state_counters(void) {
     glad_glBlendFuncSeparate = counting_blend_func_separate;
     glad_glActiveTexture = counting_active_texture;
     glad_glBindTexture = counting_state_bind_texture;
+    glad_glViewport = counting_viewport;
+    glad_glClearColor = counting_clear_color;
+    glad_glClearDepth = counting_clear_depth;
 }
 
 /* Must run before any assert -- a failure longjmps past the restore. */
@@ -260,6 +287,9 @@ static void remove_state_counters(void) {
     glad_glBlendFuncSeparate = s_saved_blend_func_separate;
     glad_glActiveTexture = s_saved_active_texture;
     glad_glBindTexture = s_saved_state_bind_texture;
+    glad_glViewport = s_saved_viewport;
+    glad_glClearColor = s_saved_clear_color;
+    glad_glClearDepth = s_saved_clear_depth;
 }
 
 /* One glBindVertexArray selects the whole geometry: two meshes alternate under
@@ -625,6 +655,9 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.blend_func_separate);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.viewport);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_color);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_depth);
 }
 
 /* Deduplication is a diff, not a mute: a pipeline that really changes state
@@ -774,6 +807,96 @@ static void test_ground_state_after_reinit(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
 }
 
+/* The viewport is cached like any other GL state: a repeated rect costs nothing,
+ * a real change and a framebuffer resize both reach GL. */
+static void test_viewport_dedup_and_resize(void) {
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    install_state_counters();
+    nt_gfx_set_viewport(0, 0, 8, 8);
+    nt_gfx_set_viewport(0, 0, 8, 8);
+    uint32_t after_same_rect = s_gl_calls.viewport;
+    nt_gfx_set_viewport(0, 0, 4, 4);
+    uint32_t after_new_rect = s_gl_calls.viewport;
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    const uint32_t saved_fb_width = g_nt_window.fb_width;
+    g_nt_window.fb_width = saved_fb_width + 1;
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    GLint viewport[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    remove_state_counters();
+    uint32_t after_resize = s_gl_calls.viewport;
+    g_nt_window.fb_width = saved_fb_width;
+
+    TEST_ASSERT_EQUAL_UINT32(1, after_same_rect);
+    TEST_ASSERT_EQUAL_UINT32(2, after_new_rect);
+    TEST_ASSERT_EQUAL_UINT32(3, after_resize);
+    TEST_ASSERT_EQUAL_INT((int)saved_fb_width + 1, viewport[2]);
+    TEST_ASSERT_EQUAL_INT((int)g_nt_window.fb_height, viewport[3]);
+}
+
+/* Clear color and clear depth are cached per value, so repeating a pass desc is
+ * free and changing one of them re-issues only that call. */
+static void test_clear_values_dedup(void) {
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_end_pass();
+
+    install_state_counters();
+    begin_black_pass();
+    nt_gfx_end_pass();
+    uint32_t color_after_identical_pass = s_gl_calls.clear_color;
+    uint32_t depth_after_identical_pass = s_gl_calls.clear_depth;
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    remove_state_counters();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, color_after_identical_pass);
+    TEST_ASSERT_EQUAL_UINT32(0, depth_after_identical_pass);
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.clear_color);
+    TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_depth);
+}
+
+/* Ground state parks the viewport at zero size, which no real pass can match:
+ * the first pass of a fresh gfx lifetime always re-issues it. */
+static void test_ground_state_viewport_reissued_after_reinit(void) {
+    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+    TEST_ASSERT_TRUE(g_nt_gfx.initialized);
+
+    install_state_counters();
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    GLint viewport[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    remove_state_counters();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.viewport);
+    TEST_ASSERT_EQUAL_INT((int)g_nt_window.fb_width, viewport[2]);
+    TEST_ASSERT_EQUAL_INT((int)g_nt_window.fb_height, viewport[3]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
@@ -791,5 +914,8 @@ int main(void) {
     RUN_TEST(test_pass_clear_after_depth_write_off);
     RUN_TEST(test_same_pipeline_across_passes_rebinds_for_free);
     RUN_TEST(test_ground_state_after_reinit);
+    RUN_TEST(test_viewport_dedup_and_resize);
+    RUN_TEST(test_clear_values_dedup);
+    RUN_TEST(test_ground_state_viewport_reissued_after_reinit);
     return UNITY_END();
 }

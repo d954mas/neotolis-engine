@@ -203,6 +203,9 @@ static struct {
     float polygon_offset_units;
     GLenum active_texture_unit;
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
+    int viewport[4];
+    float clear_color[4];
+    float clear_depth;
 } s_gl_cache;
 
 /* ---- Per-pipeline uniform location lookup ---- */
@@ -260,6 +263,15 @@ static void ebo_upload_end(void) {
     gl_bind_vao(s_gl_cache.vao);
 }
 
+static void gl_set_viewport(int x, int y, int w, int h) {
+    const int rect[4] = {x, y, w, h};
+    if (memcmp(s_gl_cache.viewport, rect, sizeof(rect)) == 0) {
+        return;
+    }
+    memcpy(s_gl_cache.viewport, rect, sizeof(rect));
+    glViewport(x, y, (GLsizei)w, (GLsizei)h);
+}
+
 /* Real GL calls, not cache defaults: the native context outlives init cycles and
  * restore reuses it. */
 static void nt_gfx_gl_cache_ground_state(void) {
@@ -277,6 +289,11 @@ static void nt_gfx_gl_cache_ground_state(void) {
     glPolygonOffset(0.0F, 0.0F);
     glDisable(GL_SCISSOR_TEST);
     glActiveTexture(GL_TEXTURE0);
+    /* A zero-size viewport is legal GL and never equals a real pass, so the first
+     * pass after grounding always re-issues. */
+    glViewport(0, 0, 0, 0);
+    glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+    nt_gl_clear_depth(1.0F);
 
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
@@ -297,6 +314,9 @@ static void nt_gfx_gl_cache_ground_state(void) {
     s_gl_cache.polygon_offset_units = 0.0F;
     s_gl_cache.active_texture_unit = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
+    memset(s_gl_cache.viewport, 0, sizeof(s_gl_cache.viewport));
+    memset(s_gl_cache.clear_color, 0, sizeof(s_gl_cache.clear_color));
+    s_gl_cache.clear_depth = 1.0F;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -355,7 +375,7 @@ static GLenum map_blend_op(nt_blend_op_t op) {
     }
 }
 
-static bool blend_constant_color_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
+static bool float4_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
 
 static GLenum map_depth_func(nt_depth_func_t f) {
     switch (f) {
@@ -757,9 +777,15 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         s_bound_framebuffer = fbo;
     }
-    glViewport(0, 0, viewport_w, viewport_h);
-    glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
-    nt_gl_clear_depth(desc->clear_depth);
+    gl_set_viewport(0, 0, (int)viewport_w, (int)viewport_h);
+    if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
+        memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
+        glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
+    }
+    if (s_gl_cache.clear_depth != desc->clear_depth) {
+        s_gl_cache.clear_depth = desc->clear_depth;
+        nt_gl_clear_depth(desc->clear_depth);
+    }
     /* The clear must not inherit the previous pipeline's depth-write mask, and
      * leaves it on: the pass's first pipeline bind re-applies its own. */
     if (!s_gl_cache.depth_write_enabled) {
@@ -781,6 +807,7 @@ void nt_gfx_backend_end_pass(void) {
  * Raw GL bottom-left convention. Callers are expected to y-flip if they
  * think in top-left space. */
 
+/* Uncached: the UI emits a distinct rect per clipped element, so a diff never hits. */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h) { glScissor(x, y, (GLsizei)w, (GLsizei)h); }
 
 void nt_gfx_backend_set_scissor_enabled(bool enabled) {
@@ -791,7 +818,7 @@ void nt_gfx_backend_set_scissor_enabled(bool enabled) {
     }
 }
 
-void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { glViewport(x, y, (GLsizei)w, (GLsizei)h); }
+void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x, y, w, h); }
 
 /* Raw GL readback, bottom-left origin. Y-flip to top-left is done once in
  * the shared layer (nt_gfx_read_pixels). rgba8 rows are 4*w bytes -> already
@@ -891,7 +918,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.blend_op_rgb = pip->blend_op_rgb;
         s_gl_cache.blend_op_alpha = pip->blend_op_alpha;
     }
-    if (pip->blend_enabled && !blend_constant_color_equal(s_gl_cache.blend_constant_color, pip->blend_constant_color)) {
+    if (pip->blend_enabled && !float4_equal(s_gl_cache.blend_constant_color, pip->blend_constant_color)) {
         glBlendColor(pip->blend_constant_color[0], pip->blend_constant_color[1], pip->blend_constant_color[2], pip->blend_constant_color[3]);
         memcpy(s_gl_cache.blend_constant_color, pip->blend_constant_color, sizeof(pip->blend_constant_color));
     }

@@ -1749,6 +1749,10 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    /* The mirror owns this state end to end, so the dedup lives here and the backend stays raw. */
+    if (s_gfx.scissor_enabled == enabled) {
+        return;
+    }
     s_gfx.scissor_enabled = enabled;
     nt_gfx_backend_set_scissor_enabled(enabled);
 }
