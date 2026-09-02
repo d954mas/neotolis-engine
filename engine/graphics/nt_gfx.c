@@ -1755,6 +1755,7 @@ void nt_gfx_set_uniform_mat4_h(nt_hash32_t name, const float *matrix) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(matrix != NULL);
     nt_gfx_backend_set_uniform_mat4(name.value, matrix);
 }
 
@@ -1762,6 +1763,7 @@ void nt_gfx_set_uniform_vec4_h(nt_hash32_t name, const float *vec) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(vec != NULL);
     nt_gfx_backend_set_uniform_vec4(name.value, vec);
 }
 
@@ -1783,6 +1785,7 @@ void nt_gfx_set_uniform_mat4(const char *name, const float *matrix) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(matrix != NULL);
     nt_gfx_backend_set_uniform_mat4(nt_hash32_str(name).value, matrix);
 }
 
@@ -1790,6 +1793,7 @@ void nt_gfx_set_uniform_vec4(const char *name, const float *vec) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(vec != NULL);
     nt_gfx_backend_set_uniform_vec4(nt_hash32_str(name).value, vec);
 }
 
