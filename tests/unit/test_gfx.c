@@ -1890,6 +1890,8 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
     nt_gfx_bind_texture(tex, 0); /* logs, no trap */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    /* The sampler bind rides on the texture bind: skipping one skips both. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bind_sampler_count());
     nt_gfx_end_frame();
 }
 
@@ -1967,6 +1969,7 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_gfx_bind_pipeline(dead); /* rejected: stale handle */
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
+    EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_tex"), 0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
 
     nt_gfx_end_pass();
@@ -2089,6 +2092,7 @@ void test_gfx_binds_outside_a_pass_trap(void) {
     nt_gfx_begin_frame();
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
+    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(vbo, 0));
     EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
     nt_gfx_end_frame();
 }

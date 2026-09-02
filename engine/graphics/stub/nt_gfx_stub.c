@@ -51,6 +51,7 @@ static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
 static uint32_t s_stub_last_update_buffer_offset;
 static uint32_t s_stub_last_instance_offset;
+static uint32_t s_stub_last_instance_vertex_input; /* recorder: last VI handle bind_instance_buffer named */
 static nt_blend_state_t s_stub_last_pipeline_blend;
 static uint32_t s_stub_vertex_input_create_count;
 static uint32_t s_stub_bind_vertex_input_count;
@@ -116,6 +117,7 @@ void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
 uint32_t nt_gfx_stub_test_last_instance_offset(void) { return s_stub_last_instance_offset; }
+uint32_t nt_gfx_stub_test_last_instance_vertex_input(void) { return s_stub_last_instance_vertex_input; }
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void) { return s_stub_last_pipeline_blend; }
 uint32_t nt_gfx_stub_test_vertex_input_create_count(void) { return s_stub_vertex_input_create_count; }
 uint32_t nt_gfx_stub_test_bind_vertex_input_count(void) { return s_stub_bind_vertex_input_count; }
@@ -153,6 +155,7 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_next_texture_backend = 0;
     s_stub_last_update_buffer_offset = 0;
     s_stub_last_instance_offset = 0;
+    s_stub_last_instance_vertex_input = 0;
     s_stub_last_pipeline_blend = (nt_blend_state_t){0};
     s_stub_vertex_input_create_count = 0;
     s_stub_bind_vertex_input_count = 0;
@@ -510,12 +513,13 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
-    (void)vertex_input_backend;
     (void)buffer_backend;
 #ifdef NT_TEST_ACCESS
     s_stub_last_instance_offset = byte_offset;
+    s_stub_last_instance_vertex_input = vertex_input_backend;
 #else
     (void)byte_offset;
+    (void)vertex_input_backend;
 #endif
 }
 

@@ -943,6 +943,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         nt_pool_free(&s_gfx.pipeline_pool, id);
         return result;
     }
+    /* uniform_target_program and destroy_pipeline address the backend record by
+     * this slot, so the mirror must be 1:1. */
+    NT_ASSERT(backend == slot && "create_pipeline: backend must mirror the pool slot");
 
     s_gfx.pipeline_backends[slot] = backend;
     s_gfx.pipeline_programs[slot] = desc->program.id;
@@ -1005,6 +1008,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return result;
     }
+    NT_ASSERT(backend == slot && "create_vertex_input: backend must mirror the pool slot");
 
     s_gfx.vertex_input_backends[slot] = backend;
     s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
@@ -1476,10 +1480,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        /* Clear the mirror so later draws cannot reuse the previous
-         * pipeline's program. The bound vertex input is orthogonal state. */
+        /* Clearing the mirror is the whole unbind: later draws and uniform
+         * writes trap on it. The bound vertex input is orthogonal state. */
         s_gfx.bound_pipeline = 0;
-        nt_gfx_backend_bind_pipeline(0);
         NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
@@ -1536,7 +1539,11 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     /* A husk: loss zeroed the backend and neither the owner nor a render-target
      * restore refilled it. Recoverable GPU failure, not a broken invariant. */
     if (s_gfx.texture_backends[idx] == 0) {
-        NT_LOG_ERROR("bind_texture: texture has no GPU resource (restore failed)");
+        /* A batch renderer would hit this every item, and on web every log is a
+         * JS call. Clear the mirror: a following bind_sampler must not validate
+         * against the texture that stayed bound. */
+        s_gfx.bound_texture_ids[slot] = 0;
+        NT_LOG_ERROR_ONCE("bind_texture: texture has no GPU resource (restore failed)");
         return;
     }
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
@@ -1997,6 +2004,10 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     /* Pool slots survive context loss; pointing into a zeroed backend would
      * silently draw garbage on the restored context. */
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "bind_instance_buffer: buffer has no live backend -- recreate it after context restore");
+    if (s_gfx.buffer_backends[slot] == 0) {
+        NT_LOG_ERROR_ONCE("bind_instance_buffer: buffer has no live backend");
+        return;
+    }
     NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_instance_buffer: offset must be 4-byte aligned (WebGL2 attrib rule)");
     NT_ASSERT(s_gfx.bound_vertex_input != 0 && "bind_instance_buffer: requires a bound vertex input");
@@ -2038,7 +2049,7 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
      * the recreate contract, and binding it would feed the shader garbage. */
     NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
     if (s_gfx.buffer_backends[idx] == 0) {
-        NT_LOG_ERROR("bind_uniform_buffer: buffer has no live backend");
+        NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return;
     }
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);

@@ -112,7 +112,12 @@ void setUp(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
+static void remove_state_counters(void);
+
 void tearDown(void) {
+    /* A failed assert inside a counting window longjmps past the restore; leaked
+     * glad pointers would then outlive this test's GL context. */
+    remove_state_counters();
     nt_gfx_shutdown();
     nt_window_shutdown();
 }
@@ -277,8 +282,12 @@ static void install_state_counters(void) {
     glad_glClearDepth = counting_clear_depth;
 }
 
-/* Must run before any assert -- a failure longjmps past the restore. */
+/* Must run before any assert -- a failure longjmps past the restore. Idempotent,
+ * so tearDown can undo an install a failed assert jumped over. */
 static void remove_state_counters(void) {
+    if (s_saved_use_program == NULL) {
+        return;
+    }
     glad_glUseProgram = s_saved_use_program;
     glad_glBindVertexArray = s_saved_bind_vao;
     glad_glDepthMask = s_saved_depth_mask;
@@ -290,6 +299,17 @@ static void remove_state_counters(void) {
     glad_glViewport = s_saved_viewport;
     glad_glClearColor = s_saved_clear_color;
     glad_glClearDepth = s_saved_clear_depth;
+    s_saved_use_program = NULL;
+    s_saved_bind_vao = NULL;
+    s_saved_depth_mask = NULL;
+    s_saved_enable = NULL;
+    s_saved_disable = NULL;
+    s_saved_blend_func_separate = NULL;
+    s_saved_active_texture = NULL;
+    s_saved_state_bind_texture = NULL;
+    s_saved_viewport = NULL;
+    s_saved_clear_color = NULL;
+    s_saved_clear_depth = NULL;
 }
 
 /* One glBindVertexArray selects the whole geometry: two meshes alternate under
@@ -645,8 +665,11 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     remove_state_counters();
+    /* Zero calls only counts if the frame still rendered what the first one did. */
+    uint8_t red = center_red();
     nt_gfx_end_frame();
 
+    TEST_ASSERT_UINT8_WITHIN(1, 255, red);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.use_program);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_vao);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.depth_mask);
@@ -737,7 +760,8 @@ static void test_pass_clear_after_depth_write_off(void) {
 }
 
 /* Bound state is pass-scoped but the GL cache is not: re-binding the same
- * pipeline and vertex input in the next pass costs nothing. */
+ * pipeline and vertex input in the next pass -- and the next frame -- costs
+ * nothing. */
 static void test_same_pipeline_across_passes_rebinds_for_free(void) {
     nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
@@ -748,7 +772,9 @@ static void test_same_pipeline_across_passes_rebinds_for_free(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
+    nt_gfx_begin_frame();
     begin_black_pass();
     install_state_counters();
     nt_gfx_bind_pipeline(pip);
@@ -943,6 +969,173 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     }
 }
 
+/* A raw backend recreate grounds the cache against the fresh context: state the
+ * old lifetime left on is off, and the first bind that wants it says so again. */
+static void test_recreate_all_resources_grounds_cache(void) {
+    nt_pipeline_t blend_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(blend_pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
+
+    TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_BLEND));
+
+    /* The zeroed backend tables orphan every old handle, so the frame that
+     * follows a recreate has to build its own. */
+    nt_pipeline_t fresh_blend = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
+
+    /* After the recreate: it reloads glad and would drop the swapped pointers. */
+    install_state_counters();
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(fresh_blend);
+    nt_gfx_end_pass();
+    remove_state_counters();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
+}
+
+/* Destroying the bound vertex input clears the cached VAO name: a new VAO that
+ * reuses the deleted GL name must still reach glBindVertexArray. */
+static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_buffer_t vbo = make_vbo(s_full);
+    nt_vertex_input_t vi_a = make_vi(vbo, (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi_a);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
+    nt_gfx_destroy_vertex_input(vi_a); /* destroyed while bound */
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_vertex_input_t vi_b = make_vi(vbo, (nt_buffer_t){0});
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi_b));
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static nt_texture_t make_pixel_texture(const uint8_t pixel[4]) { return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8}); }
+
+/* Creation leaves its own texture bound on the active unit. */
+static GLint current_texture_name(void) {
+    GLint name = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &name);
+    return name;
+}
+
+/* Same for textures: destroy clears the cache slot, so a new texture reusing the
+ * deleted GL name is not mistaken for the one still recorded there. */
+static void test_gl_name_reuse_after_destroying_bound_texture(void) {
+    static const uint8_t white[4] = {255, 255, 255, 255};
+    static const uint8_t grey[4] = {128, 128, 128, 255};
+    nt_texture_t tex_a = make_pixel_texture(white);
+    nt_texture_t keep = make_pixel_texture(grey);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_a.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, keep.id);
+
+    nt_gfx_bind_texture(tex_a, 0);
+    /* Parking the active unit elsewhere keeps the upload-time invalidation of
+     * the new texture off slot 0, so only the destroy can clear it. */
+    nt_gfx_bind_texture(keep, 1);
+
+    nt_gfx_destroy_texture(tex_a);
+    nt_texture_t tex_b = make_pixel_texture(white);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_b.id);
+    GLint name_b = current_texture_name();
+    TEST_ASSERT_NOT_EQUAL_INT(0, name_b);
+
+    nt_gfx_bind_texture(tex_b, 0);
+    TEST_ASSERT_EQUAL_INT(name_b, current_texture_name());
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* update_texture uploads on the active unit, so it invalidates that slot: the
+ * next bind of the texture that used to live there has to reach GL again. */
+static void test_update_texture_mid_pass_then_bind_reaches_gl(void) {
+    static const uint8_t white[4] = {255, 255, 255, 255};
+    static const uint8_t grey[4] = {128, 128, 128, 255};
+    nt_texture_t tex_1 = make_pixel_texture(white);
+    GLint name_1 = current_texture_name();
+    nt_texture_t tex_2 = make_pixel_texture(grey);
+    TEST_ASSERT_NOT_EQUAL_INT(0, name_1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_2.id);
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_texture(tex_1, 0);
+    nt_gfx_update_texture(tex_2, 0, 0, 1, 1, white);
+
+    s_real_bind_texture_calls = 0;
+    s_saved_bind_texture = glad_glBindTexture;
+    glad_glBindTexture = counting_bind_texture;
+    nt_gfx_bind_texture(tex_1, 0);
+    /* Restore before any assert -- a failure longjmps past this line. */
+    glad_glBindTexture = s_saved_bind_texture;
+    GLint bound = current_texture_name();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_real_bind_texture_calls);
+    TEST_ASSERT_EQUAL_INT(name_1, bound);
+}
+
+/* Destroying the current program clears the cached name: a relink that reuses it
+ * must still reach glUseProgram, now that the cache outlives the frame. */
+static void test_destroy_current_program_then_relink_reissues_use_program(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
+    nt_program_t prog_p = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pip_p = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_p});
+    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip_p);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_program(prog_p); /* cascades into pip_p */
+    nt_program_t prog_q = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    install_state_counters();
+    nt_gfx_bind_pipeline(pip_q);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    remove_state_counters();
+    uint8_t red = center_red();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.use_program);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, red);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
@@ -964,5 +1157,10 @@ int main(void) {
     RUN_TEST(test_clear_values_dedup);
     RUN_TEST(test_ground_state_viewport_reissued_after_reinit);
     RUN_TEST(test_uniform_write_targets_bound_pipelines_program);
+    RUN_TEST(test_recreate_all_resources_grounds_cache);
+    RUN_TEST(test_gl_name_reuse_after_destroying_bound_vertex_input);
+    RUN_TEST(test_gl_name_reuse_after_destroying_bound_texture);
+    RUN_TEST(test_update_texture_mid_pass_then_bind_reaches_gl);
+    RUN_TEST(test_destroy_current_program_then_relink_reissues_use_program);
     return UNITY_END();
 }

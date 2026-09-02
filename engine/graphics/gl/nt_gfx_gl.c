@@ -369,7 +369,10 @@ static GLenum map_blend_op(nt_blend_op_t op) {
     }
 }
 
-static bool float4_equal(const float a[4], const float b[4]) { return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]; }
+/* Bitwise, not ==: -0.0 and +0.0 compare equal as floats but are distinct
+ * clear/blend values on a float render target, so the dedup must re-issue. */
+// NOLINTNEXTLINE(bugprone-suspicious-memory-comparison,cert-exp42-c,cert-flp37-c) -- distinguishing the bit patterns is the point
+static bool float4_equal(const float a[4], const float b[4]) { return memcmp(a, b, 4 * sizeof(float)) == 0; }
 
 static GLenum map_depth_func(nt_depth_func_t f) {
     switch (f) {
@@ -825,12 +828,8 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    /* The front-end saying nothing is bound: no backend state to drop. */
-    if (backend_handle == 0) {
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_init_desc.max_pipelines && "bind_pipeline: handle out of range");
-    if (backend_handle > s_init_desc.max_pipelines) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_pipelines && "bind_pipeline: handle out of range");
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
@@ -1433,6 +1432,8 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
     NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_instance_buffer: requires a live buffer");
     NT_ASSERT(vertex_input_backend != 0 && vertex_input_backend <= s_init_desc.max_vertex_inputs && s_vertex_inputs[vertex_input_backend].vao != 0 &&
               "bind_instance_buffer: requires a live vertex input");
+    /* The pointers land in whatever VAO is bound, so the named one must be it. */
+    NT_ASSERT(s_vertex_inputs[vertex_input_backend].vao == s_gl_cache.vao && "bind_instance_buffer: named vertex input is not the bound VAO");
     GLuint buf = s_buffer_gl[buffer_backend];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 

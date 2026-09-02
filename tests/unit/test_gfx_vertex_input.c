@@ -340,6 +340,7 @@ void test_bind_instance_buffer_uses_bound_vi(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 16); /* no pipeline needed on this path */
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_bound_vertex_input(), nt_gfx_stub_test_last_instance_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
