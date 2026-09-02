@@ -1848,6 +1848,51 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_gfx_end_frame();
 }
 
+/* Buffers have no auto-restore path, so a husk means the owner skipped the
+ * recreate contract -- the one case a bind cannot absorb. */
+void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, ubo.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame(); /* latches the loss, zeroes every backend record */
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
+    nt_gfx_end_frame();
+}
+
+/* A texture husk can also be a render-target attachment whose restore failed --
+ * a runtime GPU failure, so the bind reports it instead of trapping. */
+void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(tex));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    nt_gfx_bind_texture(tex, 0); /* logs, no trap */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    nt_gfx_end_frame();
+}
+
 /* ---- Per-frame draw call counter ---- */
 
 /* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
@@ -2185,6 +2230,8 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
+    RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
+    RUN_TEST(test_gfx_bind_texture_on_husk_logs_and_skips_backend);
     RUN_TEST(test_gfx_restored_frame_rejects_draws);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);

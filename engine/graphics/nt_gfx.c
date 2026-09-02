@@ -1533,6 +1533,12 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
         return;
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
+    /* A husk: loss zeroed the backend and neither the owner nor a render-target
+     * restore refilled it. Recoverable GPU failure, not a broken invariant. */
+    if (s_gfx.texture_backends[idx] == 0) {
+        NT_LOG_ERROR("bind_texture: texture has no GPU resource (restore failed)");
+        return;
+    }
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
     s_gfx.bound_texture_ids[slot] = tex.id;
     nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
@@ -2013,6 +2019,13 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     NT_ASSERT(s_gfx.buffer_metas[idx].type == NT_BUFFER_UNIFORM);
     if (s_gfx.buffer_metas[idx].type != NT_BUFFER_UNIFORM) {
         NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
+        return;
+    }
+    /* Buffers are never auto-restored: a zeroed backend means the owner skipped
+     * the recreate contract, and binding it would feed the shader garbage. */
+    NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
+    if (s_gfx.buffer_backends[idx] == 0) {
+        NT_LOG_ERROR("bind_uniform_buffer: buffer has no live backend");
         return;
     }
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);

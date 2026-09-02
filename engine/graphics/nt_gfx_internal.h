@@ -15,6 +15,10 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
+/* destroy_* accepts 0 (no-op, as glDelete*); bind_pipeline / bind_vertex_input /
+ * bind_sampler accept 0 as an explicit unbind; every other bind requires a live
+ * handle -- the front-end owns husk handling. */
+
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);

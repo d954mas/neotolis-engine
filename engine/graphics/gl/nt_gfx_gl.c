@@ -1156,7 +1156,11 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_programs) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_programs && "destroy_program: handle out of range");
+    if (backend_handle > s_init_desc.max_programs) {
         return;
     }
     GLuint program = s_programs[backend_handle].program;
@@ -1205,7 +1209,11 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_pipelines && "destroy_pipeline: handle out of range");
+    if (backend_handle > s_init_desc.max_pipelines) {
         return;
     }
     /* The program is not ours to delete -- it outlives every pipeline built
@@ -1266,7 +1274,11 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
 }
 
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_vertex_inputs) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_vertex_inputs && "destroy_vertex_input: handle out of range");
+    if (backend_handle > s_init_desc.max_vertex_inputs) {
         return;
     }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle];
@@ -1283,16 +1295,33 @@ void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
     memset(vi, 0, sizeof(*vi));
 }
 
+/* Drop the vertex-input selection and the GL binding together. */
+static void unbind_vertex_input_state(void) {
+    s_bound_vertex_input_slot = 0;
+    if (s_gl_cache.vao != 0) {
+        gl_bind_vao(0);
+        s_gl_cache.vao = 0;
+    }
+}
+
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_vertex_inputs || s_vertex_inputs[backend_handle].vao == 0) {
-        s_bound_vertex_input_slot = 0;
-        if (s_gl_cache.vao != 0) {
-            gl_bind_vao(0);
-            s_gl_cache.vao = 0;
-        }
+    if (backend_handle == 0) {
+        unbind_vertex_input_state();
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_vertex_inputs && "bind_vertex_input: handle out of range");
+    if (backend_handle > s_init_desc.max_vertex_inputs) {
+        unbind_vertex_input_state();
         return;
     }
     GLuint vao = s_vertex_inputs[backend_handle].vao;
+    /* A zeroed record (context loss, destroyed vertex input) would leave the
+     * previous VAO bound and draw the wrong geometry. */
+    NT_ASSERT(vao != 0 && "bind_vertex_input: record without a live VAO");
+    if (vao == 0) {
+        unbind_vertex_input_state();
+        return;
+    }
     if (s_gl_cache.vao != vao) {
         gl_bind_vao(vao);
         s_gl_cache.vao = vao;
@@ -1351,7 +1380,11 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
 }
 
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_buffers && "destroy_buffer: handle out of range");
+    if (backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
@@ -1402,9 +1435,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
 }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_instance_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
@@ -1427,9 +1458,7 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
 }
@@ -1649,6 +1678,9 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
     GLuint tex;
     glGenTextures(1, &tex);
+    if (tex == 0) {
+        return 0; /* lost context: storing name 0 would alias the free-slot sentinel */
+    }
     if (!nt_gfx_gl_begin_texture_upload(tex)) {
         glDeleteTextures(1, &tex);
         return 0;
@@ -1729,7 +1761,11 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_textures && "destroy_texture: handle out of range");
+    if (backend_handle > s_init_desc.max_textures) {
         return;
     }
     GLuint tex = s_texture_gl[backend_handle];
@@ -1988,9 +2024,8 @@ bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_rende
 }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
-        return;
-    }
+    NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_texture: slot out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "bind_texture: requires a live texture");
     GLuint tex = s_texture_gl[backend_handle];
     if (s_gl_cache.bound_textures[slot] == tex) {
         return; /* already bound to this slot */
