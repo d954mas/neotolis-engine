@@ -105,9 +105,10 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
     slot->info.tex_count = desc->texture_count;
     for (uint8_t i = 0; i < desc->texture_count; i++) {
+        /* A slot with no uniform name is a declaration nothing can bind. */
+        NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
         slot->tex_resources[i] = desc->textures[i].resource;
-        slot->info.tex_name_hashes[i] = desc->textures[i].name ? nt_hash32_str(desc->textures[i].name).value : 0;
-        slot->info.tex_names[i] = desc->textures[i].name; /* must be static storage */
+        slot->info.tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
         slot->info.resolved_sampler[i] = desc->textures[i].sampler;
     }
 
@@ -115,9 +116,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(desc->param_count <= NT_MATERIAL_MAX_PARAMS);
     slot->info.param_count = desc->param_count;
     for (uint8_t i = 0; i < desc->param_count; i++) {
+        NT_ASSERT(desc->params[i].name != NULL && "material param needs a uniform name");
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
-        slot->info.param_name_hashes[i] = desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
-        slot->info.param_names[i] = desc->params[i].name;
+        slot->info.param_name_hashes[i] = nt_hash32_str(desc->params[i].name).value;
     }
 
     /* Attr map */

@@ -1981,6 +1981,29 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_destroy_shader(fs);
 }
 
+/* The setter must reach the backend with the caller's key and value unchanged. */
+void test_gfx_uniform_records_hash_and_value(void) {
+    const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_INT(3, nt_gfx_stub_test_uniform_int_value_at(0));
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_stub_test_uniform_vec4_hash_at(0));
+
+    /* UNITY_EXCLUDE_FLOAT: compare the exact small integers as ints. */
+    float recorded[4];
+    nt_gfx_stub_test_uniform_vec4_value_at(0, recorded);
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_INT32((int32_t)vec[i], (int32_t)recorded[i]);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -2115,5 +2138,6 @@ int main(void) {
     RUN_TEST(test_gfx_restored_frame_rejects_draws);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
+    RUN_TEST(test_gfx_uniform_records_hash_and_value);
     return UNITY_END();
 }

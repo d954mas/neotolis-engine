@@ -1751,32 +1751,34 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 
 /* ---- Uniforms ---- */
 
-void nt_gfx_set_uniform_mat4(const char *name, const float *matrix) {
+void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    nt_gfx_backend_set_uniform_mat4(name, matrix);
+    NT_ASSERT(matrix != NULL);
+    nt_gfx_backend_set_uniform_mat4(name.value, matrix);
 }
 
-void nt_gfx_set_uniform_vec4(const char *name, const float *vec) {
+void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    nt_gfx_backend_set_uniform_vec4(name, vec);
+    NT_ASSERT(vec != NULL);
+    nt_gfx_backend_set_uniform_vec4(name.value, vec);
 }
 
-void nt_gfx_set_uniform_float(const char *name, float val) {
+void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    nt_gfx_backend_set_uniform_float(name, val);
+    nt_gfx_backend_set_uniform_float(name.value, val);
 }
 
-void nt_gfx_set_uniform_int(const char *name, int val) {
+void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    nt_gfx_backend_set_uniform_int(name, val);
+    nt_gfx_backend_set_uniform_int(name.value, val);
 }
 
 /* ---- Draw calls ---- */

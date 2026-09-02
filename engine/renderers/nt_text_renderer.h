@@ -42,7 +42,8 @@ nt_result_t nt_text_renderer_restore_gpu(void);
 
 /* Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE; setters flush on handle changes.
  * Declare u_alpha_cutoff on every material sharing the program or none: omitted uniforms retain prior values.
- * NT_TEXT_ALPHA_CUTOFF_DEFAULT enables coverage discard. */
+ * NT_TEXT_ALPHA_CUTOFF_DEFAULT enables coverage discard.
+ * A text material declares no textures: units 0 and 1 belong to the font's curve and band textures (asserted at flush). */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 

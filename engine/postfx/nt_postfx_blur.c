@@ -74,9 +74,21 @@ static struct {
 #endif
 } s_blur;
 
-static const char *const s_kernel_uniforms[5] = {
-    "u_kernel0", "u_kernel1", "u_kernel2", "u_kernel3", "u_kernel4",
-};
+/* Fixed uniform names: hashed once at init, the blur path sets them every pass. */
+static nt_hash32_t s_kernel_uniforms[5];
+static nt_hash32_t s_u_radius;
+static nt_hash32_t s_u_source;
+static nt_hash32_t s_u_direction;
+
+static void hash_uniform_names(void) {
+    static const char *const kernel_names[5] = {"u_kernel0", "u_kernel1", "u_kernel2", "u_kernel3", "u_kernel4"};
+    for (uint32_t i = 0; i < 5; i++) {
+        s_kernel_uniforms[i] = nt_hash32_str(kernel_names[i]);
+    }
+    s_u_radius = nt_hash32_str("u_radius");
+    s_u_source = nt_hash32_str("u_source");
+    s_u_direction = nt_hash32_str("u_direction");
+}
 
 static uint32_t radius_to_int(float radius) {
     if (!isfinite(radius) || radius <= 0.0F || radius > (float)NT_POSTFX_BLUR_MAX_RADIUS) {
@@ -215,6 +227,7 @@ nt_result_t nt_postfx_blur_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     memset(&s_blur, 0, sizeof(s_blur));
+    hash_uniform_names();
     if (!make_gpu_resources()) {
         NT_LOG_ERROR("postfx_blur init failed");
         destroy_gpu_resources();
@@ -377,7 +390,7 @@ static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radiu
 }
 
 static void upload_kernel(uint32_t radius, const float packed[20]) {
-    nt_gfx_set_uniform_int("u_radius", (int)radius);
+    nt_gfx_set_uniform_int(s_u_radius, (int)radius);
     for (uint32_t i = 0; i < 5; i++) {
         nt_gfx_set_uniform_vec4(s_kernel_uniforms[i], &packed[(size_t)i * 4U]);
     }
@@ -388,8 +401,8 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
     nt_gfx_bind_texture(source, 0);
-    nt_gfx_set_uniform_int("u_source", 0);
-    nt_gfx_set_uniform_vec4("u_direction", direction);
+    nt_gfx_set_uniform_int(s_u_source, 0);
+    nt_gfx_set_uniform_vec4(s_u_direction, direction);
     upload_kernel(radius, packed);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();

@@ -91,7 +91,11 @@ void nt_sprite_renderer_shutdown(void);
 nt_result_t nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
- *   1. Atlas page texture binds to slot 0; material may override sampler.
+ *   1. A material that samples the atlas declares its page sampler at slot 0, whose
+ *      declared resource is never sampled: the renderer substitutes the page texture
+ *      per command and the material may override the sampler. Every declared slot must
+ *      resolve to a texture (register a placeholder for async loads; an override does not
+ *      exempt it), asserted at flush. No textures = no page, e.g. nt_ui_radial's flat SDF.
  *   2. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind

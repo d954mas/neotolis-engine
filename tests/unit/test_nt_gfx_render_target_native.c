@@ -474,8 +474,8 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_bind_vertex_input(fullscreen_vi);
     nt_gfx_bind_texture(depth_tex, 0);
     nt_gfx_bind_sampler(comparison, 0);
-    nt_gfx_set_uniform_int("u_shadow", 0);
-    nt_gfx_set_uniform_float("u_ref", 0.5F);
+    nt_gfx_set_uniform_int(nt_hash32_str("u_shadow"), 0);
+    nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
@@ -501,7 +501,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_bind_vertex_input(fullscreen_vi);
     nt_gfx_bind_texture(depth_tex, 0);
     nt_gfx_bind_sampler(raw, 0);
-    nt_gfx_set_uniform_int("u_depth", 0);
+    nt_gfx_set_uniform_int(nt_hash32_str("u_depth"), 0);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
@@ -723,7 +723,7 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
      * setting it again. */
     nt_gfx_bind_pipeline(pip_a);
     const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
-    nt_gfx_set_uniform_vec4("u_color", green);
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), green);
     nt_gfx_bind_pipeline(pip_b);
     bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
@@ -944,7 +944,7 @@ static void test_uniform_cache_addresses_all_sixteen_array_elements(void) {
     for (int i = 0; i < 16; i++) {
         char name[32];
         (void)snprintf(name, sizeof(name), "u_values[%d]", i);
-        nt_gfx_set_uniform_float(name, (float)(i + 1));
+        nt_gfx_set_uniform_float(nt_hash32_str(name), (float)(i + 1));
         assert_uniform_float(program, name, i + 1);
     }
     nt_gfx_end_pass();
@@ -958,7 +958,7 @@ static void test_uniform_cache_preserves_long_names(void) {
                                          "out vec4 frag_color;\n"
                                          "void main() { frag_color = vec4(" LONG_UNIFORM_NAME "); }\n";
     GLuint program = bind_uniform_test_program(fragment_source);
-    nt_gfx_set_uniform_float(LONG_UNIFORM_NAME, 7.0F);
+    nt_gfx_set_uniform_float(nt_hash32_str(LONG_UNIFORM_NAME), 7.0F);
     assert_uniform_float(program, LONG_UNIFORM_NAME, 7);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -973,8 +973,8 @@ static void test_uniform_cache_expands_only_terminal_struct_array_indices(void) 
                                          "                    + u_lights[1].weights[0] + u_lights[1].weights[1]);\n"
                                          "}\n";
     GLuint program = bind_uniform_test_program(fragment_source);
-    nt_gfx_set_uniform_float("u_lights[0].weights[1]", 3.0F);
-    nt_gfx_set_uniform_float("u_lights[1].weights[1]", 5.0F);
+    nt_gfx_set_uniform_float(nt_hash32_str("u_lights[0].weights[1]"), 3.0F);
+    nt_gfx_set_uniform_float(nt_hash32_str("u_lights[1].weights[1]"), 5.0F);
     assert_uniform_float(program, "u_lights[0].weights[1]", 3);
     assert_uniform_float(program, "u_lights[1].weights[1]", 5);
     nt_gfx_end_pass();

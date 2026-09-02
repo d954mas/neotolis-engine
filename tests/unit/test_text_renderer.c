@@ -300,10 +300,20 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_material_t material = create_test_material_with_blend(blend);
 
     nt_text_renderer_set_material(material);
+    nt_gfx_stub_test_reset();
     draw_and_flush();
 
     nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
+
+    /* The font owns units 0 and 1; the third int carries the curve texture width. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_band_texture").value, nt_gfx_stub_test_uniform_int_hash_at(1));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_stub_test_uniform_int_value_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_stub_test_uniform_int_hash_at(2));
+    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_stub_test_uniform_int_value_at(2));
 }
 
 /* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */
@@ -370,6 +380,28 @@ void test_vertex_count_4_per_glyph(void) {
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     /* 2 visible glyphs -> 8 vertices */
     TEST_ASSERT_EQUAL_UINT32(8, nt_text_renderer_test_vertex_count());
+}
+
+/* Units 0 and 1 carry the font's curve and band textures, so a text material
+ * that declares its own would have them silently overwritten. */
+void test_text_material_with_textures_asserts_at_flush(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
+        .program = nt_gfx_make_program(vs, fs),
+        .cull_mode = NT_CULL_NONE,
+        .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
+        .texture_count = 1,
+    });
+    nt_material_step();
+
+    nt_text_renderer_set_material(textured);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 /* ---- Test 9: Flush resets counts (TEXT-05) ---- */
@@ -1344,6 +1376,7 @@ int main(void) {
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_stride_72);
     RUN_TEST(test_vertex_count_4_per_glyph);
+    RUN_TEST(test_text_material_with_textures_asserts_at_flush);
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);

@@ -33,13 +33,13 @@ typedef enum {
 /* ---- Descriptor sub-types ---- */
 
 typedef struct {
-    const char *name;
+    const char *name; /* required sampler uniform name; hashed at create, not retained */
     nt_resource_t resource;
     nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
 
 typedef struct {
-    const char *name;
+    const char *name; /* required uniform name; hashed at create, not retained */
     float value[4];
 } nt_material_param_desc_t;
 
@@ -96,12 +96,10 @@ typedef struct {
     nt_program_t program;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    const char *tex_names[NT_MATERIAL_MAX_TEXTURES];         /* sampler uniform names (static storage) */
     nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];
-    const char *param_names[NT_MATERIAL_MAX_PARAMS]; /* uniform names (static storage) */
     uint8_t param_count;
     uint32_t attr_map_hashes[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_locations[NT_MATERIAL_MAX_ATTR_MAP];

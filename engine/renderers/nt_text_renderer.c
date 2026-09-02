@@ -216,9 +216,18 @@ static void destroy_gpu_resources(void) {
     s_text.ibo = (nt_buffer_t){0};
 }
 
+/* Fixed font uniform names: hashed once, since the flush path sets them every time. */
+static nt_hash32_t s_u_curve_texture;
+static nt_hash32_t s_u_band_texture;
+static nt_hash32_t s_u_curve_tex_width;
+
 void nt_text_renderer_init(void) {
     NT_ASSERT(!s_text.initialized);
     memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
+
+    s_u_curve_texture = nt_hash32_str("u_curve_texture");
+    s_u_band_texture = nt_hash32_str("u_band_texture");
+    s_u_curve_tex_width = nt_hash32_str("u_curve_tex_width");
 
     /* Pre-flush hook so font-cache evictions flush our staging while texture offsets are still valid.
      * Safe when staging is empty (flush early-returns on glyph_count == 0). */
@@ -756,21 +765,18 @@ void nt_text_renderer_flush(void) {
     if (s_text.font.id != 0) {
         nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), 0);
         nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), 1);
-        nt_gfx_set_uniform_int("u_curve_texture", 0);
-        nt_gfx_set_uniform_int("u_band_texture", 1);
-        nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
+        nt_gfx_set_uniform_int(s_u_curve_texture, 0);
+        nt_gfx_set_uniform_int(s_u_band_texture, 1);
+        nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
     }
 
-    /* Re-read material vec4 params every flush (e.g. u_alpha_cutoff) — same contract sprite/mesh
-     * renderers honor; without this the shader sees uninitialized uniforms. */
+    /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         if (mi != NULL) {
-            for (uint8_t p = 0; p < mi->param_count; p++) {
-                if (mi->param_names[p] != NULL) {
-                    nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
-                }
-            }
+            NT_ASSERT(mi->tex_count == 0 && "text material declares textures: units 0/1 belong to the font");
+            const nt_renderer_material_view_t view = nt_renderer_material_view(mi);
+            nt_renderer_set_material_uniforms(&view);
         }
     }
 

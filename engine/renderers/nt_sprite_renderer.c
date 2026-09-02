@@ -36,7 +36,7 @@ typedef struct {
                                frame (nt_material_step ran before render) so we
                                re-fetch via nt_material_get_info at flush time */
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
-    const char *tex_names[NT_MATERIAL_MAX_TEXTURES];
+    uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
     nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
     uint8_t tex_count;
     uint32_t first_index; /* offset into s_sprite.indices[] */
@@ -419,7 +419,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
-        c->tex_names[i] = mi->tex_names[i];
+        c->tex_name_hashes[i] = mi->tex_name_hashes[i];
         c->resolved_sampler[i] = mi->resolved_sampler[i];
     }
     c->first_index = s_sprite.index_count;
@@ -444,16 +444,14 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
 /* Atlas page is the texture source of truth — split cmd if a run crosses pages. */
 static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     NT_ASSERT(s_sprite.cmd_count > 0 && "sprite emit called with no open cmd");
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    /* Analytic-coverage shaders never sample the page: no substitution, no split, and
+     * an unresolved page must not hold the emit back. */
+    if (c->tex_count == 0) {
+        return true;
+    }
     if (page_tex == 0) {
         return false;
-    }
-
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    /* Lazy slot 0 inject — see draw_list contract in nt_sprite_renderer.h. */
-    if (c->tex_count == 0) {
-        c->tex_count = 1;
-        c->tex_names[0] = NULL;
-        c->resolved_sampler[0] = NT_SAMPLER_INVALID;
     }
 
     if (c->resolved_tex[0] == page_tex) {
@@ -1379,12 +1377,7 @@ void nt_sprite_renderer_flush(void) {
         nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
     }
 
-    uint32_t bound_pipeline_id = 0;
-    uint32_t bound_vi_id = 0;
-    uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
-    /* Tracked separately so override→no-override cmd transitions reset to default. */
-    uint32_t bound_sampler_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
-    uint32_t bound_mat_id = 0;
+    nt_renderer_bound_t bound = {0};
 
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
@@ -1395,68 +1388,33 @@ void nt_sprite_renderer_flush(void) {
             continue;
         }
 
-        bool pipeline_changed = false;
-        if (c->pipeline.id != bound_pipeline_id) {
-            nt_gfx_bind_pipeline(c->pipeline);
-            bound_pipeline_id = c->pipeline.id;
-            /* Params and sampler uniforms belong to programs and need replay.
-             * Texture-unit bindings belong to the context and survive the switch. */
-            bound_mat_id = 0;
-            pipeline_changed = true;
-        }
-
+        nt_renderer_bind_pipeline(&bound, c->pipeline);
         /* Geometry is one bind, independent of pipeline changes: two custom
          * layouts can share a pipeline and still switch vertex inputs here. */
-        if (c->vertex_input.id != bound_vi_id) {
-            nt_gfx_bind_vertex_input(c->vertex_input);
-            bound_vi_id = c->vertex_input.id;
-        }
-
-        /* Destroyed materials contribute no params; queued commands retain
-         * their captured pipeline and texture bindings. */
-        bool material_applied = false;
-        if (c->material.id != bound_mat_id) {
-            const nt_material_info_t *mi = nt_material_get_info(c->material);
-            if (mi != NULL) {
-                for (uint8_t p = 0; p < mi->param_count; p++) {
-                    if (mi->param_names[p] != NULL) {
-                        nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
-                    }
-                }
-                bound_mat_id = c->material.id;
-                material_applied = true;
-            }
-        }
+        nt_renderer_bind_vertex_input(&bound, c->vertex_input);
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
-            /* Shared textures can use different sampler names across materials.
-             * Replay captured mappings even if the material was destroyed. */
-            if ((material_applied || pipeline_changed) && c->tex_names[t] != NULL) {
-                nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
-            }
-            if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {
-                nt_gfx_bind_texture((nt_texture_t){.id = c->resolved_tex[t]}, t);
-                bound_tex_ids[t] = c->resolved_tex[t];
-                /* bind_texture also bound the texture's default sampler. */
-                bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
-            }
-            /* Effective sampler = override if set, else texture's asset default.
-             * Material declared a binding for slot t but resolved_tex == 0 is
-             * a developer bug — the engine ships nt_resource_set_placeholder_texture
-             * exactly to keep textures resolvable through async load races.
-             * Fail-early per AGENTS.md: dev catches it on first frame. */
-            NT_ASSERT((c->resolved_sampler[t].id != 0 || c->resolved_tex[t] != 0) && "sprite cmd slot has no resolved texture — register a placeholder via nt_resource_set_placeholder_texture");
-            uint32_t want_sampler;
-            if (c->resolved_sampler[t].id != 0) {
-                want_sampler = c->resolved_sampler[t].id;
-            } else {
-                want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
-            }
-            if (want_sampler != bound_sampler_ids[t]) {
-                nt_gfx_bind_sampler((nt_sampler_t){.id = want_sampler}, t);
-                bound_sampler_ids[t] = want_sampler;
-            }
+            /* nt_resource_set_placeholder_texture exists to keep slots resolvable
+             * through async load races, so an unresolved slot is a developer bug. */
+            NT_ASSERT(c->resolved_tex[t] != 0 && "sprite cmd slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
         }
+
+        /* Sampler-unit hashes come from the cmd, so a cmd whose material died still
+         * replays them; params are read from the live material when the material or the
+         * pipeline changed. */
+        const nt_material_info_t *mi = (c->material.id != bound.material) ? nt_material_get_info(c->material) : NULL;
+        const nt_renderer_material_view_t view = {
+            .tex_count = c->tex_count,
+            .tex_name_hashes = c->tex_name_hashes,
+            .resolved_tex = c->resolved_tex,
+            .resolved_sampler = c->resolved_sampler,
+            .param_count = (mi != NULL) ? mi->param_count : 0,
+            .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
+            .params = (mi != NULL) ? mi->params : NULL,
+        };
+        nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
+        /* Per cmd, not per material: one material's page can change on a page split. */
+        nt_renderer_apply_texture_slots(&bound, &view);
 
         /* Per-cmd vertex delta — avoids stats inflation across state splits. */
         uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;

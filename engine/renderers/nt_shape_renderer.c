@@ -654,8 +654,16 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
 
 /* ---- Lifecycle ---- */
 
+/* Fixed uniform names: hashed once, the draw path sets them every frame. */
+static nt_hash32_t s_u_vp;
+static nt_hash32_t s_u_cam_pos;
+static nt_hash32_t s_u_line_width;
+
 void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
+    s_u_vp = nt_hash32_str("u_vp");
+    s_u_cam_pos = nt_hash32_str("u_cam_pos");
+    s_u_line_width = nt_hash32_str("u_line_width");
     /* Set before anything is created: the failure paths below route cleanup
      * through shutdown(), which no-ops while this is false and would strand
      * every shader and program allocated so far. shutdown() re-clears it. */
@@ -871,7 +879,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_pipeline(t == NT_SHAPE_CAPSULE ? s_shape.cap_inst_pip_active : s_shape.inst_pip_active);
         nt_gfx_bind_vertex_input(s_shape.template_vi[t]);
         nt_gfx_bind_instance_buffer(s_shape.inst_buf, inst_base);
-        nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
 
         nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, s_shape.templates[t].num_vertices, cnt);
         s_shape.inst_counts[t] = 0;
@@ -886,7 +894,7 @@ void nt_shape_renderer_flush(void) {
 
         nt_gfx_bind_pipeline(s_shape.batch_pip_active);
         nt_gfx_bind_vertex_input(s_shape.batch_vi);
-        nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
 
         nt_gfx_draw_indexed(0, s_shape.index_count, s_shape.vertex_count);
 
@@ -908,10 +916,10 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_pipeline(s_shape.line_pip_active);
         nt_gfx_bind_vertex_input(s_shape.line_vi);
         nt_gfx_bind_instance_buffer(s_shape.line_instance_buf, line_base);
-        nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
         float cp4[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0.0F};
-        nt_gfx_set_uniform_vec4("u_cam_pos", cp4);
-        nt_gfx_set_uniform_float("u_line_width", s_shape.line_width);
+        nt_gfx_set_uniform_vec4(s_u_cam_pos, cp4);
+        nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
 
         nt_gfx_draw_indexed_instanced(0, 6, 4, s_shape.line_count);
 

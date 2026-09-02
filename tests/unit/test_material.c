@@ -9,6 +9,7 @@
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
 #include "nt_pack_format.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -313,6 +314,20 @@ void test_create_hashes_param_names(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_roughness").value, info->param_name_hashes[0]);
 }
 
+/* ---- Uniform names are mandatory ---- */
+
+void test_create_asserts_null_texture_name(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.textures[0].name = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+}
+
+void test_create_asserts_null_param_name(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.params[0].name = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+}
+
 /* ---- Test 10: valid returns true for live handle ---- */
 
 void test_valid_true_after_create(void) {
@@ -596,6 +611,8 @@ int main(void) {
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);
     RUN_TEST(test_create_hashes_param_names);
+    RUN_TEST(test_create_asserts_null_texture_name);
+    RUN_TEST(test_create_asserts_null_param_name);
     RUN_TEST(test_create_stores_entity_params);
 
     /* Valid / destroy */
