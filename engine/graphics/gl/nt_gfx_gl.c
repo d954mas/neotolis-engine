@@ -179,7 +179,9 @@ static uint8_t *s_transcode_buf = NULL;
 static uint32_t s_transcode_buf_size = 0;
 static uint32_t s_transcode_buf_idle = 0;
 
-/* ---- GL state cache (skip redundant JS interop calls) ---- */
+/* ---- GL state cache (skip redundant JS interop calls) ----
+ * Every direct GL call that changes a field here mirrors it or invalidates the
+ * entry at the call site; ground state only at init and context restore. */
 
 static struct {
     GLuint vao;
@@ -258,7 +260,9 @@ static void ebo_upload_end(void) {
     gl_bind_vao(s_gl_cache.vao);
 }
 
-static void nt_gfx_gl_cache_reset(void) {
+/* Real GL calls, not cache defaults: the native context outlives init cycles and
+ * restore reuses it. */
+static void nt_gfx_gl_cache_ground_state(void) {
     gl_bind_vao(0);
     glUseProgram(0);
     glDisable(GL_DEPTH_TEST);
@@ -271,6 +275,7 @@ static void nt_gfx_gl_cache_reset(void) {
     glBlendColor(0.0F, 0.0F, 0.0F, 0.0F);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(0.0F, 0.0F);
+    glDisable(GL_SCISSOR_TEST);
     glActiveTexture(GL_TEXTURE0);
 
     s_gl_cache.vao = 0;
@@ -477,7 +482,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
-    nt_gfx_gl_cache_reset();
+    nt_gfx_gl_cache_ground_state();
 
     nt_gfx_gl_init_context_features();
     return true;
@@ -624,7 +629,7 @@ void nt_gfx_backend_begin_frame(void) {
      * Required because window resize (Windows modal loop) or driver
      * may change GL state without going through nt_gfx API, leaving
      * the cache stale. */
-    nt_gfx_gl_cache_reset();
+    nt_gfx_gl_cache_ground_state();
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
 
@@ -817,13 +822,19 @@ static void unbind_pipeline_state(void) { s_bound_pipeline_slot = 0; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
+    if (backend_handle == 0) {
+        unbind_pipeline_state();
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_pipelines && "bind_pipeline: handle out of range");
+    if (backend_handle > s_init_desc.max_pipelines) {
         unbind_pipeline_state();
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
     /* A zeroed record (context loss, destroyed pipeline) would bind program 0
      * and turn every following draw into a silent GL_INVALID_OPERATION. */
+    NT_ASSERT(pip->program_slot != 0 && pip->program_slot <= s_init_desc.max_programs && "bind_pipeline: pipeline record without a live program");
     if (pip->program_slot == 0 || pip->program_slot > s_init_desc.max_programs) {
         unbind_pipeline_state();
         return;
@@ -1499,6 +1510,15 @@ static void nt_gfx_gl_forget_texture(GLuint tex) {
     }
 }
 
+/* Invalidation belongs at the bind: a later early return can then never leave the
+ * cache naming a texture the active unit no longer has bound. */
+static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
+    glBindTexture(GL_TEXTURE_2D, tex);
+    nt_gfx_gl_invalidate_active_texture_binding();
+}
+
+/* For upload paths that check glGetError afterwards — a stale error would be
+ * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = glGetError();
     NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
@@ -1506,8 +1526,7 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
         return false;
     }
-    glBindTexture(GL_TEXTURE_2D, tex);
-    nt_gfx_gl_invalidate_active_texture_binding();
+    nt_gfx_gl_bind_texture_for_upload(tex);
     return true;
 }
 
@@ -1586,7 +1605,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     GLuint tex = s_texture_gl[backend_handle];
     NT_ASSERT(tex != 0 && "backend_update_texture: no GL texture at handle");
 
-    glBindTexture(GL_TEXTURE_2D, tex);
+    nt_gfx_gl_bind_texture_for_upload(tex);
 
     nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(format);
 
@@ -1598,12 +1617,6 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    }
-
-    /* Invalidate state cache: glBindTexture dirtied the active unit's binding */
-    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
-    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
-        s_gl_cache.bound_textures[active_slot] = 0;
     }
 }
 
@@ -1643,7 +1656,10 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
     GLuint tex;
     glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
+    if (!nt_gfx_gl_begin_texture_upload(tex)) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(min_filter));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(mag_filter));
@@ -1715,12 +1731,6 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
         return 0;
     }
     s_texture_gl[slot] = tex;
-
-    /* Invalidate cache */
-    uint32_t active_slot = s_gl_cache.active_texture_unit - GL_TEXTURE0;
-    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
-        s_gl_cache.bound_textures[active_slot] = 0;
-    }
 
     return slot;
 }
@@ -2081,7 +2091,7 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     s_bound_pipeline_slot = 0;
     s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
-    nt_gfx_gl_cache_reset();
+    nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();
     return true;
 }

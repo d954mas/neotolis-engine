@@ -1,11 +1,13 @@
 /* Real-GL coverage for VI switching, isolated EBO data operations, orphaning,
  * and binding preservation across rejected or failed operations. */
 
+#include "basisu/nt_basisu_transcoder.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -28,6 +30,63 @@ static const float s_empty[6] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
 static const uint16_t s_tri_indices[3] = {0, 1, 2};
 static const uint16_t s_degenerate_indices[3] = {0, 0, 0};
+
+/* Transcoder fake in place of the loud-fail stub: level 0 describes cleanly and
+ * the session then refuses, the shape of corrupt basis data and the only way to
+ * fail a compressed create AFTER the backend bound its new texture. */
+void nt_basisu_transcoder_global_init(void) {}
+
+bool nt_basisu_validate_header(const void *basis_data, uint32_t basis_size) {
+    (void)basis_data;
+    (void)basis_size;
+    return true;
+}
+
+uint32_t nt_basisu_get_level_count(const void *basis_data, uint32_t basis_size) {
+    (void)basis_data;
+    (void)basis_size;
+    return 1;
+}
+
+bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint32_t level_index, uint32_t *out_width, uint32_t *out_height, uint32_t *out_total_blocks) {
+    (void)basis_data;
+    (void)basis_size;
+    if (level_index != 0) {
+        return false;
+    }
+    *out_width = 4;
+    *out_height = 4;
+    *out_total_blocks = 1;
+    return true;
+}
+
+bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
+    (void)basis_data;
+    (void)basis_size;
+    return false;
+}
+
+void nt_basisu_stop_transcoding(void) {}
+
+bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t output_blocks, nt_basisu_format_t format) {
+    (void)basis_data;
+    (void)basis_size;
+    (void)level_index;
+    (void)output;
+    (void)output_blocks;
+    (void)format;
+    return false;
+}
+
+uint32_t nt_basisu_bytes_per_block(nt_basisu_format_t format) {
+    (void)format;
+    return 16;
+}
+
+uint32_t nt_basisu_gl_internal_format(nt_basisu_format_t format) {
+    (void)format;
+    return 0;
+}
 
 void setUp(void) {
     TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
@@ -339,6 +398,64 @@ static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void)
     nt_gfx_end_frame();
 }
 
+static uint32_t s_real_bind_texture_calls;
+static PFNGLBINDTEXTUREPROC s_saved_bind_texture;
+static void GLAD_API_PTR counting_bind_texture(GLenum target, GLuint texture) {
+    s_real_bind_texture_calls++;
+    s_saved_bind_texture(target, texture);
+}
+
+/* A compressed create that fails after binding its own texture leaves GL with a
+ * different binding than before: the cache must not still name the old one, or
+ * the next bind of it is skipped and the draw samples the wrong texture. */
+static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
+    static const uint8_t pixel[4] = {255, 0, 0, 255};
+    nt_texture_t tex_a = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 1,
+        .height = 1,
+        .data = pixel,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_a.id);
+
+    nt_gfx_bind_texture(tex_a, 0);
+    GLint name_a = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &name_a);
+    TEST_ASSERT_NOT_EQUAL_INT(0, name_a);
+
+    static const uint8_t fake_basis[8] = {0};
+    uint32_t failed = nt_gfx_backend_create_texture_compressed(fake_basis, sizeof(fake_basis), 4, 4, 1, NT_FILTER_NEAREST, NT_FILTER_NEAREST, NT_WRAP_CLAMP_TO_EDGE, NT_WRAP_CLAMP_TO_EDGE,
+                                                               (uint32_t)NT_BASISU_FORMAT_RGBA32);
+    TEST_ASSERT_EQUAL_UINT32(0, failed);
+
+    s_real_bind_texture_calls = 0;
+    s_saved_bind_texture = glad_glBindTexture;
+    glad_glBindTexture = counting_bind_texture;
+    nt_gfx_bind_texture(tex_a, 0);
+    /* Restore before any assert -- a failure longjmps past this line. */
+    glad_glBindTexture = s_saved_bind_texture;
+
+    GLint bound = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+    TEST_ASSERT_EQUAL_UINT32(1, s_real_bind_texture_calls);
+    TEST_ASSERT_EQUAL_INT(name_a, bound);
+}
+
+/* Ground state is real GL calls, so scissor left enabled by a previous gfx
+ * lifetime cannot survive into the next one on the same native context. */
+static void test_ground_state_disables_scissor(void) {
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_SCISSOR_TEST));
+
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+    TEST_ASSERT_TRUE(g_nt_gfx.initialized);
+
+    TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_SCISSOR_TEST));
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
@@ -349,5 +466,7 @@ int main(void) {
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
+    RUN_TEST(test_failed_compressed_upload_keeps_texture_cache_truthful);
+    RUN_TEST(test_ground_state_disables_scissor);
     return UNITY_END();
 }
