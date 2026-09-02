@@ -56,10 +56,8 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
 }
 
 // #region bound state
-/* What a material contributes to program + texture-unit state. Pointers borrow from
- * nt_material_info_t (mesh, text) or from a sprite cmd (slot 0 = atlas page; hashes
- * captured so a cmd whose material died can still replay its sampler units). Every
- * declared slot/param has a name (nt_material_create asserts), so presence = index < count. */
+/* Borrowed from nt_material_info_t, or from a sprite cmd whose slot 0 is the atlas page.
+ * Hashes are captured so a cmd whose material died still replays its sampler units. */
 typedef struct {
     uint8_t tex_count;
     const uint32_t *tex_name_hashes;      /* [tex_count] */
@@ -70,38 +68,31 @@ typedef struct {
     const float (*params)[4];
 } nt_renderer_material_view_t;
 
-/* Zero-init = nothing bound. Lives for ONE draw_list / flush: inside that call the
- * renderer is the only writer of GL draw state; across calls that is gfx's business.
- * Invariant relied on: within one call a material id never appears on two programs
- * (mesh derives the pipeline from the material; sprite set_material flushes on a
- * program change). Hence material identity alone decides uniform replay. */
+/* Zero-init = nothing bound; lives for ONE draw_list or flush. Within one call a material
+ * id never appears on two programs -- mesh derives the pipeline from the material, sprite
+ * set_material flushes on a program change -- so material identity alone decides replay. */
 typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
     uint32_t material;
     uint32_t tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t sampler[NT_MATERIAL_MAX_TEXTURES];
-    /* The bound texture's asset default, kept so a material without an override
-     * restores it after one with an override, at one pool lookup per texture change. */
-    uint32_t tex_default_sampler[NT_MATERIAL_MAX_TEXTURES];
 } nt_renderer_bound_t;
 
-static inline bool nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
+static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
     if (p.id == b->pipeline) {
-        return false;
+        return;
     }
     nt_gfx_bind_pipeline(p);
     b->pipeline = p.id;
-    return true;
 }
 
-static inline bool nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vertex_input_t vi) {
+static inline void nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vertex_input_t vi) {
     if (vi.id == b->vertex_input) {
-        return false;
+        return;
     }
     nt_gfx_bind_vertex_input(vi);
     b->vertex_input = vi.id;
-    return true;
 }
 
 /* Stateless program state: sampler unit for every declared slot (written whether or not
@@ -115,14 +106,12 @@ static inline void nt_renderer_set_material_uniforms(const nt_renderer_material_
     }
 }
 
-/* Same, skipped when the material is already the bound one. */
-static inline bool nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, uint32_t material_id, const nt_renderer_material_view_t *v) {
+static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, uint32_t material_id, const nt_renderer_material_view_t *v) {
     if (material_id == b->material) {
-        return false;
+        return;
     }
     nt_renderer_set_material_uniforms(v);
     b->material = material_id;
-    return true;
 }
 
 /* Context state: texture + effective sampler per slot, only where the slot's binding
@@ -137,10 +126,9 @@ static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const
             nt_gfx_bind_texture(tex, t);
             b->tex[t] = v->resolved_tex[t];
             /* bind_texture also installed the texture's asset-baked default. */
-            b->tex_default_sampler[t] = nt_gfx_get_texture_default_sampler(tex).id;
-            b->sampler[t] = b->tex_default_sampler[t];
+            b->sampler[t] = nt_gfx_get_texture_default_sampler(tex).id;
         }
-        const uint32_t want = (v->resolved_sampler[t].id != 0) ? v->resolved_sampler[t].id : b->tex_default_sampler[t];
+        const uint32_t want = (v->resolved_sampler[t].id != 0) ? v->resolved_sampler[t].id : nt_gfx_get_texture_default_sampler(tex).id;
         if (want != b->sampler[t]) {
             nt_gfx_bind_sampler((nt_sampler_t){.id = want}, t);
             b->sampler[t] = want;

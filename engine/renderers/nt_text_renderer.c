@@ -770,9 +770,7 @@ void nt_text_renderer_flush(void) {
         nt_gfx_set_uniform_int_h(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
     }
 
-    /* Re-read material vec4 params every flush (e.g. u_alpha_cutoff) — same contract sprite/mesh
-     * renderers honor; without this the shader sees uninitialized uniforms. Stateless because
-     * other renderers draw between two text flushes. */
+    /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         if (mi != NULL) {

@@ -593,10 +593,8 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 /* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
-/* ---- Uniforms ----
- *
- * The hash is the identity, as for tags and resources; the string forms are
- * convenience wrappers that hash with nt_hash32_str and forward. */
+/* ---- Uniforms ---- The hash is the identity, as for tags and resources;
+ * the string forms hash with nt_hash32_str and forward. */
 
 void nt_gfx_set_uniform_mat4(const char *name, const float *matrix);
 void nt_gfx_set_uniform_vec4(const char *name, const float *vec);

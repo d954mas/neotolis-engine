@@ -36,7 +36,6 @@ typedef struct {
                                frame (nt_material_step ran before render) so we
                                re-fetch via nt_material_get_info at flush time */
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
-    /* Captured so a cmd whose material died can still replay its sampler units. */
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
     nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
     uint8_t tex_count;
@@ -1394,9 +1393,8 @@ void nt_sprite_renderer_flush(void) {
         nt_renderer_bind_vertex_input(&bound, c->vertex_input);
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
-            /* A slot with no resolved texture is a developer bug — the engine ships
-             * nt_resource_set_placeholder_texture exactly to keep textures resolvable
-             * through async load races. Fail-early per AGENTS.md. */
+            /* nt_resource_set_placeholder_texture exists to keep slots resolvable
+             * through async load races, so an unresolved slot is a developer bug. */
             NT_ASSERT((c->resolved_sampler[t].id != 0 || c->resolved_tex[t] != 0) && "sprite cmd slot has no resolved texture — register a placeholder via nt_resource_set_placeholder_texture");
         }
 

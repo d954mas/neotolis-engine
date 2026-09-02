@@ -46,9 +46,6 @@ static struct {
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
     uint32_t frame_instance_total;
-    uint32_t frame_material_applies;
-    uint32_t frame_pipeline_binds;
-    uint32_t frame_vertex_input_binds;
 
     bool initialized;
 } s_mesh_renderer;
@@ -444,9 +441,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     /* Reset per-frame tracking */
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
-    s_mesh_renderer.frame_material_applies = 0;
-    s_mesh_renderer.frame_pipeline_binds = 0;
-    s_mesh_renderer.frame_vertex_input_binds = 0;
 
     /* Restore generic attribute 7 to white once per draw_list call.
      * NONE mode shaders read this as identity color. Protects against
@@ -567,17 +561,12 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
             if (mat_changed) {
                 const nt_renderer_material_view_t view = nt_renderer_material_view(mat_info);
-                if (nt_renderer_bind_pipeline(&bound, pip)) {
-                    s_mesh_renderer.frame_pipeline_binds++;
-                }
+                nt_renderer_bind_pipeline(&bound, pip);
                 nt_renderer_apply_material_uniforms(&bound, run_mat.id, &view);
                 /* Mesh renderer texture slots come from the material alone. */
                 nt_renderer_apply_texture_slots(&bound, &view);
-                s_mesh_renderer.frame_material_applies++;
             }
-            if (nt_renderer_bind_vertex_input(&bound, vi)) {
-                s_mesh_renderer.frame_vertex_input_binds++;
-            }
+            nt_renderer_bind_vertex_input(&bound, vi);
             prev_mat = run_mat;
             prev_mesh = run_mesh;
 
@@ -617,12 +606,6 @@ uint32_t nt_mesh_renderer_test_vertex_input_count(void) {
 uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.frame_draw_calls; }
 
 uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.frame_instance_total; }
-
-uint32_t nt_mesh_renderer_frame_material_applies(void) { return s_mesh_renderer.frame_material_applies; }
-
-uint32_t nt_mesh_renderer_frame_pipeline_binds(void) { return s_mesh_renderer.frame_pipeline_binds; }
-
-uint32_t nt_mesh_renderer_frame_vertex_input_binds(void) { return s_mesh_renderer.frame_vertex_input_binds; }
 
 uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }
 

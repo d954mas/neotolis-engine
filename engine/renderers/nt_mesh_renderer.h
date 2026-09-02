@@ -50,13 +50,6 @@ nt_result_t nt_mesh_renderer_restore_gpu(void);
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
-/* State transitions of the last draw_list call: how often the material block was
- * replayed, and how many pipeline / vertex-input binds that call actually issued.
- * Reset at the top of every draw_list. */
-uint32_t nt_mesh_renderer_frame_material_applies(void);
-uint32_t nt_mesh_renderer_frame_pipeline_binds(void);
-uint32_t nt_mesh_renderer_frame_vertex_input_binds(void);
-
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);

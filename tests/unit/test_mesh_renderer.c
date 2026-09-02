@@ -660,9 +660,6 @@ void test_state_same_material_three_meshes(void) {
     nt_mesh_renderer_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_frame_material_applies());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_frame_pipeline_binds());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_frame_vertex_input_binds());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
@@ -688,7 +685,6 @@ void test_state_three_materials_same_mesh(void) {
     nt_gfx_stub_test_reset();
     nt_mesh_renderer_draw_list(items, 3);
 
-    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_frame_material_applies());
     /* Same program + same render state => one pipeline; same derived layout => one VI. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
@@ -715,7 +711,7 @@ void test_state_render_state_split(void) {
     nt_mesh_renderer_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_frame_pipeline_binds());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_test_draw_trace_count());
     const uint32_t pip_a = nt_gfx_test_draw_trace_at(0).pipeline.id;
     const uint32_t pip_b = nt_gfx_test_draw_trace_at(1).pipeline.id;
@@ -843,7 +839,6 @@ void test_state_chunk_boundary_same_run(void) {
     nt_mesh_renderer_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_frame_material_applies());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
