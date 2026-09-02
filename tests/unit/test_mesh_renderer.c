@@ -581,7 +581,7 @@ void test_declared_sampler_unit_written_without_texture(void) {
     nt_mesh_renderer_draw_list(items, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
-    TEST_ASSERT_EQUAL_STRING("u_unresolved", nt_gfx_stub_test_uniform_int_name_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_unresolved").value, nt_gfx_stub_test_uniform_int_hash_at(0));
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
 }
 

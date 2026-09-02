@@ -205,7 +205,7 @@ static struct {
 
 /* ---- Per-pipeline uniform location lookup ---- */
 
-static GLint pipeline_get_uniform(const char *name) {
+static GLint pipeline_get_uniform_h(uint32_t name_hash) {
     if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
         return -1;
     }
@@ -214,9 +214,8 @@ static GLint pipeline_get_uniform(const char *name) {
         return -1;
     }
     const nt_gfx_gl_program_t *prog = &s_programs[program_slot];
-    uint32_t h = nt_hash32_str(name).value;
     for (uint8_t i = 0; i < prog->uniform_count; i++) {
-        if (prog->uniforms[i].name_hash == h) {
+        if (prog->uniforms[i].name_hash == name_hash) {
             return prog->uniforms[i].location;
         }
     }
@@ -911,29 +910,29 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 
 /* ---- Uniforms ---- */
 
-void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
-    GLint loc = pipeline_get_uniform(name);
+void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix) {
+    GLint loc = pipeline_get_uniform_h(name_hash);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
     }
 }
 
-void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec) {
-    GLint loc = pipeline_get_uniform(name);
+void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec) {
+    GLint loc = pipeline_get_uniform_h(name_hash);
     if (loc >= 0) {
         glUniform4fv(loc, 1, vec);
     }
 }
 
-void nt_gfx_backend_set_uniform_float(const char *name, float val) {
-    GLint loc = pipeline_get_uniform(name);
+void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val) {
+    GLint loc = pipeline_get_uniform_h(name_hash);
     if (loc >= 0) {
         glUniform1f(loc, val);
     }
 }
 
-void nt_gfx_backend_set_uniform_int(const char *name, int val) {
-    GLint loc = pipeline_get_uniform(name);
+void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val) {
+    GLint loc = pipeline_get_uniform_h(name_hash);
     if (loc >= 0) {
         glUniform1i(loc, val);
     }

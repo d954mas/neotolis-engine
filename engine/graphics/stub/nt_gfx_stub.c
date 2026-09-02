@@ -21,9 +21,13 @@ static uint32_t s_stub_texture_create_count;
 static uint32_t s_stub_program_create_count;
 static uint32_t s_stub_pipeline_create_count;
 #define NT_GFX_STUB_UNIFORM_NAMES 16
-static const char *s_stub_uniform_int_names[NT_GFX_STUB_UNIFORM_NAMES];
+static uint32_t s_stub_uniform_int_hashes[NT_GFX_STUB_UNIFORM_NAMES];
 static int s_stub_uniform_int_values[NT_GFX_STUB_UNIFORM_NAMES];
 static uint32_t s_stub_uniform_int_count;
+static uint32_t s_stub_uniform_vec4_hashes[NT_GFX_STUB_UNIFORM_NAMES];
+static float s_stub_uniform_vec4_values[NT_GFX_STUB_UNIFORM_NAMES][4];
+static uint32_t s_stub_uniform_vec4_count;
+static uint32_t s_stub_bind_pipeline_count;
 static uint32_t s_stub_update_texture_count;
 static uint32_t s_stub_update_buffer_count;
 static uint32_t s_stub_backend_restore_count;
@@ -71,9 +75,18 @@ uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_rend
 uint32_t nt_gfx_stub_test_texture_create_count(void) { return s_stub_texture_create_count; }
 uint32_t nt_gfx_stub_test_program_create_count(void) { return s_stub_program_create_count; }
 uint32_t nt_gfx_stub_test_pipeline_create_count(void) { return s_stub_pipeline_create_count; }
+uint32_t nt_gfx_stub_test_bind_pipeline_count(void) { return s_stub_bind_pipeline_count; }
 uint32_t nt_gfx_stub_test_uniform_int_count(void) { return s_stub_uniform_int_count; }
-const char *nt_gfx_stub_test_uniform_int_name_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_names[index] : NULL; }
+uint32_t nt_gfx_stub_test_uniform_int_hash_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_hashes[index] : 0; }
 int nt_gfx_stub_test_uniform_int_value_at(uint32_t index) { return index < s_stub_uniform_int_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_int_values[index] : -1; }
+uint32_t nt_gfx_stub_test_uniform_vec4_count(void) { return s_stub_uniform_vec4_count; }
+uint32_t nt_gfx_stub_test_uniform_vec4_hash_at(uint32_t index) { return index < s_stub_uniform_vec4_count && index < NT_GFX_STUB_UNIFORM_NAMES ? s_stub_uniform_vec4_hashes[index] : 0; }
+void nt_gfx_stub_test_uniform_vec4_value_at(uint32_t index, float out[4]) {
+    const bool valid = index < s_stub_uniform_vec4_count && index < NT_GFX_STUB_UNIFORM_NAMES;
+    for (uint32_t i = 0; i < 4; i++) {
+        out[i] = valid ? s_stub_uniform_vec4_values[index][i] : 0.0F;
+    }
+}
 uint32_t nt_gfx_stub_test_update_texture_count(void) { return s_stub_update_texture_count; }
 uint32_t nt_gfx_stub_test_update_buffer_count(void) { return s_stub_update_buffer_count; }
 uint32_t nt_gfx_stub_test_backend_restore_count(void) { return s_stub_backend_restore_count; }
@@ -121,6 +134,8 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_program_create_count = 0;
     s_stub_pipeline_create_count = 0;
     s_stub_uniform_int_count = 0;
+    s_stub_uniform_vec4_count = 0;
+    s_stub_bind_pipeline_count = 0;
     s_stub_update_texture_count = 0;
     s_stub_update_buffer_count = 0;
     s_stub_backend_restore_count = 0;
@@ -485,7 +500,12 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     (void)data;
 }
 
-void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
+#ifdef NT_TEST_ACCESS
+    s_stub_bind_pipeline_count++;
+#endif
+    (void)backend_handle;
+}
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
     (void)backend_handle;
@@ -515,30 +535,39 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
     (void)slot;
 }
 
-void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
-    (void)name;
+void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix) {
+    (void)name_hash;
     (void)matrix;
 }
 
-void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec) {
-    (void)name;
+void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec) {
+#ifdef NT_TEST_ACCESS
+    if (s_stub_uniform_vec4_count < NT_GFX_STUB_UNIFORM_NAMES) {
+        s_stub_uniform_vec4_hashes[s_stub_uniform_vec4_count] = name_hash;
+        for (uint32_t i = 0; i < 4; i++) {
+            s_stub_uniform_vec4_values[s_stub_uniform_vec4_count][i] = vec[i];
+        }
+    }
+    s_stub_uniform_vec4_count++;
+#endif
+    (void)name_hash;
     (void)vec;
 }
 
-void nt_gfx_backend_set_uniform_float(const char *name, float val) {
-    (void)name;
+void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val) {
+    (void)name_hash;
     (void)val;
 }
 
-void nt_gfx_backend_set_uniform_int(const char *name, int val) {
+void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val) {
 #ifdef NT_TEST_ACCESS
     if (s_stub_uniform_int_count < NT_GFX_STUB_UNIFORM_NAMES) {
-        s_stub_uniform_int_names[s_stub_uniform_int_count] = name;
+        s_stub_uniform_int_hashes[s_stub_uniform_int_count] = name_hash;
         s_stub_uniform_int_values[s_stub_uniform_int_count] = val;
     }
     s_stub_uniform_int_count++;
 #endif
-    (void)name;
+    (void)name_hash;
     (void)val;
 }
 

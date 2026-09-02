@@ -67,6 +67,12 @@ explicit array indices such as `colors[1]` or `lights[0].color`. Reflection read
 the complete reported names and uses temporary storage only while linking;
 setting a uniform performs no allocation.
 
+The cache is keyed by the `nt_hash32_str` hash of that complete name, so the
+`_h` setters (`nt_gfx_set_uniform_mat4_h` and friends) are the identity path:
+they hand the hash straight to the backend lookup. The string forms hash with
+`nt_hash32_str` and forward, which makes them convenience wrappers for callers
+that hold a literal rather than a precomputed key.
+
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location
 table. Nothing catches an exception thrown out of reflection: on the web the
