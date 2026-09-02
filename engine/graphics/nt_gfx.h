@@ -597,7 +597,8 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
  * at init with nt_hash32_str, or inline where the cost does not matter. Write
- * inside a pass; nt_gfx_begin_pass discards bound state. */
+ * inside a pass with a pipeline bound (asserted): the value lands on that
+ * pipeline's program. nt_gfx_begin_pass discards bound state. */
 
 void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
 void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);

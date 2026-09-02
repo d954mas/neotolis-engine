@@ -2049,6 +2049,9 @@ void test_gfx_uniform_records_hash_and_value(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_stub_test_uniform_vec4_hash_at(0));
+    /* Routed to the bound pipeline's program, not to 0. Which program it is
+     * needs distinct GL ids -- test_nt_gfx_bind_mirrors_native covers that. */
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_uniform_program());
 
     /* UNITY_EXCLUDE_FLOAT: compare the exact small integers as ints. */
     float recorded[4];
@@ -2056,6 +2059,18 @@ void test_gfx_uniform_records_hash_and_value(void) {
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_INT32((int32_t)vec[i], (int32_t)recorded[i]);
     }
+}
+
+/* A uniform value belongs to a program, so a write with no pipeline bound has
+ * no program to address -- it traps instead of landing nowhere. */
+void test_gfx_uniform_without_bound_pipeline_traps(void) {
+    const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 /* Bound state is pass-scoped: a bind or uniform write with no pass open has no
@@ -2236,6 +2251,7 @@ int main(void) {
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     RUN_TEST(test_gfx_uniform_records_hash_and_value);
+    RUN_TEST(test_gfx_uniform_without_bound_pipeline_traps);
     RUN_TEST(test_gfx_binds_outside_a_pass_trap);
     RUN_TEST(test_gfx_begin_pass_discards_bound_state);
     return UNITY_END();

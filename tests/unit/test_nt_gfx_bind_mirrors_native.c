@@ -897,6 +897,52 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
     TEST_ASSERT_EQUAL_INT((int)g_nt_window.fb_height, viewport[3]);
 }
 
+/* Uniform values are program state: the front-end names the bound pipeline's
+ * program on every write, so two programs keep their own value. */
+static void test_uniform_write_targets_bound_pipelines_program(void) {
+    static const char *vs_src = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fs_src = "precision mediump float;\n"
+                                "uniform vec4 u_x;\n"
+                                "out vec4 frag_color;\n"
+                                "void main() { frag_color = u_x; }\n";
+    const float value_a[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    const float value_b[4] = {5.0F, 6.0F, 7.0F, 8.0F};
+
+    nt_pipeline_t pip_a = make_pipeline_ex(vs_src, fs_src, false, true, false);
+    nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip_a);
+    GLint program_a = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &program_a);
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_a);
+
+    nt_gfx_bind_pipeline(pip_b);
+    GLint program_b = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &program_b);
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_b);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_NOT_EQUAL_INT(0, program_a);
+    TEST_ASSERT_NOT_EQUAL_INT(program_a, program_b);
+
+    GLint location_a = glGetUniformLocation((GLuint)program_a, "u_x");
+    GLint location_b = glGetUniformLocation((GLuint)program_b, "u_x");
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, location_a);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, location_b);
+
+    GLfloat read_a[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    GLfloat read_b[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    glGetUniformfv((GLuint)program_a, location_a, read_a);
+    glGetUniformfv((GLuint)program_b, location_b, read_b);
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_INT32((int32_t)value_a[i], (int32_t)read_a[i]);
+        TEST_ASSERT_EQUAL_INT32((int32_t)value_b[i], (int32_t)read_b[i]);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
@@ -917,5 +963,6 @@ int main(void) {
     RUN_TEST(test_viewport_dedup_and_resize);
     RUN_TEST(test_clear_values_dedup);
     RUN_TEST(test_ground_state_viewport_reissued_after_reinit);
+    RUN_TEST(test_uniform_write_targets_bound_pipelines_program);
     return UNITY_END();
 }

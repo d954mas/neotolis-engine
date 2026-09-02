@@ -17,7 +17,9 @@ typedef enum {
 
 /* destroy_* accepts 0 (no-op, as glDelete*); bind_pipeline / bind_vertex_input /
  * bind_sampler accept 0 as an explicit unbind; every other bind requires a live
- * handle -- the front-end owns husk handling. */
+ * handle -- the front-end owns husk handling.
+ * The backend keeps GL-mirror state only: what is logically bound lives in the
+ * front-end, which names the program or vertex input a call operates on. */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
@@ -44,7 +46,7 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
  * Restores the previously bound VAO before returning. Returns 0 on failure. */
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-/* 0 unbinds (VAO 0) and clears the backend's bound-vertex-input record. */
+/* 0 unbinds (VAO 0). */
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
@@ -67,9 +69,11 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
  * and reverts to the texture's own filter state. */
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
 
+/* 0 is the front-end saying nothing is bound; the backend holds no logical
+ * bound state, so it is a no-op. */
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
-/* Re-points the bound vertex input's instance attribs at byte_offset. */
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset);
+/* Re-points the named vertex input's instance attribs at byte_offset. */
+void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset);
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* Scissor and viewport (see nt_gfx.h for convention).
@@ -91,10 +95,12 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
-void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix);
-void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec);
-void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val);
-void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val);
+/* Uniform locations and values are program state, so the write names its
+ * program; it must be the one currently bound. */
+void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix);
+void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec);
+void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val);
+void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val);
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type);
@@ -172,7 +178,8 @@ uint32_t nt_gfx_stub_test_last_instance_offset(void);
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void);
 uint32_t nt_gfx_stub_test_vertex_input_create_count(void);
 uint32_t nt_gfx_stub_test_bind_vertex_input_count(void);
-uint32_t nt_gfx_stub_test_bound_vertex_input(void);
+uint32_t nt_gfx_stub_test_last_bound_vertex_input(void);
+uint32_t nt_gfx_stub_test_last_uniform_program(void);
 void nt_gfx_stub_test_fail_next_vertex_input_create(void);
 void nt_gfx_stub_test_reset(void);
 #endif

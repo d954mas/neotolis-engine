@@ -62,7 +62,8 @@ draws; per mesh switch that is a single `glBindVertexArray` instead of
 buffer re-binds plus per-attribute `glVertexAttribPointer` rewrites. The
 object's *static* half — vertex attributes and the index binding — is
 immutable after creation; its *instance* attribute pointers are re-specified
-into the bound object by each `nt_gfx_bind_instance_buffer` (WebGL2 has no
+by each `nt_gfx_bind_instance_buffer` into the vertex input the front-end
+names explicitly to the backend (WebGL2 has no
 baseInstance, so per-draw instance re-pointing stays). An empty layout with
 no buffers is the attribute-less `gl_VertexID` path; every draw asserts a
 bound vertex input.
@@ -116,7 +117,9 @@ explicitly.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
-values, and global UBO block bindings. A pipeline is fixed-function render
+values, and global UBO block bindings. A uniform write requires a bound
+pipeline and addresses that pipeline's program at the backend boundary; a
+write with nothing bound asserts. A pipeline is fixed-function render
 state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program

@@ -1774,54 +1774,63 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 
 /* ---- Uniforms ---- */
 
+/* Uniform values are program state, so a write addresses the bound pipeline's
+ * program. Returns 0 when there is nothing legal to write into. The bound
+ * pipeline handle is its pool slot, which indexes pipeline_programs. */
+static uint32_t uniform_target_program(const char *fn) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("%s called outside PASS state", fn);
+        return 0;
+    }
+    NT_ASSERT(s_gfx.bound_pipeline != 0 && "set_uniform: no pipeline bound");
+    if (s_gfx.bound_pipeline == 0) {
+        NT_LOG_ERROR("%s called with no pipeline bound", fn);
+        return 0;
+    }
+    return s_gfx.program_backends[nt_pool_slot_index(s_gfx.pipeline_programs[s_gfx.bound_pipeline])];
+}
+
 void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_mat4: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("set_uniform_mat4 called outside PASS state");
-        return;
-    }
     NT_ASSERT(matrix != NULL);
-    nt_gfx_backend_set_uniform_mat4(name.value, matrix);
+    uint32_t program_backend = uniform_target_program("set_uniform_mat4");
+    if (program_backend != 0) {
+        nt_gfx_backend_set_uniform_mat4(program_backend, name.value, matrix);
+    }
 }
 
 void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_vec4: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("set_uniform_vec4 called outside PASS state");
-        return;
-    }
     NT_ASSERT(vec != NULL);
-    nt_gfx_backend_set_uniform_vec4(name.value, vec);
+    uint32_t program_backend = uniform_target_program("set_uniform_vec4");
+    if (program_backend != 0) {
+        nt_gfx_backend_set_uniform_vec4(program_backend, name.value, vec);
+    }
 }
 
 void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_float: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("set_uniform_float called outside PASS state");
-        return;
+    uint32_t program_backend = uniform_target_program("set_uniform_float");
+    if (program_backend != 0) {
+        nt_gfx_backend_set_uniform_float(program_backend, name.value, val);
     }
-    nt_gfx_backend_set_uniform_float(name.value, val);
 }
 
 void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform_int: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("set_uniform_int called outside PASS state");
-        return;
+    uint32_t program_backend = uniform_target_program("set_uniform_int");
+    if (program_backend != 0) {
+        nt_gfx_backend_set_uniform_int(program_backend, name.value, val);
     }
-    nt_gfx_backend_set_uniform_int(name.value, val);
 }
 
 /* ---- Draw calls ---- */
@@ -1999,7 +2008,7 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
     s_gfx.vertex_input_metas[vi_slot].instance_pointed = true;
     s_gfx.vertex_input_metas[vi_slot].inst_buf_id = buf.id;
-    nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot], byte_offset);
+    nt_gfx_backend_bind_instance_buffer(s_gfx.vertex_input_backends[vi_slot], s_gfx.buffer_backends[slot], byte_offset);
 }
 
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {

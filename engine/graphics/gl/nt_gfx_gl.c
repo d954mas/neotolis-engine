@@ -119,8 +119,6 @@ typedef struct {
 
 /* ---- File-scope state ---- */
 
-static uint32_t s_bound_pipeline_slot;     /* currently bound pipeline index */
-static uint32_t s_bound_vertex_input_slot; /* currently bound vertex-input index */
 /* Service VAO for index-buffer data ops: the ELEMENT_ARRAY_BUFFER bind is VAO
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
@@ -208,17 +206,13 @@ static struct {
     float clear_depth;
 } s_gl_cache;
 
-/* ---- Per-pipeline uniform location lookup ---- */
+/* ---- Per-program uniform location lookup ---- */
 
-static GLint pipeline_get_uniform_h(uint32_t name_hash) {
-    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
-        return -1;
-    }
-    uint32_t program_slot = s_pipelines[s_bound_pipeline_slot].program_slot;
-    if (program_slot == 0 || program_slot > s_init_desc.max_programs) {
-        return -1;
-    }
-    const nt_gfx_gl_program_t *prog = &s_programs[program_slot];
+static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "set_uniform: requires a live program");
+    /* glUniform* writes into the current program, so the named one must be it. */
+    NT_ASSERT(s_programs[program_backend].program == s_gl_cache.program && "uniform write targets a program that is not current");
+    const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     for (uint8_t i = 0; i < prog->uniform_count; i++) {
         if (prog->uniforms[i].name_hash == name_hash) {
             return prog->uniforms[i].location;
@@ -499,8 +493,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_targets = (nt_gfx_gl_render_target_t *)calloc(s_init_desc.max_render_targets + 1, sizeof(nt_gfx_gl_render_target_t));
 
-    s_bound_pipeline_slot = 0;
-    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_ground_state();
 
@@ -536,8 +528,6 @@ void nt_gfx_backend_shutdown(void) {
     s_transcode_buf = NULL;
     s_transcode_buf_size = 0;
 
-    s_bound_pipeline_slot = 0;
-    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
     /* A dead context already reclaimed the name; a GL call here would run
      * without a current context on web. */
@@ -645,9 +635,6 @@ void nt_gfx_backend_end_segment(void) {
 // #endregion
 
 void nt_gfx_backend_begin_frame(void) {
-    s_bound_pipeline_slot = 0;
-    s_bound_vertex_input_slot = 0;
-
     /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
      * GLES variants). Native ARB_timer_query has no disjoint concept — GPU
      * clock is reliable by spec there. Reading 0x8FBB on the desktop driver
@@ -836,19 +823,14 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 /* ---- Pipeline bind ---- */
 
-/* Clear the pipeline selection so later uniform writes cannot target a stale
- * program. Vertex-input state is orthogonal and stays bound. */
-static void unbind_pipeline_state(void) { s_bound_pipeline_slot = 0; }
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
+    /* The front-end saying nothing is bound: no backend state to drop. */
     if (backend_handle == 0) {
-        unbind_pipeline_state();
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_pipelines && "bind_pipeline: handle out of range");
     if (backend_handle > s_init_desc.max_pipelines) {
-        unbind_pipeline_state();
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
@@ -856,7 +838,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
      * and turn every following draw into a silent GL_INVALID_OPERATION. */
     NT_ASSERT(pip->program_slot != 0 && pip->program_slot <= s_init_desc.max_programs && "bind_pipeline: pipeline record without a live program");
     if (pip->program_slot == 0 || pip->program_slot > s_init_desc.max_programs) {
-        unbind_pipeline_state();
         return;
     }
 
@@ -865,7 +846,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         glUseProgram(program);
         s_gl_cache.program = program;
     }
-    s_bound_pipeline_slot = backend_handle;
 
     /* Depth test */
     if (s_gl_cache.depth_test_enabled != pip->depth_test_enabled) {
@@ -941,29 +921,29 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 
 /* ---- Uniforms ---- */
 
-void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix) {
-    GLint loc = pipeline_get_uniform_h(name_hash);
+void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
+    GLint loc = program_get_uniform_h(program_backend, name_hash);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
     }
 }
 
-void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec) {
-    GLint loc = pipeline_get_uniform_h(name_hash);
+void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
+    GLint loc = program_get_uniform_h(program_backend, name_hash);
     if (loc >= 0) {
         glUniform4fv(loc, 1, vec);
     }
 }
 
-void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val) {
-    GLint loc = pipeline_get_uniform_h(name_hash);
+void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
+    GLint loc = program_get_uniform_h(program_backend, name_hash);
     if (loc >= 0) {
         glUniform1f(loc, val);
     }
 }
 
-void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val) {
-    GLint loc = pipeline_get_uniform_h(name_hash);
+void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
+    GLint loc = program_get_uniform_h(program_backend, name_hash);
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -1199,9 +1179,6 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     if (s_gl_cache.program == program) {
         s_gl_cache.program = 0;
     }
-    if (s_bound_pipeline_slot != 0 && s_pipelines[s_bound_pipeline_slot].program_slot == backend_handle) {
-        s_bound_pipeline_slot = 0;
-    }
     glDeleteProgram(program);
     memset(&s_programs[backend_handle], 0, sizeof(s_programs[backend_handle]));
 }
@@ -1245,9 +1222,6 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
     }
     /* The program is not ours to delete -- it outlives every pipeline built
      * on it; the pipeline owns no GL objects of its own. */
-    if (s_bound_pipeline_slot == backend_handle) {
-        s_bound_pipeline_slot = 0;
-    }
     memset(&s_pipelines[backend_handle], 0, sizeof(s_pipelines[backend_handle]));
 }
 
@@ -1316,15 +1290,10 @@ void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
     if (vi->vao) {
         glDeleteVertexArrays(1, &vi->vao);
     }
-    if (s_bound_vertex_input_slot == backend_handle) {
-        s_bound_vertex_input_slot = 0;
-    }
     memset(vi, 0, sizeof(*vi));
 }
 
-/* Drop the vertex-input selection and the GL binding together. */
 static void unbind_vertex_input_state(void) {
-    s_bound_vertex_input_slot = 0;
     if (s_gl_cache.vao != 0) {
         gl_bind_vao(0);
         s_gl_cache.vao = 0;
@@ -1353,7 +1322,6 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
         gl_bind_vao(vao);
         s_gl_cache.vao = vao;
     }
-    s_bound_vertex_input_slot = backend_handle;
 }
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
@@ -1461,22 +1429,22 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     }
 }
 
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_instance_buffer: requires a live buffer");
-    GLuint buf = s_buffer_gl[backend_handle];
+void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
+    NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_instance_buffer: requires a live buffer");
+    NT_ASSERT(vertex_input_backend != 0 && vertex_input_backend <= s_init_desc.max_vertex_inputs && s_vertex_inputs[vertex_input_backend].vao != 0 &&
+              "bind_instance_buffer: requires a live vertex input");
+    GLuint buf = s_buffer_gl[buffer_backend];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
-    /* Re-specify the bound vertex input's instance pointers into its VAO. */
-    if (s_bound_vertex_input_slot != 0 && s_bound_vertex_input_slot <= s_init_desc.max_vertex_inputs) {
-        const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[s_bound_vertex_input_slot];
-        for (uint8_t i = 0; i < vi->instance_attr_count; i++) {
-            const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
-            glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
-                                  (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
+    /* Re-specify the named vertex input's instance pointers into its VAO. */
+    const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[vertex_input_backend];
+    for (uint8_t i = 0; i < vi->instance_attr_count; i++) {
+        const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
+        glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
+                              (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
 #ifdef NT_TEST_ACCESS
-            s_test_instance_attrib_pointer_calls++;
+        s_test_instance_attrib_pointer_calls++;
 #endif
-        }
     }
 }
 
@@ -2143,8 +2111,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_render_targets) {
         memset(s_render_targets, 0, (s_init_desc.max_render_targets + 1) * sizeof(nt_gfx_gl_render_target_t));
     }
-    s_bound_pipeline_slot = 0;
-    s_bound_vertex_input_slot = 0;
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();
