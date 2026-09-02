@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Unified pre-commit check (read-only — the mutating formatter is scripts/fmt.sh,
-# combined entry: scripts/format_and_check.sh). Modes:
-#   scripts/check.sh          gates + build + ctest + format/tidy on changed files
-#   scripts/check.sh --full   default + whole-tree format + full tidy
-#   scripts/check.sh --push   default + wasm-debug + wasm-release + submodule test
+# Unified pre-commit check. Direct modes are read-only; format_and_check.sh
+# opts into running the formatter under the same lock first. Modes:
+#   scripts/check.sh                    gates + build + ctest + format/tidy on changed files
+#   scripts/check.sh --full             default + whole-tree format + full tidy
+#   scripts/check.sh --push             default + wasm-debug + wasm-release + submodule test
+#   scripts/check.sh --format [--full|--push]  format changed files under the same run lock first
 # The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
 # Remaining known CI-only class: GNU ld link order (Linux-specific, see AGENTS.md).
@@ -16,13 +17,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+FORMAT_FIRST=0
+if [ "${1:-}" = "--format" ]; then
+    FORMAT_FIRST=1
+    shift
+fi
+
 MODE="default"
 case "${1:-}" in
     "") ;;
     --full) MODE="full" ;;
     --push) MODE="push" ;;
     *)
-        echo "usage: scripts/check.sh [--full|--push]"
+        echo "usage: scripts/check.sh [--format] [--full|--push]"
         exit 2
         ;;
 esac
@@ -71,15 +78,20 @@ print_summary() {
     else
         echo "  FAIL  $CURRENT_STEP"
         if [ "$CURRENT_STEP" = "ctest (native-debug)" ] && [ -f "${CTEST_LOG:-}" ]; then
-            # The full log survives on disk; a reader who piped this run through
-            # tail still gets the failing test names here.
-            grep -E '\(Failed\)|\(Timeout\)|\(SEGFAULT\)|\(Exception|\(Not Run\)' "$CTEST_LOG" | sed 's/^/  /' || true
+            print_ctest_failures "$CTEST_LOG"
             echo "  full ctest log: $CTEST_LOG"
         fi
         echo "RESULT: FAIL"
     fi
 }
 trap print_summary EXIT
+
+# shellcheck source=lib/check_output.sh
+source "$SCRIPT_DIR/lib/check_output.sh"
+
+if [ "$FORMAT_FIRST" -eq 1 ]; then
+    bash "$SCRIPT_DIR/fmt.sh"
+fi
 
 # #region changed files
 # shellcheck source=lib/changed_files.sh
@@ -155,6 +167,7 @@ bash scripts/check_crt_pins.sh
 ensure_tidy_ci
 bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
 python -m unittest discover -s scripts/tests -p 'test_*.py'
+bash scripts/tests/test_check.sh
 bash scripts/tests/test_tidy.sh
 ok
 
