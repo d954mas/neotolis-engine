@@ -450,6 +450,10 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     }
 
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    /* Analytic-coverage shaders never sample the page: no substitution, no split. */
+    if (c->tex_count == 0) {
+        return true;
+    }
     if (c->resolved_tex[0] == page_tex) {
         return true;
     }

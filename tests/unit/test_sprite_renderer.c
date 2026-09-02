@@ -309,6 +309,25 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
 
 static nt_material_t create_test_material(void) { return create_test_material_with_blend(nt_blend_opaque()); }
 
+/* Analytic-coverage shape (nt_ui_radial's flat SDF): borrows region geometry, samples nothing. */
+static nt_material_t create_test_material_textureless(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sdf_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "sdf_fs"});
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = nt_gfx_make_program(vs, fs);
+    desc.depth_test = false;
+    desc.depth_write = false;
+    desc.cull_mode = NT_CULL_NONE;
+    desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.label = "test_sprite_material_textureless";
+
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+    return mat;
+}
+
 /* ---- Helper: material declaring a custom per-vertex attr_map ----
  *
  * Shares ONE vs/fs pair across calls so the only pipeline-key axis that varies
@@ -810,6 +829,30 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
+}
+
+/* A material that declares no textures never takes the page, so crossing pages
+ * must not split the run — contrast the two-page test above, which draws twice. */
+void test_sprite_renderer_textureless_material_ignores_page_change(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE2ULL);
+    nt_material_t mat = create_test_material_textureless();
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_sprite_renderer_set_material(mat);
+    /* Region 0 lives on page 0, region 1 on page 1. */
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
+    nt_gfx_test_draw_trace_reset(false);
 }
 
 /* ---- Test: polygon emit ----
@@ -1391,6 +1434,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
+    RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
