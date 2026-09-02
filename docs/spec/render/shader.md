@@ -62,16 +62,15 @@ survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer
 The GL backend caches at most 16 active standalone uniform locations per
 program. Each active array element consumes one entry; uniforms in blocks do
 not consume entries. Exceeding the cache capacity asserts at link time instead
-of silently omitting values. Uniform setters use complete names, including
-explicit array indices such as `colors[1]` or `lights[0].color`. Reflection reads
-the complete reported names and uses temporary storage only while linking;
-setting a uniform performs no allocation.
+of silently omitting values. Reflection reads the complete reported names and
+uses temporary storage only while linking; setting a uniform performs no
+allocation.
 
-The cache is keyed by the `nt_hash32_str` hash of that complete name, so the
-`_h` setters (`nt_gfx_set_uniform_mat4_h` and friends) are the identity path:
-they hand the hash straight to the backend lookup. The string forms hash with
-`nt_hash32_str` and forward, which makes them convenience wrappers for callers
-that hold a literal rather than a precomputed key.
+The cache is keyed by the `nt_hash32_str` hash of the uniform's complete name,
+including explicit array indices such as `colors[1]` or `lights[0].color`. The
+setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and its
+three siblings — and there is no string form: a caller hashes the name once at
+init, or inline where the cost does not matter.
 
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location

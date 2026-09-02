@@ -489,10 +489,10 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     nt_gfx_bind_texture(texture, 0);
-    nt_gfx_set_uniform_int("u_texture", 0);
-    nt_gfx_set_uniform_int("u_mode", mode);
-    nt_gfx_set_uniform_float("u_zoom", mode == 1 ? 1.0F : s_demo.sample_zoom);
-    nt_gfx_set_uniform_vec4("u_tint", tint);
+    nt_gfx_set_uniform_int(nt_hash32_str("u_texture"), 0);
+    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
+    nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);
     nt_gfx_draw(0, 6);
 }
 

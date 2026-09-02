@@ -593,18 +593,13 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 /* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
-/* ---- Uniforms ---- The hash is the identity, as for tags and resources;
- * the string forms hash with nt_hash32_str and forward. */
+/* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
+ * at init with nt_hash32_str, or inline where the cost does not matter. */
 
-void nt_gfx_set_uniform_mat4(const char *name, const float *matrix);
-void nt_gfx_set_uniform_vec4(const char *name, const float *vec);
-void nt_gfx_set_uniform_float(const char *name, float val);
-void nt_gfx_set_uniform_int(const char *name, int val);
-
-void nt_gfx_set_uniform_mat4_h(nt_hash32_t name, const float *matrix);
-void nt_gfx_set_uniform_vec4_h(nt_hash32_t name, const float *vec);
-void nt_gfx_set_uniform_float_h(nt_hash32_t name, float val);
-void nt_gfx_set_uniform_int_h(nt_hash32_t name, int val);
+void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
+void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);
+void nt_gfx_set_uniform_float(nt_hash32_t name, float val);
+void nt_gfx_set_uniform_int(nt_hash32_t name, int val);
 
 /* ---- Draw calls ---- */
 

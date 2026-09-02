@@ -101,10 +101,10 @@ static inline void nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vert
  * the texture resolved -- shared with other materials on the program) + every vec4 param. */
 static inline void nt_renderer_set_material_uniforms(const nt_renderer_material_view_t *v) {
     for (uint8_t t = 0; t < v->tex_count; t++) {
-        nt_gfx_set_uniform_int_h((nt_hash32_t){.value = v->tex_name_hashes[t]}, (int)t);
+        nt_gfx_set_uniform_int((nt_hash32_t){.value = v->tex_name_hashes[t]}, (int)t);
     }
     for (uint8_t p = 0; p < v->param_count; p++) {
-        nt_gfx_set_uniform_vec4_h((nt_hash32_t){.value = v->param_name_hashes[p]}, v->params[p]);
+        nt_gfx_set_uniform_vec4((nt_hash32_t){.value = v->param_name_hashes[p]}, v->params[p]);
     }
 }
 
