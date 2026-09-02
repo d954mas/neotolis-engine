@@ -193,6 +193,13 @@ a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` 
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
 context loss before asserting readiness.
 
+Texture slots differ by renderer. A sprite material that samples the atlas
+declares its page sampler at slot 0, where the renderer substitutes the page
+texture per command; a material declaring no textures never receives the page
+and is for shaders that compute coverage analytically. A text material declares
+no textures at all — units 0 and 1 belong to the font's curve and band textures
+— and `nt_text_renderer_flush` asserts that.
+
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;
 renderers remove their dead cache records on the next insertion after a miss,

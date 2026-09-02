@@ -121,7 +121,9 @@ state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set —
-each consumer sets every uniform it needs on every draw. A uniform a material
+each consumer sets every uniform it needs on every material transition inside
+one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
+end of that call; removing redundancy across calls is the gfx cache's job. A uniform a material
 does not declare retains the value last written on that program; this applies
 to sampler units and material params. Planned fixes are fixed sampler-unit
 assignments per program (#359) and per-material param UBOs bound at material
@@ -140,6 +142,24 @@ The hashed population is distinct material states, tens of values
 in a real game, so a 64-bit collision is not a practical risk, and a fixed
 array with a linear scan stays cheaper than a hash map at that scale. Every
 `nt_pipeline_desc_t` field a renderer varies must be folded into its key.
+
+**State transitions.** The run-based renderers (mesh, sprite) drive one shared
+state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
+It separates five transitions, each with its own identity: pipeline (handle),
+vertex input (handle), material uniforms — sampler unit per declared slot plus
+every vec4 param, keyed by material id — per-slot texture and sampler (keyed by
+the resolved texture and the effective sampler), and the per-run instance range
+plus draw. A run that changes only the mesh therefore does no material work at
+all. The tracked state lives for exactly one `draw_list` call or flush: inside
+that call the renderer is the only writer of GL draw state, and it relies on one
+material id never appearing on two programs within the call — the mesh renderer
+derives its pipeline from the material, and `nt_sprite_renderer_set_material`
+flushes when the program changes. Sampler tracking is per slot because
+`nt_gfx_bind_texture` re-installs the texture's asset default, so a material
+without an override has to restore that default after one that overrode it;
+fixed sampler-unit assignments (#359) will collapse this. The text renderer
+draws once per flush and other renderers draw in between, so it uses the
+stateless half of the helper and replays unconditionally.
 
 The material-driven mesh, sprite, and text renderer caches key pipelines on
 `program.id` folded with `nt_material_info_t.render_state_hash`. Layouts live
@@ -255,7 +275,7 @@ or a shadow-map system.
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
 
-**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one or more instanced draws per batch_key run — split at max_instances chunk boundaries (see items-sorting-batching.md). Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
+**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one or more instanced draws per batch_key run — split at max_instances chunk boundaries (see items-sorting-batching.md). Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal. The mesh renderer does state-delta tracking through the shared `static inline` helper, which costs it no cmd queue and no snapshot machinery.
 
 **Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
 
