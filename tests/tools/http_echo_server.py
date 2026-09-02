@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Local echo server for the nt_http native net test (test_http_native_net).
+
+Run:  python tests/tools/http_echo_server.py [port]   (default 8124)
+Then: build/tests/<preset>/test_http_native_net
+
+Endpoints mirror tests/browser/serve.mjs so both acceptance tests assert the
+same contract: POST /echo (byte-exact echo + request headers reflected into
+X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
+/slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
+/r301hello + /hello301 (redirect probes).
+"""
+import gzip
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _reply(self, status, body, headers=()):
+        self.send_response(status)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _redirect(self, status, location):
+        # Drain the request body first — an unread body corrupts the reused connection
+        n = int(self.headers.get("Content-Length", "0"))
+        if n > 0:
+            self.rfile.read(n)
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _echo(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(n)
+        self._reply(
+            200,
+            body,
+            [
+                ("Content-Type", "application/octet-stream"),
+                ("X-Echo-Content-Type", self.headers.get("Content-Type", "")),
+                ("X-Echo-Content-Length", self.headers.get("Content-Length", "")),
+                ("X-Echo-X-Nt-Test", self.headers.get("X-NT-Test", "")),
+                ("X-Echo-Accept-Encoding", self.headers.get("Accept-Encoding", "")),
+            ],
+        )
+
+    def do_PUT(self):
+        if self.path == "/echo":
+            self._echo()
+        elif self.path == "/r301hello":
+            self._redirect(301, "/hello301")
+        else:
+            self._reply(404, b"")
+
+    def do_GET(self):
+        if self.path == "/hello":
+            self._reply(200, b"hello-neotolis", [("Content-Type", "text/plain"), ("X-NT-Server", "echo")])
+        elif self.path == "/status404":
+            self._reply(404, b"missing")
+        elif self.path == "/slow":
+            time.sleep(5)
+            self._reply(200, b"ok")
+        elif self.path == "/hello301":
+            # Lands here only when a redirected POST correctly became a GET
+            self._reply(200, b"hello-neotolis")
+        elif self.path == "/gzip":
+            body = gzip.compress(b"gzip-payload-neotolis" * 8)
+            self._reply(200, body, [("Content-Type", "text/plain"), ("Content-Encoding", "gzip")])
+        elif self.path == "/truncated":
+            # Content-Length 100, 7 bytes, close: transport truncation must FAIL
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"partial")
+            self.wfile.flush()
+            self.close_connection = True
+        elif self.path == "/empty":
+            self._reply(200, b"")
+        elif self.path == "/loop":
+            self._redirect(302, "/loop")
+        elif self.path == "/slowbody":
+            # Headers + partial body, then stall: a timeout here must FAIL with status 200
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"partial")
+            self.wfile.flush()
+            time.sleep(5)
+        else:
+            self._reply(404, b"")
+
+    def do_POST(self):
+        if self.path == "/echo":
+            self._echo()
+        elif self.path == "/r301hello":
+            self._redirect(301, "/hello301")
+        else:
+            self._reply(404, b"")
+
+
+if __name__ == "__main__":
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8124
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # PORT= line first: run_http_net_test.py parses it (port 0 -> OS-assigned)
+    print(f"PORT={server.server_address[1]}", flush=True)
+    print(f"nt_http echo server: http://127.0.0.1:{server.server_address[1]}/", flush=True)
+    server.serve_forever()

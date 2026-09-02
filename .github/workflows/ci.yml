@@ -307,7 +307,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev xvfb
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -456,7 +456,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build python3 python3-pip \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri xvfb
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri libssl-dev xvfb
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -512,7 +512,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
 
       - name: Read emsdk version
         id: emsdk-version
@@ -577,7 +577,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
 
       - name: Check formatting
         run: |
@@ -638,7 +638,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
 
       - name: Read emsdk version
         id: emsdk-version
@@ -695,7 +695,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts context_loss.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts context_loss.spec.ts http.spec.ts
 
   deploy:
     name: Deploy

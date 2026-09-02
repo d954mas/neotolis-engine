@@ -27,7 +27,9 @@ platform_step
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
-resource_step         ← async loading processing
+resource_step         ← async loading processing (also pumps nt_http_update)
+    → a game issuing its own nt_http requests without resource_step calls
+      nt_http_update() itself once per frame (no-op on web/stub)
 game-defined resource sync helpers
     → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management

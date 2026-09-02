@@ -170,6 +170,85 @@ if(NOT EMSCRIPTEN)
         set(GLFW_LIBRARY_TYPE "STATIC")
     endif()
     add_subdirectory(deps/glfw EXCLUDE_FROM_ALL)
+
+    # libcurl: nt_http native backend. HTTP(S)-only static lib, TLS from the OS
+    # (Schannel on Windows, OpenSSL elsewhere — needs libssl-dev) — no bundled
+    # crypto. Vendored tree is stripped to the CMake lib build (no docs/tests/src),
+    # so everything referencing the removed dirs stays OFF; disabling Perl also
+    # kills curl's codegen target that writes into the vendored source tree.
+    # OFF drops the dependency: native nt_http becomes the always-fail stub (loudly:
+    # configure STATUS + runtime WARN at nt_http_init). Subprojects default OFF so a
+    # consumer linking only nt_http_stub never pays the curl configure, which
+    # hard-requires OpenSSL headers off-Windows; linking real nt_http needs an
+    # explicit -DNT_HTTP_CURL=ON (a pre-provided CURL::libcurl then skips the
+    # vendored configure but does not replace the ON).
+    if(PROJECT_IS_TOP_LEVEL)
+        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
+    else()
+        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" OFF)
+    endif()
+    if(NT_HTTP_CURL AND NOT TARGET CURL::libcurl)
+        # block(): BUILD_* and CMAKE_DISABLE_* are generic names a consumer
+        # superproject may own, and later add_subdirectory() calls in THIS file
+        # must not inherit them either — same policy as the GLFW block above.
+        # curl pins CMake 3.18+, so CMP0077 is NEW there and its option() calls
+        # honor these normal variables.
+        block(SCOPE_FOR VARIABLES)
+        set(BUILD_CURL_EXE OFF)
+        set(BUILD_SHARED_LIBS OFF)
+        set(BUILD_STATIC_LIBS ON)
+        set(BUILD_EXAMPLES OFF)
+        set(BUILD_TESTING OFF)
+        set(BUILD_LIBCURL_DOCS OFF)
+        set(BUILD_MISC_DOCS OFF)
+        set(ENABLE_CURL_MANUAL OFF)
+        set(CMAKE_DISABLE_FIND_PACKAGE_Perl ON)
+        # A superproject may have found Perl already; curl gates add_subdirectory(docs)
+        # on Perl_FOUND and docs/ is stripped from the vendored tree — clear the
+        # inherited results (block-scoped) so that branch can never run.
+        set(Perl_FOUND FALSE)
+        set(PERL_FOUND FALSE)
+        set(PERL_EXECUTABLE "")
+        set(HTTP_ONLY ON)
+        # HTTP_ONLY drops non-HTTP protocols only; nt_http exposes none of these
+        # features either — compile them out of the native exe.
+        set(CURL_DISABLE_ALTSVC ON)
+        set(CURL_DISABLE_HSTS ON)
+        set(CURL_DISABLE_DOH ON)
+        set(CURL_DISABLE_COOKIES ON)
+        set(CURL_DISABLE_AWS ON)
+        set(CURL_DISABLE_INSTALL ON)
+        set(CURL_ENABLE_EXPORT_TARGET OFF)
+        set(CURL_USE_LIBPSL OFF)
+        set(CURL_USE_LIBSSH2 OFF)
+        # gzip/deflate content decoding: curl's find_package(ZLIB) resolves to the
+        # vendored deps/zlib through a module-path shim (native exe only; wasm uses
+        # the browser's decoder). CMAKE_MODULE_PATH is scope-local, unlike
+        # FetchContent OVERRIDE_FIND_PACKAGE whose redirect is build-global and
+        # would hijack a consumer superproject's own find_package(ZLIB).
+        list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/find_shims")
+        set(CURL_ZLIB ON)
+        set(CURL_BROTLI OFF)
+        set(CURL_ZSTD OFF)
+        set(USE_NGHTTP2 OFF)
+        set(USE_LIBIDN2 OFF)
+        if(WIN32)
+            set(CURL_USE_SCHANNEL ON)
+        endif()
+        add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
+        # CRT pins only for targets THIS block created — outside the guard the
+        # foreach would mutate a consumer's like-named targets (libcurl_static is
+        # curl's standard name). Both curl targets guarded: with SHARE_LIB_OBJECT
+        # the objects live in libcurl_object and the static lib has no sources of
+        # its own — the object pin is the one that matters.
+        foreach(_curl_target libcurl_static libcurl_object zlib_vendored)
+            if(TARGET ${_curl_target})
+                nt_set_static_crt(${_curl_target})
+            endif()
+        endforeach()
+        endblock()
+    endif()
+
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
     add_subdirectory(deps/cgltf EXCLUDE_FROM_ALL)
     add_subdirectory(deps/stb EXCLUDE_FROM_ALL)

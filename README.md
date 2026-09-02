@@ -18,6 +18,10 @@ engine/game ownership boundary is
 - **Ninja** build system
 - **Clang** (LLVM) -- recommended for both native and cross-compilation consistency
 - **Emscripten SDK** -- for WASM builds (setup automated via `scripts/setup.sh`)
+- **OpenSSL dev headers** (Linux/macOS only: `libssl-dev` / brew `openssl@3`) -- TLS for the
+  libcurl-backed native HTTP module; skip entirely with `-DNT_HTTP_CURL=OFF` (Windows uses
+  Schannel). Submodule builds default to OFF -- set `-DNT_HTTP_CURL=ON` to get real native HTTP
+- **Python 3** -- optional; without it the native HTTP acceptance test is skipped
 
 ## Quick Start
 

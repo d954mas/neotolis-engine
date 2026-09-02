@@ -38,6 +38,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef NT_PLATFORM_WEB
@@ -268,6 +269,54 @@ EMSCRIPTEN_KEEPALIVE void nt_test_hide_probe(int mode) {
     NT_ASSERT(mode >= 0 && mode <= 2);
     s_nt_hidden_probe = mode;
 }
+/* http acceptance state (http.spec.ts): one request at a time, byte-exact echo check in C */
+static uint8_t s_nt_http_body[300];
+static uint32_t s_nt_http_body_size;
+static nt_http_request_t s_nt_http_req;
+
+EMSCRIPTEN_KEEPALIVE void nt_test_http_post_echo(void) {
+    s_nt_http_body_size = (uint32_t)sizeof(s_nt_http_body);
+    for (uint32_t i = 0; i < s_nt_http_body_size; i++) {
+        s_nt_http_body[i] = (uint8_t)(i * 7U); /* includes 0x00 bytes — catches string-truncating paths */
+    }
+    const char *hdrs[] = {"X-NT-Test", "neotolis"};
+    nt_http_options_t opts = {
+        .method = "POST",
+        .body = s_nt_http_body,
+        .body_size = s_nt_http_body_size,
+        .content_type = "application/json",
+        .headers = hdrs,
+        .header_count = 1,
+        .timeout_ms = 10000,
+    };
+    s_nt_http_req = nt_http_request_ex("/echo", &opts);
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_404(void) { s_nt_http_req = nt_http_request("/status404"); }
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow_timeout(void) {
+    nt_http_options_t opts = {.timeout_ms = 300};
+    s_nt_http_req = nt_http_request_ex("/slow", &opts);
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_http_get_slow(void) { s_nt_http_req = nt_http_request("/slow"); }
+EMSCRIPTEN_KEEPALIVE int nt_test_http_state(void) { return (int)nt_http_state(s_nt_http_req); }
+EMSCRIPTEN_KEEPALIVE int nt_test_http_status(void) { return (int)nt_http_status(s_nt_http_req); }
+EMSCRIPTEN_KEEPALIVE const char *nt_test_http_headers(void) {
+    const char *h = nt_http_response_headers(s_nt_http_req);
+    return h != NULL ? h : "";
+}
+/* 1 = echoed body byte-exact, 0 = mismatch, -1 = not DONE. Takes the data and frees the slot. */
+EMSCRIPTEN_KEEPALIVE int nt_test_http_verify_echo(void) {
+    uint32_t size = 0;
+    uint8_t *data = nt_http_take_data(s_nt_http_req, &size);
+    if (data == NULL) {
+        return -1;
+    }
+    int ok = (size == s_nt_http_body_size && memcmp(data, s_nt_http_body, size) == 0) ? 1 : 0;
+    free(data);
+    nt_http_free(s_nt_http_req);
+    return ok;
+}
+EMSCRIPTEN_KEEPALIVE void nt_test_http_free(void) { nt_http_free(s_nt_http_req); }
+
 EMSCRIPTEN_KEEPALIVE int nt_test_rich_link_present(void) { return s_nt_rich_link_present; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_x(void) { return s_nt_rich_link_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_y(void) { return s_nt_rich_link_css_y; }
@@ -296,7 +345,16 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'rich_link_css': function() {
             return { 'present': _nt_test_rich_link_present() !== 0, 'x': _nt_test_rich_link_css_x(), 'y': _nt_test_rich_link_css_y(), 'w': _nt_test_rich_link_css_w(), 'h': _nt_test_rich_link_css_h() };
         },
-        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; }
+        'rich_link_clicks': function() { return _nt_test_rich_link_clicks() >>> 0; },
+        'http_post_echo': function() { _nt_test_http_post_echo(); },
+        'http_get_404': function() { _nt_test_http_get_404(); },
+        'http_get_slow_timeout': function() { _nt_test_http_get_slow_timeout(); },
+        'http_get_slow': function() { _nt_test_http_get_slow(); },
+        'http_state': function() { return _nt_test_http_state(); },
+        'http_status': function() { return _nt_test_http_status(); },
+        'http_headers': function() { return UTF8ToString(_nt_test_http_headers()); },
+        'http_verify_echo': function() { return _nt_test_http_verify_echo(); },
+        'http_free': function() { _nt_test_http_free(); }
     };
 })
 /* clang-format on */

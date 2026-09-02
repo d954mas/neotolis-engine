@@ -1,5 +1,8 @@
 #include "http/nt_http_internal.h"
 
+#include "core/nt_assert.h"
+#include "log/nt_log.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +37,169 @@ static NtHttpSlot *http_validate(nt_http_request_t req) {
     return &s_http.slots[index];
 }
 
+/* ---- Request copy helpers ---- */
+
+static char *http_strdup(const char *src) {
+    size_t len = strlen(src) + 1;
+    char *dst = malloc(len);
+    NT_ASSERT(dst != NULL);
+    memcpy(dst, src, len);
+    return dst;
+}
+
+static void http_free_slot_buffers(NtHttpSlot *slot) {
+    free(slot->url);
+    free(slot->method);
+    free(slot->body);
+    free(slot->headers);
+    free(slot->data);
+    free(slot->resp_headers);
+    slot->url = NULL;
+    slot->method = NULL;
+    slot->body = NULL;
+    slot->headers = NULL;
+    slot->data = NULL;
+    slot->resp_headers = NULL;
+}
+
+static bool http_iequals(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return false;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+/* Copies request headers into one blob of alternating NUL-terminated name,value
+ * strings, appending a Content-Type pair when a body is present and the caller
+ * did not already provide one. */
+static void http_copy_headers(NtHttpSlot *slot, const nt_http_options_t *opts, const char *content_type) {
+    size_t pairs = opts ? opts->header_count : 0;
+    size_t total = 0;
+    for (size_t i = 0; i < pairs * 2; i++) {
+        total += strlen(opts->headers[i]) + 1;
+    }
+    if (content_type != NULL) {
+        total += sizeof("Content-Type") + strlen(content_type) + 1;
+    }
+    if (total == 0) {
+        return;
+    }
+
+    char *blob = malloc(total);
+    NT_ASSERT(blob != NULL);
+    char *p = blob;
+    for (size_t i = 0; i < pairs * 2; i++) {
+        size_t len = strlen(opts->headers[i]) + 1;
+        memcpy(p, opts->headers[i], len);
+        p += len;
+    }
+    if (content_type != NULL) {
+        memcpy(p, "Content-Type", sizeof("Content-Type"));
+        p += sizeof("Content-Type");
+        memcpy(p, content_type, strlen(content_type) + 1);
+    }
+
+    slot->headers = blob;
+    slot->headers_size = (uint32_t)total;
+    slot->header_pairs = (uint32_t)pairs + (content_type != NULL ? 1U : 0U);
+}
+
+/* Content-Type to append for a body; NULL when there is no body or the caller
+ * already passed one as an explicit header pair. Keyed off opts->body (caller
+ * intent), not the copied bytes — a zero-size body keeps its Content-Type. */
+static const char *http_default_content_type(const nt_http_options_t *opts) {
+    if (opts == NULL || opts->body == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < opts->header_count; i++) {
+        if (http_iequals(opts->headers[i * 2], "Content-Type")) {
+            return NULL;
+        }
+    }
+    return opts->content_type != NULL ? opts->content_type : "application/octet-stream";
+}
+
+/* RFC 7230 token — fetch() throws on anything else (space, CTL, separators),
+ * native curl would put the raw bytes on the wire. static inline: referenced
+ * only from NT_ASSERT, which vanishes in the OFF config. */
+static inline bool http_method_is_token(const char *m) {
+    if (*m == '\0') {
+        return false;
+    }
+    for (; *m; m++) {
+        char c = *m;
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("!#$%&'*+-.^_`|~", c) != NULL;
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* fetch() normalizes these six methods to uppercase (and only these — PATCH is
+ * deliberately case-preserved by the spec); mirror it so both backends send the
+ * same bytes for method = "put" etc. */
+static const char *http_normalize_method(const char *method) {
+    static const char *const known[] = {"DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"};
+    for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (http_iequals(method, known[i])) {
+            return known[i];
+        }
+    }
+    return method;
+}
+
+/* Copies method/body/headers/timeout out of opts so the caller keeps ownership. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansions
+static void http_copy_request(NtHttpSlot *slot, const char *url, const nt_http_options_t *opts) {
+    NT_ASSERT(opts == NULL || opts->header_count == 0 || opts->headers != NULL);
+    slot->url = http_strdup(url);
+    slot->method = http_strdup(http_normalize_method(opts != NULL && opts->method != NULL ? opts->method : "GET"));
+    /* fetch() rejects non-token methods and forbids CONNECT/TRACE/TRACK outright
+     * (native curl would happily send them) — crash early instead of diverging */
+    NT_ASSERT(http_method_is_token(slot->method));
+    NT_ASSERT(!http_iequals(slot->method, "CONNECT") && !http_iequals(slot->method, "TRACE") && !http_iequals(slot->method, "TRACK"));
+    slot->body = NULL;
+    slot->body_size = 0;
+    if (opts != NULL && opts->body != NULL) {
+        /* A body on GET/HEAD is a caller bug: fetch rejects it, curl would silently
+         * reinterpret it as POST — crash early instead of diverging per backend.
+         * ANY non-NULL body pointer counts: zero-size still signals body intent
+         * (it keeps its Content-Type). */
+        NT_ASSERT(!http_iequals(slot->method, "GET") && !http_iequals(slot->method, "HEAD"));
+        if (opts->body_size > 0) {
+            slot->body = malloc(opts->body_size);
+            NT_ASSERT(slot->body != NULL);
+            memcpy(slot->body, opts->body, opts->body_size);
+            slot->body_size = opts->body_size;
+        }
+    }
+
+    slot->headers = NULL;
+    slot->headers_size = 0;
+    slot->header_pairs = 0;
+    http_copy_headers(slot, opts, http_default_content_type(opts));
+
+    /* Clamp to INT_MAX (~24 days): the value crosses int (EM_JS) and long (LLP64
+     * curl setopt) — a larger uint32 would go negative and silently disable the timeout */
+    slot->timeout_ms = opts != NULL ? opts->timeout_ms : 0;
+    if (slot->timeout_ms > 0x7FFFFFFFU) {
+        slot->timeout_ms = 0x7FFFFFFFU;
+    }
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_http_init(void) {
@@ -41,32 +207,61 @@ nt_result_t nt_http_init(void) {
         return NT_ERR_INIT_FAILED;
     }
 
-    memset(&s_http, 0, sizeof(s_http));
-
-    /* Fill free queue: stack with lowest index on top (first alloc gets 1) */
+    /* Slots are NOT cleared here: nt_http_shutdown left them zeroed with their
+     * generations bumped and preserved, so a callback from a previous lifecycle
+     * of the module can never match a new handle (first boot: static zero). */
     s_http.queue_top = NT_HTTP_MAX_REQUESTS;
     for (uint16_t i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
         s_http.free_queue[i] = (uint16_t)(NT_HTTP_MAX_REQUESTS - i);
     }
 
+    if (!nt_http_backend_init()) {
+        /* initialized stays false — the only gate every entry point checks */
+        return NT_ERR_INIT_FAILED;
+    }
     s_http.initialized = true;
     return NT_OK;
 }
 
 void nt_http_shutdown(void) {
-    /* Free any remaining slot data */
-    for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
-        if (s_http.slots[i].data != NULL) {
-            free(s_http.slots[i].data);
-        }
+    /* Guard double-shutdown: backend teardown (curl_global_cleanup) must pair 1:1 with init */
+    if (!s_http.initialized) {
+        return;
     }
-    memset(&s_http, 0, sizeof(s_http));
+    nt_http_backend_shutdown();
+    /* Bump and PRESERVE every generation: completions of fetches aborted above are
+     * already scheduled on the web backend and fire later — after the bump they
+     * mismatch, across any number of shutdown/init cycles. One staleness mechanism
+     * (the generation) covers both slot reuse and module re-init. */
+    for (uint16_t i = 1; i <= NT_HTTP_MAX_REQUESTS; i++) {
+        NtHttpSlot *slot = &s_http.slots[i];
+        http_free_slot_buffers(slot);
+        uint16_t gen = (uint16_t)(slot->generation + 1);
+        memset(slot, 0, sizeof(*slot));
+        slot->generation = gen != 0 ? gen : 1;
+    }
+    s_http.queue_top = 0;
+    s_http.initialized = false;
+}
+
+void nt_http_update(void) {
+    if (!s_http.initialized) {
+        return;
+    }
+    nt_http_backend_update();
 }
 
 /* ---- Request management ---- */
 
-nt_http_request_t nt_http_request(const char *url) {
-    if (!s_http.initialized || url == NULL || s_http.queue_top == 0) {
+nt_http_request_t nt_http_request(const char *url) { return nt_http_request_ex(url, NULL); }
+
+nt_http_request_t nt_http_request_ex(const char *url, const nt_http_options_t *opts) {
+    if (!s_http.initialized || url == NULL) {
+        return NT_HTTP_REQUEST_INVALID;
+    }
+    if (s_http.queue_top == 0) {
+        /* Pool exhaustion would be a silent INVALID otherwise — indistinguishable from bad args */
+        NT_LOG_WARN("all %d request slots busy, dropping %s", NT_HTTP_MAX_REQUESTS, url);
         return NT_HTTP_REQUEST_INVALID;
     }
 
@@ -82,14 +277,17 @@ nt_http_request_t nt_http_request(const char *url) {
         slot->generation = 1;
     }
 
+    http_copy_request(slot, url, opts);
+
     slot->data = NULL;
     slot->size = 0;
     slot->received = 0;
     slot->total = 0;
+    slot->resp_headers = NULL;
+    slot->status = 0;
     slot->state = (uint8_t)NT_HTTP_STATE_PENDING;
-    slot->_pad = 0;
 
-    nt_http_backend_request(index, url);
+    nt_http_backend_request(index);
 
     return http_make(index, slot->generation);
 }
@@ -100,6 +298,14 @@ nt_http_state_t nt_http_state(nt_http_request_t req) {
         return NT_HTTP_STATE_NONE;
     }
     return (nt_http_state_t)slot->state;
+}
+
+uint16_t nt_http_status(nt_http_request_t req) {
+    NtHttpSlot *slot = http_validate(req);
+    if (!slot) {
+        return 0;
+    }
+    return slot->status;
 }
 
 void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total) {
@@ -121,6 +327,14 @@ void nt_http_progress(nt_http_request_t req, uint32_t *received, uint32_t *total
     }
 }
 
+const char *nt_http_response_headers(nt_http_request_t req) {
+    NtHttpSlot *slot = http_validate(req);
+    if (!slot) {
+        return NULL;
+    }
+    return slot->resp_headers;
+}
+
 uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     NtHttpSlot *slot = http_validate(req);
     if (!slot || slot->state != (uint8_t)NT_HTTP_STATE_DONE) {
@@ -134,6 +348,12 @@ uint8_t *nt_http_take_data(nt_http_request_t req, uint32_t *out_size) {
     uint32_t sz = slot->size;
     slot->data = NULL;
     slot->size = 0;
+    /* Canonical empty contract: web hands over malloc(0) (non-NULL under emmalloc),
+     * native hands over NULL — normalize so both backends return NULL/0 */
+    if (sz == 0) {
+        free(ptr);
+        ptr = NULL;
+    }
 
     if (out_size) {
         *out_size = sz;
@@ -148,23 +368,15 @@ void nt_http_free(nt_http_request_t req) {
         return;
     }
 
-    /* Cancel in-flight backend request (aborts fetch on web, noop on native/stub) */
+    /* Cancel in-flight backend request (aborts fetch on web, curl transfer on native) */
     if (slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
         nt_http_backend_cancel(index);
     }
 
-    /* Free any remaining data */
-    if (slot->data != NULL) {
-        free(slot->data);
-        slot->data = NULL;
-    }
-
-    /* Clear slot state */
-    slot->size = 0;
-    slot->received = 0;
-    slot->total = 0;
-    slot->state = (uint8_t)NT_HTTP_STATE_NONE;
-    slot->_pad = 0;
+    /* No scalar clearing needed: after the generation bump below the slot is
+     * unreachable through any handle, and every field is re-initialized on the
+     * next allocation (http_copy_request + nt_http_request_ex). */
+    http_free_slot_buffers(slot);
 
     /* Increment generation so stale handles are rejected */
     slot->generation++;
@@ -172,7 +384,9 @@ void nt_http_free(nt_http_request_t req) {
         slot->generation = 1;
     }
 
-    /* Return slot to free queue */
+    /* Return slot to free queue. A full queue means a double-free through a
+     * generation-wrapped stale handle — crash early instead of writing OOB. */
+    NT_ASSERT(s_http.queue_top < NT_HTTP_MAX_REQUESTS);
     s_http.free_queue[s_http.queue_top] = index;
     s_http.queue_top++;
 }

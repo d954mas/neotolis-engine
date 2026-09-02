@@ -560,13 +560,38 @@ if(NOT EMSCRIPTEN)
 
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
-    target_link_libraries(test_http PRIVATE nt_http_stub unity)
+    target_link_libraries(test_http PRIVATE nt_http_stub nt_log_stub unity)
     nt_set_warning_flags(test_http)
     nt_set_sanitizer_flags(test_http)
     set_target_properties(test_http PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_http COMMAND test_http)
+
+    # Real-network acceptance for the native libcurl backend, loopback only: the
+    # python wrapper starts tests/tools/http_echo_server.py on an OS-assigned port
+    # (read back via a PORT= line), runs the exe with NT_HTTP_TEST_BASE set, then
+    # stops the server. Skipped entirely without python3 (the wrapper cannot run)
+    # or with NT_HTTP_CURL=OFF (native nt_http is then the always-fail stub).
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND AND NT_HTTP_CURL)
+        add_executable(test_http_native_net unit/test_http_native_net.c)
+        target_link_libraries(test_http_native_net PRIVATE nt_http nt_log_stub unity)
+        target_compile_definitions(test_http_native_net PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_warning_flags(test_http_native_net)
+        nt_set_sanitizer_flags(test_http_native_net)
+        nt_set_static_crt(test_http_native_net)
+        set_target_properties(test_http_native_net PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+        add_test(NAME test_http_native_net
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/tools/run_http_net_test.py"
+                    "$<TARGET_FILE:test_http_native_net>"
+        )
+        set_tests_properties(test_http_native_net PROPERTIES TIMEOUT 120)
+    else()
+        message(STATUS "test_http_native_net skipped (python3: ${Python3_Interpreter_FOUND}, NT_HTTP_CURL: ${NT_HTTP_CURL})")
+    endif()
 
     # cJSON standalone round-trip. Links cjson only (proves cjson works WITHOUT devapi),
     # so it must NOT sit behind the NT_DEVAPI_ENABLED gate — cjson is built unconditionally.

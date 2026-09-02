@@ -109,6 +109,56 @@ static void test_request_null_url(void) {
     TEST_ASSERT_EQUAL(0, req.id);
 }
 
+static void test_request_ex_null_opts_is_get(void) {
+    nt_http_request_t req = nt_http_request_ex("http://example.com/test.bin", NULL);
+    TEST_ASSERT_NOT_EQUAL(0, req.id);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, nt_http_state(req));
+    nt_http_free(req);
+}
+
+static void test_request_ex_full_options_slot_lifecycle(void) {
+    /* Body + headers are copied at call time — clobber the caller's buffers after the call */
+    uint8_t body[16] = {1, 0, 2, 0, 3};
+    char header_value[16] = "Bearer x";
+    const char *hdrs[] = {"Authorization", header_value};
+    nt_http_options_t opts = {
+        .method = "POST",
+        .body = body,
+        .body_size = sizeof(body),
+        .content_type = "application/json",
+        .headers = hdrs,
+        .header_count = 1,
+        .timeout_ms = 500,
+    };
+    nt_http_request_t req = nt_http_request_ex("http://example.com/echo", &opts);
+    TEST_ASSERT_NOT_EQUAL(0, req.id);
+    memset(body, 0xAA, sizeof(body));
+    memset(header_value, 0, sizeof(header_value));
+
+    /* Stub fails immediately: no response — status 0, headers NULL, no data */
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_FAILED, nt_http_state(req));
+    TEST_ASSERT_EQUAL(0, nt_http_status(req));
+    TEST_ASSERT_NULL(nt_http_response_headers(req));
+    uint32_t size = 999;
+    TEST_ASSERT_NULL(nt_http_take_data(req, &size));
+    TEST_ASSERT_EQUAL(0, size);
+
+    nt_http_free(req);
+    TEST_ASSERT_EQUAL(NT_HTTP_STATE_NONE, nt_http_state(req));
+}
+
+static void test_status_invalid_handle(void) {
+    TEST_ASSERT_EQUAL(0, nt_http_status(NT_HTTP_REQUEST_INVALID));
+    TEST_ASSERT_NULL(nt_http_response_headers(NT_HTTP_REQUEST_INVALID));
+}
+
+static void test_update_is_safe(void) {
+    nt_http_update(); /* no requests in flight */
+    nt_http_request_t req = nt_http_request("http://example.com/test.bin");
+    nt_http_update();
+    nt_http_free(req);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -124,5 +174,9 @@ int main(void) {
     RUN_TEST(test_progress_invalid_handle);
     RUN_TEST(test_progress_null_pointers);
     RUN_TEST(test_request_null_url);
+    RUN_TEST(test_request_ex_null_opts_is_get);
+    RUN_TEST(test_request_ex_full_options_slot_lifecycle);
+    RUN_TEST(test_status_invalid_handle);
+    RUN_TEST(test_update_is_safe);
     return UNITY_END();
 }
