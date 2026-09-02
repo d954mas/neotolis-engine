@@ -508,6 +508,8 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
     s_render_targets = (nt_gfx_gl_render_target_t *)calloc(s_init_desc.max_render_targets + 1, sizeof(nt_gfx_gl_render_target_t));
+    /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
+    NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_targets && "gfx backend init: out of memory");
 
     s_bound_framebuffer = 0;
     nt_gfx_gl_cache_ground_state();

@@ -538,6 +538,9 @@ bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 /* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
+/* False after a context restore that could not recreate the target (a runtime GPU
+ * failure, same class as creation returning invalid). No automatic retry: the owner
+ * destroys and recreates it, or falls back. */
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;

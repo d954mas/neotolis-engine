@@ -272,6 +272,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Mesh pool + data table */
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
+    /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
+    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.pipeline_backends && s_gfx.pipeline_programs && s_gfx.vertex_input_backends && s_gfx.buffer_backends && s_gfx.texture_backends &&
+              s_gfx.render_target_backends && s_gfx.buffer_metas && s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
