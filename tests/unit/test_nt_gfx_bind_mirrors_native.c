@@ -1005,8 +1005,8 @@ static void test_recreate_all_resources_grounds_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
 }
 
-/* Destroying the bound vertex input clears the cached VAO name: a new VAO that
- * reuses the deleted GL name must still reach glBindVertexArray. */
+/* Deterministic half: destroying the bound vertex input clears the cached VAO
+ * name. The redraw half only bites on drivers that recycle the deleted name. */
 static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_pipeline_t pip = make_red_pipeline();
     nt_buffer_t vbo = make_vbo(s_full);
@@ -1019,6 +1019,7 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_destroy_vertex_input(vi_a); /* destroyed while bound */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -1038,34 +1039,41 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
 
 static nt_texture_t make_pixel_texture(const uint8_t pixel[4]) { return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8}); }
 
-/* Creation leaves its own texture bound on the active unit. */
+/* Creation uploads on the scratch unit and leaves it active, so this reads the
+ * new texture's GL name. */
 static GLint current_texture_name(void) {
     GLint name = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &name);
     return name;
 }
 
-/* Same for textures: destroy clears the cache slot, so a new texture reusing the
- * deleted GL name is not mistaken for the one still recorded there. */
+/* Deterministic half: destroy clears the slot the texture was bound in, leaving
+ * the other slots alone. The re-bind half only bites on drivers that recycle the
+ * deleted GL name. */
 static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     static const uint8_t white[4] = {255, 255, 255, 255};
     static const uint8_t grey[4] = {128, 128, 128, 255};
     nt_texture_t tex_a = make_pixel_texture(white);
     nt_texture_t keep = make_pixel_texture(grey);
+    GLint name_keep = current_texture_name();
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_a.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, keep.id);
+    TEST_ASSERT_NOT_EQUAL_INT(0, name_keep);
 
     nt_gfx_bind_texture(tex_a, 0);
     nt_gfx_bind_texture(keep, 1);
 
     nt_gfx_destroy_texture(tex_a);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)name_keep, nt_gfx_gl_test_cached_texture(1));
+
     nt_texture_t tex_b = make_pixel_texture(white);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_b.id);
     GLint name_b = current_texture_name();
     TEST_ASSERT_NOT_EQUAL_INT(0, name_b);
 
     nt_gfx_bind_texture(tex_b, 0);
-    TEST_ASSERT_EQUAL_INT(name_b, current_texture_name());
+    TEST_ASSERT_EQUAL_INT(name_b, texture_name_on_unit(0));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
@@ -1142,8 +1150,8 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
 }
 
-/* Destroying the current program clears the cached name: a relink that reuses it
- * must still reach glUseProgram, now that the cache outlives the frame. */
+/* Deterministic half: destroying the current program clears the cached name.
+ * The glUseProgram count only bites when the relink recycles the deleted name. */
 static void test_destroy_current_program_then_relink_reissues_use_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
@@ -1160,6 +1168,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_gfx_end_frame();
 
     nt_gfx_destroy_program(prog_p); /* cascades into pip_p */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_program());
     nt_program_t prog_q = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));

@@ -194,6 +194,11 @@ void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_vao_binds(void);
+/* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
+ * depending on the driver recycling the deleted GL name. */
+uint32_t nt_gfx_gl_test_cached_vao(void);
+uint32_t nt_gfx_gl_test_cached_program(void);
+uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot);
 #endif
 
 #ifdef NT_TEST_ACCESS

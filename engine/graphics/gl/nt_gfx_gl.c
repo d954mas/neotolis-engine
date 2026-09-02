@@ -241,6 +241,14 @@ void nt_gfx_gl_test_reset_counters(void) {
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void) { return s_test_static_attrib_pointer_calls; }
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void) { return s_test_instance_attrib_pointer_calls; }
 uint32_t nt_gfx_gl_test_vao_binds(void) { return s_test_vao_binds; }
+
+uint32_t nt_gfx_gl_test_cached_vao(void) { return s_gl_cache.vao; }
+uint32_t nt_gfx_gl_test_cached_program(void) { return s_gl_cache.program; }
+
+uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot) {
+    NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "cached_texture: slot out of range");
+    return s_gl_cache.bound_textures[slot];
+}
 #endif
 // #endregion
 
