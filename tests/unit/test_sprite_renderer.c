@@ -309,6 +309,30 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
 
 static nt_material_t create_test_material(void) { return create_test_material_with_blend(nt_blend_opaque()); }
 
+/* Slot 0 plus one vec4 param, so a flush's uniform counts are not vacuous. */
+static nt_material_t create_test_material_with_param(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "param_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "param_fs"});
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = nt_gfx_make_program(vs, fs);
+    desc.depth_test = false;
+    desc.depth_write = false;
+    desc.cull_mode = NT_CULL_NONE;
+    desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
+    desc.params[0].name = "u_tint";
+    desc.params[0].value[0] = 1.0F;
+    desc.param_count = 1;
+    desc.label = "test_sprite_material_param";
+
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+    return mat;
+}
+
 /* Analytic-coverage shape (nt_ui_radial's flat SDF): borrows region geometry, samples nothing. */
 static nt_material_t create_test_material_textureless(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sdf_vs"});
@@ -889,8 +913,16 @@ void test_sprite_renderer_dead_material_cmd_replays_sampler_units(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
     s_atlas_res = register_test_atlas(0xE4ULL);
-    nt_material_t mat = create_test_material();
+    nt_material_t mat = create_test_material_with_param();
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    /* Control: while the material lives, its one param goes out with the sampler unit. */
+    nt_gfx_stub_test_reset();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
 
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
@@ -906,6 +938,75 @@ void test_sprite_renderer_dead_material_cmd_replays_sampler_units(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_vec4_count());
     nt_gfx_test_draw_trace_reset(false);
+}
+
+/* A program replaced between an immediate emit and an ECS draw_list puts one
+ * material id on two programs in one flush; the uniforms must go out twice. */
+void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE5ULL);
+    nt_material_t mat = create_test_material_with_param();
+    const nt_program_t program_a = nt_material_get_info(mat)->program;
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "prog_b_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "prog_b_fs"});
+    const nt_program_t program_b = nt_gfx_make_program(vs, fs);
+
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_gfx_stub_test_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_material_set_program(mat, program_b);
+    /* draw_list opens its cmds on the new pipeline without flushing the pending one. */
+    nt_sprite_renderer_draw_list(&item, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_test_draw_trace_at(1).program.id);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_uniform_vec4_count());
+    nt_gfx_test_draw_trace_reset(false);
+}
+
+/* A sampler override picks filtering for a texture that still has to exist, so
+ * an unresolved slot 1 is a bug even with one set. */
+void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE6ULL);
+    nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+    });
+    TEST_ASSERT_TRUE(override.id != 0);
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "two_slot_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "two_slot_fs"});
+    nt_material_create_desc_t mdesc;
+    memset(&mdesc, 0, sizeof(mdesc));
+    mdesc.program = nt_gfx_make_program(vs, fs);
+    mdesc.cull_mode = NT_CULL_NONE;
+    mdesc.textures[0].name = "u_texture";
+    mdesc.textures[1].name = "u_second";
+    mdesc.textures[1].resource = NT_RESOURCE_INVALID;
+    mdesc.textures[1].sampler = override;
+    mdesc.texture_count = 2;
+    mdesc.label = "test_sprite_material_two_slots";
+    nt_material_t mat = nt_material_create(&mdesc);
+    nt_material_step();
+
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
 }
 
 /* ---- Test: polygon emit ----
@@ -1490,6 +1591,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_replays_sampler_units);
+    RUN_TEST(test_sprite_renderer_program_replace_between_immediate_and_draw_list);
+    RUN_TEST(test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);

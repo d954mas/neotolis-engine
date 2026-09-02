@@ -300,10 +300,20 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_material_t material = create_test_material_with_blend(blend);
 
     nt_text_renderer_set_material(material);
+    nt_gfx_stub_test_reset();
     draw_and_flush();
 
     nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
+
+    /* The font owns units 0 and 1; the third int carries the curve texture width. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_band_texture").value, nt_gfx_stub_test_uniform_int_hash_at(1));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_stub_test_uniform_int_value_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_stub_test_uniform_int_hash_at(2));
+    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_stub_test_uniform_int_value_at(2));
 }
 
 /* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */

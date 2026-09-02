@@ -123,7 +123,8 @@ re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
-end of that call; removing redundancy across calls is the gfx cache's job. A uniform a material
+end of that call; across calls the GL backend deduplicates program, VAO and
+texture binds, while sampler binds and uniform writes are always issued. A uniform a material
 does not declare retains the value last written on that program; this applies
 to sampler units and material params. Planned fixes are fixed sampler-unit
 assignments per program (#359) and per-material param UBOs bound at material
@@ -151,10 +152,13 @@ every vec4 param, keyed by material id — per-slot texture and sampler (keyed b
 the resolved texture and the effective sampler), and the per-run instance range
 plus draw. A run that changes only the mesh therefore does no material work at
 all. The tracked state lives for exactly one `draw_list` call or flush: inside
-that call the renderer is the only writer of GL draw state, and it relies on one
-material id never appearing on two programs within the call — the mesh renderer
-derives its pipeline from the material, and `nt_sprite_renderer_set_material`
-flushes when the program changes. Sampler tracking is per slot because
+that call the renderer is the only writer of GL draw state. Material uniforms
+replay on a material change *or* a pipeline change, because uniform values are
+program state and the new pipeline may sit on another program — one flush can
+hold one material id on two programs when a game replaces the material's program
+between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
+nothing for this: a pipeline change there always implies a material change.
+Sampler tracking is per slot because
 `nt_gfx_bind_texture` re-installs the texture's asset default, so a material
 without an override has to restore that default after one that overrode it;
 fixed sampler-unit assignments (#359) will collapse this. The text renderer

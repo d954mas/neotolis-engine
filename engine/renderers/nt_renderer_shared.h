@@ -68,9 +68,8 @@ typedef struct {
     const float (*params)[4];
 } nt_renderer_material_view_t;
 
-/* Zero-init = nothing bound; lives for ONE draw_list or flush. Within one call a material
- * id never appears on two programs -- mesh derives the pipeline from the material, sprite
- * set_material flushes on a program change -- so material identity alone decides replay. */
+/* Zero-init = nothing bound; lives for ONE draw_list or flush. Material uniforms replay on
+ * a material change or a pipeline change. */
 typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
@@ -85,6 +84,9 @@ static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline
     }
     nt_gfx_bind_pipeline(p);
     b->pipeline = p.id;
+    /* Uniforms are program state and the new pipeline may sit on another program,
+     * so the same material has to write them again. */
+    b->material = 0;
 }
 
 static inline void nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vertex_input_t vi) {

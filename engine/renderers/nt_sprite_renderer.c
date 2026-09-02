@@ -1400,8 +1400,8 @@ void nt_sprite_renderer_flush(void) {
         }
 
         /* Sampler-unit hashes come from the cmd, so a cmd whose material died still
-         * replays them; params are read from the live material. */
-        const nt_material_info_t *mi = nt_material_get_info(c->material);
+         * replays them; params are read from the live material, only when it changes. */
+        const nt_material_info_t *mi = (c->material.id != bound.material) ? nt_material_get_info(c->material) : NULL;
         const nt_renderer_material_view_t view = {
             .tex_count = c->tex_count,
             .tex_name_hashes = c->tex_name_hashes,
