@@ -139,6 +139,8 @@ Environment differences a local Windows host cannot reproduce:
 ## Test-infra & debugging gotchas
 
 - Only a fresh full `check.sh` run is authoritative — targeted builds + ctest can pass on stale binaries after an edit burst.
+- Never run two `check.sh`/`ctest` in one tree at once (agent + lead included): shared test outputs and relinked exes make builder/atlas tests fail spuriously. `check.sh` holds `build/.check.lock` and exits 2 while another run is active; `rmdir` it only if the other run is dead.
+- A failed test's name and output after `check.sh`: `build/_cmake/native-debug/check-ctest.log` (kept on disk) or `Testing/Temporary/LastTestsFailed.log` — do not rely on a `tail`-truncated terminal.
 - A failed `NT_BUILD_ASSERT` aborts the test process; if a dead process still holds the exe (next link fails with permission denied), `taskkill //F //IM <test>.exe`. Deliberate assert-trip tests: run the binary directly, not through ctest.
 - A crashing test that prints nothing: diagnose with `lldb -b -o run -o bt <exe>` (gdb absent; MSVC CRT buffers stdout to pipes and ignores stdbuf).
 - `UNITY_EXCLUDE_FLOAT` is defined — float Unity asserts compile to nothing; compare small exact values via `(int32_t)` casts.

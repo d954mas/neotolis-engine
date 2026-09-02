@@ -31,6 +31,15 @@ NATIVE_BUILD_DIR="build/_cmake/native-debug"
 CURRENT_STEP="startup"
 RESULTS=()
 
+# Two checks in one tree corrupt each other (shared test outputs, exes relinked
+# under a running ctest); mkdir is the atomic lock that works on every host.
+LOCK_DIR="build/.check.lock"
+mkdir -p build
+if ! mkdir "$LOCK_DIR" 2> /dev/null; then
+    echo "check.sh: another run holds $LOCK_DIR in this tree -- wait for it, or rmdir the lock if it is stale"
+    exit 2
+fi
+
 step() {
     CURRENT_STEP="$1"
     echo ""
@@ -49,8 +58,8 @@ print_summary() {
         WINPID="$(ps -p "$CTEST_PID" 2> /dev/null | awk 'NR == 2 { print $4 }' || true)"
         { [ -n "$WINPID" ] && taskkill //PID "$WINPID" //T //F > /dev/null 2>&1; } || kill "$CTEST_PID" 2> /dev/null || true
         wait "$CTEST_PID" 2> /dev/null || true
-        rm -f "${CTEST_LOG:-}"
     fi
+    rmdir "$LOCK_DIR" 2> /dev/null || true
     echo ""
     echo "=================================================="
     echo "check.sh summary (mode: $MODE)"
@@ -61,6 +70,12 @@ print_summary() {
         echo "RESULT: PASS"
     else
         echo "  FAIL  $CURRENT_STEP"
+        if [ "$CURRENT_STEP" = "ctest (native-debug)" ] && [ -f "${CTEST_LOG:-}" ]; then
+            # The full log survives on disk; a reader who piped this run through
+            # tail still gets the failing test names here.
+            grep -E '\(Failed\)|\(Timeout\)|\(SEGFAULT\)|\(Exception|\(Not Run\)' "$CTEST_LOG" | sed 's/^/  /' || true
+            echo "  full ctest log: $CTEST_LOG"
+        fi
         echo "RESULT: FAIL"
     fi
 }
@@ -170,7 +185,7 @@ if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$
     echo "(no builder/atlas paths in the change set — the 3 bench-guard tests defer to --push/--full)"
     CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
 fi
-CTEST_LOG="$(mktemp)"
+CTEST_LOG="$NATIVE_BUILD_DIR/check-ctest.log" # kept on disk; overwritten per run
 ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
 CTEST_PID=$!
 echo "(backgrounded, pid $CTEST_PID)"
@@ -182,11 +197,9 @@ collect_ctest() {
     CTEST_PID=""
     if [ "$rc" -ne 0 ]; then
         cat "$CTEST_LOG"
-        rm -f "$CTEST_LOG"
         return "$rc"
     fi
     tail -n 3 "$CTEST_LOG"
-    rm -f "$CTEST_LOG"
     RESULTS+=("PASS  ctest (native-debug)")
 }
 
