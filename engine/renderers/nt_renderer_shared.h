@@ -55,6 +55,112 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
     return pip;
 }
 
+// #region bound state
+/* What a material contributes to program + texture-unit state. Pointers borrow from
+ * nt_material_info_t (mesh, text) or from a sprite cmd (slot 0 = atlas page; hashes
+ * captured so a cmd whose material died can still replay its sampler units). Every
+ * declared slot/param has a name (nt_material_create asserts), so presence = index < count. */
+typedef struct {
+    uint8_t tex_count;
+    const uint32_t *tex_name_hashes;      /* [tex_count] */
+    const uint32_t *resolved_tex;         /* [tex_count]; 0 = unresolved */
+    const nt_sampler_t *resolved_sampler; /* [tex_count]; .id == 0 = texture default */
+    uint8_t param_count;
+    const uint32_t *param_name_hashes; /* [param_count] */
+    const float (*params)[4];
+} nt_renderer_material_view_t;
+
+/* Zero-init = nothing bound. Lives for ONE draw_list / flush: inside that call the
+ * renderer is the only writer of GL draw state; across calls that is gfx's business.
+ * Invariant relied on: within one call a material id never appears on two programs
+ * (mesh derives the pipeline from the material; sprite set_material flushes on a
+ * program change). Hence material identity alone decides uniform replay. */
+typedef struct {
+    uint32_t pipeline;
+    uint32_t vertex_input;
+    uint32_t material;
+    uint32_t tex[NT_MATERIAL_MAX_TEXTURES];
+    uint32_t sampler[NT_MATERIAL_MAX_TEXTURES];
+    /* The bound texture's asset default, kept so a material without an override
+     * restores it after one with an override, at one pool lookup per texture change. */
+    uint32_t tex_default_sampler[NT_MATERIAL_MAX_TEXTURES];
+} nt_renderer_bound_t;
+
+static inline bool nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
+    if (p.id == b->pipeline) {
+        return false;
+    }
+    nt_gfx_bind_pipeline(p);
+    b->pipeline = p.id;
+    return true;
+}
+
+static inline bool nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vertex_input_t vi) {
+    if (vi.id == b->vertex_input) {
+        return false;
+    }
+    nt_gfx_bind_vertex_input(vi);
+    b->vertex_input = vi.id;
+    return true;
+}
+
+/* Stateless program state: sampler unit for every declared slot (written whether or not
+ * the texture resolved -- shared with other materials on the program) + every vec4 param. */
+static inline void nt_renderer_set_material_uniforms(const nt_renderer_material_view_t *v) {
+    for (uint8_t t = 0; t < v->tex_count; t++) {
+        nt_gfx_set_uniform_int_h((nt_hash32_t){.value = v->tex_name_hashes[t]}, (int)t);
+    }
+    for (uint8_t p = 0; p < v->param_count; p++) {
+        nt_gfx_set_uniform_vec4_h((nt_hash32_t){.value = v->param_name_hashes[p]}, v->params[p]);
+    }
+}
+
+/* Same, skipped when the material is already the bound one. */
+static inline bool nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, uint32_t material_id, const nt_renderer_material_view_t *v) {
+    if (material_id == b->material) {
+        return false;
+    }
+    nt_renderer_set_material_uniforms(v);
+    b->material = material_id;
+    return true;
+}
+
+/* Context state: texture + effective sampler per slot, only where the slot's binding
+ * changed. Unresolved slots are left alone (the unit keeps whatever it held). */
+static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const nt_renderer_material_view_t *v) {
+    for (uint8_t t = 0; t < v->tex_count; t++) {
+        if (v->resolved_tex[t] == 0) {
+            continue;
+        }
+        const nt_texture_t tex = {.id = v->resolved_tex[t]};
+        if (v->resolved_tex[t] != b->tex[t]) {
+            nt_gfx_bind_texture(tex, t);
+            b->tex[t] = v->resolved_tex[t];
+            /* bind_texture also installed the texture's asset-baked default. */
+            b->tex_default_sampler[t] = nt_gfx_get_texture_default_sampler(tex).id;
+            b->sampler[t] = b->tex_default_sampler[t];
+        }
+        const uint32_t want = (v->resolved_sampler[t].id != 0) ? v->resolved_sampler[t].id : b->tex_default_sampler[t];
+        if (want != b->sampler[t]) {
+            nt_gfx_bind_sampler((nt_sampler_t){.id = want}, t);
+            b->sampler[t] = want;
+        }
+    }
+}
+
+static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {
+    return (nt_renderer_material_view_t){
+        .tex_count = mi->tex_count,
+        .tex_name_hashes = mi->tex_name_hashes,
+        .resolved_tex = mi->resolved_tex,
+        .resolved_sampler = mi->resolved_sampler,
+        .param_count = mi->param_count,
+        .param_name_hashes = mi->param_name_hashes,
+        .params = mi->params,
+    };
+}
+// #endregion
+
 /* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag. */
 static inline void nt_renderer_warn_program_not_ready(bool *warned, const nt_material_info_t *mat_info) {
     if (*warned) {

@@ -46,6 +46,9 @@ static struct {
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
     uint32_t frame_instance_total;
+    uint32_t frame_material_applies;
+    uint32_t frame_pipeline_binds;
+    uint32_t frame_vertex_input_binds;
 
     bool initialized;
 } s_mesh_renderer;
@@ -441,6 +444,9 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     /* Reset per-frame tracking */
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
+    s_mesh_renderer.frame_material_applies = 0;
+    s_mesh_renderer.frame_pipeline_binds = 0;
+    s_mesh_renderer.frame_vertex_input_binds = 0;
 
     /* Restore generic attribute 7 to white once per draw_list call.
      * NONE mode shaders read this as identity color. Protects against
@@ -453,6 +459,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     uint32_t chunk_start = 0;
     nt_material_t prev_mat = {0};
     nt_mesh_t prev_mesh = {0};
+    /* Call-scoped: chunks share it because the per-chunk instance upload touches
+     * ARRAY_BUFFER only and leaves pipeline / VI / texture-unit state alone. */
+    nt_renderer_bound_t bound = {0};
+    nt_pipeline_t pip = {0};
+    nt_vertex_input_t vi = {0};
 
     while (chunk_start < count) {
         uint32_t chunk_count = count - chunk_start;
@@ -537,39 +548,38 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 continue;
             }
 
-            /* Bind pipeline + vertex input (if material or mesh changed) */
-            if (run_mat.id != prev_mat.id || run_mesh.id != prev_mesh.id) {
-                nt_pipeline_t pip = find_or_create_pipeline(mat_info);
-                nt_vertex_input_t vi = (pip.id != 0) ? find_or_create_vertex_input(run_mat, run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
-                if (pip.id == 0 || vi.id == 0) {
-                    draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
-                    run_start = run_end;
-                    continue;
-                }
-                nt_gfx_bind_pipeline(pip);
-                nt_gfx_bind_vertex_input(vi);
-
-                /* Sampler units are program state shared with every other
-                 * material on this program, so each declared slot is written
-                 * whether or not its texture resolved. */
-                for (uint8_t t = 0; t < mat_info->tex_count; t++) {
-                    nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
-                    if (mat_info->resolved_tex[t] != 0) {
-                        nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
-                        if (mat_info->resolved_sampler[t].id != 0) {
-                            nt_gfx_bind_sampler(mat_info->resolved_sampler[t], t);
-                        }
-                    }
-                }
-
-                /* Apply material params as uniforms */
-                for (uint8_t p = 0; p < mat_info->param_count; p++) {
-                    nt_gfx_set_uniform_vec4(mat_info->param_names[p], mat_info->params[p]);
-                }
-
-                prev_mat = run_mat;
-                prev_mesh = run_mesh;
+            const bool mat_changed = run_mat.id != prev_mat.id;
+            const bool mesh_changed = run_mesh.id != prev_mesh.id;
+            if (mat_changed) {
+                pip = find_or_create_pipeline(mat_info);
             }
+            /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */
+            if (mat_changed || mesh_changed) {
+                vi = (pip.id != 0) ? find_or_create_vertex_input(run_mat, run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
+            }
+            if (pip.id == 0 || vi.id == 0) {
+                draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+                run_start = run_end;
+                prev_mat = (nt_material_t){0};
+                prev_mesh = (nt_mesh_t){0};
+                continue;
+            }
+
+            if (mat_changed) {
+                const nt_renderer_material_view_t view = nt_renderer_material_view(mat_info);
+                if (nt_renderer_bind_pipeline(&bound, pip)) {
+                    s_mesh_renderer.frame_pipeline_binds++;
+                }
+                nt_renderer_apply_material_uniforms(&bound, run_mat.id, &view);
+                /* Mesh renderer texture slots come from the material alone. */
+                nt_renderer_apply_texture_slots(&bound, &view);
+                s_mesh_renderer.frame_material_applies++;
+            }
+            if (nt_renderer_bind_vertex_input(&bound, vi)) {
+                s_mesh_renderer.frame_vertex_input_binds++;
+            }
+            prev_mat = run_mat;
+            prev_mesh = run_mesh;
 
             nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, draw_byte_offset);
 
@@ -607,6 +617,12 @@ uint32_t nt_mesh_renderer_test_vertex_input_count(void) {
 uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.frame_draw_calls; }
 
 uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.frame_instance_total; }
+
+uint32_t nt_mesh_renderer_frame_material_applies(void) { return s_mesh_renderer.frame_material_applies; }
+
+uint32_t nt_mesh_renderer_frame_pipeline_binds(void) { return s_mesh_renderer.frame_pipeline_binds; }
+
+uint32_t nt_mesh_renderer_frame_vertex_input_binds(void) { return s_mesh_renderer.frame_vertex_input_binds; }
 
 uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }
 
