@@ -298,6 +298,8 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     desc.blend = blend;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
     desc.label = "test_sprite_material";
 
     nt_material_t mat = nt_material_create(&desc);
@@ -640,9 +642,13 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_material_set_program(mat, program_b);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     nt_sprite_renderer_set_material(mat);
+    nt_gfx_stub_test_reset();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     nt_sprite_renderer_flush();
 
+    /* One flush, one cmd, one material: the sampler unit is written once. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_test_draw_trace_count());
     TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
     nt_gfx_test_draw_t first = nt_gfx_test_draw_trace_at(0);
@@ -774,6 +780,36 @@ void test_sprite_renderer_splits_run_on_actual_page_change(void) {
 
     nt_sprite_renderer_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+}
+
+/* One material spanning two atlas pages: the page changes per cmd, the program
+ * state (sampler unit + params) does not. */
+void test_sprite_renderer_same_material_two_pages_state(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xE1ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = sprite_batch_key(e0, mat);
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = sprite_batch_key(e1, mat);
+
+    nt_gfx_stub_test_reset();
+    nt_sprite_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+    /* Two pages => two texture binds; one material => one sampler-unit write. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
 }
 
 /* ---- Test: polygon emit ----
@@ -1354,6 +1390,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
+    RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);

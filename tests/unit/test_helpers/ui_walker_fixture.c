@@ -34,6 +34,8 @@ nt_material_t ui_walker_fixture_make_material(void) {
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
     desc.label = "walker_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
