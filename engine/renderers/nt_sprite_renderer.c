@@ -1419,9 +1419,7 @@ void nt_sprite_renderer_flush(void) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
             if (mi != NULL) {
                 for (uint8_t p = 0; p < mi->param_count; p++) {
-                    if (mi->param_names[p] != NULL) {
-                        nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
-                    }
+                    nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
                 }
                 bound_mat_id = c->material.id;
                 material_applied = true;
@@ -1430,7 +1428,8 @@ void nt_sprite_renderer_flush(void) {
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
             /* Shared textures can use different sampler names across materials.
-             * Replay captured mappings even if the material was destroyed. */
+             * Replay captured mappings even if the material was destroyed.
+             * NULL is the lazily injected atlas slot 0, not a material slot. */
             if ((material_applied || pipeline_changed) && c->tex_names[t] != NULL) {
                 nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
             }

@@ -553,9 +553,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                  * material on this program, so each declared slot is written
                  * whether or not its texture resolved. */
                 for (uint8_t t = 0; t < mat_info->tex_count; t++) {
-                    if (mat_info->tex_names[t] != NULL) {
-                        nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
-                    }
+                    nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
                     if (mat_info->resolved_tex[t] != 0) {
                         nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
                         if (mat_info->resolved_sampler[t].id != 0) {
@@ -566,9 +564,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
                 /* Apply material params as uniforms */
                 for (uint8_t p = 0; p < mat_info->param_count; p++) {
-                    if (mat_info->param_names[p] != NULL) {
-                        nt_gfx_set_uniform_vec4(mat_info->param_names[p], mat_info->params[p]);
-                    }
+                    nt_gfx_set_uniform_vec4(mat_info->param_names[p], mat_info->params[p]);
                 }
 
                 prev_mat = run_mat;

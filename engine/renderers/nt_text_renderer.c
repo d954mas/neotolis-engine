@@ -767,9 +767,7 @@ void nt_text_renderer_flush(void) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         if (mi != NULL) {
             for (uint8_t p = 0; p < mi->param_count; p++) {
-                if (mi->param_names[p] != NULL) {
-                    nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
-                }
+                nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
             }
         }
     }

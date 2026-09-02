@@ -33,13 +33,13 @@ typedef enum {
 /* ---- Descriptor sub-types ---- */
 
 typedef struct {
-    const char *name;
+    const char *name; /* required sampler uniform name (static storage) */
     nt_resource_t resource;
     nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
 
 typedef struct {
-    const char *name;
+    const char *name; /* required uniform name (static storage) */
     float value[4];
 } nt_material_param_desc_t;
 
