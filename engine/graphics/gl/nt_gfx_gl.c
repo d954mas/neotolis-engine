@@ -79,7 +79,6 @@ typedef struct {
 typedef struct {
     uint32_t name_hash;
     GLint location;
-    uint8_t unit;
 } nt_gfx_gl_sampler_unit_t;
 
 typedef struct {
@@ -249,7 +248,7 @@ int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_
     const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     for (uint8_t i = 0; i < prog->sampler_count; i++) {
         if (prog->sampler_units[i].name_hash == name_hash) {
-            return (int)prog->sampler_units[i].unit;
+            return (int)i;
         }
     }
     return -1;
@@ -1222,7 +1221,6 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                     }
                     rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
                     rec->sampler_units[rec->sampler_count].location = loc;
-                    rec->sampler_units[rec->sampler_count].unit = rec->sampler_count;
                     rec->sampler_count++;
                 }
                 uniform_count++;
@@ -1244,7 +1242,7 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
     const GLuint saved = s_gl_cache.program;
     glUseProgram(program);
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
-        glUniform1i(rec->sampler_units[i].location, (GLint)rec->sampler_units[i].unit);
+        glUniform1i(rec->sampler_units[i].location, (GLint)i);
     }
     glUseProgram(saved);
 }
