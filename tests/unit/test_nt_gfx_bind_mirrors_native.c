@@ -801,7 +801,7 @@ static void test_ground_state_after_reinit(void) {
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
     nt_gfx_begin_frame();
-    begin_black_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(blend_pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
@@ -814,6 +814,16 @@ static void test_ground_state_after_reinit(void) {
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_BLEND));
+
+    /* The fresh cache says the clear color is already {0,0,0,0}, so this pass
+     * dedups it: only a real glClearColor in ground state clears away the red
+     * the previous lifetime left in GL. */
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
+    uint8_t cleared_red = center_red();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_UINT8_WITHIN(1, 0, cleared_red);
 
     nt_pipeline_t opaque_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
     nt_pipeline_t alpha_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
@@ -1081,8 +1091,9 @@ static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
-/* update_texture uploads on the scratch unit, so the texture sampling slot 0
- * holds stays bound there and re-binding it mid-pass costs no GL call. */
+/* update_texture and plain creation both upload on the scratch unit, so the
+ * texture sampling slot 0 holds stays bound there and re-binding it mid-pass
+ * costs no GL call. */
 static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     static const uint8_t white[4] = {255, 255, 255, 255};
     static const uint8_t grey[4] = {128, 128, 128, 255};
@@ -1096,6 +1107,10 @@ static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_texture(tex_1, 0);
+    /* A failed create would leave slot 0 untouched and false-pass the next line. */
+    nt_texture_t created_mid_pass = make_pixel_texture(grey);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, created_mid_pass.id);
+    TEST_ASSERT_EQUAL_INT(name_1, texture_name_on_unit(0));
     nt_gfx_update_texture(tex_2, 0, 0, 1, 1, white);
 
     GLint upload_unit = 0;
@@ -1152,6 +1167,33 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     TEST_ASSERT_EQUAL_UINT32(3, burst_bind);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
+}
+
+/* Resizing a render target deletes the old colour texture, so its GL name must
+ * leave the cache: old and new names are both live during the resize, so only
+ * the cache probe can see the forget. Depth NONE keeps the colour texture the
+ * one the resize touches last. */
+static void test_resize_render_target_forgets_cached_color_name(void) {
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 4,
+        .height = 4,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_NONE,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
+
+    nt_gfx_bind_texture(nt_gfx_render_target_color(rt), 0);
+    /* Without this the probe below would pass on a texture that never cached. */
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
+
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 6, 5));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
+
+    nt_gfx_destroy_render_target(rt);
 }
 
 /* Destruction must release the current GL program even without another bind. */
@@ -1230,6 +1272,7 @@ int main(void) {
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_texture);
     RUN_TEST(test_update_texture_mid_pass_leaves_sampling_slot_bound);
     RUN_TEST(test_upload_burst_costs_one_active_texture_switch);
+    RUN_TEST(test_resize_render_target_forgets_cached_color_name);
     RUN_TEST(test_destroy_current_program_then_relink_reissues_use_program);
     return UNITY_END();
 }

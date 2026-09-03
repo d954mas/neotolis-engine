@@ -127,8 +127,8 @@ share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
-texture, viewport and clear-value binds, while sampler binds and uniform writes
-are always issued. The
+texture, viewport and clear-value binds (scissor-enable is deduplicated by the
+front-end mirror), while sampler binds and uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. A uniform a material
 does not declare retains the value last written on that program; this applies
