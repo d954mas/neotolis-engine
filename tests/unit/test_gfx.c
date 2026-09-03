@@ -1895,6 +1895,68 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     nt_gfx_end_frame();
 }
 
+/* Render-target attachments are rejected earlier, so an update reaching a husk
+ * is always a primary texture the owner never recreated. */
+void test_gfx_update_texture_on_husk_asserts(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
+
+    EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_texture_count());
+    nt_gfx_end_frame();
+}
+
+/* A husk write is the same owner bug as a husk bind, so it traps the same way. */
+void test_gfx_update_buffer_on_husk_asserts(void) {
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    const uint8_t data[64] = {0};
+    EXPECT_ASSERT(nt_gfx_update_buffer(vbo, 0, data, sizeof(data)));
+    nt_gfx_end_frame();
+}
+
+void test_gfx_orphan_buffer_on_husk_asserts(void) {
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    const uint8_t data[64] = {0};
+    EXPECT_ASSERT(nt_gfx_orphan_buffer(vbo, data, sizeof(data)));
+    nt_gfx_end_frame();
+}
+
 /* ---- Per-frame draw call counter ---- */
 
 /* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
@@ -2107,13 +2169,33 @@ void test_gfx_begin_pass_discards_bound_state(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_test_vertex_input();
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline_backend());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline_backend());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* Slots are recycled, so only the full handle tells a rebound pipeline apart
+ * from the destroyed one that occupied its slot. */
+void test_gfx_bound_pipeline_holds_the_generation(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t old_pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, old_pip.id);
+    nt_gfx_destroy_pipeline(old_pip);
+
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_pip.id), nt_pool_slot_index(pip.id));
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_pip.id, pip.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    TEST_ASSERT_EQUAL_UINT32(pip.id, nt_gfx_test_bound_pipeline());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -2251,6 +2333,10 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bind_texture_on_husk_logs_and_skips_backend);
+    RUN_TEST(test_gfx_update_texture_on_husk_asserts);
+    RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
+    RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
+    RUN_TEST(test_gfx_bound_pipeline_holds_the_generation);
     RUN_TEST(test_gfx_restored_frame_rejects_draws);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);

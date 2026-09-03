@@ -181,9 +181,10 @@ static uint32_t s_transcode_buf_idle = 0;
  * Every direct GL call that changes a field here mirrors it or invalidates the
  * entry at the call site; ground state only at init and context restore. */
 
-/* Uploads bind here instead of on a sampling unit. WebGL2 and GL 3.3 both
- * guarantee at least 16 fragment texture units, so this one always exists. */
+/* Uploads bind here instead of on a sampling unit: unit NT_GFX_MAX_TEXTURE_SLOTS
+ * is below the 16 fragment units WebGL2/GL 3.3 guarantee. */
 #define NT_GFX_GL_UPLOAD_TEXTURE_UNIT ((GLenum)(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS))
+_Static_assert(NT_GFX_MAX_TEXTURE_SLOTS < 16, "scratch upload unit must stay inside the guaranteed unit range");
 
 static struct {
     GLuint vao;

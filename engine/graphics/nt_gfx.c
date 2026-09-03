@@ -144,7 +144,7 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
-    uint32_t bound_pipeline;     /* pool slot of the bound pipeline, 0 = none */
+    uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t bound_index_type; /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
@@ -158,7 +158,6 @@ static struct {
 
 #ifdef NT_TEST_ACCESS
 static nt_gfx_test_draw_t s_test_draws[128];
-static nt_pipeline_t s_test_bound_pipeline;
 static uint32_t s_test_draw_count;
 static bool s_test_draw_enabled;
 static bool s_test_draw_overflow;
@@ -186,8 +185,8 @@ static void test_record_draw(uint32_t first_vertex, uint32_t num_vertices, uint3
         return;
     }
     s_test_draws[s_test_draw_count++] = (nt_gfx_test_draw_t){
-        .pipeline = s_test_bound_pipeline,
-        .program = {s_gfx.pipeline_programs[nt_pool_slot_index(s_test_bound_pipeline.id)]},
+        .pipeline = {s_gfx.bound_pipeline},
+        .program = {s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)]},
         .first_vertex = first_vertex,
         .num_vertices = num_vertices,
         .first_index = first_index,
@@ -1278,7 +1277,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    if (s_gfx.bound_pipeline == slot) {
+    if (s_gfx.bound_pipeline == pip.id) {
         s_gfx.bound_pipeline = 0;
     }
     nt_gfx_backend_destroy_pipeline(slot);
@@ -1470,11 +1469,8 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
     /* Loss frees pipeline slots, so a live slot always has a backend. */
-    s_gfx.bound_pipeline = slot;
-#ifdef NT_TEST_ACCESS
-    s_test_bound_pipeline = pip;
-#endif
-    nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
+    s_gfx.bound_pipeline = pip.id;
+    nt_gfx_backend_bind_pipeline(slot);
 }
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
@@ -1514,12 +1510,10 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
         return;
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
-    /* A husk: loss zeroed the backend and neither the owner nor a render-target
-     * restore refilled it. Recoverable GPU failure, not a broken invariant. */
+    /* Husk: loss zeroed the backend -- either an RT attachment whose restore failed
+     * (GPU failure) or a primary texture the owner never recreated. Bind cannot tell
+     * them apart, so it reports; clear the mirror so bind_sampler skips the stale one. */
     if (s_gfx.texture_backends[idx] == 0) {
-        /* A batch renderer would hit this every item, and on web every log is a
-         * JS call. Clear the mirror: a following bind_sampler must not validate
-         * against the texture that stayed bound. */
         s_gfx.bound_texture_ids[slot] = 0;
         NT_LOG_ERROR_ONCE("bind_texture: texture has no GPU resource (restore failed)");
         return;
@@ -1574,7 +1568,7 @@ void nt_gfx_test_viewport_rect(int out[4]) {
     out[3] = s_gfx.viewport_rect[3];
 }
 
-uint32_t nt_gfx_test_bound_pipeline_backend(void) { return s_gfx.bound_pipeline; }
+uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
 
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 #endif
@@ -1759,11 +1753,11 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 
 /* ---- Uniforms ---- */
 
-/* The bound pipeline is a pool slot; uniforms belong to its borrowed program. */
+/* Uniforms belong to the bound pipeline's borrowed program. */
 static uint32_t uniform_target_program(void) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "set_uniform: no pipeline bound");
-    return s_gfx.program_backends[nt_pool_slot_index(s_gfx.pipeline_programs[s_gfx.bound_pipeline])];
+    return s_gfx.program_backends[nt_pool_slot_index(s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)])];
 }
 
 void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
@@ -2027,6 +2021,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
     NT_ASSERT((data != NULL || size == 0) && "update_buffer: NULL data with nonzero size");
     NT_ASSERT(offset <= s_gfx.buffer_metas[slot].size && "update_buffer: offset exceeds buffer capacity");
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size - offset && "update_buffer: offset + size exceeds buffer capacity");
+    NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "update_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], offset, data, size);
 }
 
@@ -2066,6 +2061,7 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].usage == NT_USAGE_DYNAMIC && "orphan_buffer: requires NT_USAGE_DYNAMIC");
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
+    NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
@@ -2103,6 +2099,9 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     }
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
+    /* RT-owned textures are rejected above, so a husk here is a primary texture
+     * whose owner skipped the recreate contract -- a programmer error. */
+    NT_ASSERT(s_gfx.texture_backends[slot] != 0 && "update_texture: texture has no live backend -- recreate it after context restore");
     nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)stored_format, data);
 }
 

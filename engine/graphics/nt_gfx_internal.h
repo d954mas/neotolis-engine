@@ -37,9 +37,9 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
-/* `slot` is the frontend pool slot: the pool owns allocation, the backend
- * table mirrors it 1:1 -- returns exactly `slot`, or 0 on failure. Callers
- * addressing a pipeline's program by slot depend on that identity. */
+/* `slot` is the frontend pool slot: the pool owns allocation, the backend table
+ * mirrors it 1:1 and the front-end addresses records by that slot -- returns
+ * exactly `slot`, or 0 on failure. */
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
@@ -209,7 +209,7 @@ uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
-uint32_t nt_gfx_test_bound_pipeline_backend(void);
+uint32_t nt_gfx_test_bound_pipeline(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
 #endif
 
