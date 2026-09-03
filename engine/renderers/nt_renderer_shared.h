@@ -70,7 +70,8 @@ typedef struct {
 } nt_renderer_material_view_t;
 
 /* Zero-init = nothing bound; lives for ONE draw_list or flush. Material uniforms replay on
- * a material change or a pipeline change. */
+ * a material change or a pipeline change. Texture and sampler binds are deduplicated by the
+ * GL backend, so the renderer tracks only what it replays itself. */
 typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
@@ -79,10 +80,6 @@ typedef struct {
      * per-cmd path pays no program or mask query. */
     nt_program_t program;
     uint32_t sampler_mask;
-    /* Indexed by program sampler unit, not by material slot: two materials on one
-     * program can list the same sampler in different slots. */
-    uint32_t tex[NT_GFX_MAX_TEXTURE_SLOTS];
-    uint32_t sampler[NT_GFX_MAX_TEXTURE_SLOTS];
 } nt_renderer_bound_t;
 
 static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
@@ -122,29 +119,20 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
     b->material = material_id;
 }
 
-/* Context state: texture + effective sampler on the unit the program gave that sampler
- * name, only where the unit's binding changed. */
-static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, nt_program_t prog, const nt_renderer_material_view_t *v, uint8_t t) {
+/* Context state: texture + effective sampler on the unit the program gave that sampler name.
+ * Issued per call -- the GL backend drops a bind that repeats what the unit already holds. */
+static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, const nt_renderer_material_view_t *v, uint8_t t) {
     /* Negative: the program has no such active sampler (never declared, or the
      * driver eliminated it). Ignored, so a shared material can over-declare. */
-    const int unit = nt_gfx_program_sampler_unit(prog, (nt_hash32_t){.value = v->tex_name_hashes[t]});
+    const int unit = nt_gfx_program_sampler_unit(b->program, (nt_hash32_t){.value = v->tex_name_hashes[t]});
     if (unit < 0) {
         return unit;
     }
     /* nt_resource_set_placeholder_texture exists to keep slots resolvable through async
      * load races; binding nothing would leave the previous material's texture on the unit. */
     NT_ASSERT(v->resolved_tex[t] != 0 && "material slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
-    const nt_texture_t tex = {.id = v->resolved_tex[t]};
-    /* Resolved here so the dedup key is the sampler GL ends up with, not "no override". */
-    uint32_t want = v->resolved_sampler[t].id;
-    if (want == 0) {
-        want = nt_gfx_get_texture_default_sampler(tex).id;
-    }
-    if (v->resolved_tex[t] != b->tex[unit] || want != b->sampler[unit]) {
-        nt_gfx_bind_texture(tex, (nt_sampler_t){.id = want}, (uint32_t)unit);
-        b->tex[unit] = v->resolved_tex[t];
-        b->sampler[unit] = want;
-    }
+    /* NT_SAMPLER_INVALID already means "the texture's own default" inside nt_gfx_bind_texture. */
+    nt_gfx_bind_texture((nt_texture_t){.id = v->resolved_tex[t]}, v->resolved_sampler[t], (uint32_t)unit);
     return unit;
 }
 
@@ -161,13 +149,11 @@ static inline void nt_renderer_assert_sampler_coverage(uint32_t covered, uint32_
 static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const nt_renderer_material_view_t *v) {
     uint32_t covered = 0;
     for (uint8_t t = 0; t < v->tex_count; t++) {
-        const int unit = nt_renderer_bind_slot(b, b->program, v, t);
+        const int unit = nt_renderer_bind_slot(b, v, t);
         if (unit < 0) {
             continue;
         }
-        const uint32_t bit = 1U << (uint32_t)unit;
-        NT_ASSERT((covered & bit) == 0 && "two texture slots name the same sampler uniform");
-        covered |= bit;
+        covered |= 1U << (uint32_t)unit;
     }
     nt_renderer_assert_sampler_coverage(covered, b->sampler_mask, v->label);
 }

@@ -154,12 +154,10 @@ array with a linear scan stays cheaper than a hash map at that scale. Every
 
 **State transitions.** The run-based renderers (mesh, sprite) drive one shared
 state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
-It separates five transitions, each with its own identity: pipeline (handle),
+It separates four transitions, each with its own identity: pipeline (handle),
 vertex input (handle), material uniforms — every vec4 param, keyed by material
-id — per-unit texture and sampler (keyed by the resolved texture and the
-effective sampler), and the per-run instance range
-plus draw. A run that changes only the mesh therefore does no material work at
-all. The tracked state lives for exactly one `draw_list` call or flush: inside
+id — and the per-run instance range plus draw. A run that changes only the mesh
+therefore does no material work at all. The tracked state lives for exactly one `draw_list` call or flush: inside
 that call the renderer is the only writer of GL draw state. Material uniforms
 replay on a material change *or* a pipeline change, because uniform values are
 program state and the new pipeline may sit on another program — one flush can
@@ -168,8 +166,9 @@ between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
 Texture and sampler travel together: `nt_gfx_bind_texture` takes the
 sampler the texture is read through, so a material without an override restores
-the texture's asset default in the same bind, and the per-unit key is the
-resolved texture plus the effective sampler. The unit is not the material's slot
+the texture's asset default in the same bind. The renderer keeps no mirror of
+those binds — it issues one `nt_gfx_bind_texture` per cmd per sampled slot and
+the backend GL cache drops the repeats. The unit is not the material's slot
 index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
 a name the program does not sample is skipped, and the coverage assert compares
 the units covered against the program's sampler mask — a material must declare

@@ -59,10 +59,11 @@ programs that declare the block. The registry borrows each name without copying;
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
 survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`.
 
-The GL backend caches at most 16 active standalone uniform locations per
-program. Each active array element consumes one entry; uniforms in blocks do
-not consume entries. Exceeding the cache capacity asserts at link time instead
-of silently omitting values. Reflection reads the complete reported names and
+The GL backend caches at most 16 active standalone non-sampler uniform locations
+per program. Each active array element consumes one entry; uniforms in blocks do
+not consume entries, and samplers do not either — they live in a separate table
+capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts at link
+time instead of silently omitting values. Reflection reads the complete reported names and
 uses temporary storage only while linking; setting a uniform performs no
 allocation.
 

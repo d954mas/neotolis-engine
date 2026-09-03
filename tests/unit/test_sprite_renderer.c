@@ -978,9 +978,9 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_test_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_test_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_test_draw_trace_at(1).program.id);
-    /* Texture units are context state: both programs read the page from unit 0, so the
-     * second cmd re-binds nothing. Params are program state and go out twice. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    /* One bind per cmd per sampled slot; the backend GL cache drops the second one.
+     * Params are program state and go out twice. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
     nt_gfx_test_draw_trace_reset(false);

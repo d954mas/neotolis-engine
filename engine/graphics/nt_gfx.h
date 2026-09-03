@@ -492,7 +492,8 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links valid stages; link errors and the GL cache limit (16 uniform locations) assert.
+/* Links valid stages; link errors and the GL cache limit (16 non-sampler uniform locations;
+ * samplers are capped separately by NT_GFX_MAX_TEXTURE_SLOTS) assert.
  * Returns invalid while the context is lost or begin_frame has not completed recovery, and
  * for a live stage handle whose GPU object an earlier loss discarded -- recreate the stages
  * and link again. Only a stale stage handle asserts. */

@@ -770,8 +770,9 @@ void test_state_three_materials_same_mesh(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
+    /* One bind per material transition; the backend GL cache drops the repeats. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_sampler_count());
 }
 
 void test_state_render_state_split(void) {
@@ -1010,8 +1011,8 @@ void test_state_same_tex_same_sampler_diff_params(void) {
     nt_gfx_fake_reset();
     nt_mesh_renderer_draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
 }

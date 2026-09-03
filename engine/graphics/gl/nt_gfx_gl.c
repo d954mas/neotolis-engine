@@ -74,8 +74,8 @@ typedef struct {
     GLint location;
 } nt_cached_uniform_t;
 
-/* One entry per active sampler element; the unit is fixed at link. The location is
- * kept here because a sampler past NT_MAX_CACHED_UNIFORMS has none in the table. */
+/* One entry per active sampler element; the unit is fixed at link. Samplers live only
+ * here, never in the uniform table; the location is needed once, to write the unit. */
 typedef struct {
     uint32_t name_hash;
     GLint location;
@@ -1207,23 +1207,18 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
-                const bool is_sampler = uniform_type_is_sampler(utype);
-                if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
-                    out[uniform_count].name_hash = nt_hash32_str(uname).value;
-                    out[uniform_count].location = loc;
-                }
-                if (is_sampler) {
+                if (uniform_type_is_sampler(utype)) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    /* Discard the program rather than leave the overflowing sampler reading unit 0. */
-                    if (rec->sampler_count >= NT_GFX_MAX_TEXTURE_SLOTS) {
-                        free(uname);
-                        return false;
-                    }
                     rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
                     rec->sampler_units[rec->sampler_count].location = loc;
                     rec->sampler_count++;
+                } else {
+                    if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
+                        out[uniform_count].name_hash = nt_hash32_str(uname).value;
+                        out[uniform_count].location = loc;
+                    }
+                    uniform_count++;
                 }
-                uniform_count++;
             }
         }
     }
