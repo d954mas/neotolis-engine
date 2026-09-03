@@ -538,6 +538,9 @@ bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 /* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
+/* False after a context restore that could not recreate the target (a runtime GPU
+ * failure, same class as creation returning invalid). No automatic retry: the owner
+ * destroys and recreates it, or falls back. */
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
@@ -562,7 +565,9 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- */
+/* ---- Draw state ---- Pipeline, vertex input, instance pointers and uniforms are
+ * pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass discards them.
+ * Texture, sampler and uniform-buffer binds are context state. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -594,7 +599,8 @@ void nt_gfx_set_viewport(int x, int y, int w, int h);
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once
- * at init with nt_hash32_str, or inline where the cost does not matter. */
+ * at init with nt_hash32_str, or inline where the cost does not matter. The
+ * value lands on the bound pipeline's program (asserted). */
 
 void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix);
 void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);

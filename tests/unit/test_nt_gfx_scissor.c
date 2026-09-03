@@ -6,6 +6,7 @@
 #include "unity.h"
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
@@ -64,11 +65,43 @@ static void test_viewport_survives_scissor_toggle(void) {
     TEST_ASSERT_EQUAL_INT(600, rect[3]);
 }
 
+/* The front-end mirror owns scissor enable, so a repeated value never reaches the backend. */
+static void test_scissor_enable_dedups_before_the_backend(void) {
+    nt_gfx_stub_test_reset();
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_set_scissor_enabled_count());
+    nt_gfx_set_scissor_enabled(false);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_set_scissor_enabled_count());
+}
+
+/* Restore clears the mirror, so the same value must reach the backend again --
+ * without that reset the front-end dedup would swallow it forever. */
+static void test_context_restore_resets_the_scissor_mirror(void) {
+    nt_gfx_stub_test_reset();
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_set_scissor_enabled_count());
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_set_scissor_enabled_count());
+    nt_gfx_end_frame();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_set_scissor_round_trips);
     RUN_TEST(test_set_scissor_enabled_round_trips);
     RUN_TEST(test_set_viewport_round_trips);
     RUN_TEST(test_viewport_survives_scissor_toggle);
+    RUN_TEST(test_scissor_enable_dedups_before_the_backend);
+    RUN_TEST(test_context_restore_resets_the_scissor_mirror);
     return UNITY_END();
 }

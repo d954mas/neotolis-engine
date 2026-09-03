@@ -285,8 +285,10 @@ if(NOT EMSCRIPTEN)
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
     # Real OpenGL: a rejected bind must clear the backend slot mirrors (stub cannot show it).
+    # No nt_basisu_transcoder_stub: the test TU supplies a transcoder fake whose
+    # failure lands mid-upload, which the loud-fail stub cannot reach.
     add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
-    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
 

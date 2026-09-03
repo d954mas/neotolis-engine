@@ -584,6 +584,8 @@ static void test_depth_buffer_uses_explicit_format(void) {
     nt_gfx_destroy_render_target(target);
 }
 
+/* The clear runs with the depth mask forced on and leaves it on; the pipeline
+ * that wants it off must be re-bound inside the new pass. */
 static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0); }\n";
     static const char *fragment_source = "#ifdef GL_ES\n"
@@ -624,6 +626,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
     uint32_t depth_milli = (uint32_t)((depth * 1000.0F) + 0.5F);
     TEST_ASSERT_UINT32_WITHIN(1, 750, depth_milli);
+    nt_gfx_bind_pipeline(no_depth_write_pipeline);
     GLboolean depth_write_enabled = GL_TRUE;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, depth_write_enabled);

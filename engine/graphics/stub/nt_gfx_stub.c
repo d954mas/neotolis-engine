@@ -9,6 +9,7 @@
 #define NT_GFX_STUB_HISTORY_CAPACITY 16
 static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
 static uint32_t s_stub_bind_sampler_count;
+static uint32_t s_stub_set_scissor_enabled_count;
 static uint32_t s_stub_last_pass_target;
 static uint32_t s_stub_pass_targets[NT_GFX_STUB_HISTORY_CAPACITY];
 static uint32_t s_stub_pass_target_count;
@@ -50,10 +51,12 @@ static bool s_stub_fail_next_render_target_create;
 static bool s_stub_fail_next_render_target_resize;
 static uint32_t s_stub_last_update_buffer_offset;
 static uint32_t s_stub_last_instance_offset;
+static uint32_t s_stub_last_instance_vertex_input; /* recorder: last VI handle bind_instance_buffer named */
 static nt_blend_state_t s_stub_last_pipeline_blend;
 static uint32_t s_stub_vertex_input_create_count;
 static uint32_t s_stub_bind_vertex_input_count;
-static uint32_t s_stub_bound_vertex_input; /* mirrors the GL backend's bound slot */
+static uint32_t s_stub_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
+static uint32_t s_stub_last_uniform_program;    /* recorder: last program a uniform write named */
 static bool s_stub_fail_next_vertex_input_create;
 
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
@@ -64,6 +67,7 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
 }
 
 uint32_t nt_gfx_stub_test_bind_sampler_count(void) { return s_stub_bind_sampler_count; }
+uint32_t nt_gfx_stub_test_set_scissor_enabled_count(void) { return s_stub_set_scissor_enabled_count; }
 uint32_t nt_gfx_stub_test_last_pass_target(void) { return s_stub_last_pass_target; }
 uint32_t nt_gfx_stub_test_pass_target_count(void) { return s_stub_pass_target_count; }
 uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index) { return index < s_stub_pass_target_count ? s_stub_pass_targets[index] : 0; }
@@ -113,10 +117,12 @@ void nt_gfx_stub_test_fail_next_backend_restore(void) { s_stub_fail_next_backend
 void nt_gfx_stub_test_set_context_lost(bool lost) { s_stub_context_lost = lost; }
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void) { return s_stub_last_update_buffer_offset; }
 uint32_t nt_gfx_stub_test_last_instance_offset(void) { return s_stub_last_instance_offset; }
+uint32_t nt_gfx_stub_test_last_instance_vertex_input(void) { return s_stub_last_instance_vertex_input; }
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void) { return s_stub_last_pipeline_blend; }
 uint32_t nt_gfx_stub_test_vertex_input_create_count(void) { return s_stub_vertex_input_create_count; }
 uint32_t nt_gfx_stub_test_bind_vertex_input_count(void) { return s_stub_bind_vertex_input_count; }
-uint32_t nt_gfx_stub_test_bound_vertex_input(void) { return s_stub_bound_vertex_input; }
+uint32_t nt_gfx_stub_test_last_bound_vertex_input(void) { return s_stub_last_bound_vertex_input; }
+uint32_t nt_gfx_stub_test_last_uniform_program(void) { return s_stub_last_uniform_program; }
 void nt_gfx_stub_test_fail_next_vertex_input_create(void) { s_stub_fail_next_vertex_input_create = true; }
 
 void nt_gfx_stub_test_reset(void) {
@@ -124,6 +130,7 @@ void nt_gfx_stub_test_reset(void) {
         s_stub_last_sampler[i] = 0;
     }
     s_stub_bind_sampler_count = 0;
+    s_stub_set_scissor_enabled_count = 0;
     s_stub_last_pass_target = 0;
     s_stub_pass_target_count = 0;
     s_stub_bound_texture_count = 0;
@@ -148,10 +155,12 @@ void nt_gfx_stub_test_reset(void) {
     s_stub_next_texture_backend = 0;
     s_stub_last_update_buffer_offset = 0;
     s_stub_last_instance_offset = 0;
+    s_stub_last_instance_vertex_input = 0;
     s_stub_last_pipeline_blend = (nt_blend_state_t){0};
     s_stub_vertex_input_create_count = 0;
     s_stub_bind_vertex_input_count = 0;
-    s_stub_bound_vertex_input = 0;
+    s_stub_last_bound_vertex_input = 0;
+    s_stub_last_uniform_program = 0;
     s_stub_fail_next_vertex_input_create = false;
     s_stub_context_lost = false;
     s_stub_backend_missing = false;
@@ -208,7 +217,12 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
     (void)h;
 }
 
-void nt_gfx_backend_set_scissor_enabled(bool enabled) { (void)enabled; }
+void nt_gfx_backend_set_scissor_enabled(bool enabled) {
+    (void)enabled;
+#ifdef NT_TEST_ACCESS
+    s_stub_set_scissor_enabled_count++;
+#endif
+}
 
 void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
     (void)x;
@@ -295,21 +309,13 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     return slot;
 }
 
-void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
-#ifdef NT_TEST_ACCESS
-    /* Mirror the GL backend: destroying the bound vertex input unbinds it. */
-    if (backend_handle != 0 && s_stub_bound_vertex_input == backend_handle) {
-        s_stub_bound_vertex_input = 0;
-    }
-#else
-    (void)backend_handle;
-#endif
-}
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && "bind_vertex_input: requires a live handle");
 #ifdef NT_TEST_ACCESS
     s_stub_bind_vertex_input_count++;
-    s_stub_bound_vertex_input = backend_handle;
+    s_stub_last_bound_vertex_input = backend_handle;
 #else
     (void)backend_handle;
 #endif
@@ -424,6 +430,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+    NT_ASSERT(backend_handle != 0 && "bind_texture: requires a live handle");
     (void)slot;
 #ifdef NT_TEST_ACCESS
     if (s_stub_bound_texture_count < NT_GFX_STUB_HISTORY_CAPACITY) {
@@ -501,18 +508,22 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 }
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && "bind_pipeline: requires a live handle");
 #ifdef NT_TEST_ACCESS
     s_stub_bind_pipeline_count++;
 #endif
     (void)backend_handle;
 }
 
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset) {
-    (void)backend_handle;
+void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
+    NT_ASSERT(vertex_input_backend != 0 && buffer_backend != 0 && "bind_instance_buffer: requires live handles");
+    (void)buffer_backend;
 #ifdef NT_TEST_ACCESS
     s_stub_last_instance_offset = byte_offset;
+    s_stub_last_instance_vertex_input = vertex_input_backend;
 #else
     (void)byte_offset;
+    (void)vertex_input_backend;
 #endif
 }
 
@@ -525,6 +536,7 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 }
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+    NT_ASSERT(backend_handle != 0 && "bind_uniform_buffer: requires a live handle");
     (void)backend_handle;
     (void)slot;
 }
@@ -535,13 +547,19 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
     (void)slot;
 }
 
-void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix) {
+void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
+#ifdef NT_TEST_ACCESS
+    s_stub_last_uniform_program = program_backend;
+#else
+    (void)program_backend;
+#endif
     (void)name_hash;
     (void)matrix;
 }
 
-void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec) {
+void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
 #ifdef NT_TEST_ACCESS
+    s_stub_last_uniform_program = program_backend;
     if (s_stub_uniform_vec4_count < NT_GFX_STUB_UNIFORM_NAMES) {
         s_stub_uniform_vec4_hashes[s_stub_uniform_vec4_count] = name_hash;
         for (uint32_t i = 0; i < 4; i++) {
@@ -549,23 +567,33 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec) {
         }
     }
     s_stub_uniform_vec4_count++;
+#else
+    (void)program_backend;
 #endif
     (void)name_hash;
     (void)vec;
 }
 
-void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val) {
+void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
+#ifdef NT_TEST_ACCESS
+    s_stub_last_uniform_program = program_backend;
+#else
+    (void)program_backend;
+#endif
     (void)name_hash;
     (void)val;
 }
 
-void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val) {
+void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
 #ifdef NT_TEST_ACCESS
+    s_stub_last_uniform_program = program_backend;
     if (s_stub_uniform_int_count < NT_GFX_STUB_UNIFORM_NAMES) {
         s_stub_uniform_int_hashes[s_stub_uniform_int_count] = name_hash;
         s_stub_uniform_int_values[s_stub_uniform_int_count] = val;
     }
     s_stub_uniform_int_count++;
+#else
+    (void)program_backend;
 #endif
     (void)name_hash;
     (void)val;

@@ -253,59 +253,79 @@ void test_deactivate_mesh_cascades_to_vi(void) {
 void test_bind_vi_reaches_backend(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_bound_vertex_input());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
-void test_bind_invalid_vi_unbinds(void) {
+void test_bind_invalid_vi_clears_mirror(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_destroy_vertex_input(vi);
-    nt_gfx_bind_vertex_input(vi); /* stale: clears the binding instead of trapping */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 void test_bind_pipeline_preserves_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_pipeline_t pip = make_test_pipeline();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
-    uint32_t bound = nt_gfx_stub_test_bound_vertex_input();
+    uint32_t bound = nt_gfx_test_bound_vertex_input();
     TEST_ASSERT_NOT_EQUAL_UINT32(0, bound);
     nt_gfx_bind_pipeline(pip);
     /* Orthogonal state: a pipeline change must not disturb the geometry bind. */
-    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_stub_test_bound_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
     nt_gfx_bind_instance_buffer(stream, 16); /* still points into the bound vertex input */
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 void test_destroy_while_bound_clears_mirrors(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_destroy_vertex_input(vi);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     /* With the vertex-input mirror cleared and no pipeline, the instance
      * bind has nothing to point with -- it must trap, not use stale state. */
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
-void test_begin_frame_clears_bound_vi(void) {
+/* Bound state is pass-scoped: the next pass starts with nothing bound. */
+void test_begin_pass_clears_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
     nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 0); /* bound this frame: passes */
-    nt_gfx_end_frame();
+    nt_gfx_bind_instance_buffer(stream, 0); /* bound this pass: passes */
+    nt_gfx_end_pass();
 
-    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0)); /* mirror cleared, no pipeline */
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
 
@@ -315,17 +335,26 @@ void test_bind_instance_buffer_uses_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 16); /* no pipeline needed on this path */
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_bound_vertex_input(), nt_gfx_stub_test_last_instance_vertex_input());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 void test_bind_instance_buffer_asserts_without_instance_layout(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 /* --- Draw invariants --- */
@@ -420,10 +449,14 @@ void test_bind_instance_buffer_rejects_unaligned_offset(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 4);
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 1));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 }
 
 /* Every draw variant requires a bound vertex input. */
@@ -486,12 +519,14 @@ void test_bind_instance_buffer_asserts_on_stale_buffer(void) {
     nt_gfx_begin_frame(); /* recovery completes */
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_gfx_bind_vertex_input(vi);
     /* The stale handle is still pool-valid; only its backend is gone. */
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stale, 0));
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
 
@@ -507,8 +542,10 @@ void test_vi_slots_freed_by_context_loss(void) {
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi); /* stale: ordinary invalid path, no trap */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    nt_gfx_end_pass();
     nt_gfx_destroy_vertex_input(vi); /* stale: tolerated no-op */
 
     /* Buffers survive as husks; recreate before baking new vertex inputs. */
@@ -541,10 +578,10 @@ int main(void) {
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_bind_vi_reaches_backend);
-    RUN_TEST(test_bind_invalid_vi_unbinds);
+    RUN_TEST(test_bind_invalid_vi_clears_mirror);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);
     RUN_TEST(test_destroy_while_bound_clears_mirrors);
-    RUN_TEST(test_begin_frame_clears_bound_vi);
+    RUN_TEST(test_begin_pass_clears_bound_vi);
     RUN_TEST(test_bind_instance_buffer_uses_bound_vi);
     RUN_TEST(test_bind_instance_buffer_asserts_without_instance_layout);
     RUN_TEST(test_draw_indexed_asserts_on_non_indexed_vi);

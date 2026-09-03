@@ -15,6 +15,10 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
+/* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an unbind;
+ * every other bind requires a live handle -- the front-end owns husk handling.
+ * The backend keeps GL-mirror state only; calls name the program or vertex input. */
+
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
@@ -31,16 +35,17 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
-/* `slot` is the frontend pool slot: the pool owns allocation, the backend
- * table mirrors it 1:1 (create_* returns the slot, or 0 on failure). */
+/* `slot` is the frontend pool slot: the pool owns allocation, the backend table
+ * mirrors it 1:1 and the front-end addresses records by that slot -- returns
+ * exactly `slot`, or 0 on failure. */
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
 /* Bakes the desc's layouts and the given buffer backends into an owned VAO.
- * Restores the previously bound VAO before returning. Returns 0 on failure. */
+ * Restores the previously bound VAO before returning. Same slot contract as
+ * create_pipeline: returns `slot`, or 0 on failure. */
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-/* 0 unbinds (VAO 0) and clears the backend's bound-vertex-input record. */
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
@@ -64,14 +69,16 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
-/* Re-points the bound vertex input's instance attribs at byte_offset. */
-void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle, uint32_t byte_offset);
+/* Re-points the named vertex input's instance attribs at byte_offset. */
+void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset);
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* Scissor and viewport (see nt_gfx.h for convention).
  * Backend implementations:
  *   - gl/nt_gfx_gl.c: glScissor + glEnable/glDisable(GL_SCISSOR_TEST) + glViewport
  *   - stub/nt_gfx_stub.c: no-op (state cached in shared nt_gfx.c for test probes)
+ * One owner per state: the scissor-enable dedup is front-end (nt_gfx.c mirrors it),
+ * the viewport and clear-value dedup is the backend GL cache.
  */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h);
 void nt_gfx_backend_set_scissor_enabled(bool enabled);
@@ -85,10 +92,12 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
-void nt_gfx_backend_set_uniform_mat4(uint32_t name_hash, const float *matrix);
-void nt_gfx_backend_set_uniform_vec4(uint32_t name_hash, const float *vec);
-void nt_gfx_backend_set_uniform_float(uint32_t name_hash, float val);
-void nt_gfx_backend_set_uniform_int(uint32_t name_hash, int val);
+/* Uniform locations and values are program state, so the write names its
+ * program; it must be the one currently bound. */
+void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix);
+void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec);
+void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val);
+void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val);
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type);
@@ -124,6 +133,7 @@ void nt_gfx_backend_drop_timer_segments(void);
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
+uint32_t nt_gfx_stub_test_set_scissor_enabled_count(void);
 uint32_t nt_gfx_stub_test_last_pass_target(void);
 uint32_t nt_gfx_stub_test_pass_target_count(void);
 uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index);
@@ -162,10 +172,12 @@ void nt_gfx_stub_test_fail_next_render_target_resize(void);
 void nt_gfx_stub_test_set_context_lost(bool lost);
 uint32_t nt_gfx_stub_test_last_update_buffer_offset(void);
 uint32_t nt_gfx_stub_test_last_instance_offset(void);
+uint32_t nt_gfx_stub_test_last_instance_vertex_input(void);
 nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void);
 uint32_t nt_gfx_stub_test_vertex_input_create_count(void);
 uint32_t nt_gfx_stub_test_bind_vertex_input_count(void);
-uint32_t nt_gfx_stub_test_bound_vertex_input(void);
+uint32_t nt_gfx_stub_test_last_bound_vertex_input(void);
+uint32_t nt_gfx_stub_test_last_uniform_program(void);
 void nt_gfx_stub_test_fail_next_vertex_input_create(void);
 void nt_gfx_stub_test_reset(void);
 #endif
@@ -179,6 +191,11 @@ void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_vao_binds(void);
+/* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
+ * depending on the driver recycling the deleted GL name. */
+uint32_t nt_gfx_gl_test_cached_vao(void);
+uint32_t nt_gfx_gl_test_cached_program(void);
+uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot);
 #endif
 
 #ifdef NT_TEST_ACCESS
@@ -189,6 +206,9 @@ uint32_t nt_gfx_gl_test_vao_binds(void);
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
+/* Pass-scoped bound state, read from its owner: the front-end. */
+uint32_t nt_gfx_test_bound_pipeline(void);
+uint32_t nt_gfx_test_bound_vertex_input(void);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

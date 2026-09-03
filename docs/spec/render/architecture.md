@@ -62,7 +62,8 @@ draws; per mesh switch that is a single `glBindVertexArray` instead of
 buffer re-binds plus per-attribute `glVertexAttribPointer` rewrites. The
 object's *static* half — vertex attributes and the index binding — is
 immutable after creation; its *instance* attribute pointers are re-specified
-into the bound object by each `nt_gfx_bind_instance_buffer` (WebGL2 has no
+by each `nt_gfx_bind_instance_buffer` into the vertex input the front-end
+names explicitly to the backend (WebGL2 has no
 baseInstance, so per-draw instance re-pointing stays). An empty layout with
 no buffers is the attribute-less `gl_VertexID` path; every draw asserts a
 bound vertex input.
@@ -112,19 +113,25 @@ loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
-explicitly.
+explicitly. Binding a husk texture reports once and leaves the unit as it was;
+binding a husk buffer, or writing into any husk, asserts.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
-values, and global UBO block bindings. A pipeline is fixed-function render
+values, and global UBO block bindings. A uniform write requires a bound
+pipeline and addresses that pipeline's program at the backend boundary; a
+write with nothing bound asserts. A pipeline is fixed-function render
 state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
-end of that call; across calls the GL backend deduplicates program, VAO and
-texture binds, while sampler binds and uniform writes are always issued. A uniform a material
+end of that call; across calls the GL backend deduplicates program, VAO,
+pipeline state, texture, viewport and clear-value binds (scissor-enable is deduplicated by the
+front-end mirror), while sampler binds and uniform writes are always issued. The
+backend GL cache persists across passes and frames; ground state is issued once
+at backend init and at context restore. A uniform a material
 does not declare retains the value last written on that program; this applies
 to sampler units and material params. Planned fixes are fixed sampler-unit
 assignments per program (#359) and per-material param UBOs bound at material
@@ -209,7 +216,12 @@ bind or unbind render-target state outside the pass descriptor.
 
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
-state; pipeline write masks affect draws, not the next pass initialization.
+state; pipeline write masks affect draws, not the next pass initialization. Bound
+pipeline and vertex input are pass-scoped: `begin_pass` discards them; pipeline
+and vertex-input binds, instance-buffer re-pointing, uniform writes and draws
+outside a pass assert. Texture, sampler and uniform-buffer binds are context
+state — they are not pass-scoped and do not assert. The clear forces the depth
+mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
 `nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
