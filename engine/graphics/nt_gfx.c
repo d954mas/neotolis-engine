@@ -146,9 +146,8 @@ static struct {
     bool context_restore_retry;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
-    uint32_t bound_texture_ids[NT_GFX_MAX_TEXTURE_SLOTS];
-    uint8_t bound_index_type; /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
-    bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST */
+    uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
+    bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -586,11 +585,10 @@ void nt_gfx_begin_frame(void) {
         s_gfx.bound_pipeline = 0;
         s_gfx.bound_vertex_input = 0;
         s_gfx.bound_index_type = NT_INDEX_NONE;
-        memset(s_gfx.bound_texture_ids, 0, sizeof(s_gfx.bound_texture_ids));
         /* Sampler cache: zero only the GL backend ids — keys, descs
          * and sampler_count stay so material-stored sampler.id values
          * remain valid slot references. Backend is lazy-recreated on
-         * the next nt_gfx_make_sampler hit or on bind_sampler. */
+         * the next nt_gfx_make_sampler hit or on bind_texture. */
         for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
             s_gfx.sampler_cache[i].backend = 0;
         }
@@ -1497,7 +1495,59 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
     nt_gfx_backend_bind_vertex_input(slot);
 }
 
-void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
+static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
+    uint16_t max_dim = meta->width > meta->height ? meta->width : meta->height;
+    uint8_t required_levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1;
+        required_levels++;
+    }
+    return meta->mip_count >= required_levels;
+}
+
+static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_desc_t *desc) {
+    const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
+    uint8_t format = meta->format;
+    bool compares = desc->compare_func != NT_COMPARE_NONE;
+    bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    /* Comparison against a non-depth texture makes every lookup undefined in
+     * GL, whichever sampler type the shader declares. */
+    if (compares && !depth) {
+        return false;
+    }
+    /* Filtering raw depth averages texels into a depth that exists in none of
+     * them; with comparison on, LINEAR blends the 0/1 comparison results
+     * instead. Integer storage has no such escape and stays NEAREST. */
+    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || (depth && !compares);
+    if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
+        return false;
+    }
+    bool mipmap_filter = desc->min_filter > NT_FILTER_LINEAR;
+    return !mipmap_filter || texture_has_complete_mip_chain(meta);
+}
+
+/* Effective sampler for the texture being bound: an explicit override, else the
+ * texture's own default. False rejects the pair; a zero backend is GL's "use the
+ * texture's filter state" and only follows a failed recreate. */
+static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler, uint32_t *out_backend) {
+    nt_sampler_t effective = sampler.id != 0 ? sampler : s_gfx.texture_metas[texture_slot].default_sampler;
+    NT_ASSERT(effective.id != 0 && "bind_texture: live texture without a default sampler");
+    NT_ASSERT(effective.id <= s_gfx.sampler_count && "bind_texture: invalid sampler handle");
+    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[effective.id - 1];
+    bool compatible = texture_sampler_compatible(texture_slot, &e->desc);
+    NT_ASSERT(compatible && "bind_texture: sampler is incompatible with texture storage");
+    if (!compatible) {
+        return false;
+    }
+    if (e->backend == 0) {
+        /* Lazy recreate after context-loss recovery — desc was preserved. */
+        e->backend = nt_gfx_backend_create_sampler(&e->desc);
+    }
+    *out_backend = e->backend;
+    return true;
+}
+
+void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -1512,14 +1562,18 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     uint32_t idx = nt_pool_slot_index(tex.id);
     /* Husk: loss zeroed the backend -- either an RT attachment whose restore failed
      * (GPU failure) or a primary texture the owner never recreated. Bind cannot tell
-     * them apart, so it reports. The mirror keeps what GL still holds on the unit. */
+     * them apart, so it reports. Rejected before the default sampler is read: loss
+     * zeroes that too. */
     if (s_gfx.texture_backends[idx] == 0) {
         NT_LOG_ERROR_ONCE("bind_texture: texture has no GPU resource (restore failed)");
         return;
     }
+    uint32_t sampler_backend = 0;
+    if (!resolve_sampler_backend(idx, sampler, &sampler_backend)) {
+        return;
+    }
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
-    s_gfx.bound_texture_ids[slot] = tex.id;
-    nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
+    nt_gfx_backend_bind_sampler(sampler_backend, slot);
 }
 
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
@@ -1636,72 +1690,6 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     s_gfx.sampler_cache[slot].backend = backend;
     s_gfx.sampler_cache[slot].desc = normalized;
     return (nt_sampler_t){.id = slot + 1};
-}
-
-static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
-    uint16_t max_dim = meta->width > meta->height ? meta->width : meta->height;
-    uint8_t required_levels = 1;
-    while (max_dim > 1) {
-        max_dim >>= 1;
-        required_levels++;
-    }
-    return meta->mip_count >= required_levels;
-}
-
-static bool bound_texture_sampler_compatible(uint32_t slot, const nt_sampler_desc_t *desc) {
-    bool compares = desc->compare_func != NT_COMPARE_NONE;
-    uint32_t texture_id = s_gfx.bound_texture_ids[slot];
-    if (!nt_pool_valid(&s_gfx.texture_pool, texture_id)) {
-        /* Comparison needs depth storage to check against, and nt_gfx_bind_texture
-         * reinstalls the texture's own sampler — so a comparison sampler on an
-         * empty slot can only be a bind-order mistake. */
-        return !compares;
-    }
-    uint32_t texture_slot = nt_pool_slot_index(texture_id);
-    const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
-    uint8_t format = meta->format;
-    bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
-    /* Comparison against a non-depth texture makes every lookup undefined in
-     * GL, whichever sampler type the shader declares. */
-    if (compares && !depth) {
-        return false;
-    }
-    /* Filtering raw depth averages texels into a depth that exists in none of
-     * them; with comparison on, LINEAR blends the 0/1 comparison results
-     * instead. Integer storage has no such escape and stays NEAREST. */
-    bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || (depth && !compares);
-    if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
-        return false;
-    }
-    bool mipmap_filter = desc->min_filter > NT_FILTER_LINEAR;
-    return !mipmap_filter || texture_has_complete_mip_chain(meta);
-}
-
-void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
-    if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
-        NT_LOG_ERROR("bind_sampler: slot exceeds max");
-        return;
-    }
-    if (s.id == 0) {
-        /* Unbind: revert texture unit to texture's own filter/wrap. */
-        nt_gfx_backend_bind_sampler(0, slot);
-        return;
-    }
-    NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
-    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[s.id - 1];
-    bool sampler_compatible = bound_texture_sampler_compatible(slot, &e->desc);
-    NT_ASSERT(sampler_compatible && "bind_sampler: sampler is incompatible with texture storage");
-    if (!sampler_compatible) {
-        return;
-    }
-    if (e->backend == 0) {
-        /* Lazy recreate after context-loss recovery — desc was preserved. */
-        e->backend = nt_gfx_backend_create_sampler(&e->desc);
-    }
-    nt_gfx_backend_bind_sampler(e->backend, slot);
 }
 
 /* ---- Scissor and viewport ----

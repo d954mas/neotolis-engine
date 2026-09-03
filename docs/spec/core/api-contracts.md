@@ -220,8 +220,9 @@ false without mutating the material.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
-A separately bound sampler must obey the same format restrictions; it cannot
-replace the explicit texture state with an incompatible filter. Depth comparison
+A sampler override passed to `nt_gfx_bind_texture` must obey the same format
+restrictions; it cannot replace the explicit texture state with an
+incompatible filter. Depth comparison
 is the one documented exception, and it is sampler state only: `DEPTH*` accepts
 `LINEAR` from a sampler whose `compare_func` is not `NONE`, because the filtering
 then applies to comparison results rather than to raw depth. The texture keeps

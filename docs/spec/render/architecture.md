@@ -128,8 +128,8 @@ share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
-pipeline state, texture, viewport and clear-value binds (scissor-enable is deduplicated by the
-front-end mirror), while sampler binds and uniform writes are always issued. The
+pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
+front-end mirror), while uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. A uniform a material
 does not declare retains the value last written on that program; this applies
@@ -165,10 +165,11 @@ program state and the new pipeline may sit on another program — one flush can
 hold one material id on two programs when a game replaces the material's program
 between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
-Sampler tracking is per slot because
-`nt_gfx_bind_texture` re-installs the texture's asset default, so a material
-without an override has to restore that default after one that overrode it;
-fixed sampler-unit assignments (#359) will collapse this. The text renderer
+Texture and sampler travel together: `nt_gfx_bind_texture` takes the
+sampler the texture is read through, so a material without an override restores
+the texture's asset default in the same bind, and the per-slot key is the
+resolved texture plus the effective sampler. Fixed sampler-unit assignments
+(#359) will decouple the slot index from the texture unit. The text renderer
 draws once per flush and other renderers draw in between, so it uses the
 stateless half of the helper and replays unconditionally.
 
@@ -267,10 +268,11 @@ description is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one
 still cannot filter depth.
 
-Sampler binds follow the texture bind for a unit, because
-`nt_gfx_bind_texture` installs the texture's own default sampler and discards
-whatever the unit held. A comparison sampler bound to a unit with no live
-texture is therefore rejected rather than silently replaced.
+A texture and the sampler it is read through are bound in one call, so the
+sampler is validated against that texture and not against whatever the unit held;
+`NT_SAMPLER_INVALID` selects the texture's own default. A comparison sampler is
+therefore rejected against a non-depth texture in the same call, and a unit never
+holds a texture without its sampler.
 
 With comparison on, `LINEAR` filters the 0/1 comparison results instead of the
 raw depths — the ordering a shadow edge needs, since averaging depths first

@@ -115,7 +115,7 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), 0);
+    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), NT_SAMPLER_INVALID, 0);
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
@@ -472,8 +472,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(shadow_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, 0);
-    nt_gfx_bind_sampler(comparison, 0);
+    nt_gfx_bind_texture(depth_tex, comparison, 0);
     nt_gfx_set_uniform_int(nt_hash32_str("u_shadow"), 0);
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
@@ -499,8 +498,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(raw_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, 0);
-    nt_gfx_bind_sampler(raw, 0);
+    nt_gfx_bind_texture(depth_tex, raw, 0);
     nt_gfx_set_uniform_int(nt_hash32_str("u_depth"), 0);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
@@ -532,7 +530,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_color(target), 0);
+    nt_gfx_bind_texture(nt_gfx_render_target_color(target), NT_SAMPLER_INVALID, 0);
     GLint internal_format = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);

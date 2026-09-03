@@ -575,14 +575,13 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * either may change without re-binding the other. Every draw requires a bound
  * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
-/* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
- * bind_texture installs the texture's own default sampler and discards this one.
- * Pass NT_SAMPLER_INVALID to fall back to texture state. RG16UI requires NEAREST
- * min/mag, and so does DEPTH* unless compare_func is set; a set compare_func
- * requires a bound DEPTH* texture. Mipmap min filters require a complete chain;
- * a 1x1 base level is already complete. */
-void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
+/* Binds the texture on unit `slot` together with the sampler it is read through;
+ * NT_SAMPLER_INVALID selects the texture's own asset-baked default. A unit never
+ * holds a texture without its sampler, so there is no separate sampler bind.
+ * RG16UI requires NEAREST min/mag, and so does DEPTH* unless compare_func is set;
+ * a set compare_func requires a DEPTH* texture. Mipmap min filters require a
+ * complete chain; a 1x1 base level is already complete. */
+void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
 
 /* ---- Scissor and viewport ----
  *

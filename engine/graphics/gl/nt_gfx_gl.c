@@ -207,6 +207,9 @@ static struct {
     GLenum active_texture_unit;
     /* GL name per sampling slot; uploads use the scratch unit and never touch these. */
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS];
+    /* GL auto-unbinds a deleted sampler, and samplers die only at gfx shutdown,
+     * so no destroy has to invalidate these. */
+    GLuint bound_samplers[NT_GFX_MAX_TEXTURE_SLOTS];
     int viewport[4];
     float clear_color[4];
     float clear_depth;
@@ -232,16 +235,19 @@ static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash)
 static uint32_t s_test_static_attrib_pointer_calls;   /* divisor-0 glVertexAttribPointer */
 static uint32_t s_test_instance_attrib_pointer_calls; /* divisor-1 glVertexAttribPointer */
 static uint32_t s_test_vao_binds;
+static uint32_t s_test_sampler_binds;
 
 void nt_gfx_gl_test_reset_counters(void) {
     s_test_static_attrib_pointer_calls = 0;
     s_test_instance_attrib_pointer_calls = 0;
     s_test_vao_binds = 0;
+    s_test_sampler_binds = 0;
 }
 
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void) { return s_test_static_attrib_pointer_calls; }
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void) { return s_test_instance_attrib_pointer_calls; }
 uint32_t nt_gfx_gl_test_vao_binds(void) { return s_test_vao_binds; }
+uint32_t nt_gfx_gl_test_sampler_binds(void) { return s_test_sampler_binds; }
 
 uint32_t nt_gfx_gl_test_cached_vao(void) { return s_gl_cache.vao; }
 uint32_t nt_gfx_gl_test_cached_program(void) { return s_gl_cache.program; }
@@ -249,6 +255,11 @@ uint32_t nt_gfx_gl_test_cached_program(void) { return s_gl_cache.program; }
 uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "cached_texture: slot out of range");
     return s_gl_cache.bound_textures[slot];
+}
+
+uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot) {
+    NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "cached_sampler: slot out of range");
+    return s_gl_cache.bound_samplers[slot];
 }
 #endif
 // #endregion
@@ -297,6 +308,9 @@ static void nt_gfx_gl_cache_ground_state(void) {
     glPolygonOffset(0.0F, 0.0F);
     glDisable(GL_SCISSOR_TEST);
     glActiveTexture(GL_TEXTURE0);
+    for (uint32_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
+        glBindSampler(unit, 0);
+    }
     /* A zero-size viewport is legal GL and never equals a real pass, so the first
      * pass after grounding always re-issues. */
     glViewport(0, 0, 0, 0);
@@ -323,6 +337,7 @@ static void nt_gfx_gl_cache_ground_state(void) {
     s_gl_cache.polygon_offset_units = 0.0F;
     s_gl_cache.active_texture_unit = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
+    memset(s_gl_cache.bound_samplers, 0, sizeof(s_gl_cache.bound_samplers));
     memset(s_gl_cache.viewport, 0, sizeof(s_gl_cache.viewport));
     memset(s_gl_cache.clear_color, 0, sizeof(s_gl_cache.clear_color));
     s_gl_cache.clear_depth = 1.0F;
@@ -2031,8 +2046,16 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
-    /* backend_handle == 0 unbinds (revert to texture's own filter state) */
-    glBindSampler(slot, (GLuint)backend_handle);
+    NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_sampler: slot out of range");
+    GLuint sampler = (GLuint)backend_handle;
+    if (s_gl_cache.bound_samplers[slot] == sampler) {
+        return;
+    }
+#ifdef NT_TEST_ACCESS
+    s_test_sampler_binds++;
+#endif
+    glBindSampler(slot, sampler);
+    s_gl_cache.bound_samplers[slot] = sampler;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

@@ -907,7 +907,7 @@ void test_gfx_bind_texture_valid(void) {
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_bind_texture(tex, 0);
+    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0);
     nt_gfx_destroy_texture(tex);
 }
 
@@ -915,7 +915,7 @@ void test_gfx_bind_texture_valid(void) {
 
 void test_gfx_bind_texture_invalid(void) {
     nt_texture_t tex = {.id = 0};
-    nt_gfx_bind_texture(tex, 0); /* must not crash */
+    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0); /* must not crash */
 }
 
 /* ---- Texture: destroy and reuse slot ---- */
@@ -1888,31 +1888,22 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
-    nt_gfx_bind_texture(tex, 0); /* logs, no trap */
+    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0); /* logs, no trap */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
     /* The sampler bind rides on the texture bind: skipping one skips both. */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bind_sampler_count());
     nt_gfx_end_frame();
 }
 
-/* A rejected bind leaves the previous texture on the unit, so the mirror keeps
- * it: the next sampler is validated against what GL will actually sample. */
-void test_gfx_bind_texture_on_husk_keeps_previous_mirror(void) {
-    nt_texture_t husk = nt_gfx_make_texture(&(nt_texture_desc_t){
+/* The sampler is validated against the texture of the same call, so an override
+ * that cannot sample that storage is rejected whatever the unit held before. */
+void test_gfx_bind_texture_rejects_sampler_incompatible_with_its_texture(void) {
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .data = s_test_pixels_4x4,
         .format = NT_TEXTURE_FORMAT_RGBA8,
     });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, husk.id);
-
-    nt_gfx_stub_test_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
-
-    /* Created after the restore, so it is live while the husk is not. */
     nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
@@ -1920,12 +1911,14 @@ void test_gfx_bind_texture_on_husk_keeps_previous_mirror(void) {
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
     });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
-    nt_gfx_bind_texture(depth, 0);
-    nt_gfx_bind_texture(husk, 0); /* rejected: unit 0 still samples the depth texture */
 
     nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
-    EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0)); /* LINEAR on raw depth is incomplete sampling */
+    nt_gfx_begin_frame();
+    nt_gfx_bind_texture(color, linear, 0);
+    /* LINEAR on raw depth is incomplete sampling, even on the unit colour just left. */
+    EXPECT_ASSERT(nt_gfx_bind_texture(depth, linear, 0));
     nt_gfx_end_frame();
 }
 
@@ -2367,7 +2360,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bind_texture_on_husk_logs_and_skips_backend);
-    RUN_TEST(test_gfx_bind_texture_on_husk_keeps_previous_mirror);
+    RUN_TEST(test_gfx_bind_texture_rejects_sampler_incompatible_with_its_texture);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);

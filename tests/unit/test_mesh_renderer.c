@@ -806,9 +806,38 @@ void test_state_texture_sampler_transitions(void) {
     nt_gfx_stub_test_reset();
     nt_mesh_renderer_draw_list(items, 3);
 
-    /* One texture bind; sampler binds: A default+override, B default, A override. */
+    /* Texture and sampler travel together, so each of A / B / A is one bind of
+     * each: override, default, override. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(override), nt_gfx_stub_test_last_sampler(0));
+}
+
+/* An override costs one sampler bind per texture change, never a default bind
+ * followed by the override, and repeats on the slot cost nothing. */
+void test_state_override_binds_one_sampler_per_texture_change(void) {
+    nt_mesh_t meshes[3] = {create_test_mesh(), create_test_mesh(), create_test_mesh()};
+    nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+    });
+    TEST_ASSERT_TRUE(override.id != 0);
+
+    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), override);
+    nt_material_t mats[3] = {mat, mat, mat};
+    nt_entity_t entities[3] = {create_test_entity(meshes[0], mat), create_test_entity(meshes[1], mat), create_test_entity(meshes[2], mat)};
+
+    nt_render_item_t items[3];
+    fill_items(items, entities, mats, meshes, 3);
+
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(items, 3);
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(override), nt_gfx_stub_test_last_sampler(0));
 }
 
@@ -1507,6 +1536,7 @@ int main(void) {
     RUN_TEST(test_state_runtime_set_param_between_calls);
     RUN_TEST(test_state_program_replaced_between_calls);
     RUN_TEST(test_state_texture_sampler_transitions);
+    RUN_TEST(test_state_override_binds_one_sampler_per_texture_change);
     RUN_TEST(test_state_distinct_textures_a_b_a);
     RUN_TEST(test_state_skip_mid_list_resolves_next_run);
     RUN_TEST(test_state_pipeline_failure_mid_list_rebinds_next_run);

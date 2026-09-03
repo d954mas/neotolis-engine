@@ -124,22 +124,17 @@ static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const
             continue;
         }
         const nt_texture_t tex = {.id = v->resolved_tex[t]};
+        /* Resolved here so the dedup key is the sampler GL ends up with, not "no override". */
         uint32_t want = v->resolved_sampler[t].id;
-        if (v->resolved_tex[t] != b->tex[t]) {
-            const uint32_t def = nt_gfx_get_texture_default_sampler(tex).id;
-            nt_gfx_bind_texture(tex, t);
-            b->tex[t] = v->resolved_tex[t];
-            b->sampler[t] = def; /* bind_texture also installed the asset-baked default */
-            if (want == 0) {
-                want = def;
-            }
-        } else if (want == 0) {
+        if (want == 0) {
             want = nt_gfx_get_texture_default_sampler(tex).id;
         }
-        if (want != b->sampler[t]) {
-            nt_gfx_bind_sampler((nt_sampler_t){.id = want}, t);
-            b->sampler[t] = want;
+        if (v->resolved_tex[t] == b->tex[t] && want == b->sampler[t]) {
+            continue;
         }
+        nt_gfx_bind_texture(tex, (nt_sampler_t){.id = want}, t);
+        b->tex[t] = v->resolved_tex[t];
+        b->sampler[t] = want;
     }
 }
 

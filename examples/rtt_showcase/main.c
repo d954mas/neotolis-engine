@@ -488,7 +488,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
-    nt_gfx_bind_texture(texture, 0);
+    nt_gfx_bind_texture(texture, NT_SAMPLER_INVALID, 0);
     nt_gfx_set_uniform_int(nt_hash32_str("u_texture"), 0);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);

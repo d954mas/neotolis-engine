@@ -355,11 +355,9 @@ static void test_depth_texture_rejects_linear_sampler_override(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
 
-    nt_gfx_bind_texture(depth, 0);
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_texture(depth, linear, 0));
 
-    nt_gfx_bind_texture(color, 0);
-    nt_gfx_bind_sampler(linear, 0);
+    nt_gfx_bind_texture(color, linear, 0);
 }
 
 static void test_integer_texture_rejects_linear_sampler_override(void) {
@@ -379,8 +377,7 @@ static void test_integer_texture_rejects_linear_sampler_override(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
 
-    nt_gfx_bind_texture(integer, 0);
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_texture(integer, linear, 0));
 }
 
 static nt_sampler_t make_comparison_sampler(void) {
@@ -399,8 +396,7 @@ static void test_depth_texture_accepts_linear_comparison_sampler(void) {
     nt_sampler_t comparison = make_comparison_sampler();
     TEST_ASSERT_NOT_EQUAL_UINT32(0, comparison.id);
 
-    nt_gfx_bind_texture(nt_gfx_render_target_depth(rt), 0);
-    nt_gfx_bind_sampler(comparison, 0);
+    nt_gfx_bind_texture(nt_gfx_render_target_depth(rt), comparison, 0);
 
     nt_gfx_destroy_render_target(rt);
 }
@@ -412,8 +408,7 @@ static void test_color_texture_rejects_comparison_sampler(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t comparison = make_comparison_sampler();
 
-    nt_gfx_bind_texture(nt_gfx_render_target_color(rt), 0);
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(comparison, 0));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_texture(nt_gfx_render_target_color(rt), comparison, 0));
 
     nt_gfx_destroy_render_target(rt);
 }
@@ -438,8 +433,7 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
         .compare_func = NT_COMPARE_LEQUAL,
     });
 
-    nt_gfx_bind_texture(integer, 0);
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(comparison, 0));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_texture(integer, comparison, 0));
 
     nt_gfx_destroy_texture(integer);
 }
@@ -504,8 +498,7 @@ static void test_render_target_color_rejects_mipmap_sampler_override(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
-    nt_gfx_bind_texture(nt_gfx_render_target_color(rt), 0);
-    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_sampler(mipmap_sampler, 0));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_texture(nt_gfx_render_target_color(rt), mipmap_sampler, 0));
 }
 
 static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
@@ -522,8 +515,7 @@ static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
     });
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
-    nt_gfx_bind_texture(texture, 0);
-    nt_gfx_bind_sampler(mipmap_sampler, 0);
+    nt_gfx_bind_texture(texture, mipmap_sampler, 0);
 }
 
 static void test_invalid_render_target_lifecycle_arguments_assert(void) {

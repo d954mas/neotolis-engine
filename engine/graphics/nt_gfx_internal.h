@@ -64,8 +64,9 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
-/* slot is the texture unit (0..MAX). backend_handle == 0 unbinds the sampler
- * and reverts to the texture's own filter state. */
+/* slot is the texture unit (0..MAX). Always paired with bind_texture on that
+ * unit; backend_handle == 0 (revert to the texture's own filter state) is left
+ * for backend ground state, the front-end always resolves a real sampler. */
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
@@ -191,11 +192,14 @@ void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_vao_binds(void);
+/* glBindSampler calls that reached GL; a deduplicated bind does not count. */
+uint32_t nt_gfx_gl_test_sampler_binds(void);
 /* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
  * depending on the driver recycling the deleted GL name. */
 uint32_t nt_gfx_gl_test_cached_vao(void);
 uint32_t nt_gfx_gl_test_cached_program(void);
 uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot);
+uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot);
 #endif
 
 #ifdef NT_TEST_ACCESS

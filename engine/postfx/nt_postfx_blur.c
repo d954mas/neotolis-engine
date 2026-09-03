@@ -400,7 +400,7 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
-    nt_gfx_bind_texture(source, 0);
+    nt_gfx_bind_texture(source, NT_SAMPLER_INVALID, 0);
     nt_gfx_set_uniform_int(s_u_source, 0);
     nt_gfx_set_uniform_vec4(s_u_direction, direction);
     upload_kernel(radius, packed);

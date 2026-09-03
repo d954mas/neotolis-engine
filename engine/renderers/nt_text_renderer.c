@@ -763,8 +763,8 @@ void nt_text_renderer_flush(void) {
 
     /* Bind font textures */
     if (s_text.font.id != 0) {
-        nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), 0);
-        nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), 1);
+        nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_INVALID, 0);
+        nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_INVALID, 1);
         nt_gfx_set_uniform_int(s_u_curve_texture, 0);
         nt_gfx_set_uniform_int(s_u_band_texture, 1);
         nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
