@@ -118,27 +118,9 @@ static nt_mesh_t create_test_mesh_nonindexed(void) {
 
 /* ---- Helper: link a real GFX program, then create a material on it ---- */
 
-static nt_program_t create_test_program(void) {
-    nt_gfx_fake_set_samplers(NULL, 0);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
-        .type = NT_SHADER_VERTEX,
-        .source = "void main(){}",
-        .label = "test_vs",
-    });
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
-        .type = NT_SHADER_FRAGMENT,
-        .source = "void main(){}",
-        .label = "test_fs",
-    });
-    return nt_gfx_make_program(vs, fs);
-}
+static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(NULL, 0); }
 
-static nt_program_t create_test_sampler_program(const char *const *names, uint8_t count) {
-    nt_gfx_fake_set_samplers(names, count);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "test_smp_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "test_smp_fs"});
-    return nt_gfx_make_program(vs, fs);
-}
+static nt_program_t create_test_sampler_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program(names, count); }
 
 static nt_program_t create_test_tex_program(void) { return create_test_sampler_program((const char *const[]){"u_tex"}, 1); }
 

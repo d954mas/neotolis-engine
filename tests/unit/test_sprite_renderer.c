@@ -288,13 +288,9 @@ static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
 /* ---- Helper: create a minimal real material backed by test backend shader handles ---- */
 
 static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sprite_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_texture"}, 1);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "sprite_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.blend = blend;
@@ -313,13 +309,9 @@ static nt_material_t create_test_material(void) { return create_test_material_wi
 
 /* Slot 0 plus one vec4 param, so a flush's uniform counts are not vacuous. */
 static nt_material_t create_test_material_with_param(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "param_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_texture"}, 1);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "param_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -338,13 +330,9 @@ static nt_material_t create_test_material_with_param(void) {
 
 /* Analytic-coverage shape (nt_ui_radial's flat SDF): borrows region geometry, samples nothing. */
 static nt_material_t create_test_material_textureless(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "sdf_vs"});
-    nt_gfx_fake_set_samplers(NULL, 0);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "sdf_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_fake_make_program(NULL, 0);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -371,10 +359,7 @@ static nt_program_t s_radial_shared_program;
 
 static nt_material_t create_radial_test_material(const char *stream_name, uint8_t loc) {
     if (s_radial_shared_program.id == 0) {
-        nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
-        nt_gfx_fake_set_samplers(NULL, 0);
-        nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "radial_fs"});
-        s_radial_shared_program = nt_gfx_make_program(vs, fs);
+        s_radial_shared_program = nt_gfx_fake_make_program(NULL, 0);
     }
 
     nt_material_create_desc_t desc;
@@ -949,6 +934,39 @@ void test_sprite_renderer_dead_material_cmd_binds_on_program_unit(void) {
     nt_gfx_test_draw_trace_reset(false);
 }
 
+/* The page is the material's slot 0, never the program's unit 0: a program that names
+ * another sampler first must still read the page from the unit it gave "u_texture". */
+void test_sprite_renderer_page_lands_on_its_program_unit(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xEAULL);
+
+    nt_material_create_desc_t mdesc;
+    memset(&mdesc, 0, sizeof(mdesc));
+    mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_other", "u_texture"}, 2);
+    mdesc.cull_mode = NT_CULL_NONE;
+    mdesc.textures[0].name = "u_texture";
+    mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
+    /* u_other exists only so the coverage assert passes; any resolved texture serves. */
+    mdesc.textures[1].name = "u_other";
+    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 0);
+    mdesc.texture_count = 2;
+    mdesc.label = "test_sprite_material_page_on_unit_1";
+    nt_material_t mat = nt_material_create(&mdesc);
+    nt_material_step();
+
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
+}
+
 /* A program replaced between an immediate emit and an ECS draw_list puts one
  * material id on two programs in one flush; the uniforms must go out twice. */
 void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) {
@@ -958,10 +976,7 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     s_atlas_res = register_test_atlas(0xE5ULL);
     nt_material_t mat = create_test_material_with_param();
     const nt_program_t program_a = nt_material_get_info(mat)->program;
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "prog_b_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_texture"}, 1);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "prog_b_fs"});
-    const nt_program_t program_b = nt_gfx_make_program(vs, fs);
+    const nt_program_t program_b = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
 
     nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
@@ -1001,12 +1016,9 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     });
     TEST_ASSERT_TRUE(override.id != 0);
 
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "two_slot_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_texture", "u_second"}, 2);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "two_slot_fs"});
     nt_material_create_desc_t mdesc;
     memset(&mdesc, 0, sizeof(mdesc));
-    mdesc.program = nt_gfx_make_program(vs, fs);
+    mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_second"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
     mdesc.textures[0].name = "u_texture";
     mdesc.textures[1].name = "u_second";
@@ -1021,6 +1033,7 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "resolved_tex"));
 }
 
 /* Flush resolves units from the pipeline's program, so a material that leaves one of
@@ -1030,12 +1043,9 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
     s_atlas_res = register_test_atlas(0xE7ULL);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "miss_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_texture", "u_second"}, 2);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "miss_fs"});
     nt_material_create_desc_t mdesc;
     memset(&mdesc, 0, sizeof(mdesc));
-    mdesc.program = nt_gfx_make_program(vs, fs);
+    mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture", "u_second"}, 2);
     mdesc.cull_mode = NT_CULL_NONE;
     mdesc.textures[0].name = "u_texture";
     mdesc.texture_count = 1;
@@ -1057,12 +1067,9 @@ void test_sprite_renderer_unknown_sampler_name_is_ignored(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
     s_atlas_res = register_test_atlas(0xE8ULL);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "unknown_vs"});
-    nt_gfx_fake_set_samplers(NULL, 0);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "unknown_fs"});
     nt_material_create_desc_t mdesc;
     memset(&mdesc, 0, sizeof(mdesc));
-    mdesc.program = nt_gfx_make_program(vs, fs);
+    mdesc.program = nt_gfx_fake_make_program(NULL, 0);
     mdesc.cull_mode = NT_CULL_NONE;
     mdesc.textures[0].name = "u_texture";
     mdesc.texture_count = 1;
@@ -1422,13 +1429,9 @@ void test_sprite_renderer_pipeline_cache_capacity(void) {
  * delta-tracking in flush, B's cmd would skip bind_sampler entirely
  * (texture-bind cache hit), leaving A's override on the unit. */
 static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "smp_vs"});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_tex"}, 1);
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "smp_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
     desc.cull_mode = NT_CULL_NONE;
     desc.texture_count = 1;
     desc.textures[0].name = "u_tex";
@@ -1663,6 +1666,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_binds_on_program_unit);
+    RUN_TEST(test_sprite_renderer_page_lands_on_its_program_unit);
     RUN_TEST(test_sprite_renderer_program_replace_between_immediate_and_draw_list);
     RUN_TEST(test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override);
     RUN_TEST(test_sprite_renderer_material_missing_a_program_sampler_asserts);

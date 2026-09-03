@@ -525,10 +525,7 @@ void test_gfx_two_pipelines_share_one_program(void) {
 /* ---- Program-owned sampler units ---- */
 
 static nt_program_t make_sampler_program(const char *const *names, uint8_t count) {
-    nt_gfx_fake_set_samplers(names, count);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    nt_program_t prog = nt_gfx_fake_make_program(names, count);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
     return prog;
 }

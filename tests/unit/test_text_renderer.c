@@ -135,7 +135,7 @@ static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
 static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
         .program = nt_gfx_make_program(vs, fs),
         .blend = blend,
@@ -247,7 +247,8 @@ void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
-    nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
+    /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
+    nt_gfx_fake_set_samplers((const char *const[]){"u_band_texture", "u_curve_texture"}, 2);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
@@ -327,8 +328,8 @@ void test_text_renderer_font_textures_land_on_program_units(void) {
     const nt_program_t prog = nt_material_get_info(material)->program;
     const int curve_unit = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_curve_texture"));
     const int band_unit = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_band_texture"));
-    TEST_ASSERT_EQUAL_INT(0, curve_unit);
-    TEST_ASSERT_EQUAL_INT(1, band_unit);
+    TEST_ASSERT_EQUAL_INT(1, curve_unit);
+    TEST_ASSERT_EQUAL_INT(0, band_unit);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(0));
@@ -408,7 +409,7 @@ void test_vertex_count_4_per_glyph(void) {
  * that declares its own would have them silently overwritten. */
 void test_text_material_with_textures_asserts_at_flush(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
         .program = nt_gfx_make_program(vs, fs),
         .cull_mode = NT_CULL_NONE,
@@ -532,7 +533,7 @@ void test_failed_restore_releases_partial_buffers(void) {
  * the pipeline signature, not the material's identity. */
 void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -551,7 +552,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
 /* Render state is folded in, so one program with two states is two pipelines. */
 void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -580,7 +581,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 
     nt_gfx_destroy_program(dead);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t reborn = nt_gfx_make_program(vs, fs); /* same pool slot, new generation */
     TEST_ASSERT_NOT_EQUAL_UINT32(dead.id, reborn.id);
 
@@ -851,7 +852,7 @@ void test_switching_back_to_a_material_reuses_its_pipeline(void) {
 void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
 
     nt_gfx_fake_reset();
     nt_text_renderer_set_material(mat);
@@ -937,7 +938,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
 
     /* The game's gate relinks and re-assigns onto the same material. */
     nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"}));
+                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
     nt_material_set_program(material, second);
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, second.id);
 

@@ -3,8 +3,13 @@
 
 #include "graphics/nt_gfx.h"
 
-/* Subsequent links copy this sampler list; reset clears observations, not this list. */
+/* Subsequent links copy this sampler list; reset clears observations, not this list.
+ * Needed directly only where the engine links the program itself (postfx, text). */
 void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count);
+
+/* Links a program whose active samplers are exactly `names`. The fake ignores shader
+ * source, so the stages are placeholders. */
+nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 
 /* Test-only backend observations and failure injection. */
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot);

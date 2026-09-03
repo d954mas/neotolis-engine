@@ -1028,25 +1028,28 @@ static void test_every_supported_sampler_type_gets_its_own_unit(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     static const char *fragment_source = "precision highp float;\n"
                                          "uniform sampler2D u_color;\n"
+                                         "uniform highp isampler2D u_signed_ids;\n"
                                          "uniform highp usampler2D u_ids;\n"
                                          "uniform highp sampler2DShadow u_shadow;\n"
                                          "uniform float u_scale;\n"
                                          "out vec4 frag_color;\n"
                                          "void main() {\n"
                                          "    vec4 c = texture(u_color, vec2(0.5));\n"
+                                         "    ivec4 si = texture(u_signed_ids, vec2(0.5));\n"
                                          "    uvec4 i = texture(u_ids, vec2(0.5));\n"
                                          "    float s = texture(u_shadow, vec3(0.5));\n"
-                                         "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
+                                         "    frag_color = (c + vec4(si) + vec4(i) + vec4(s)) * u_scale;\n"
                                          "}\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
 
-    const int units[3] = {
+    const int units[4] = {
         nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_signed_ids")),
         nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_ids")),
         nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")),
     };
-    assert_distinct_units_in_range(units, 3);
-    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+    assert_distinct_units_in_range(units, 4);
+    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_program_sampler_mask(prog));
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_scale")));
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_missing")));
 }
@@ -1095,6 +1098,20 @@ static void test_reflection_reports_active_uniforms_with_glsl_declarations(void)
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_unused")));
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("tex")));
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
+}
+
+/* An unsupported sampler type has no texture-unit story, so it is rejected at link
+ * rather than bound silently wrong. The GL program leaks: the assert is the contract. */
+static void test_program_with_an_unsupported_sampler_type_asserts(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform samplerCube u_env;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(u_env, vec3(0.0, 0.0, 1.0)); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
 }
 
 /* One sampler past the unit budget is a link failure, not a sampler on unit 0. */
@@ -1387,6 +1404,7 @@ int main(void) {
     RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
+    RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);
     RUN_TEST(test_program_with_more_samplers_than_units_asserts);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);

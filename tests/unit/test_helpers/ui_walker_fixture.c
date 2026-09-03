@@ -26,17 +26,10 @@
 #include "unity.h"
 
 static nt_material_t make_material(bool with_page_sampler) {
-    if (with_page_sampler) {
-        nt_gfx_fake_set_samplers((const char *const[]){"u_texture"}, 1);
-    } else {
-        nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
-    }
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f", .label = "walker_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = with_page_sampler ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1) : nt_gfx_fake_make_program((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
+    /* Programs the engine links later (shape renderer) must not inherit this template. */
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.depth_test = false;
     desc.depth_write = false;

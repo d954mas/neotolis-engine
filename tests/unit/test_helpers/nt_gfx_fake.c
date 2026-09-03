@@ -25,6 +25,13 @@ void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) {
     }
 }
 
+nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) {
+    nt_gfx_fake_set_samplers(names, count);
+    const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    return nt_gfx_make_program(vs, fs);
+}
+
 static uint32_t fake_alloc_slot(nt_gfx_fake_program_t *table, uint32_t capacity) {
     for (uint32_t i = 1; i <= capacity; i++) {
         if (!table[i].used) {
@@ -53,9 +60,8 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
 }
 // #endregion
 
-#define NT_GFX_FAKE_MAX_SLOTS 16
 #define NT_GFX_FAKE_HISTORY_CAPACITY 16
-static uint32_t s_fake_last_sampler[NT_GFX_FAKE_MAX_SLOTS];
+static uint32_t s_fake_last_sampler[NT_GFX_MAX_TEXTURE_SLOTS];
 static uint32_t s_fake_bind_sampler_count;
 static uint32_t s_fake_set_scissor_enabled_count;
 static uint32_t s_fake_last_pass_target;
@@ -109,7 +115,7 @@ static uint32_t s_fake_last_uniform_program;    /* recorder: last program a unif
 static bool s_fake_fail_next_vertex_input_create;
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
-    if (slot >= NT_GFX_FAKE_MAX_SLOTS) {
+    if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
         return 0;
     }
     return s_fake_last_sampler[slot];
@@ -176,7 +182,7 @@ uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_pro
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
 
 void nt_gfx_fake_reset(void) {
-    for (uint32_t i = 0; i < NT_GFX_FAKE_MAX_SLOTS; i++) {
+    for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
         s_fake_last_sampler[i] = 0;
     }
     s_fake_bind_sampler_count = 0;
@@ -202,7 +208,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_render_target_depth = NT_RT_DEPTH_NONE;
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_depth_texture_backend = 0;
-    s_fake_next_texture_backend = 0;
     s_fake_last_update_buffer_offset = 0;
     s_fake_last_instance_offset = 0;
     s_fake_last_instance_vertex_input = 0;
@@ -228,6 +233,8 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     free(s_fake_program_table);
     s_fake_max_programs = desc->max_programs;
+    /* Init-only: a mid-test reset must never re-issue a texture id that is still live. */
+    s_fake_next_texture_backend = 0;
     nt_gfx_fake_set_samplers(NULL, 0);
     s_fake_program_table = (nt_gfx_fake_program_t *)calloc((size_t)s_fake_max_programs + 1U, sizeof(nt_gfx_fake_program_t));
     NT_ASSERT(s_fake_program_table && "gfx fake backend init: out of memory");
@@ -319,9 +326,6 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     (void)fs_backend;
     const uint32_t slot = fake_alloc_slot(s_fake_program_table, s_fake_max_programs);
     NT_ASSERT(slot != 0 && "fake program table full");
-    if (slot == 0) {
-        return 0;
-    }
     s_fake_program_table[slot] = s_fake_program_template;
     return slot;
 }
@@ -412,9 +416,6 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_han
 uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(color_backend != 0);
-    if (desc == NULL || color_backend == 0) {
-        return 0;
-    }
     (void)color_backend;
     (void)depth_texture_backend;
     s_fake_render_target_create_count++;
@@ -432,7 +433,8 @@ uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc
 bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
     (void)color_backend;
     NT_ASSERT(desc != NULL);
-    if (backend_handle == 0 || desc == NULL) {
+    /* A target whose recreate failed keeps handle 0; resize must report failure, not crash. */
+    if (backend_handle == 0) {
         return false;
     }
     s_fake_render_target_resize_count++;
@@ -498,7 +500,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
-    if (slot < NT_GFX_FAKE_MAX_SLOTS) {
+    if (slot < NT_GFX_MAX_TEXTURE_SLOTS) {
         s_fake_last_sampler[slot] = backend_handle;
     }
     s_fake_bind_sampler_count++;

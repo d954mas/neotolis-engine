@@ -335,6 +335,7 @@ void test_create_asserts_duplicate_texture_name(void) {
     d.textures[1].resource = (nt_resource_t){.id = 4};
     d.texture_count = 2;
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "same sampler uniform"));
 }
 
 /* ---- Test 10: valid returns true for live handle ---- */
