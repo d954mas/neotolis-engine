@@ -1512,9 +1512,8 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     uint32_t idx = nt_pool_slot_index(tex.id);
     /* Husk: loss zeroed the backend -- either an RT attachment whose restore failed
      * (GPU failure) or a primary texture the owner never recreated. Bind cannot tell
-     * them apart, so it reports; clear the mirror so bind_sampler skips the stale one. */
+     * them apart, so it reports. The mirror keeps what GL still holds on the unit. */
     if (s_gfx.texture_backends[idx] == 0) {
-        s_gfx.bound_texture_ids[slot] = 0;
         NT_LOG_ERROR_ONCE("bind_texture: texture has no GPU resource (restore failed)");
         return;
     }

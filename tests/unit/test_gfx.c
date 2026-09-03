@@ -1895,6 +1895,40 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     nt_gfx_end_frame();
 }
 
+/* A rejected bind leaves the previous texture on the unit, so the mirror keeps
+ * it: the next sampler is validated against what GL will actually sample. */
+void test_gfx_bind_texture_on_husk_keeps_previous_mirror(void) {
+    nt_texture_t husk = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, husk.id);
+
+    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
+
+    /* Created after the restore, so it is live while the husk is not. */
+    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
+    nt_gfx_bind_texture(depth, 0);
+    nt_gfx_bind_texture(husk, 0); /* rejected: unit 0 still samples the depth texture */
+
+    nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    EXPECT_ASSERT(nt_gfx_bind_sampler(linear, 0)); /* LINEAR on raw depth is incomplete sampling */
+    nt_gfx_end_frame();
+}
+
 /* Render-target attachments are rejected earlier, so an update reaching a husk
  * is always a primary texture the owner never recreated. */
 void test_gfx_update_texture_on_husk_asserts(void) {
@@ -2333,6 +2367,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bind_texture_on_husk_logs_and_skips_backend);
+    RUN_TEST(test_gfx_bind_texture_on_husk_keeps_previous_mirror);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
