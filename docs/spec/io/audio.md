@@ -17,11 +17,27 @@ engine/
     audio/
         audio.h           // public API — single for all platforms
         audio_types.h     // handles, enums, defines
-        audio_web.c       // Web Audio API via JS bridge
-        audio_desktop.c   // miniaudio or custom mixer (future)
+        audio.c           // shared core: clip/voice tables, states, eviction,
+                          // SUSPENDED gate, backend completion callbacks
+        audio_backend.h   // thin backend contract the core calls
+        web/audio_web.c   // Web Audio API via JS bridge
+        native/audio_native.c // miniaudio or custom mixer (future)
+        stub/audio_stub.c // inert backend + call trace for tests
 ```
 
-Build system compiles only one implementation file per platform.
+The module follows the interface/impl/stub composition from
+[Module Layout](../core/module-layout.md): the core owns every decision (which
+voice to evict, whether a play call is gated by SUSPENDED, when a clip becomes
+READY) and the backend only executes them. The core never sees a platform type,
+so voice eviction and the SUSPENDED gate are covered by native ctest through the
+stub, which records each backend call the way the gfx draw trace does. Build
+system compiles the core plus exactly one backend.
+
+Reference for the split: Poseidon (Arma: Cold War Assault source,
+<https://github.com/BohemiaInteractive/CWR>) keeps all playback timing and
+voice-culling logic as pure functions in `engine/Poseidon/Audio/Core/`
+(`WaveLogic.hpp`, `VoiceBudget.hpp`) with Dummy and Text backends behind one
+interface. GPL source — pattern only, no code.
 
 ## Platform-agnostic design
 
@@ -32,7 +48,7 @@ Key contracts:
 - `audio_clip_create` is always potentially async (desktop may complete instantly, but game code does not rely on this)
 - `audio_try_resume()` exists on all platforms (no-op on desktop)
 - Audio format in packs is OGG Vorbis — both platforms can decode it
-- Internal structures are different per-platform, hidden from game code
+- Clip/voice tables live in the shared core; only backend-side ids (JS buffer/source ids, mixer handles) differ per platform and stay hidden from game code
 
 ## Audio state
 
