@@ -1415,7 +1415,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
     GLuint buf = s_buffer_gl[buffer_backend];
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
-    /* Re-specify the named vertex input's instance pointers into its VAO. */
     const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[vertex_input_backend];
     for (uint8_t i = 0; i < vi->instance_attr_count; i++) {
         const nt_vertex_attr_t *attr = &vi->instance_attrs[i];

@@ -15,11 +15,9 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-/* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an
- * explicit unbind; every other bind requires a live handle -- the front-end
- * owns husk handling.
- * The backend keeps GL-mirror state only: what is logically bound lives in the
- * front-end, which names the program or vertex input a call operates on. */
+/* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an unbind;
+ * every other bind requires a live handle -- the front-end owns husk handling.
+ * The backend keeps GL-mirror state only; calls name the program or vertex input. */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);

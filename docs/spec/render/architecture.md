@@ -113,7 +113,8 @@ loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
-explicitly.
+explicitly. Binding a husk texture reports once and leaves the unit as it was;
+binding a husk buffer, or writing into any husk, asserts.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -127,7 +128,7 @@ share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
-texture, viewport and clear-value binds (scissor-enable is deduplicated by the
+pipeline state, texture, viewport and clear-value binds (scissor-enable is deduplicated by the
 front-end mirror), while sampler binds and uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. A uniform a material
