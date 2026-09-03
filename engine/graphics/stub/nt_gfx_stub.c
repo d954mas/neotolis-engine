@@ -11,9 +11,10 @@
 
 // #region sampler units
 /* No reflection here, so sampler units come from a scan of the stage sources at
- * shader creation, merged VS-then-FS at link. Declaration order mirrors GL
- * reflection order minus inactive-uniform elimination; the scan is also blind to
- * comments, so a commented-out declaration still takes a unit. */
+ * shader creation, merged VS-then-FS at link. Only `uniform` declarations count;
+ * declaration order mirrors GL reflection order minus inactive-uniform
+ * elimination. The scan is blind to comments and the preprocessor, so a
+ * commented-out declaration still takes a unit. */
 typedef struct {
     bool used;
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS]; /* index = unit */
@@ -62,29 +63,43 @@ static size_t stub_match_sampler_type(const char *p) {
     return stub_match_type(k_stub_sampler_types, sizeof(k_stub_sampler_types) / sizeof(k_stub_sampler_types[0]), p);
 }
 
-/* 0 = not an array; GL reflects a declared array by element even at size 1. */
-static uint32_t stub_parse_array_elements(const char *p) {
-    if (*p != '[') {
-        return 0;
+static const char *stub_skip_ws(const char *p) {
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+        p++;
     }
-    uint32_t parsed = 0;
-    const char *digit = p + 1;
-    while (*digit >= '0' && *digit <= '9') {
-        parsed = (parsed * 10U) + (uint32_t)(*digit - '0');
-        digit++;
-    }
-    NT_ASSERT(*digit == ']' && parsed > 0 && "stub scanner needs a literal sampler array size");
-    return parsed;
+    return p;
 }
 
-/* Records one `<sampler type> name[N]` declaration; returns the scan position
- * right after the declared name. */
-static const char *stub_scan_declaration(const char *p, size_t type_len, nt_gfx_stub_program_t *rec) {
-    const char *q = p + type_len;
-    while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r') {
-        q++;
+static size_t stub_match_word(const char *p, const char *word) {
+    const size_t len = strlen(word);
+    return (strncmp(p, word, len) == 0 && !stub_ident_char(p[len])) ? len : 0;
+}
+
+/* 0 = not an array; GL reflects a declared array by element even at size 1. */
+static const char *stub_parse_array(const char *p, uint32_t *out_elements) {
+    *out_elements = 0;
+    const char *q = stub_skip_ws(p);
+    if (*q != '[') {
+        return p;
     }
-    const char *name = q;
+    q = stub_skip_ws(q + 1);
+    uint32_t parsed = 0;
+    bool literal = false;
+    while (*q >= '0' && *q <= '9') {
+        parsed = (parsed * 10U) + (uint32_t)(*q - '0');
+        q++;
+        literal = true;
+    }
+    q = stub_skip_ws(q);
+    NT_ASSERT(literal && *q == ']' && parsed > 0 && "stub scanner needs a literal sampler array size");
+    *out_elements = parsed;
+    return q + 1;
+}
+
+/* One `name[N]` declarator; returns the position right after it. */
+static const char *stub_scan_declarator(const char *p, nt_gfx_stub_program_t *rec) {
+    const char *name = stub_skip_ws(p);
+    const char *q = name;
     while (stub_ident_char(*q)) {
         q++;
     }
@@ -92,8 +107,9 @@ static const char *stub_scan_declaration(const char *p, size_t type_len, nt_gfx_
     if (name_len == 0) {
         return q;
     }
-    const uint32_t elements = stub_parse_array_elements(q);
-    char full_name[96];
+    uint32_t elements = 0;
+    q = stub_parse_array(q, &elements);
+    char full_name[256];
     NT_ASSERT(name_len + 16U < sizeof(full_name) && "sampler name too long for the stub scanner");
     if (elements == 0) {
         (void)snprintf(full_name, sizeof(full_name), "%.*s", (int)name_len, name);
@@ -107,19 +123,45 @@ static const char *stub_scan_declaration(const char *p, size_t type_len, nt_gfx_
     return q;
 }
 
+/* `uniform [precision] <sampler type> a[N], b;` -- only a uniform declaration
+ * names a sampler unit; function parameters and locals do not. */
+static const char *stub_scan_uniform(const char *p, nt_gfx_stub_program_t *rec) {
+    static const char *const k_precision[] = {"lowp", "mediump", "highp"};
+    const char *q = stub_skip_ws(p);
+    for (size_t i = 0; i < sizeof(k_precision) / sizeof(k_precision[0]); i++) {
+        const size_t len = stub_match_word(q, k_precision[i]);
+        if (len != 0) {
+            q = stub_skip_ws(q + len);
+            break;
+        }
+    }
+    const size_t type_len = stub_match_sampler_type(q);
+    if (type_len == 0) {
+        return q; /* a non-sampler uniform or a block */
+    }
+    q += type_len;
+    for (;;) {
+        q = stub_skip_ws(stub_scan_declarator(q, rec));
+        if (*q != ',') {
+            return q;
+        }
+        q++;
+    }
+}
+
 static void stub_scan_samplers(const char *src, nt_gfx_stub_program_t *rec) {
     if (src == NULL) {
         return;
     }
     for (const char *p = src; *p != '\0'; p++) {
         if (p != src && stub_ident_char(p[-1])) {
-            continue; /* the type name must start a token */
+            continue; /* the keyword must start a token */
         }
-        const size_t type_len = stub_match_sampler_type(p);
-        if (type_len == 0) {
+        const size_t len = stub_match_word(p, "uniform");
+        if (len == 0) {
             continue;
         }
-        p = stub_scan_declaration(p, type_len, rec) - 1;
+        p = stub_scan_uniform(p + len, rec) - 1;
     }
 }
 

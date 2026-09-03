@@ -572,6 +572,25 @@ void test_gfx_sampler_array_declarations_expand_per_element(void) {
     nt_gfx_destroy_program(prog);
 }
 
+/* Only `uniform` declarations name units: a function parameter typed sampler2D
+ * is not one. Whitespace around the array size and comma lists are legal GLSL. */
+void test_gfx_sampler_scan_reads_only_uniform_declarations(void) {
+    nt_program_t prog = make_sampler_program("uniform highp usampler2D u_band;\n"
+                                             "vec4 read_tex(sampler2D tex, vec2 uv) { return texture(tex, uv); }\n"
+                                             "uniform sampler2D u_arr [ 2 ], u_b;\n"
+                                             "uniform sampler2D a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x;\n"
+                                             "uniform vec4 u_color;\n");
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_band")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("tex")));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")));
+    TEST_ASSERT_EQUAL_INT(2, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")));
+    TEST_ASSERT_EQUAL_INT(3, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_INT(4, nt_gfx_program_sampler_unit(prog, nt_hash32_str("a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")));
+    TEST_ASSERT_EQUAL_UINT32(0x1FU, nt_gfx_program_sampler_mask(prog));
+    nt_gfx_destroy_program(prog);
+}
+
 /* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
 
 /* Games clear their handles on context loss and destroy them again at shutdown,
@@ -2302,6 +2321,7 @@ int main(void) {
     RUN_TEST(test_gfx_sampler_units_follow_declaration_order_per_program);
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
     RUN_TEST(test_gfx_sampler_array_declarations_expand_per_element);
+    RUN_TEST(test_gfx_sampler_scan_reads_only_uniform_declarations);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);

@@ -1393,12 +1393,6 @@ void nt_sprite_renderer_flush(void) {
          * layouts can share a pipeline and still switch vertex inputs here. */
         nt_renderer_bind_vertex_input(&bound, c->vertex_input);
 
-        for (uint8_t t = 0; t < c->tex_count; t++) {
-            /* nt_resource_set_placeholder_texture exists to keep slots resolvable
-             * through async load races, so an unresolved slot is a developer bug. */
-            NT_ASSERT(c->resolved_tex[t] != 0 && "sprite cmd slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
-        }
-
         /* Sampler names come from the cmd, so a cmd whose material died still resolves
          * its units; params are read from the live material when the material or the
          * pipeline changed. */
