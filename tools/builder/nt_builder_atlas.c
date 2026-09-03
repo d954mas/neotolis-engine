@@ -605,7 +605,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 /* Order-sensitive fold over the cache payload — the corruption net for in-range
- * bit flips the per-field bounds checks cannot see (placement coords, pixels). */
+ * bit flips the per-field bounds checks cannot see (placement coords, pixels).
+ * A checksum, not an identity key (the file name is the content hash), and the
+ * formula is part of the on-disk cache format: changing it invalidates every cache. */
 static uint64_t atlas_cache_combine(uint64_t acc, const void *data, size_t len) {
     /* nt_hash64 takes a uint32 length; the largest section (a 16384^2 RGBA page)
      * stays within it. */

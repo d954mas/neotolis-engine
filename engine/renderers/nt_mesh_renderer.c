@@ -167,17 +167,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
      * state the requirement where the pipeline is actually built. */
     NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
 
-    /* Layouts live on the vertex-input versions; the pipeline signature is
-     * program x render state (the text-renderer pattern). render_state_hash
-     * folds color_mode, so pipelines still split per color mode -- an accepted
-     * over-split: nothing in the slimmed pipeline depends on it. */
-    const uint64_t key = ((uint64_t)mat_info->program.id * 0x9E3779B97F4A7C15ULL) + mat_info->render_state_hash;
-
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, key);
-    if (cached.id != 0) {
-        return cached;
-    }
-
+    /* Layouts and color_mode live on the vertex-input versions; the pipeline is
+     * program x render state, keyed by its exact desc identity. */
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = mat_info->program;
@@ -187,8 +178,13 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.blend = mat_info->blend;
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
+    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
 
-    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, key, &desc, &s_mesh_renderer.warned_program_not_ready);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, &key);
+    if (cached.id != 0) {
+        return cached;
+    }
+    return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, &key, &desc, &s_mesh_renderer.warned_program_not_ready);
 }
 
 /* ---- Vertex-input versions (Godot-style, one row per mesh pool slot) ---- */
@@ -196,10 +192,21 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 /* Derived layout = mesh streams x material attr_map: only mapped streams
  * become attributes, so materials whose extra attr_map entries match none of
  * this mesh's streams share a vertex input. */
-static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
+/* Exact identity of a derived layout within one mesh row: the row is per mesh, so
+ * stream type/count/offset/stride are fixed and only which streams map, their
+ * locations, and the instance layout (color_mode) vary. 5 bits per stream
+ * (presence + location) plus 2 for color_mode. */
+#define NT_MESH_VI_KEY_STREAM_BITS 5
+_Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "mesh VI key packs a location in 4 bits");
+_Static_assert(NT_MESH_MAX_STREAMS *NT_MESH_VI_KEY_STREAM_BITS + 2 <= 64, "mesh VI key overflows uint64");
+_Static_assert(NT_COLOR_MODE_FLOAT4 < 4, "mesh VI key packs color_mode in 2 bits");
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info, uint64_t *out_key) {
     nt_vertex_layout_t layout;
     memset(&layout, 0, sizeof(layout));
     layout.stride = mesh_info->stride;
+    uint64_t key = (uint64_t)mat_info->color_mode << (NT_MESH_MAX_STREAMS * NT_MESH_VI_KEY_STREAM_BITS);
 
     uint16_t offset = 0;
     for (uint8_t si = 0; si < mesh_info->stream_count; si++) {
@@ -218,6 +225,8 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
 
         if (found) {
             NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
+            NT_ASSERT(location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
+            key |= (1ULL | (uint64_t)location << 1) << (si * NT_MESH_VI_KEY_STREAM_BITS);
             layout.attrs[layout.attr_count].location = location;
             layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);
             layout.attrs[layout.attr_count].count = stream->count;
@@ -228,6 +237,7 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
 
         offset += stream_byte_size(stream);
     }
+    *out_key = key;
     return layout;
 }
 
@@ -253,12 +263,8 @@ static nt_vertex_input_t find_or_create_vertex_input(nt_material_t mat, nt_mesh_
         }
     }
 
-    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info);
-    /* Hash only the used attrs (memset'd, so padding is deterministic; the
-     * unused tail would be pure noise). color_mode selects the instance
-     * layout, which the baked divisor state depends on. */
-    uint64_t key = nt_hash64(layout.attrs, (uint32_t)layout.attr_count * (uint32_t)sizeof(nt_vertex_attr_t)).value;
-    key = key * 0x9E3779B97F4A7C15ULL + ((uint64_t)layout.attr_count << 24 | (uint64_t)layout.stride << 8 | (uint64_t)mat_info->color_mode);
+    uint64_t key = 0;
+    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info, &key);
 
     nt_mesh_vi_version_t *reusable = NULL;
     for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {

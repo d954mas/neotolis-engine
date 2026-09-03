@@ -291,21 +291,18 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
     return layout;
 }
 
-/* Layout discriminator folded into the pipeline-cache key: 0 for the base 20 B
- * layout, a distinct non-zero value for each extended layout, so a base
- * material and a custom-attr material can never alias the same pipeline.
- * Mixes attr_map count + each (location, FLOAT4) so two distinct attr_maps
- * yield distinct keys. */
-static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
-    if (mat_info->attr_map_count == 0) {
-        return 0;
-    }
-    uint64_t h = 0x100000001B3ULL; /* nonzero seed so a single base-located attr never hashes to 0 */
-    h = h * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_count;
+/* Exact vertex-input identity: 0 for the base 20 B layout, else attr_map count
+ * plus every location packed bit-exact, so two attr_maps never share a key. */
+_Static_assert(NT_MATERIAL_MAX_ATTR_MAP < 16, "sprite VI key packs attr_map_count in 4 bits");
+_Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "sprite VI key packs a location in 4 bits");
+_Static_assert(4 + NT_MATERIAL_MAX_ATTR_MAP * 4 <= 64, "sprite VI key overflows uint64");
+static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
+    uint64_t key = mat_info->attr_map_count;
     for (uint8_t ai = 0; ai < mat_info->attr_map_count; ai++) {
-        h = h * 0x9E3779B97F4A7C15ULL + mat_info->attr_map_locations[ai];
+        NT_ASSERT(mat_info->attr_map_locations[ai] < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
+        key |= (uint64_t)mat_info->attr_map_locations[ai] << (4 + ai * 4);
     }
-    return h;
+    return key;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -317,15 +314,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
         nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
-    /* Vertex-inputs own layouts, so the pipeline key is program x state. */
-    uint64_t key = (uint64_t)mat_info->program.id * 0x9E3779B97F4A7C15ULL;
-    key = key * 0x9E3779B97F4A7C15ULL + mat_info->render_state_hash;
-
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, key);
-    if (cached.id != 0) {
-        return cached;
-    }
-
+    /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */
     nt_pipeline_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = mat_info->program;
@@ -335,15 +324,20 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.blend = mat_info->blend;
     desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
+    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
 
-    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, key, &desc, &s_sprite.warned_program_not_ready);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, &key);
+    if (cached.id != 0) {
+        return cached;
+    }
+    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, &key, &desc, &s_sprite.warned_program_not_ready);
 }
 
 /* Entries are weak: a context loss frees vertex-input slots, so a hit
  * validates and a dead entry recreates in place (the mesh-row pattern) --
  * repeated losses must not grow the cache toward the hardcap. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
-    const uint64_t key = nt_sprite_layout_hash(mat_info);
+    const uint64_t key = nt_sprite_layout_key(mat_info);
     uint16_t idx = s_sprite.vi_count;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         if (s_sprite.vi_entries[i].key != key) {
@@ -1317,6 +1311,10 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
     nt_transform_comp_view_t tv = nt_transform_comp_view();
     nt_drawable_comp_view_t dv = nt_drawable_comp_view();
 
+    /* Runs split per atlas page too, so consecutive runs often share a material;
+     * nothing can replace its program inside this call, so the last resolve holds. */
+    uint32_t memo_mat = 0;
+    nt_pipeline_t memo_pip = {0};
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -1334,7 +1332,11 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         }
 
         /* Each batch_key boundary opens a fresh cmd. */
-        nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+        if (mat->id != memo_mat) {
+            memo_pip = find_or_create_pipeline(mat_info);
+            memo_mat = mat->id;
+        }
+        const nt_pipeline_t pip = memo_pip;
         if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
             run_start = run_end;
             continue;

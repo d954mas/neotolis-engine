@@ -162,6 +162,7 @@ bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
+bash scripts/check_cache_keys.sh
 # Registration gate reads the tidy-ci compile DB + CTestTestfiles (devapi ON,
 # so devapi-gated tests are visible) — keep the DB fresh first.
 ensure_tidy_ci

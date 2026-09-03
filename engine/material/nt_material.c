@@ -155,13 +155,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
     slot->info.color_mode = desc->color_mode;
 
-    const nt_blend_state_t hash_blend = slot->info.blend.enabled ? slot->info.blend : nt_blend_opaque();
-    slot->info.render_state_hash = nt_hash64(&hash_blend, sizeof(hash_blend)).value;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_test;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_write;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.cull_mode;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.color_mode;
-
     /* Debug label (caller must ensure static storage / string literal) */
     slot->info.label = desc->label;
 

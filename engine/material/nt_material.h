@@ -111,7 +111,6 @@ typedef struct {
     bool depth_write;
     nt_cull_mode_t cull_mode;
     nt_color_mode_t color_mode;
-    uint64_t render_state_hash;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 

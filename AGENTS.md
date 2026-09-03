@@ -96,6 +96,7 @@ sources, delete the `.ntpack` before visual QA to force a repack.
 - If a temporary deviation from the spec is necessary, mark it explicitly in the change comment and the final report.
 - New UI widget demos go into the existing `examples/ui_showcase` vitrine (new tab) — never a new example dir.
 - Never id sibling widgets as `base_id + index`: Clay's anonymous child ids are additive (`seed + offset`), so consecutive seeds collide → DUPLICATE_ID. Salt sub-ids with a mixed hash (`nt_ui_child_id` / `nt_ui_fmix_id`). Virtualized widgets must RECYCLE ids (see `nt_ui_vlist`'s ring) or Clay's element hashmap saturates until `build_tree` asserts.
+- Never fold a pool handle or a small enum linearly into a cache key (`handle*K + field`): handles are sequential, so a one-step change on one side equals a one-step change on the other and neighbouring resources silently share the cached object. Pipeline caches key on `nt_gfx_pipeline_key_t` (exact); other GPU-object caches pack their identity bit-exact with `_Static_assert`ed lane widths, or hash the whole canonical struct via `nt_hash64` when the identity is content. Every new cache key ships with a neighbour test: consecutive handles × one-step change of each field → all keys distinct (gate: `scripts/check_cache_keys.sh`).
 
 ## Performance and hot path
 

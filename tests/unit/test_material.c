@@ -237,36 +237,6 @@ void test_create_stores_render_state(void) {
     TEST_ASSERT_EQUAL_MEMORY(&d.blend, &info->blend, sizeof(d.blend));
 }
 
-void test_disabled_blend_uses_canonical_render_state_hash(void) {
-    nt_material_create_desc_t opaque_desc = make_test_desc();
-    nt_material_create_desc_t disabled_alpha_desc = make_test_desc();
-    opaque_desc.blend = nt_blend_opaque();
-    disabled_alpha_desc.blend = nt_blend_alpha();
-    disabled_alpha_desc.blend.enabled = false;
-    disabled_alpha_desc.blend.constant_color[0] = 0.5F;
-
-    nt_material_t opaque = nt_material_create(&opaque_desc);
-    nt_material_t disabled_alpha = nt_material_create(&disabled_alpha_desc);
-    const nt_material_info_t *opaque_info = nt_material_get_info(opaque);
-    const nt_material_info_t *disabled_alpha_info = nt_material_get_info(disabled_alpha);
-
-    TEST_ASSERT_EQUAL_UINT64(opaque_info->render_state_hash, disabled_alpha_info->render_state_hash);
-}
-
-void test_enabled_blend_changes_render_state_hash(void) {
-    nt_material_create_desc_t alpha_desc = make_test_desc();
-    nt_material_create_desc_t additive_desc = make_test_desc();
-    alpha_desc.blend = nt_blend_alpha();
-    additive_desc.blend = nt_blend_additive();
-
-    nt_material_t alpha = nt_material_create(&alpha_desc);
-    nt_material_t additive = nt_material_create(&additive_desc);
-    const nt_material_info_t *alpha_info = nt_material_get_info(alpha);
-    const nt_material_info_t *additive_info = nt_material_get_info(additive);
-
-    TEST_ASSERT_NOT_EQUAL_UINT64(alpha_info->render_state_hash, additive_info->render_state_hash);
-}
-
 void test_blend_reserved_byte_is_canonicalized(void) {
     nt_material_create_desc_t clean_desc = make_test_desc();
     nt_material_create_desc_t dirty_desc = make_test_desc();
@@ -280,7 +250,7 @@ void test_blend_reserved_byte_is_canonicalized(void) {
     const nt_material_info_t *dirty_info = nt_material_get_info(dirty);
 
     TEST_ASSERT_EQUAL_UINT8(0, dirty_info->blend._reserved);
-    TEST_ASSERT_EQUAL_UINT64(clean_info->render_state_hash, dirty_info->render_state_hash);
+    TEST_ASSERT_EQUAL_MEMORY(&clean_info->blend, &dirty_info->blend, sizeof(clean_info->blend));
 }
 
 /* ---- Test 7: attr_map stored correctly ---- */
@@ -615,8 +585,6 @@ int main(void) {
     RUN_TEST(test_blend_subtractive_presets_preserve_destination_alpha);
     RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
-    RUN_TEST(test_disabled_blend_uses_canonical_render_state_hash);
-    RUN_TEST(test_enabled_blend_changes_render_state_hash);
     RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);

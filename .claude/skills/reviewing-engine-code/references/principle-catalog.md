@@ -26,6 +26,7 @@ smell**. Skip anything clang-format / clang-tidy / the size tracker already enfo
 11. Comments: short WHY only
 12. No gold-plating / speculative generality
 13. EM_JS_DEPS covers every referenced JS runtime helper
+14. Cache identity is exact, or hashed whole — never a linear fold
 
 ---
 
@@ -168,3 +169,18 @@ transitively (latent).
 **Scope:** `engine/*/web/`, any TU with `EM_JS`/`EM_ASM`.
 ✅ `EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")` and the body uses exactly those.
 ❌ body calls `lengthBytesUTF8(text)` while `EM_JS_DEPS` lists only `$stringToNewUTF8,$UTF8ToString`.
+
+## 14. Cache identity is exact, or hashed whole — never a linear fold — P0/P1
+
+**Rule:** a cache that hands back a GPU object (pipeline, vertex input, sampler) by key must
+derive that key either bit-exact (packed lanes with `_Static_assert`ed widths, every input
+range-asserted before packing) or as one `nt_hash64` over the whole canonical identity struct.
+Flag any `handle * K + field` / `h = h*K + small_int` chain used as identity: pool handles are
+sequential, so `(p, field)` and `(p+1, field-1)` collide as the common case and the second
+resource silently draws with the first one's object. P0 when the key gates a pipeline/program;
+P1 for other caches. Also flag a new cache key without a neighbour test (consecutive handles ×
+one-step change of each field → all keys distinct).
+**Cite:** AGENTS.md §"Change rules" (never fold a pool handle…) + docs/spec/render/architecture.md §"Cache identity".
+**Scope:** `engine/renderers/`, `engine/graphics/`, `engine/material/`, any `*_cache_find`.
+✅ `key = nt_gfx_pipeline_key(&desc)`; `key |= (1ULL | location << 1) << (si * 5)` with static asserts.
+❌ `key = program.id * 0x9E3779B97F4A7C15ULL + render_state_hash` compared with `==` on a hit.

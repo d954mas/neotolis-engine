@@ -568,6 +568,34 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT16(2U, nt_text_renderer_test_pipeline_cache_count());
 }
 
+/* Programs come out of the pool in creation order, so two shader pairs get
+ * neighbouring ids; one cull step on the neighbour must not land on the same key. */
+void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void) {
+    nt_shader_t vs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_program_t p0 = nt_gfx_make_program(vs0, fs0);
+    nt_shader_t vs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_program_t p1 = nt_gfx_make_program(vs1, fs1);
+    TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
+    nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
+    nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    nt_material_step();
+
+    nt_gfx_fake_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_text_renderer_set_material(a);
+    draw_and_flush();
+    nt_text_renderer_set_material(b);
+    draw_and_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_text_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_test_draw_trace_at(1).program.id);
+}
+
 /* Reusing the program slot changes its generation. The first quad of a new batch
  * must resolve the replacement even when the material handle is unchanged. */
 void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
@@ -1411,6 +1439,7 @@ int main(void) {
     RUN_TEST(test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline);
     RUN_TEST(test_materials_sharing_a_program_share_one_pipeline);
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
+    RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
