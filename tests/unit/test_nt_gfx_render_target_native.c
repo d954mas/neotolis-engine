@@ -1006,6 +1006,169 @@ static void test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity(void
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_MAX_CACHED_UNIFORMS"));
 }
 
+// #region program-owned sampler units
+static nt_program_t make_sampler_program(const char *vertex_source, const char *fragment_source) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    return prog;
+}
+
+/* Reflection order is the driver's business, so only the unit set is pinned. */
+static void assert_distinct_units_in_range(const int *units, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        TEST_ASSERT_GREATER_OR_EQUAL_INT(0, units[i]);
+        TEST_ASSERT_LESS_THAN_INT((int)count, units[i]);
+        for (uint32_t j = i + 1; j < count; j++) {
+            TEST_ASSERT_NOT_EQUAL_INT(units[i], units[j]);
+        }
+    }
+}
+
+static void test_every_supported_sampler_type_gets_its_own_unit(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u_color;\n"
+                                         "uniform highp usampler2D u_ids;\n"
+                                         "uniform highp sampler2DShadow u_shadow;\n"
+                                         "uniform float u_scale;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    vec4 c = texture(u_color, vec2(0.5));\n"
+                                         "    uvec4 i = texture(u_ids, vec2(0.5));\n"
+                                         "    float s = texture(u_shadow, vec3(0.5));\n"
+                                         "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
+                                         "}\n";
+    nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+
+    const int units[3] = {
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_ids")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")),
+    };
+    assert_distinct_units_in_range(units, 3);
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_scale")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_missing")));
+}
+
+static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
+    static const char *vertex_source = "uniform sampler2D u_heights;\n"
+                                       "void main() { gl_Position = texture(u_heights, vec2(0.5)); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u_arr[2];\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(u_arr[0], vec2(0.5)) + texture(u_arr[1], vec2(0.5)); }\n";
+    nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+
+    const int units[3] = {
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_heights")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
+    };
+    assert_distinct_units_in_range(units, 3);
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+}
+
+static nt_texture_t make_unit_test_texture(const uint8_t rgba[4]) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 1,
+        .height = 1,
+        .data = rgba,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
+    return tex;
+}
+
+/* No set_uniform_int anywhere: each sampler reads the unit the link wrote. */
+static void test_samplers_read_their_link_time_units_without_uniform_writes(void) {
+    static const char *vertex_source = "out vec2 v_uv;\n"
+                                       "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    v_uv = vec2(x, y);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    /* Red through u_a and green through u_b make yellow; two samplers sharing
+       one unit would read one texture and show red or green. */
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u_a;\n"
+                                         "uniform sampler2D u_b;\n"
+                                         "in vec2 v_uv;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(texture(u_a, v_uv).r, texture(u_b, v_uv).g, 0.0, 1.0); }\n";
+    nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    static const uint8_t red[4] = {255, 0, 0, 255};
+    static const uint8_t green[4] = {0, 255, 0, 255};
+    nt_texture_t tex_red = make_unit_test_texture(red);
+    nt_texture_t tex_green = make_unit_test_texture(green);
+
+    const int unit_a = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_a"));
+    const int unit_b = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b"));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_a);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_b);
+    TEST_ASSERT_NOT_EQUAL_INT(unit_a, unit_b);
+
+    uint8_t pixel[4] = {0};
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    bind_empty_vertex_input();
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_a);
+    nt_gfx_bind_texture(tex_green, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    assert_rgba(pixel, 1, 255, 255, 0, 255);
+}
+
+/* Writing the units must leave the bound pipeline's program current. */
+static void test_linking_a_program_keeps_the_bound_pipelines_program_current(void) {
+    static const char *vertex_source = "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    static const char *color_fs = "precision highp float;\n"
+                                  "uniform vec4 u_color;\n"
+                                  "out vec4 frag_color;\n"
+                                  "void main() { frag_color = u_color; }\n";
+    static const char *sampler_fs = "precision highp float;\n"
+                                    "uniform sampler2D u_a;\n"
+                                    "out vec4 frag_color;\n"
+                                    "void main() { frag_color = texture(u_a, vec2(0.5)); }\n";
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(vertex_source, color_fs)});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    uint8_t pixel[4] = {0};
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    bind_empty_vertex_input();
+
+    nt_program_t linked_under_the_bind = make_sampler_program(vertex_source, sampler_fs);
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(linked_under_the_bind, nt_hash32_str("u_a")));
+
+    const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), green);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    assert_rgba(pixel, 1, 0, 255, 0, 255);
+}
+// #endregion
+
 static PFNGLGETPROGRAMIVPROC s_get_program_iv;
 static PFNGLGETACTIVEUNIFORMPROC s_get_active_uniform;
 static GLenum s_skipped_program_query;
@@ -1102,6 +1265,10 @@ int main(void) {
     RUN_TEST(test_uniform_cache_expands_only_terminal_struct_array_indices);
     RUN_TEST(test_uniform_cache_asserts_when_array_elements_exceed_capacity);
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
+    RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
+    RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
+    RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
+    RUN_TEST(test_linking_a_program_keeps_the_bound_pipelines_program_current);
     RUN_TEST(test_missing_active_uniform_count_releases_program_for_retry);
     RUN_TEST(test_missing_uniform_name_length_releases_program_for_retry);
     RUN_TEST(test_missing_uniform_details_releases_partial_cache_for_retry);

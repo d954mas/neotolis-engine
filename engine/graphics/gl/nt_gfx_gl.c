@@ -72,7 +72,14 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 typedef struct {
     uint32_t name_hash;
     GLint location;
+    bool is_sampler;
 } nt_cached_uniform_t;
+
+/* One entry per active sampler element; the unit is fixed at link. */
+typedef struct {
+    uint32_t name_hash;
+    uint8_t unit;
+} nt_gfx_gl_sampler_unit_t;
 
 typedef struct {
     bool depth_test_enabled;
@@ -99,6 +106,10 @@ typedef struct {
     GLuint program;
     nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
     uint8_t uniform_count;
+    /* Sampler units are program state: assigned in reflection order at link,
+     * written once, never rewritten by a material. */
+    nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
+    uint8_t sampler_count;
 } nt_gfx_gl_program_t;
 
 typedef struct {
@@ -217,17 +228,37 @@ static struct {
 
 /* ---- Per-program uniform location lookup ---- */
 
-static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "set_uniform: requires a live program");
-    /* glUniform* writes into the current program, so the named one must be it. */
-    NT_ASSERT(s_programs[program_backend].program == s_gl_cache.program && "uniform write targets a program that is not current");
-    const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
+static GLint program_uniform_location(const nt_gfx_gl_program_t *prog, uint32_t name_hash) {
     for (uint8_t i = 0; i < prog->uniform_count; i++) {
         if (prog->uniforms[i].name_hash == name_hash) {
             return prog->uniforms[i].location;
         }
     }
     return -1;
+}
+
+static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "set_uniform: requires a live program");
+    /* glUniform* writes into the current program, so the named one must be it. */
+    NT_ASSERT(s_programs[program_backend].program == s_gl_cache.program && "uniform write targets a program that is not current");
+    return program_uniform_location(&s_programs[program_backend], name_hash);
+}
+
+int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_unit: requires a live program");
+    const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
+    for (uint8_t i = 0; i < prog->sampler_count; i++) {
+        if (prog->sampler_units[i].name_hash == name_hash) {
+            return (int)prog->sampler_units[i].unit;
+        }
+    }
+    return -1;
+}
+
+uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_mask: requires a live program");
+    /* Units are dense 0..n-1, so the count is the mask. */
+    return (1U << s_programs[program_backend].sampler_count) - 1U;
 }
 
 // #region test counters
@@ -1107,9 +1138,39 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
     *suffix = '\0';
 }
 
+/* Only 2D samplers have a texture-unit story here; the rest would bind
+ * silently wrong, so they are rejected at link instead. */
+static bool uniform_type_is_sampler(GLenum utype) {
+    switch (utype) {
+    case GL_SAMPLER_2D:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+        return true;
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_CUBE:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_INT_SAMPLER_3D:
+    case GL_INT_SAMPLER_CUBE:
+    case GL_INT_SAMPLER_2D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_3D:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+        NT_ASSERT(false && "program declares an unsupported sampler type");
+        return false;
+    default:
+        return false;
+    }
+}
+
 /* Cache locations off the hot path; NT_ASSERT expansion inflates complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, uint8_t *out_count) {
+static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
+    nt_cached_uniform_t *out = rec->uniforms;
+    uint8_t *out_count = &rec->uniform_count;
+    rec->sampler_count = 0;
     *out_count = 0;
     GLint active_uniforms = -1;
     glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
@@ -1146,9 +1207,19 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, u
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
+                const bool is_sampler = uniform_type_is_sampler(utype);
                 if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
                     out[uniform_count].name_hash = nt_hash32_str(uname).value;
                     out[uniform_count].location = loc;
+                    out[uniform_count].is_sampler = is_sampler;
+                }
+                if (is_sampler) {
+                    NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
+                    if (rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS) {
+                        rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
+                        rec->sampler_units[rec->sampler_count].unit = rec->sampler_count;
+                        rec->sampler_count++;
+                    }
                 }
                 uniform_count++;
             }
@@ -1158,6 +1229,23 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_cached_uniform_t *out, u
     NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
     *out_count = (uint8_t)uniform_count;
     return true;
+}
+
+/* The units are written once, here: linking may happen with a pipeline bound,
+ * and the cache mirror must keep naming that pipeline's program. */
+static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) {
+    if (rec->sampler_count == 0) {
+        return;
+    }
+    const GLuint saved = s_gl_cache.program;
+    glUseProgram(program);
+    for (uint8_t i = 0; i < rec->sampler_count; i++) {
+        const GLint loc = program_uniform_location(rec, rec->sampler_units[i].name_hash);
+        if (loc >= 0) {
+            glUniform1i(loc, (GLint)rec->sampler_units[i].unit);
+        }
+    }
+    glUseProgram(saved);
 }
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
@@ -1178,10 +1266,11 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         return 0; /* no free slots */
     }
 
-    if (!nt_gfx_gl_cache_uniforms(program, s_programs[slot].uniforms, &s_programs[slot].uniform_count) || nt_gfx_backend_is_context_lost()) {
+    if (!nt_gfx_gl_cache_uniforms(program, &s_programs[slot]) || nt_gfx_backend_is_context_lost()) {
         glDeleteProgram(program);
         return 0;
     }
+    write_sampler_units(program, &s_programs[slot]);
     s_programs[slot].program = program;
     return slot;
 }

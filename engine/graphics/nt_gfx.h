@@ -560,6 +560,15 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
+/* Sampler uniforms are program state: units are fixed at link, nobody writes
+ * them. Returns the unit the named sampler reads from, or -1 when the program
+ * has no active sampler of that name. Program must be ready (asserted). */
+int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
+/* Every unit the program samples, as 1<<unit bits -- the interface a material
+ * must cover. Program must be ready (asserted). */
+uint32_t nt_gfx_program_sampler_mask(nt_program_t prog);
+/* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
+nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
 /* Returns INVALID for invalid or stale handles. */

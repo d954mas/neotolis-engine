@@ -1418,6 +1418,24 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
 }
 
+int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
+    NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_unit: program is not linked");
+    return nt_gfx_backend_program_sampler_unit(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value);
+}
+
+uint32_t nt_gfx_program_sampler_mask(nt_program_t prog) {
+    NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_mask: program is not linked");
+    return nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
+}
+
+nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
+    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        return NT_PROGRAM_INVALID;
+    }
+    nt_program_t prog = {s_gfx.pipeline_programs[nt_pool_slot_index(pip.id)]};
+    return prog;
+}
+
 bool nt_gfx_texture_ready(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;

@@ -72,6 +72,20 @@ setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and 
 three siblings — and there is no string form: a caller hashes the name once at
 init, or inline where the cost does not matter.
 
+Sampler uniforms are program state, not material state: their texture units are
+fixed at link and nobody writes them afterwards. Reflection classifies every
+active uniform by type — `sampler2D`, `sampler2DShadow`, `isampler2D` and
+`usampler2D` are supported, any other sampler type asserts at link — and each
+sampler element, array elements included, takes one unit, numbered 0..n-1 in
+reflection order. A program may not use more than `NT_GFX_MAX_TEXTURE_SLOTS`
+sampler units (asserted at link). The backend writes the units once with
+`glUniform1i` immediately after reflection, restoring the program that was
+current, because linking may happen while a pipeline is bound.
+`nt_gfx_program_sampler_unit(prog, name)` reports the unit a named sampler reads
+from, or -1 when the program has no active sampler of that name (the driver
+eliminates unused ones); `nt_gfx_program_sampler_mask(prog)` reports every unit
+the program samples as `1 << unit` bits. Both require a ready program.
+
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location
 table. Nothing catches an exception thrown out of reflection: on the web the

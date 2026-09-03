@@ -1,8 +1,141 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx_internal.h"
+#include "hash/nt_hash.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* No-op backend for headless builds and testing.
-   Create functions return 1 (nonzero) so make_shader/program/pipeline/buffer succeed. */
+   Create functions return a live slot (nonzero) so make_shader/program/pipeline/buffer succeed. */
+
+// #region sampler units
+/* No reflection here, so sampler units come from a scan of the stage sources at
+ * shader creation, merged VS-then-FS at link. Declaration order mirrors GL
+ * reflection order minus inactive-uniform elimination. */
+typedef struct {
+    bool used;
+    uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS]; /* index = unit */
+    uint8_t sampler_count;
+} nt_gfx_stub_program_t;
+
+static nt_gfx_stub_program_t *s_stub_shaders; /* indexed by backend slot, 1-based */
+static nt_gfx_stub_program_t *s_stub_program_table;
+static uint32_t s_stub_max_shaders;
+static uint32_t s_stub_max_programs;
+
+static const char *const k_stub_sampler_types[] = {"sampler2DShadow", "sampler2D", "isampler2D", "usampler2D"};
+
+static bool stub_ident_char(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+
+/* A sampler declared in both stages is one uniform to GL, so dedup by name. */
+static void stub_push_sampler(nt_gfx_stub_program_t *rec, uint32_t name_hash) {
+    for (uint8_t i = 0; i < rec->sampler_count; i++) {
+        if (rec->sampler_hashes[i] == name_hash) {
+            return;
+        }
+    }
+    NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
+    if (rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS) {
+        rec->sampler_hashes[rec->sampler_count++] = name_hash;
+    }
+}
+
+static size_t stub_match_sampler_type(const char *p) {
+    for (size_t i = 0; i < sizeof(k_stub_sampler_types) / sizeof(k_stub_sampler_types[0]); i++) {
+        const size_t len = strlen(k_stub_sampler_types[i]);
+        if (strncmp(p, k_stub_sampler_types[i], len) == 0 && !stub_ident_char(p[len])) {
+            return len;
+        }
+    }
+    return 0;
+}
+
+static uint32_t stub_parse_array_elements(const char *p) {
+    if (*p != '[') {
+        return 1;
+    }
+    uint32_t parsed = 0;
+    const char *digit = p + 1;
+    while (*digit >= '0' && *digit <= '9') {
+        parsed = (parsed * 10U) + (uint32_t)(*digit - '0');
+        digit++;
+    }
+    return (*digit == ']' && parsed > 0) ? parsed : 1;
+}
+
+/* Records one `<sampler type> name[N]` declaration; returns the scan position
+ * right after the declared name. */
+static const char *stub_scan_declaration(const char *p, size_t type_len, nt_gfx_stub_program_t *rec) {
+    const char *q = p + type_len;
+    while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r') {
+        q++;
+    }
+    const char *name = q;
+    while (stub_ident_char(*q)) {
+        q++;
+    }
+    const size_t name_len = (size_t)(q - name);
+    if (name_len == 0) {
+        return q;
+    }
+    const uint32_t elements = stub_parse_array_elements(q);
+    char full_name[96];
+    NT_ASSERT(name_len + 16U < sizeof(full_name) && "sampler name too long for the stub scanner");
+    for (uint32_t element = 0; element < elements; element++) {
+        if (elements == 1) {
+            (void)snprintf(full_name, sizeof(full_name), "%.*s", (int)name_len, name);
+        } else {
+            (void)snprintf(full_name, sizeof(full_name), "%.*s[%u]", (int)name_len, name, element);
+        }
+        stub_push_sampler(rec, nt_hash32_str(full_name).value);
+    }
+    return q;
+}
+
+static void stub_scan_samplers(const char *src, nt_gfx_stub_program_t *rec) {
+    if (src == NULL) {
+        return;
+    }
+    for (const char *p = src; *p != '\0'; p++) {
+        if (p != src && stub_ident_char(p[-1])) {
+            continue; /* the type name must start a token */
+        }
+        const size_t type_len = stub_match_sampler_type(p);
+        if (type_len == 0) {
+            continue;
+        }
+        p = stub_scan_declaration(p, type_len, rec) - 1;
+    }
+}
+
+static uint32_t stub_alloc_slot(nt_gfx_stub_program_t *table, uint32_t capacity) {
+    for (uint32_t i = 1; i <= capacity; i++) {
+        if (!table[i].used) {
+            memset(&table[i], 0, sizeof(table[i]));
+            table[i].used = true;
+            return i;
+        }
+    }
+    return 0;
+}
+
+int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_stub_max_programs && s_stub_program_table[program_backend].used && "program_sampler_unit: requires a live program");
+    const nt_gfx_stub_program_t *rec = &s_stub_program_table[program_backend];
+    for (uint8_t i = 0; i < rec->sampler_count; i++) {
+        if (rec->sampler_hashes[i] == name_hash) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_stub_max_programs && s_stub_program_table[program_backend].used && "program_sampler_mask: requires a live program");
+    return (1U << s_stub_program_table[program_backend].sampler_count) - 1U;
+}
+// #endregion
 
 #ifdef NT_TEST_ACCESS
 #define NT_GFX_STUB_MAX_SLOTS 16
@@ -176,11 +309,25 @@ void nt_gfx_stub_test_reset(void) {
 #endif
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
-    (void)desc;
+    NT_ASSERT(desc != NULL);
+    free(s_stub_shaders);
+    free(s_stub_program_table);
+    s_stub_max_shaders = desc->max_shaders;
+    s_stub_max_programs = desc->max_programs;
+    s_stub_shaders = (nt_gfx_stub_program_t *)calloc((size_t)s_stub_max_shaders + 1U, sizeof(nt_gfx_stub_program_t));
+    s_stub_program_table = (nt_gfx_stub_program_t *)calloc((size_t)s_stub_max_programs + 1U, sizeof(nt_gfx_stub_program_t));
+    NT_ASSERT(s_stub_shaders && s_stub_program_table && "gfx stub backend init: out of memory");
     return true;
 }
 
-void nt_gfx_backend_shutdown(void) {}
+void nt_gfx_backend_shutdown(void) {
+    free(s_stub_shaders);
+    free(s_stub_program_table);
+    s_stub_shaders = NULL;
+    s_stub_program_table = NULL;
+    s_stub_max_shaders = 0;
+    s_stub_max_programs = 0;
+}
 
 bool nt_gfx_backend_is_context_lost(void) {
 #ifdef NT_TEST_ACCESS
@@ -252,15 +399,25 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 }
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
-    (void)desc;
-    return 1;
+    NT_ASSERT(desc != NULL);
+    const uint32_t slot = stub_alloc_slot(s_stub_shaders, s_stub_max_shaders);
+    NT_ASSERT(slot != 0 && "stub shader table full");
+    if (slot == 0) {
+        return 0;
+    }
+    stub_scan_samplers(desc->source, &s_stub_shaders[slot]);
+    return slot;
 }
 
-void nt_gfx_backend_destroy_shader(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_stub_max_shaders && "destroy_shader: handle out of range");
+    memset(&s_stub_shaders[backend_handle], 0, sizeof(s_stub_shaders[backend_handle]));
+}
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
-    (void)vs_backend;
-    (void)fs_backend;
 #ifdef NT_TEST_ACCESS
     s_stub_program_create_count++;
     if (s_stub_lose_context_on_program_create) {
@@ -273,10 +430,29 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         return 0;
     }
 #endif
-    return 1;
+    NT_ASSERT(vs_backend != 0 && vs_backend <= s_stub_max_shaders && fs_backend != 0 && fs_backend <= s_stub_max_shaders && "create_program: requires live stages");
+    const uint32_t slot = stub_alloc_slot(s_stub_program_table, s_stub_max_programs);
+    NT_ASSERT(slot != 0 && "stub program table full");
+    if (slot == 0) {
+        return 0;
+    }
+    nt_gfx_stub_program_t *rec = &s_stub_program_table[slot];
+    const nt_gfx_stub_program_t *stages[2] = {&s_stub_shaders[vs_backend], &s_stub_shaders[fs_backend]};
+    for (uint32_t stage = 0; stage < 2; stage++) {
+        for (uint8_t i = 0; i < stages[stage]->sampler_count; i++) {
+            stub_push_sampler(rec, stages[stage]->sampler_hashes[i]);
+        }
+    }
+    return slot;
 }
 
-void nt_gfx_backend_destroy_program(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
+    if (backend_handle == 0) {
+        return;
+    }
+    NT_ASSERT(backend_handle <= s_stub_max_programs && "destroy_program: handle out of range");
+    memset(&s_stub_program_table[backend_handle], 0, sizeof(s_stub_program_table[backend_handle]));
+}
 
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
 #ifdef NT_TEST_ACCESS
@@ -624,6 +800,14 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 }
 
 bool nt_gfx_backend_recreate_all_resources(void) {
+    /* The front-end drops every stage and program handle on loss without a
+     * destroy call, so the tables are released here, as in the GL backend. */
+    if (s_stub_shaders) {
+        memset(s_stub_shaders, 0, ((size_t)s_stub_max_shaders + 1U) * sizeof(nt_gfx_stub_program_t));
+    }
+    if (s_stub_program_table) {
+        memset(s_stub_program_table, 0, ((size_t)s_stub_max_programs + 1U) * sizeof(nt_gfx_stub_program_t));
+    }
 #ifdef NT_TEST_ACCESS
     s_stub_backend_restore_count++;
     if (s_stub_fail_next_backend_restore) {

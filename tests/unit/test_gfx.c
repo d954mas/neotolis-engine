@@ -521,6 +521,57 @@ void test_gfx_two_pipelines_share_one_program(void) {
     nt_gfx_destroy_program(prog);
 }
 
+/* ---- Program-owned sampler units ---- */
+
+static nt_program_t make_sampler_program(const char *fragment_source) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    return prog;
+}
+
+void test_gfx_sampler_units_follow_declaration_order_per_program(void) {
+    nt_program_t first = make_sampler_program("uniform sampler2D u_a;\nuniform usampler2D u_b;\n");
+    nt_program_t second = make_sampler_program("uniform sampler2D u_b;\n");
+
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(first));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_missing")));
+
+    /* The second program's table is its own: same name, its own unit. */
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(second));
+
+    nt_gfx_destroy_program(second);
+    nt_gfx_destroy_program(first);
+}
+
+void test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table(void) {
+    nt_program_t old = make_sampler_program("uniform sampler2D u_a;\nuniform sampler2D u_b;\n");
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(old));
+    nt_gfx_destroy_program(old);
+
+    nt_program_t fresh = make_sampler_program("uniform sampler2D u_c;\n");
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_c")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(fresh));
+
+    nt_gfx_destroy_program(fresh);
+}
+
+void test_gfx_sampler_array_declarations_expand_per_element(void) {
+    nt_program_t prog = make_sampler_program("uniform sampler2D u_arr[2];\nuniform sampler2DShadow u_shadow;\n");
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")));
+    TEST_ASSERT_EQUAL_INT(2, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+    nt_gfx_destroy_program(prog);
+}
+
 /* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
 
 /* Games clear their handles on context loss and destroy them again at shutdown,
@@ -2248,6 +2299,9 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_asserts_unready_program);
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
+    RUN_TEST(test_gfx_sampler_units_follow_declaration_order_per_program);
+    RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
+    RUN_TEST(test_gfx_sampler_array_declarations_expand_per_element);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);

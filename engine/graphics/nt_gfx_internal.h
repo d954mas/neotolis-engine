@@ -31,9 +31,16 @@ void nt_gfx_backend_end_pass(void);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Links the pair and caches its uniform locations. Returns 0 on link failure. */
+/* Links the pair, caches its uniform locations and fixes one texture unit per
+ * active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS).
+ * Returns 0 on link failure. */
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
+
+/* Sampler units are program state, written once at link. -1 = not a sampler of
+ * that program; the mask carries every unit the program samples. */
+int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash);
+uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 
 /* `slot` is the frontend pool slot: the pool owns allocation, the backend table
  * mirrors it 1:1 and the front-end addresses records by that slot -- returns
