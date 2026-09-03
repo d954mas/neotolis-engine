@@ -5,6 +5,7 @@
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "unity.h"
 
 #include <math.h>
@@ -57,7 +58,7 @@ void setUp(void) {
 void tearDown(void) {
     nt_assert_handler = NULL;
     nt_gfx_shutdown();
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 /* ---- Pool: alloc returns nonzero ---- */
@@ -291,7 +292,7 @@ static void bind_test_vertex_input(void) {
 /* ---- Program: no dedup — same pair links twice ---- */
 
 void test_gfx_make_program_does_not_dedup(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
@@ -302,7 +303,7 @@ void test_gfx_make_program_does_not_dedup(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, b.id);
     /* Distinct handles must also produce distinct backend programs. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_program_create_count());
 
     nt_gfx_destroy_program(a);
     nt_gfx_destroy_program(b);
@@ -376,12 +377,12 @@ void test_gfx_make_program_asserts_invalid_shader(void) {
 /* ---- Program: link failure asserts ---- */
 
 void test_gfx_make_program_asserts_on_link_failure(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
-    nt_gfx_stub_test_fail_next_program_create();
+    nt_gfx_fake_fail_next_program_create();
     EXPECT_ASSERT(nt_gfx_make_program(vs, fs));
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 /* ---- Program: a lost context yields an invalid handle, not an assert ---- */
@@ -392,9 +393,9 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
 
     /* No begin_frame in between: g_nt_gfx.context_lost is still false, so this
      * pins the live backend poll rather than the cached flag. */
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
 
     TEST_ASSERT_EQUAL_UINT32(0, prog.id);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
@@ -404,13 +405,13 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
  * handles are still live, but their GPU objects are gone until the owner
  * recreates them. That is recoverable, so linking rejects instead of trapping. */
 void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame(); /* wipes the backend tables, latches context_lost */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame(); /* recovery completes; the stages stay unready */
 
     /* Neither loss gate can explain the rejection below. */
@@ -419,7 +420,7 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(vs));
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(fs));
 
-    const uint32_t links_before = nt_gfx_stub_test_program_create_count();
+    const uint32_t links_before = nt_gfx_fake_program_create_count();
     nt_assert_handler = test_assert_handler;
     if (setjmp(s_assert_jmp) != 0) {
         nt_assert_handler = NULL;
@@ -431,12 +432,12 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
     TEST_ASSERT_EQUAL_UINT32(0, prog.id);
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
     /* Rejected before the backend, so no GL program leaked on the way out. */
-    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_fake_program_create_count());
     nt_gfx_end_frame();
 }
 
 void test_gfx_program_link_context_loss_releases_every_slot(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     nt_program_t programs[4];
@@ -444,32 +445,32 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
     nt_assert_handler = test_assert_handler;
     if (setjmp(s_assert_jmp) != 0) {
         nt_assert_handler = NULL;
-        nt_gfx_stub_test_set_context_lost(false);
+        nt_gfx_fake_set_context_lost(false);
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
-        nt_gfx_stub_test_set_context_lost(false);
-        nt_gfx_stub_test_lose_context_on_program_create();
+        nt_gfx_fake_set_context_lost(false);
+        nt_gfx_fake_lose_context_on_program_create();
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
         TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
         TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
         TEST_ASSERT_TRUE(nt_gfx_backend_is_context_lost());
-        TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_stub_test_program_create_count());
+        TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_fake_program_create_count());
     }
 
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     for (uint32_t i = 0; i < 4; i++) {
         programs[i] = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(programs[i]));
     }
     nt_assert_handler = NULL;
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_program_create_count());
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_TRUE(nt_gfx_program_valid(programs[i]));
         nt_gfx_destroy_program(programs[i]);
     }
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 /* ---- Program: context loss clears readiness, handles stay valid ---- */
@@ -477,9 +478,9 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
 void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
 
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
@@ -507,14 +508,14 @@ void test_gfx_register_global_block_after_program_is_allowed(void) {
 /* ---- Program: pipelines borrow it, they never link ---- */
 
 void test_gfx_two_pipelines_share_one_program(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     nt_pipeline_t a = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = false});
     nt_pipeline_t b = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .depth_test = true});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, a.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_program_create_count());
 
     nt_gfx_destroy_pipeline(a);
     nt_gfx_destroy_pipeline(b);
@@ -523,17 +524,18 @@ void test_gfx_two_pipelines_share_one_program(void) {
 
 /* ---- Program-owned sampler units ---- */
 
-static nt_program_t make_sampler_program(const char *fragment_source) {
+static nt_program_t make_sampler_program(const char *const *names, uint8_t count) {
+    nt_gfx_fake_set_samplers(names, count);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
     return prog;
 }
 
-void test_gfx_sampler_units_follow_declaration_order_per_program(void) {
-    nt_program_t first = make_sampler_program("uniform sampler2D u_a;\nuniform usampler2D u_b;\n");
-    nt_program_t second = make_sampler_program("uniform sampler2D u_b;\n");
+void test_gfx_sampler_queries_use_each_program_backend(void) {
+    nt_program_t first = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_program_t second = make_sampler_program((const char *const[]){"u_b"}, 1);
 
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_a")));
     TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_b")));
@@ -550,45 +552,16 @@ void test_gfx_sampler_units_follow_declaration_order_per_program(void) {
 }
 
 void test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table(void) {
-    nt_program_t old = make_sampler_program("uniform sampler2D u_a;\nuniform sampler2D u_b;\n");
+    nt_program_t old = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
     TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(old));
     nt_gfx_destroy_program(old);
 
-    nt_program_t fresh = make_sampler_program("uniform sampler2D u_c;\n");
+    nt_program_t fresh = make_sampler_program((const char *const[]){"u_c"}, 1);
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_c")));
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_a")));
     TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(fresh));
 
     nt_gfx_destroy_program(fresh);
-}
-
-void test_gfx_sampler_array_declarations_expand_per_element(void) {
-    nt_program_t prog = make_sampler_program("uniform sampler2D u_arr[2];\nuniform sampler2DShadow u_shadow;\n");
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")));
-    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")));
-    TEST_ASSERT_EQUAL_INT(2, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
-    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
-    nt_gfx_destroy_program(prog);
-}
-
-/* Only `uniform` declarations name units: a function parameter typed sampler2D
- * is not one. Whitespace around the array size and comma lists are legal GLSL. */
-void test_gfx_sampler_scan_reads_only_uniform_declarations(void) {
-    nt_program_t prog = make_sampler_program("uniform highp usampler2D u_band;\n"
-                                             "vec4 read_tex(sampler2D tex, vec2 uv) { return texture(tex, uv); }\n"
-                                             "uniform sampler2D u_arr [ 2 ], u_b;\n"
-                                             "uniform sampler2D a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x;\n"
-                                             "uniform vec4 u_color;\n");
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_band")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("tex")));
-    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")));
-    TEST_ASSERT_EQUAL_INT(2, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")));
-    TEST_ASSERT_EQUAL_INT(3, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b")));
-    TEST_ASSERT_EQUAL_INT(4, nt_gfx_program_sampler_unit(prog, nt_hash32_str("a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")));
-    TEST_ASSERT_EQUAL_UINT32(0x1FU, nt_gfx_program_sampler_mask(prog));
-    nt_gfx_destroy_program(prog);
 }
 
 /* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
@@ -616,25 +589,25 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 1;
     nt_gfx_init(&desc);
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     nt_program_t old = nt_gfx_make_program(vs, fs);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_TRUE(nt_gfx_program_valid(old));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(old));
 
     nt_gfx_destroy_program(old);
     nt_shader_t pending_vs = make_test_vs();
     nt_shader_t pending_fs = make_test_fs();
-    uint32_t links_before = nt_gfx_stub_test_program_create_count();
+    uint32_t links_before = nt_gfx_fake_program_create_count();
     nt_program_t pending = nt_gfx_make_program(pending_vs, pending_fs);
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_EQUAL_UINT32(0, pending.id);
-    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_stub_test_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_fake_program_create_count());
     nt_gfx_destroy_shader(pending_vs);
     nt_gfx_destroy_shader(pending_fs);
 
@@ -735,10 +708,10 @@ void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipel
 void test_gfx_pipeline_context_lost_returns_invalid(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
 
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
@@ -756,9 +729,9 @@ void test_gfx_pipeline_pool_full_asserts(void) {
 /* A backend failure is not a developer error: it stays an invalid handle so
  * callers can retry on a later frame. */
 void test_gfx_pipeline_backend_failure_returns_invalid(void) {
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_gfx_fake_fail_next_pipeline_create();
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_EQUAL_UINT32(0, pip.id);
@@ -767,7 +740,7 @@ void test_gfx_pipeline_backend_failure_returns_invalid(void) {
     nt_pipeline_t retry = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, retry.id);
     nt_gfx_destroy_pipeline(retry);
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
@@ -1893,9 +1866,9 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame(); /* latches the loss, frees pipeline slots */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip));
@@ -1928,9 +1901,9 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, ubo.id);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame(); /* latches the loss, zeroes every backend record */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -1949,19 +1922,19 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(tex));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0); /* logs, no trap */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     /* The sampler bind rides on the texture bind: skipping one skips both. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
     nt_gfx_end_frame();
 }
 
@@ -2003,15 +1976,15 @@ void test_gfx_update_texture_on_husk_asserts(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
 
     EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_texture_count());
     nt_gfx_end_frame();
 }
 
@@ -2024,9 +1997,9 @@ void test_gfx_update_buffer_on_husk_asserts(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2043,9 +2016,9 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2067,9 +2040,9 @@ void test_gfx_restored_frame_rejects_draws(void) {
 
     /* Lose it, then let begin_frame see the context back: that frame is the
      * restored one and carries the flag. */
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
 
@@ -2144,7 +2117,7 @@ void test_gfx_frame_draw_calls(void) {
     /* Separate draw-call counter for nt_debug_overlay consumption.
      * Verifies counter starts at 0, increments by 1 per draw API, resets on begin_frame. */
 
-    /* Minimal pipeline so draws have something bound (stub backend accepts any handle). */
+    /* Minimal pipeline so draws have something bound (test backend accepts any handle). */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -2199,25 +2172,25 @@ void test_gfx_uniform_records_hash_and_value(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_stub_test_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT(3, nt_gfx_stub_test_uniform_int_value_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_fake_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_INT(3, nt_gfx_fake_uniform_int_value_at(0));
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_stub_test_uniform_vec4_hash_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_tint").value, nt_gfx_fake_uniform_vec4_hash_at(0));
     /* Routed to the bound pipeline's program, not to 0. Which program it is
      * needs distinct GL ids -- test_nt_gfx_bind_mirrors_native covers that. */
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_uniform_program());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_uniform_program());
 
     /* UNITY_EXCLUDE_FLOAT: compare the exact small integers as ints. */
     float recorded[4];
-    nt_gfx_stub_test_uniform_vec4_value_at(0, recorded);
+    nt_gfx_fake_uniform_vec4_value_at(0, recorded);
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_INT32((int32_t)vec[i], (int32_t)recorded[i]);
     }
@@ -2318,10 +2291,8 @@ int main(void) {
     RUN_TEST(test_gfx_double_destroy_buffer);
     RUN_TEST(test_gfx_pipeline_asserts_unready_program);
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
-    RUN_TEST(test_gfx_sampler_units_follow_declaration_order_per_program);
+    RUN_TEST(test_gfx_sampler_queries_use_each_program_backend);
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
-    RUN_TEST(test_gfx_sampler_array_declarations_expand_per_element);
-    RUN_TEST(test_gfx_sampler_scan_reads_only_uniform_declarations);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);

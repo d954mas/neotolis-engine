@@ -1,3 +1,4 @@
+#include "test_helpers/nt_gfx_fake.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -230,10 +231,10 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
         programs[type] = s_programs[type].program;
     }
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     drop_programs();

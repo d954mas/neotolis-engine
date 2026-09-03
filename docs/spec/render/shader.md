@@ -76,9 +76,9 @@ Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
 active uniform by type — `sampler2D`, `sampler2DShadow`, `isampler2D` and
 `usampler2D` are supported; the other WebGL2 sampler types (cube, 3D, array, and
-their integer forms) assert at link. The stub backend scans stage declarations
-instead of reflecting, so it rejects the same spellings but cannot model
-inactive-uniform elimination and is blind to comments. Each
+their integer forms) assert at link. The production gfx stub neither compiles
+nor inspects shader sources and creates no programs; see
+[stub semantics](../core/module-layout.md#stub-semantics-and-capability-queries). Each
 sampler element, array elements included, takes one unit, numbered 0..n-1 in
 reflection order. A program may not use more than `NT_GFX_MAX_TEXTURE_SLOTS`
 sampler units (asserted at link). The backend writes the units once with

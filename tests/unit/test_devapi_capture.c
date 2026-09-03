@@ -1,5 +1,5 @@
 /* L2 capture group via submit() (no socket): bot-param validation -> bad_params (never assert), the
-   defer path (submit -> NULL), and seam-driven encode against nt_gfx_stub (no GL). Gated on
+   defer path (submit -> NULL), and seam-driven encode against nt_gfx_fake (no GL). Gated on
    NT_DEVAPI_GROUP_CAPTURE so the OFF mirror links a stub main (zero release delta). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */

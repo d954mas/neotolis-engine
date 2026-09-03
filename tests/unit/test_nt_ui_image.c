@@ -1,4 +1,4 @@
-/* Unit tests for nt_ui_image. Walker fixture with stub backend; death tests
+/* Unit tests for nt_ui_image. Walker fixture with test backend; death tests
  * gated to NT_ASSERT_FULL. */
 
 #include <stdalign.h>

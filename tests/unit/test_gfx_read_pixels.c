@@ -1,5 +1,5 @@
 /* nt_gfx_read_pixels contract — cap-reject / top-left orientation /
- * channel layout / bad-size reject. Links nt_gfx_stub (deterministic synthetic
+ * channel layout / bad-size reject. Links nt_gfx_fake (deterministic synthetic
  * gradient, no GL context — the only L1 readback layer CTest can prove headless). */
 
 #include "graphics/nt_gfx.h"
@@ -11,7 +11,7 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-/* Stub gradient (see stub/nt_gfx_stub.c): at GL row r, col c (bottom-left),
+/* Fake gradient (see test_helpers/nt_gfx_fake.c): at GL row r, col c (bottom-left),
  *   R = r & 0xFF, G = c & 0xFF, B = 0x40, A = 0xFF.
  * After the shared-layer Y-flip, out row 0 must carry GL row (h-1). */
 

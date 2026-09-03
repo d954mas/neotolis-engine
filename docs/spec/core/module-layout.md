@@ -149,6 +149,28 @@ gate-enforced instead of buried in per-TU macros.
 
 A stub is a Null Object: the API is always present, the impl is inert.
 
+`nt_gfx_stub` implements the public `nt_gfx.h` interface directly. It does not
+link the shared graphics implementation or a GPU backend, allocate resource
+pools, parse shaders, or record draw state. Creation and activation return
+invalid handles, validity/readiness queries return false, and draw/state calls
+do nothing. Capabilities, capacities and statistics remain zero. Data views are
+empty; texture-size and timer outputs are zeroed. Readback returns false without
+writing pixels. Sampler lookup returns -1 and its mask is zero.
+
+A headless executable owns the decision to omit graphics initialization and
+renderer calls while running its gameplay systems. Linking the stub does not
+make a renderer's GPU-resource preconditions valid. The stub also works without
+initialization; its init/shutdown calls clear the public gfx state without
+creating resources.
+
+Tests that need live logical graphics resources select `nt_gfx_fake`, defined
+only under `tests/`, instead. It combines the shared gfx implementation with
+controlled backend responses, observations and failure injection. Those test
+facilities are not part of the production stub. The test backend receives
+sampler names explicitly from its fixture and does not parse GLSL. Shader
+compilation, reflection and pixel correctness are checked against the real GL
+backend.
+
 A no-op / empty stub is safe ONLY when the caller already treats "nothing
 happened" as a legitimate runtime state, not an error:
 

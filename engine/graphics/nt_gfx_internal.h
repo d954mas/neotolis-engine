@@ -84,7 +84,7 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 /* Scissor and viewport (see nt_gfx.h for convention).
  * Backend implementations:
  *   - gl/nt_gfx_gl.c: glScissor + glEnable/glDisable(GL_SCISSOR_TEST) + glViewport
- *   - stub/nt_gfx_stub.c: no-op (state cached in shared nt_gfx.c for test probes)
+ *   - test backend: no-op (state cached in shared nt_gfx.c for test probes)
  * One owner per state: the scissor-enable dedup is front-end (nt_gfx.c mirrors it),
  * the viewport and clear-value dedup is the backend GL cache.
  */
@@ -119,7 +119,7 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
                                                   nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v,
                                                   uint32_t transcode_target /* nt_basisu_format_t cast to uint32_t */);
 
-/* GPU caps detection — implemented per-backend (gl/nt_gfx_gl_ctx_*.c, stub). */
+/* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 
 // #region GPU timer segments
@@ -136,60 +136,6 @@ bool nt_gfx_backend_is_gpu_timing_supported(void);
  * delete them (context is gone). Next begin_segment lazy-allocates fresh. */
 void nt_gfx_backend_drop_timer_segments(void);
 // #endregion
-
-#ifdef NT_TEST_ACCESS
-/* Stub-only test hooks: inspect and reset bind_sampler observations. */
-uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
-uint32_t nt_gfx_stub_test_bind_sampler_count(void);
-uint32_t nt_gfx_stub_test_set_scissor_enabled_count(void);
-uint32_t nt_gfx_stub_test_last_pass_target(void);
-uint32_t nt_gfx_stub_test_pass_target_count(void);
-uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index);
-uint32_t nt_gfx_stub_test_bound_texture_count(void);
-uint32_t nt_gfx_stub_test_bound_texture_at(uint32_t index);
-uint32_t nt_gfx_stub_test_bound_texture_slot_at(uint32_t index);
-uint32_t nt_gfx_stub_test_render_target_create_count(void);
-uint32_t nt_gfx_stub_test_render_target_resize_count(void);
-uint32_t nt_gfx_stub_test_render_target_destroy_count(void);
-uint32_t nt_gfx_stub_test_texture_create_count(void);
-uint32_t nt_gfx_stub_test_program_create_count(void);
-uint32_t nt_gfx_stub_test_pipeline_create_count(void);
-uint32_t nt_gfx_stub_test_bind_pipeline_count(void);
-uint32_t nt_gfx_stub_test_uniform_int_count(void);
-uint32_t nt_gfx_stub_test_uniform_int_hash_at(uint32_t index);
-int nt_gfx_stub_test_uniform_int_value_at(uint32_t index);
-uint32_t nt_gfx_stub_test_uniform_vec4_count(void);
-uint32_t nt_gfx_stub_test_uniform_vec4_hash_at(uint32_t index);
-void nt_gfx_stub_test_uniform_vec4_value_at(uint32_t index, float out[4]);
-void nt_gfx_stub_test_fail_next_program_create(void);
-void nt_gfx_stub_test_lose_context_on_program_create(void);
-void nt_gfx_stub_test_fail_next_pipeline_create(void);
-uint16_t nt_gfx_stub_test_last_render_target_width(void);
-uint16_t nt_gfx_stub_test_last_render_target_height(void);
-nt_render_target_depth_t nt_gfx_stub_test_last_render_target_depth(void);
-nt_texture_desc_t nt_gfx_stub_test_last_texture_desc(void);
-uint32_t nt_gfx_stub_test_last_depth_texture_backend(void);
-uint32_t nt_gfx_stub_test_update_texture_count(void);
-uint32_t nt_gfx_stub_test_update_buffer_count(void);
-uint32_t nt_gfx_stub_test_backend_restore_count(void);
-uint32_t nt_gfx_stub_test_gpu_caps_probe_count(void);
-void nt_gfx_stub_test_fail_texture_creates(uint8_t mask);
-void nt_gfx_stub_test_fail_buffer_creates(uint8_t mask);
-void nt_gfx_stub_test_fail_next_backend_restore(void);
-void nt_gfx_stub_test_fail_next_render_target_create(void);
-void nt_gfx_stub_test_fail_next_render_target_resize(void);
-void nt_gfx_stub_test_set_context_lost(bool lost);
-uint32_t nt_gfx_stub_test_last_update_buffer_offset(void);
-uint32_t nt_gfx_stub_test_last_instance_offset(void);
-uint32_t nt_gfx_stub_test_last_instance_vertex_input(void);
-nt_blend_state_t nt_gfx_stub_test_last_pipeline_blend(void);
-uint32_t nt_gfx_stub_test_vertex_input_create_count(void);
-uint32_t nt_gfx_stub_test_bind_vertex_input_count(void);
-uint32_t nt_gfx_stub_test_last_bound_vertex_input(void);
-uint32_t nt_gfx_stub_test_last_uniform_program(void);
-void nt_gfx_stub_test_fail_next_vertex_input_create(void);
-void nt_gfx_stub_test_reset(void);
-#endif
 
 #ifdef NT_TEST_ACCESS
 /* GL-backend-only counters (defined in gl/nt_gfx_gl.c; link only from tests
@@ -211,10 +157,7 @@ uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot);
 #endif
 
 #ifdef NT_TEST_ACCESS
-/* Real-backend test hook: inspect a sampler's GPU backend handle from the
- * dedup cache. Distinct from STUB_TEST_ACCESS — works against the real GL
- * (or any non-stub) backend, so a test running with the real backend can
- * still reach this without enabling stub-only state. */
+/* Backend handles owned by the frontend caches. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);

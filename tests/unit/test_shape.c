@@ -1,3 +1,4 @@
+#include "test_helpers/nt_gfx_fake.h"
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
@@ -12,7 +13,7 @@ static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <=
 void setUp(void) {
     nt_gfx_init(
         &(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = 32, .max_render_targets = 16});
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
     nt_shape_renderer_init();
     /* Enter frame/pass so flush->draw_indexed doesn't assert */
     nt_gfx_begin_frame();
@@ -419,10 +420,10 @@ void test_shape_failed_restore_flush_discards_staging(void) {
     const float c[3] = {0, 1, 0};
     const float size[3] = {1, 2, 3};
     const float color[4] = {1, 1, 1, 1};
-    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_gfx_fake_fail_next_pipeline_create();
     restore_shape_between_frames();
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 
     nt_shape_renderer_rect(a, size, color);
     nt_shape_renderer_cube(a, size, color);
@@ -435,7 +436,7 @@ void test_shape_failed_restore_flush_discards_staging(void) {
     nt_shape_renderer_flush();
 
     assert_shape_staging_empty();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
 }
 
@@ -447,7 +448,7 @@ void test_shape_failed_restore_preserves_settings(void) {
         nt_shape_renderer_set_cam_pos(cam_pos);
         nt_shape_renderer_set_line_width(3);
         nt_shape_renderer_set_depth(depth != 0);
-        nt_gfx_stub_test_fail_next_pipeline_create();
+        nt_gfx_fake_fail_next_pipeline_create();
         for (int attempt = 0; attempt < 2; attempt++) {
             restore_shape_between_frames();
             TEST_ASSERT_EQUAL_INT(attempt != 0, nt_shape_renderer_test_initialized());
@@ -466,14 +467,14 @@ void test_shape_restore_on_inactive_renderer_does_nothing(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_shape_renderer_shutdown();
-    const uint32_t programs = nt_gfx_stub_test_program_create_count();
-    const uint32_t pipelines = nt_gfx_stub_test_pipeline_create_count();
+    const uint32_t programs = nt_gfx_fake_program_create_count();
+    const uint32_t pipelines = nt_gfx_fake_pipeline_create_count();
 
     nt_shape_renderer_restore_gpu();
 
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
-    TEST_ASSERT_EQUAL_UINT32(programs, nt_gfx_stub_test_program_create_count());
-    TEST_ASSERT_EQUAL_UINT32(pipelines, nt_gfx_stub_test_pipeline_create_count());
+    TEST_ASSERT_EQUAL_UINT32(programs, nt_gfx_fake_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(pipelines, nt_gfx_fake_pipeline_create_count());
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
@@ -508,10 +509,10 @@ static void emit_test_instance(int type) {
 }
 
 void test_shape_failed_restore_instance_staging_stays_bounded(void) {
-    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_gfx_fake_fail_next_pipeline_create();
     restore_shape_between_frames();
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 
     uint32_t capacity = nt_shape_renderer_test_instance_capacity();
     for (int type = NT_SHAPE_TEST_RECT; type <= NT_SHAPE_TEST_CAPSULE; type++) {
@@ -523,7 +524,7 @@ void test_shape_failed_restore_instance_staging_stays_bounded(void) {
         nt_shape_renderer_flush();
         assert_shape_staging_empty();
     }
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
 }
 
@@ -531,10 +532,10 @@ void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
     const float positions[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     const nt_shape_index_t indices[] = {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2};
     const float color[4] = {1, 1, 1, 1};
-    nt_gfx_stub_test_fail_next_pipeline_create();
+    nt_gfx_fake_fail_next_pipeline_create();
     restore_shape_between_frames();
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 
     uint32_t triangle_capacity = (NT_SHAPE_RENDERER_MAX_VERTICES < NT_SHAPE_RENDERER_MAX_INDICES ? NT_SHAPE_RENDERER_MAX_VERTICES : NT_SHAPE_RENDERER_MAX_INDICES) / 3;
     for (uint32_t i = 0; i < triangle_capacity * 3 + 1; i++) {
@@ -568,7 +569,7 @@ void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
     nt_shape_renderer_flush();
     assert_shape_staging_empty();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
 }
 

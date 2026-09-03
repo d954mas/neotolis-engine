@@ -1069,6 +1069,34 @@ static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
     TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
 }
 
+static void test_reflection_reports_active_uniforms_with_glsl_declarations(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "#define COUNT 2\n"
+                                         "// uniform samplerCube u_comment;\n"
+                                         "uniform sampler2D u_unused;\n"
+                                         "uniform sampler2D u_arr [ COUNT ], u_b;\n"
+                                         "uniform sampler2D a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x;\n"
+                                         "vec4 read_tex(sampler2D tex, vec2 uv) { return texture(tex, uv); }\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = read_tex(u_arr[0], vec2(0.5)) + read_tex(u_arr[1], vec2(0.5))\n"
+                                         "    + read_tex(u_b, vec2(0.5))\n"
+                                         "    + read_tex(a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x, vec2(0.5)); }\n";
+    nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+    const int units[] = {
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b")),
+        nt_gfx_program_sampler_unit(prog, nt_hash32_str("a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x")),
+    };
+    assert_distinct_units_in_range(units, 4);
+    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_program_sampler_mask(prog));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_comment")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_unused")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("tex")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
+}
+
 static nt_texture_t make_unit_test_texture(const uint8_t rgba[4]) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 1,
@@ -1340,6 +1368,7 @@ int main(void) {
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
     RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
+    RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);
     RUN_TEST(test_set_uniform_int_on_a_sampler_asserts);

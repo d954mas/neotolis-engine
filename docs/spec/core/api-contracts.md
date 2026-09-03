@@ -118,6 +118,12 @@ unregister", "until replaced", "until context destroy", "until shutdown", or
 
 ## Handles
 
+The contracts below describe the real implementation. `nt_gfx_stub` is the
+explicit no-graphics composition: creation/activation returns invalid handles,
+queries return empty results, and commands are inert. It has no GPU resources
+or shader interface to validate. Headless applications omit renderer calls;
+see [stub semantics](module-layout.md#stub-semantics-and-capability-queries).
+
 Generational handles are values, not owned pointers. Passing a handle does not
 transfer ownership of the backing resource. An API that destroys, unregisters,
 invalidates, or releases backing state must say so explicitly.

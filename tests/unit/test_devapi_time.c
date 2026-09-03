@@ -187,7 +187,7 @@ static void test_render_info_reflects_flag(void) {
     root = parse_ok(nt_devapi_submit("{\"method\":\"render.info\"}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "enabled")));
-    /* no draw happened in this headless test -> draw_calls == 0 (nt_gfx_stub returns 0). */
+    /* no draw happened in this headless test -> draw_calls == 0 (nt_gfx_fake returns 0). */
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(result, "draw_calls")->valueint);
     cJSON_Delete(root);
 }

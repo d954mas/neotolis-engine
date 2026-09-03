@@ -11,8 +11,17 @@ if(NOT EMSCRIPTEN)
     # Tests-wide define + engine libs that have a test surface. New module
     # with test surface? Add its target name to NT_TEST_ACCESS_LIBS below.
     add_compile_definitions(NT_TEST_ACCESS)
+    add_library(nt_gfx_fake STATIC
+        ../engine/graphics/nt_gfx.c
+        unit/test_helpers/nt_gfx_fake.c
+    )
+    target_include_directories(nt_gfx_fake PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_link_libraries(nt_gfx_fake PUBLIC nt_core nt_pool nt_hash nt_gfx_interface nt_log_interface nt_basisu_transcoder_interface nt_meshwire_interface)
+    target_compile_definitions(nt_gfx_fake PRIVATE NT_LOG_DOMAIN_DEFAULT="gfx_fake")
+    nt_set_warning_flags(nt_gfx_fake)
+    nt_set_sanitizer_flags(nt_gfx_fake)
     set(NT_TEST_ACCESS_LIBS
-        nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
+        nt_atlas nt_ui nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
@@ -244,9 +253,13 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input_char COMMAND test_input_char)
 
+    add_executable(test_gfx_stub unit/test_gfx_stub.c)
+    target_link_libraries(test_gfx_stub PRIVATE nt_gfx_stub unity)
+    nt_setup_test_target(test_gfx_stub)
+
     # --- Graphics module tests ---
     add_executable(test_gfx unit/test_gfx.c)
-    target_link_libraries(test_gfx PRIVATE nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
+    target_link_libraries(test_gfx PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
     nt_set_warning_flags(test_gfx)
     nt_set_sanitizer_flags(test_gfx)
     set_target_properties(test_gfx PROPERTIES
@@ -256,7 +269,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Vertex-input object tests (lifecycle, cascade, bind mirrors) ---
     add_executable(test_gfx_vertex_input unit/test_gfx_vertex_input.c)
-    target_link_libraries(test_gfx_vertex_input PRIVATE nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
+    target_link_libraries(test_gfx_vertex_input PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
     nt_set_warning_flags(test_gfx_vertex_input)
     nt_set_sanitizer_flags(test_gfx_vertex_input)
     set_target_properties(test_gfx_vertex_input PROPERTIES
@@ -265,10 +278,10 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_gfx_vertex_input COMMAND test_gfx_vertex_input)
 
     # --- Graphics readback tests (nt_gfx_read_pixels) ---
-    # nt_gfx_stub bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
+    # nt_gfx_fake bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
     # with the synthetic readback backend, so it alone proves the readback contract headless.
     add_executable(test_gfx_read_pixels unit/test_gfx_read_pixels.c)
-    target_link_libraries(test_gfx_read_pixels PRIVATE nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_gfx_read_pixels PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
     nt_set_warning_flags(test_gfx_read_pixels)
     nt_set_sanitizer_flags(test_gfx_read_pixels)
     set_target_properties(test_gfx_read_pixels PROPERTIES
@@ -278,7 +291,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Graphics render-target tests ---
     add_executable(test_nt_gfx_render_target unit/test_nt_gfx_render_target.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_nt_gfx_render_target PRIVATE nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_nt_gfx_render_target PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
     target_include_directories(test_nt_gfx_render_target PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_gfx_render_target PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_gfx_render_target WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -306,7 +319,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Post-FX blur tests ---
     add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
     target_include_directories(test_nt_postfx_blur PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_postfx_blur PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_postfx_blur WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -330,14 +343,14 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
     target_link_libraries(test_nt_gfx_scissor PRIVATE
         nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_gfx_stub nt_basisu_transcoder_stub nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_gfx_fake nt_basisu_transcoder_stub nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_nt_gfx_scissor PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
-    target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
     nt_set_warning_flags(test_shape)
     nt_set_sanitizer_flags(test_shape)
     set_target_properties(test_shape PROPERTIES
@@ -402,7 +415,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Render items tests ---
     add_executable(test_render_items unit/test_render_items.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_stub nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
     target_include_directories(test_render_items PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_render_items)
     nt_set_sanitizer_flags(test_render_items)
@@ -418,7 +431,7 @@ if(NOT EMSCRIPTEN)
         nt_mesh_renderer nt_app_stub nt_input_stub nt_window_stub nt_resource nt_material
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_render
         nt_hash nt_math nt_time nt_shared nt_core
-        nt_gfx_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     nt_setup_test_target(test_sponza_program_assignment)
 
@@ -434,7 +447,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c)
-    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log stb_truetype unity nt_meshwire_stub)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS NT_LILITA_TTF="${CMAKE_SOURCE_DIR}/assets/fonts/LilitaOne-RussianChineseKo.ttf")
     nt_setup_test_target(test_font)
 
@@ -442,7 +455,7 @@ if(NOT EMSCRIPTEN)
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
-    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity nt_meshwire_stub)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
@@ -457,7 +470,7 @@ if(NOT EMSCRIPTEN)
     # nt_assert_trap.c backs the dead-program death-test; needs unit/ on the include
     # path so it resolves "test_helpers/nt_assert_trap.h".
     add_executable(test_text_renderer unit/test_text_renderer.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub)
     target_include_directories(test_text_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_text_renderer)
@@ -698,7 +711,7 @@ if(NOT EMSCRIPTEN)
                 $<TARGET_NAME_IF_EXISTS:nt_devapi_capture>
                 $<TARGET_NAME_IF_EXISTS:nt_devapi_discovery>
                 nt_devapi cjson
-                nt_ui_stub nt_window_stub nt_app_stub nt_gfx_stub nt_basisu_transcoder_stub nt_input_stub
+                nt_ui_stub nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub
                 ${_disc_group_provider_libs}
                 nt_core nt_log_stub unity nt_meshwire_stub)
             target_compile_definitions(test_devapi_discovery PRIVATE
@@ -709,11 +722,11 @@ if(NOT EMSCRIPTEN)
 
         # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
         # bad_params + render.info + frame.current + yield-after-N-sim-advances + end-to-end step drain.
-        # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_stub
+        # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_fake
         # (nt_gfx_get_frame_draw_calls -> 0 for render.info; the light gfx stub, no font/material chain).
         if(NT_DEVAPI_GROUP_TIME)
             add_executable(test_devapi_time unit/test_devapi_time.c)
-            target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_basisu_transcoder_stub nt_core nt_log_stub unity nt_meshwire_stub)
+            target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_log_stub unity nt_meshwire_stub)
             target_compile_definitions(test_devapi_time PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
@@ -736,7 +749,7 @@ if(NOT EMSCRIPTEN)
 
         # L2 obs group via submit(): log.*/perf.*/entity.*/resource.* immediate reads. Links the real
         # obs-referenced L1 libs (the dev ring + metrics collector + overlay + entity/components +
-        # resource) so the handlers read live state; nt_gfx_stub satisfies the overlay/resource gfx
+        # resource) so the handlers read live state; nt_gfx_fake satisfies the overlay/resource gfx
         # symbols, nt_http_stub/nt_fs_stub the resource loader. Consumer-before-provider link order:
         # nt_devapi first, the obs libs next, nt_core / nt_log trailing last (GNU-ld single pass).
         # perf.* reads nt_metrics directly now (no overlay), and the test feeds nt_metrics via the
@@ -750,7 +763,7 @@ if(NOT EMSCRIPTEN)
                 nt_log_ring nt_metrics
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_comp_storage
                 nt_material nt_pool nt_resource nt_math nt_shared
-                nt_gfx_stub nt_basisu_transcoder_stub nt_input_stub nt_http_stub nt_fs_stub
+                nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log nt_hash unity
              nt_meshwire_stub)
             target_compile_definitions(test_devapi_obs PRIVATE
@@ -769,7 +782,7 @@ if(NOT EMSCRIPTEN)
                 nt_devapi_entity_write nt_devapi cjson nt_window_stub nt_app_stub
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
                 nt_resource nt_math nt_shared
-                nt_gfx_stub nt_basisu_transcoder_stub nt_input_stub nt_http_stub nt_fs_stub
+                nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log_stub nt_hash unity
              nt_meshwire_stub)
             target_compile_definitions(test_devapi_entity_write PRIVATE
@@ -778,16 +791,16 @@ if(NOT EMSCRIPTEN)
             nt_setup_test_target(test_devapi_entity_write)
         endif()
 
-        # capture group (capture.frame / capture.region) via submit(): the synthetic nt_gfx_stub
+        # capture group (capture.frame / capture.region) via submit(): the synthetic nt_gfx_fake
         # readback feeds the real strip+box+fpng+base64 chain when the seam is driven manually (no GL).
-        # Consumer-before-provider GNU-ld order: nt_devapi first, nt_gfx_stub/nt_fpng next, core/log last.
+        # Consumer-before-provider GNU-ld order: nt_devapi first, nt_gfx_fake/nt_fpng next, core/log last.
         # The TU is #if-gated on NT_DEVAPI_GROUP_CAPTURE with an #else stub-main, so a group-absent
         # compile still links clean.
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_executable(test_devapi_capture unit/test_devapi_capture.c)
             target_link_libraries(test_devapi_capture PRIVATE
                 nt_devapi_capture nt_devapi cjson nt_window_stub nt_app_stub
-                nt_gfx_stub nt_basisu_transcoder_stub nt_fpng nt_core nt_log_stub unity
+                nt_gfx_fake nt_basisu_transcoder_stub nt_fpng nt_core nt_log_stub unity
              nt_meshwire_stub)
             target_compile_definitions(test_devapi_capture PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
@@ -1034,7 +1047,7 @@ if(NOT EMSCRIPTEN)
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_mesh_renderer PRIVATE
-        nt_mesh_renderer nt_render nt_gfx_stub nt_basisu_transcoder_stub
+        nt_mesh_renderer nt_render nt_gfx_fake nt_basisu_transcoder_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
         nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity
      nt_meshwire_stub)
@@ -1052,7 +1065,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_sprite_renderer PRIVATE
         nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp
         nt_drawable_comp nt_material_comp nt_material nt_render
-        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub nt_basisu_transcoder_stub nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_fake nt_basisu_transcoder_stub nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_sprite_renderer PRIVATE
         _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
@@ -1076,7 +1089,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_ui_element_data PRIVATE
         nt_ui nt_mem_scratch nt_core
-        nt_gfx_stub nt_basisu_transcoder_stub nt_input_stub nt_resource nt_font nt_material nt_atlas
+        nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub nt_resource nt_font nt_material nt_atlas
         nt_sprite_renderer nt_text_renderer nt_hash nt_pool
         nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
@@ -1090,7 +1103,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_debug_overlay unit/test_debug_overlay.c)
     target_link_libraries(test_debug_overlay PRIVATE
         nt_debug_overlay nt_metrics nt_text_renderer nt_font nt_material nt_resource
-        nt_gfx_stub nt_basisu_transcoder_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_gfx_fake nt_basisu_transcoder_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_debug_overlay PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_debug_overlay)
@@ -1124,7 +1137,7 @@ if(NOT EMSCRIPTEN)
     # under the unified NT_TEST_ACCESS define.
     target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_basisu_transcoder_stub nt_core nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_sprite_renderer_emit_region)
@@ -1134,7 +1147,7 @@ if(NOT EMSCRIPTEN)
     # walker tests that publish draw_calls / element_count into nt_metrics and read the HUD back.
     set(_nt_ui_test_libs
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_metrics nt_gfx_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_core
+        nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_metrics nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_core
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
@@ -1160,7 +1173,7 @@ if(NOT EMSCRIPTEN)
             nt_devapi_net nt_devapi_ui nt_devapi_input nt_devapi cjson
             nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
             nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay
-            nt_window_stub nt_app_stub nt_gfx_stub nt_basisu_transcoder_stub nt_input_stub
+            nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub
             nt_core nt_http_stub nt_fs_stub nt_log_stub unity
          nt_meshwire_stub)
         target_compile_definitions(test_devapi_ui PRIVATE
