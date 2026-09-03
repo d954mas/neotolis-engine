@@ -1129,9 +1129,9 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     assert_rgba(pixel, 1, 255, 255, 0, 255);
 }
 
-/* Two materials on one program name the same samplers in opposite slot order: the unit
- * comes from the name, so each draw samples its own textures. */
-static void test_opposite_slot_orders_on_one_program_sample_their_own_textures(void) {
+/* Two draws through one program bind at the units it reports: rebinding one unit
+ * between them leaves the other's texture alone. */
+static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     static const char *vertex_source = "out vec2 v_uv;\n"
                                        "void main() {\n"
                                        "    float x = float((gl_VertexID << 1) & 2);\n"
@@ -1166,14 +1166,13 @@ static void test_opposite_slot_orders_on_one_program_sample_their_own_textures(v
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
 
-    /* Material one: slot 0 = u_a (red), slot 1 = u_b (green). */
+    /* First draw: red through u_a, green through u_b. */
     nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_a);
     nt_gfx_bind_texture(tex_green, NT_SAMPLER_INVALID, (uint32_t)unit_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
 
-    /* Material two lists the same names in the other order and puts red in both slots:
-     * only u_b's unit changes, and u_a must keep reading red (red has no green). */
+    /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
     nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
@@ -1200,6 +1199,7 @@ static void test_set_uniform_int_on_a_sampler_asserts(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1); /* a plain int still writes */
     NT_TEST_EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_a"), 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program_sampler_unit"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -1341,7 +1341,7 @@ int main(void) {
     RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
-    RUN_TEST(test_opposite_slot_orders_on_one_program_sample_their_own_textures);
+    RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);
     RUN_TEST(test_set_uniform_int_on_a_sampler_asserts);
     RUN_TEST(test_linking_a_program_keeps_the_bound_pipelines_program_current);
     RUN_TEST(test_missing_active_uniform_count_releases_program_for_retry);

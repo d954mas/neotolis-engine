@@ -12,7 +12,8 @@
 // #region sampler units
 /* No reflection here, so sampler units come from a scan of the stage sources at
  * shader creation, merged VS-then-FS at link. Declaration order mirrors GL
- * reflection order minus inactive-uniform elimination. */
+ * reflection order minus inactive-uniform elimination; the scan is also blind to
+ * comments, so a commented-out declaration still takes a unit. */
 typedef struct {
     bool used;
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS]; /* index = unit */
@@ -25,6 +26,10 @@ static uint32_t s_stub_max_shaders;
 static uint32_t s_stub_max_programs;
 
 static const char *const k_stub_sampler_types[] = {"sampler2DShadow", "sampler2D", "isampler2D", "usampler2D"};
+
+/* The GL backend rejects these at link, so the stub must reject them too. */
+static const char *const k_stub_unsupported_sampler_types[] = {"sampler3D",    "samplerCube",     "samplerCubeShadow", "sampler2DArray", "sampler2DArrayShadow", "isampler3D",
+                                                               "isamplerCube", "isampler2DArray", "usampler3D",        "usamplerCube",   "usampler2DArray"};
 
 static bool stub_ident_char(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 
@@ -41,19 +46,26 @@ static void stub_push_sampler(nt_gfx_stub_program_t *rec, uint32_t name_hash) {
     }
 }
 
-static size_t stub_match_sampler_type(const char *p) {
-    for (size_t i = 0; i < sizeof(k_stub_sampler_types) / sizeof(k_stub_sampler_types[0]); i++) {
-        const size_t len = strlen(k_stub_sampler_types[i]);
-        if (strncmp(p, k_stub_sampler_types[i], len) == 0 && !stub_ident_char(p[len])) {
+static size_t stub_match_type(const char *const *types, size_t count, const char *p) {
+    for (size_t i = 0; i < count; i++) {
+        const size_t len = strlen(types[i]);
+        if (strncmp(p, types[i], len) == 0 && !stub_ident_char(p[len])) {
             return len;
         }
     }
     return 0;
 }
 
+static size_t stub_match_sampler_type(const char *p) {
+    NT_ASSERT(stub_match_type(k_stub_unsupported_sampler_types, sizeof(k_stub_unsupported_sampler_types) / sizeof(k_stub_unsupported_sampler_types[0]), p) == 0 &&
+              "program declares an unsupported sampler type");
+    return stub_match_type(k_stub_sampler_types, sizeof(k_stub_sampler_types) / sizeof(k_stub_sampler_types[0]), p);
+}
+
+/* 0 = not an array; GL reflects a declared array by element even at size 1. */
 static uint32_t stub_parse_array_elements(const char *p) {
     if (*p != '[') {
-        return 1;
+        return 0;
     }
     uint32_t parsed = 0;
     const char *digit = p + 1;
@@ -61,7 +73,8 @@ static uint32_t stub_parse_array_elements(const char *p) {
         parsed = (parsed * 10U) + (uint32_t)(*digit - '0');
         digit++;
     }
-    return (*digit == ']' && parsed > 0) ? parsed : 1;
+    NT_ASSERT(*digit == ']' && parsed > 0 && "stub scanner needs a literal sampler array size");
+    return parsed;
 }
 
 /* Records one `<sampler type> name[N]` declaration; returns the scan position
@@ -82,12 +95,13 @@ static const char *stub_scan_declaration(const char *p, size_t type_len, nt_gfx_
     const uint32_t elements = stub_parse_array_elements(q);
     char full_name[96];
     NT_ASSERT(name_len + 16U < sizeof(full_name) && "sampler name too long for the stub scanner");
+    if (elements == 0) {
+        (void)snprintf(full_name, sizeof(full_name), "%.*s", (int)name_len, name);
+        stub_push_sampler(rec, nt_hash32_str(full_name).value);
+        return q;
+    }
     for (uint32_t element = 0; element < elements; element++) {
-        if (elements == 1) {
-            (void)snprintf(full_name, sizeof(full_name), "%.*s", (int)name_len, name);
-        } else {
-            (void)snprintf(full_name, sizeof(full_name), "%.*s[%u]", (int)name_len, name, element);
-        }
+        (void)snprintf(full_name, sizeof(full_name), "%.*s[%u]", (int)name_len, name, element);
         stub_push_sampler(rec, nt_hash32_str(full_name).value);
     }
     return q;

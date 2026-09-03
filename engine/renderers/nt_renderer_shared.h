@@ -75,6 +75,10 @@ typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
     uint32_t material;
+    /* The pipeline selects the program, so both are refreshed together and the
+     * per-cmd path pays no program or mask query. */
+    nt_program_t program;
+    uint32_t sampler_mask;
     /* Indexed by program sampler unit, not by material slot: two materials on one
      * program can list the same sampler in different slots. */
     uint32_t tex[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -87,6 +91,8 @@ static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline
     }
     nt_gfx_bind_pipeline(p);
     b->pipeline = p.id;
+    b->program = nt_gfx_pipeline_program(p);
+    b->sampler_mask = nt_gfx_program_sampler_mask(b->program);
     /* Uniforms are program state and the new pipeline may sit on another program,
      * so the same material has to write them again. */
     b->material = 0;
@@ -117,15 +123,17 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
 }
 
 /* Context state: texture + effective sampler on the unit the program gave that sampler
- * name, only where the unit's binding changed. Unresolved slots are left alone (the unit
- * keeps whatever it held) but still count as covering their sampler. */
+ * name, only where the unit's binding changed. */
 static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, nt_program_t prog, const nt_renderer_material_view_t *v, uint8_t t) {
     /* Negative: the program has no such active sampler (never declared, or the
      * driver eliminated it). Ignored, so a shared material can over-declare. */
     const int unit = nt_gfx_program_sampler_unit(prog, (nt_hash32_t){.value = v->tex_name_hashes[t]});
-    if (unit < 0 || v->resolved_tex[t] == 0) {
+    if (unit < 0) {
         return unit;
     }
+    /* nt_resource_set_placeholder_texture exists to keep slots resolvable through async
+     * load races; binding nothing would leave the previous material's texture on the unit. */
+    NT_ASSERT(v->resolved_tex[t] != 0 && "material slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
     const nt_texture_t tex = {.id = v->resolved_tex[t]};
     /* Resolved here so the dedup key is the sampler GL ends up with, not "no override". */
     uint32_t want = v->resolved_sampler[t].id;
@@ -140,10 +148,20 @@ static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, nt_program_t pro
     return unit;
 }
 
-static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, nt_program_t prog, const nt_renderer_material_view_t *v) {
+/* TRAP omits assert text; the log names the material that left a sampler uncovered. */
+static inline void nt_renderer_assert_sampler_coverage(uint32_t covered, uint32_t sampler_mask, const char *label) {
+    if (covered != sampler_mask) {
+        NT_LOG_ERROR_ONCE("material '%s' declares samplers 0x%x but its program uses 0x%x -- add a texture slot for every sampler the shader reads", (label != NULL) ? label : "(unlabeled)", covered,
+                          sampler_mask);
+    }
+    NT_ASSERT(covered == sampler_mask && "material must declare every sampler its program uses");
+}
+
+/* The program and its sampler mask come from the last bound pipeline. */
+static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const nt_renderer_material_view_t *v) {
     uint32_t covered = 0;
     for (uint8_t t = 0; t < v->tex_count; t++) {
-        const int unit = nt_renderer_bind_slot(b, prog, v, t);
+        const int unit = nt_renderer_bind_slot(b, b->program, v, t);
         if (unit < 0) {
             continue;
         }
@@ -151,13 +169,7 @@ static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, nt_pr
         NT_ASSERT((covered & bit) == 0 && "two texture slots name the same sampler uniform");
         covered |= bit;
     }
-    /* TRAP omits assert text; the log names the material that left a sampler uncovered. */
-    const uint32_t required = nt_gfx_program_sampler_mask(prog);
-    if (covered != required) {
-        NT_LOG_ERROR("material '%s' declares samplers 0x%x but its program uses 0x%x -- add a texture slot for every sampler the shader reads", (v->label != NULL) ? v->label : "(unlabeled)", covered,
-                     required);
-    }
-    NT_ASSERT(covered == required && "material must declare every sampler its program uses");
+    nt_renderer_assert_sampler_coverage(covered, b->sampler_mask, v->label);
 }
 
 static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {

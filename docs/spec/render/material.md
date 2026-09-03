@@ -28,11 +28,20 @@ by `index < count` and consumers never test the name for NULL.
 
 A material declares every sampler its program uses; the first draw after a
 material transition asserts it, because a sampler the material leaves out would
-read whatever texture the previous material left on that unit. A declared name
-the program does not sample is ignored — its unit lookup returns -1 — so one
-material can over-declare for a family of shaders. The slot index is not the
-texture unit: the unit comes from the program (`nt_gfx_program_sampler_unit`),
-fixed at link, and two materials may list the same samplers in any order.
+read whatever texture the previous material left on that unit. Each covering slot
+must also resolve to a texture — an unresolved one would leave that same stale
+texture on the unit, so register a placeholder with
+`nt_resource_set_placeholder_texture` for slots that load asynchronously. A
+declared name the program does not sample is ignored — its unit lookup returns
+-1 — so one material can over-declare for a family of shaders. The slot index is
+not the texture unit: the unit comes from the program
+(`nt_gfx_program_sampler_unit`), fixed at link, and two materials may list the
+same samplers in any order. A material carries at most
+`NT_MATERIAL_MAX_TEXTURES` (4) slots, so a material-driven program may sample at
+most 4 of the 8 units a program can link.
+
+`nt_material_create` asserts that no two slots name the same sampler uniform:
+two slots on one unit would fight over it at every draw.
 
 ## MaterialAsset binary layout
 

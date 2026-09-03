@@ -626,9 +626,9 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* An unresolved slot binds nothing, but it still covers its program's sampler: the
- * interface assert must not fire, and no sampler int is ever written. */
-void test_declared_sampler_unresolved_covers_the_interface(void) {
+/* An unresolved slot would leave the previous material's texture on the unit, so the
+ * placeholder contract is asserted instead. */
+void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     nt_mesh_t mesh = create_test_mesh();
 
     nt_material_create_desc_t desc;
@@ -649,11 +649,8 @@ void test_declared_sampler_unresolved_covers_the_interface(void) {
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
-    nt_gfx_stub_test_reset();
-    nt_mesh_renderer_draw_list(items, 1);
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "resolved_tex"));
 }
 
 /* The declared name is what selects the unit, so a material whose program has no such
@@ -681,6 +678,7 @@ void test_material_missing_a_program_sampler_asserts(void) {
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "sampler_mask"));
 }
 
 /* The texture goes to the unit the link assigned, not to the material slot index. */
@@ -877,7 +875,8 @@ void test_state_texture_sampler_transitions(void) {
     nt_mesh_renderer_draw_list(items, 3);
 
     /* Texture and sampler travel together, so each of A / B / A is one bind of
-     * each: override, default, override. */
+     * each: override, default, override. The texture repeats, and only the GL
+     * cache absorbs that -- the stub counts every call. */
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(override), nt_gfx_stub_test_last_sampler(0));
@@ -1599,7 +1598,7 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
-    RUN_TEST(test_declared_sampler_unresolved_covers_the_interface);
+    RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
     RUN_TEST(test_material_missing_a_program_sampler_asserts);
     RUN_TEST(test_texture_lands_on_the_program_sampler_unit);

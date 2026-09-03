@@ -171,9 +171,12 @@ sampler the texture is read through, so a material without an override restores
 the texture's asset default in the same bind, and the per-unit key is the
 resolved texture plus the effective sampler. The unit is not the material's slot
 index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
-a name the program does not sample is skipped, and the material transition
-asserts that the units it covered are exactly the program's sampler mask — a
-material must declare every sampler its program uses. The text renderer
+a name the program does not sample is skipped, and the coverage assert compares
+the units covered against the program's sampler mask — a material must declare
+every sampler its program uses. That check runs per material transition in the
+mesh renderer and per cmd in the sprite renderer, where one material's atlas page
+can change on a page split. The program and its mask are read once per pipeline
+change, not per cmd. The text renderer
 draws once per flush and other renderers draw in between, so it uses the
 stateless half of the helper and replays unconditionally.
 

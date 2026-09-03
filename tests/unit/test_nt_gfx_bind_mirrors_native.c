@@ -1291,7 +1291,8 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
 }
 
 /* One bind installs the override itself: the texture default never reaches the
- * unit first, so an overriding material costs one glBindSampler, not two. */
+ * unit first, so an overriding material costs one glBindSampler, not two. The
+ * cache is per unit, so a default on one unit and an override on another coexist. */
 static void test_override_binds_one_sampler(void) {
     static const uint8_t white[4] = {255, 255, 255, 255};
     nt_texture_t tex = make_pixel_texture(white);
@@ -1310,12 +1311,17 @@ static void test_override_binds_one_sampler(void) {
     nt_gfx_gl_test_reset_counters();
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_bind_texture(tex, override, 0);
+    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0);
+    nt_gfx_bind_texture(tex, override, 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
-    TEST_ASSERT_EQUAL_INT((GLint)override_backend, sampler_name_on_unit(0));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(default_backend, nt_gfx_gl_test_cached_sampler(0));
+    TEST_ASSERT_EQUAL_UINT32(override_backend, nt_gfx_gl_test_cached_sampler(1));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_gl_test_cached_sampler(0), nt_gfx_gl_test_cached_sampler(1));
+    TEST_ASSERT_EQUAL_INT((GLint)default_backend, sampler_name_on_unit(0));
+    TEST_ASSERT_EQUAL_INT((GLint)override_backend, sampler_name_on_unit(1));
 }
 
 /* The native context outlives a recreate and its sampler objects with it, so

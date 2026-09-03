@@ -1416,7 +1416,7 @@ void nt_sprite_renderer_flush(void) {
         nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
         /* Per cmd, not per material: one material's page can change on a page split.
          * Units come from the pipeline's program, so a dead material still binds right. */
-        nt_renderer_apply_texture_slots(&bound, nt_gfx_pipeline_program(c->pipeline), &view);
+        nt_renderer_apply_texture_slots(&bound, &view);
 
         /* Per-cmd vertex delta — avoids stats inflation across state splits. */
         uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;

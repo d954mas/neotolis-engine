@@ -74,9 +74,11 @@ typedef struct {
     GLint location;
 } nt_cached_uniform_t;
 
-/* One entry per active sampler element; the unit is fixed at link. */
+/* One entry per active sampler element; the unit is fixed at link. The location is
+ * kept here because a sampler past NT_MAX_CACHED_UNIFORMS has none in the table. */
 typedef struct {
     uint32_t name_hash;
+    GLint location;
     uint8_t unit;
 } nt_gfx_gl_sampler_unit_t;
 
@@ -217,8 +219,7 @@ static struct {
     GLenum active_texture_unit;
     /* GL name per sampling slot; uploads use the scratch unit and never touch these. */
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS];
-    /* GL auto-unbinds a deleted sampler, and samplers die only at gfx shutdown,
-     * so no destroy has to invalidate these. */
+    /* GL auto-unbinds a deleted sampler, so destroy_sampler mirrors that here. */
     GLuint bound_samplers[NT_GFX_MAX_TEXTURE_SLOTS];
     int viewport[4];
     float clear_color[4];
@@ -1214,11 +1215,15 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                 }
                 if (is_sampler) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    if (rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS) {
-                        rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
-                        rec->sampler_units[rec->sampler_count].unit = rec->sampler_count;
-                        rec->sampler_count++;
+                    /* Discard the program rather than leave the overflowing sampler reading unit 0. */
+                    if (rec->sampler_count >= NT_GFX_MAX_TEXTURE_SLOTS) {
+                        free(uname);
+                        return false;
                     }
+                    rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
+                    rec->sampler_units[rec->sampler_count].location = loc;
+                    rec->sampler_units[rec->sampler_count].unit = rec->sampler_count;
+                    rec->sampler_count++;
                 }
                 uniform_count++;
             }
@@ -1239,10 +1244,7 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
     const GLuint saved = s_gl_cache.program;
     glUseProgram(program);
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
-        const GLint loc = program_uniform_location(rec, rec->sampler_units[i].name_hash);
-        if (loc >= 0) {
-            glUniform1i(loc, (GLint)rec->sampler_units[i].unit);
-        }
+        glUniform1i(rec->sampler_units[i].location, (GLint)rec->sampler_units[i].unit);
     }
     glUseProgram(saved);
 }
@@ -2131,6 +2133,12 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
     }
     GLuint s = (GLuint)backend_handle;
     glDeleteSamplers(1, &s);
+    /* GL unbinds the deleted name from every unit; the mirror must say so too. */
+    for (uint32_t u = 0; u < NT_GFX_MAX_TEXTURE_SLOTS; u++) {
+        if (s_gl_cache.bound_samplers[u] == s) {
+            s_gl_cache.bound_samplers[u] = 0;
+        }
+    }
 }
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {

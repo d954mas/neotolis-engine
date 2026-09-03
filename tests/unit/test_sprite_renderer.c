@@ -1039,6 +1039,7 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "sampler_mask"));
 }
 
 /* A declared name the program never samples maps to no unit: the slot is skipped and

@@ -197,10 +197,12 @@ Texture slots differ by renderer. A sprite material that samples the atlas
 declares its page sampler at slot 0; that slot's resource is never sampled,
 because the renderer substitutes the page texture there per command. A material
 declaring no textures never receives the page and is for shaders that compute
-coverage analytically. Every other declared sprite slot must resolve to a
-texture — register a placeholder with `nt_resource_set_placeholder_texture` to
-survive async load races; a sampler override does not exempt a slot, since the
-override only picks filtering for a texture that still has to exist. A text
+coverage analytically. Every declared slot the program samples must resolve to a
+texture, in every material-driven renderer — the bind asserts it, because a slot
+that binds nothing leaves the previous material's texture on that unit. Register
+a placeholder with `nt_resource_set_placeholder_texture` to survive async load
+races; a sampler override does not exempt a slot, since the override only picks
+filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
 and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
