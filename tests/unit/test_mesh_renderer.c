@@ -116,6 +116,35 @@ static nt_mesh_t create_test_mesh_nonindexed(void) {
     return (nt_mesh_t){.id = handle};
 }
 
+/* Two streams (position, normal), non-indexed: for tests that map a subset. */
+static nt_mesh_t create_test_mesh_two_streams(void) {
+    uint32_t vdata_size = 3 * 6 * (uint32_t)sizeof(float);
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + (2 * (uint32_t)sizeof(NtStreamDesc)) + vdata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 72];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->index_type = 0;
+    hdr->vertex_count = 3;
+    hdr->index_count = 0;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = 0;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0].name_hash = nt_hash32_str("position").value;
+    sd[0].type = NT_STREAM_FLOAT32;
+    sd[0].count = 3;
+    sd[1].name_hash = nt_hash32_str("normal").value;
+    sd[1].type = NT_STREAM_FLOAT32;
+    sd[1].count = 3;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    return (nt_mesh_t){.id = handle};
+}
+
 /* ---- Helper: link a real GFX program, then create a material on it ---- */
 
 static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(NULL, 0); }
@@ -1129,6 +1158,41 @@ void test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs(vo
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_draw_trace_at(0).pipeline.id, nt_gfx_test_draw_trace_at(2).pipeline.id);
 }
 
+/* The vertex-input key carries a presence bit per stream: mapping one more
+ * stream splits the vertex input even though every mapped location is unchanged. */
+void test_mapping_an_extra_stream_splits_vertex_inputs_not_pipelines(void) {
+    nt_mesh_t mesh = create_test_mesh_two_streams();
+    nt_program_t shared = create_test_program();
+    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = shared;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map[0].location = 0;
+    desc.attr_map[1].stream_name = "normal";
+    desc.attr_map[1].location = 1;
+    desc.attr_map_count = 2;
+    desc.depth_test = true;
+    desc.depth_write = true;
+    desc.blend = nt_blend_opaque();
+    desc.cull_mode = NT_CULL_BACK;
+    nt_material_t mat_b = nt_material_create(&desc);
+    nt_material_step();
+
+    nt_entity_t e0 = create_test_entity(mesh, mat_a);
+    nt_entity_t e1 = create_test_entity(mesh, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
+    };
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+}
+
 /* Equal program/state share a pipeline; distinct attr_maps derive separate VIs. */
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1649,6 +1713,7 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs);
+    RUN_TEST(test_mapping_an_extra_stream_splits_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
     RUN_TEST(test_material_missing_a_program_sampler_asserts);

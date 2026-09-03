@@ -1216,6 +1216,23 @@ void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
+/* The vertex-input key packs every attr_map location: one location step on the
+ * same program and state is a second vertex input, still one pipeline. */
+void test_sprite_renderer_attr_map_location_step_splits_vertex_inputs(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xA7ULL);
+
+    nt_material_t mat_loc4 = create_radial_test_material("a_radial", 4);
+    nt_material_t mat_loc5 = create_radial_test_material("a_radial", 5);
+
+    nt_sprite_renderer_set_material(mat_loc4);
+    nt_sprite_renderer_set_material(mat_loc5);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
+}
+
 void test_sprite_renderer_retries_vertex_input_after_backend_failure(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -1723,6 +1740,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
+    RUN_TEST(test_sprite_renderer_attr_map_location_step_splits_vertex_inputs);
     RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);

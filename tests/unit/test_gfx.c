@@ -780,16 +780,25 @@ static uint32_t key_variants(uint32_t program_id, nt_gfx_pipeline_key_t *out) {
     VARIANT(d.blend.op_rgb = NT_BLEND_OP_SUBTRACT);
     VARIANT(d.blend.op_alpha = NT_BLEND_OP_MAX);
     VARIANT(d.blend.constant_color[0] = 0.5F);
+    VARIANT(d.blend.constant_color[1] = 0.5F);
+    VARIANT(d.blend.constant_color[2] = 0.5F);
+    VARIANT(d.blend.constant_color[3] = 0.5F);
+    VARIANT(d.depth_func = NT_DEPTH_ALWAYS);
     VARIANT(d.polygon_offset = true; d.polygon_offset_factor = 2.0F);
+    VARIANT(d.polygon_offset = true; d.polygon_offset_units = 2.0F);
 #undef VARIANT
     return n;
 }
 
+#define KEY_VARIANT_COUNT 21
+
 void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
-    nt_gfx_pipeline_key_t keys[4 * 16];
+    nt_gfx_pipeline_key_t keys[4 * KEY_VARIANT_COUNT];
     uint32_t n = 0;
     for (uint32_t p = 65550; p < 65554; p++) {
-        n += key_variants(p, &keys[n]);
+        const uint32_t per_program = key_variants(p, &keys[n]);
+        TEST_ASSERT_EQUAL_UINT32(KEY_VARIANT_COUNT, per_program); /* keys[] is sized for exactly this many */
+        n += per_program;
     }
     for (uint32_t i = 0; i < n; i++) {
         for (uint32_t j = 0; j < i; j++) {
@@ -836,6 +845,10 @@ void test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads(void) {
 void test_gfx_pipeline_key_asserts_out_of_range_lanes(void) {
     nt_pipeline_desc_t d = key_base_desc(3);
     d.cull_mode = 3;
+    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+    d = key_base_desc(3);
+    const int bad_depth_func = NT_DEPTH_ALWAYS + 1; /* memcpy: an enum cast of a literal trips the analyzer */
+    memcpy(&d.depth_func, &bad_depth_func, sizeof(d.depth_func));
     EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
     d = key_base_desc(3);
     d.blend.src_rgb = 16;

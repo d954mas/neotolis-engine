@@ -1334,7 +1334,8 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         /* Each batch_key boundary opens a fresh cmd. */
         if (mat->id != memo_mat) {
             memo_pip = find_or_create_pipeline(mat_info);
-            memo_mat = mat->id;
+            /* A failed resolve stays unmemoised so a later run retries, as before. */
+            memo_mat = (memo_pip.id != 0) ? mat->id : 0;
         }
         const nt_pipeline_t pip = memo_pip;
         if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */

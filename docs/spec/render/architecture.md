@@ -149,11 +149,17 @@ one 64-bit word (program handle, depth, cull, polygon-offset enable, blend
 factors and ops) plus the float payloads (blend constant, polygon-offset
 factor/units) that cannot pack. Equal keys mean identical pipelines; a hit
 compares the packed word and, only when it matches, the floats. No hash is
-involved, so identity does not rest on a collision argument. The packer asserts
-every lane input is in range, so an out-of-range value can never truncate onto
-a valid neighbour and hand a cache hit to a descriptor `make_pipeline` would
-have rejected. gfx owns the lane widths: a new `nt_pipeline_desc_t` field trips
-the packer's size assert and must be added there. The cached pipelines borrow
+involved, so identity does not rest on a collision argument. Two
+canonicalisations apply, both in the packer: a disabled blend packs as opaque
+(factors, ops and constant ignored) and a disabled polygon offset packs its
+factor/units as zero; nothing else is normalised, so depth lanes are exact even
+when depth test is off. Lane inputs are range-checked twice: `nt_material_create`
+asserts them at the API boundary and the packer asserts them again, so under
+TRAP/FULL an out-of-range value can never truncate onto a valid neighbour (OFF
+is undefined behaviour here as everywhere). gfx owns the lane widths: an
+appended `nt_pipeline_desc_t` field trips the packer's size/offset asserts and
+must be added there; a field slipped into existing padding must be added by
+hand. The cached pipelines borrow
 programs the game owns, so a cache entry never extends a program's lifetime.
 The population is distinct material states, tens of values in a real game, so
 a fixed array with a linear scan stays cheaper than a hash map at that scale.

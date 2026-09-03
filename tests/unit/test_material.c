@@ -253,6 +253,29 @@ void test_blend_reserved_byte_is_canonicalized(void) {
     TEST_ASSERT_EQUAL_MEMORY(&clean_info->blend, &dirty_info->blend, sizeof(clean_info->blend));
 }
 
+/* Lane inputs of the pipeline / vertex-input keys are rejected at the API boundary,
+ * not on the first draw. */
+void test_create_asserts_out_of_range_key_lanes(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    const int bad_cull = NT_CULL_FRONT + 1; /* memcpy: an enum cast of a literal trips the analyzer */
+    memcpy(&d.cull_mode, &bad_cull, sizeof(d.cull_mode));
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+
+    d = make_test_desc();
+    d.blend = nt_blend_alpha();
+    d.blend.src_rgb = 16;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+
+    d = make_test_desc();
+    d.blend = nt_blend_alpha();
+    d.blend.op_alpha = 8;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+
+    d = make_test_desc();
+    d.attr_map[0].location = 16;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+}
+
 /* ---- Test 7: attr_map stored correctly ---- */
 
 void test_create_stores_attr_map(void) {
@@ -585,6 +608,7 @@ int main(void) {
     RUN_TEST(test_blend_subtractive_presets_preserve_destination_alpha);
     RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
+    RUN_TEST(test_create_asserts_out_of_range_key_lanes);
     RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);

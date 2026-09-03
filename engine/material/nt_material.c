@@ -129,6 +129,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(desc->attr_map_count <= NT_MATERIAL_MAX_ATTR_MAP);
     slot->info.attr_map_count = desc->attr_map_count;
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
+        /* The renderers pack the location into 4-bit vertex-input key lanes. */
+        NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
         slot->info.attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         slot->info.attr_map_locations[i] = desc->attr_map[i].location;
     }
@@ -149,6 +151,12 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.blend.op_rgb = desc->blend.op_rgb;
     slot->info.blend.op_alpha = desc->blend.op_alpha;
     slot->info.blend.enabled = desc->blend.enabled;
+    /* Range-check here, at the API boundary: the pipeline key packs these into
+     * fixed lanes and traps on the first draw otherwise. */
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "invalid blend factor");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "invalid blend op");
+    NT_ASSERT((uint32_t)desc->cull_mode <= NT_CULL_FRONT && "invalid cull_mode -- use NT_CULL_NONE/BACK/FRONT");
     slot->info.depth_test = desc->depth_test;
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
