@@ -937,6 +937,10 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     const float value_b[4] = {5.0F, 6.0F, 7.0F, 8.0F};
 
     nt_pipeline_t pip_a = make_pipeline_ex(vs_src, fs_src, false, true, false);
+    /* Program and pipeline slots must differ to expose wrong-slot routing. */
+    nt_program_t spare =
+        nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src}), nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src}));
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(spare));
     nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
 
     nt_gfx_begin_frame();
@@ -1150,8 +1154,7 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
 }
 
-/* Deterministic half: destroying the current program clears the cached name.
- * The glUseProgram count only bites when the relink recycles the deleted name. */
+/* Destruction must release the current GL program even without another bind. */
 static void test_destroy_current_program_then_relink_reissues_use_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
@@ -1167,8 +1170,21 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
+    GLint old_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
+    TEST_ASSERT_NOT_EQUAL_INT(0, old_program);
     nt_gfx_destroy_program(prog_p); /* cascades into pip_p */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_program());
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_FALSE(glIsProgram((GLuint)old_program));
+    GLint current_program = -1;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    TEST_ASSERT_EQUAL_INT(0, current_program);
+
     nt_program_t prog_q = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));

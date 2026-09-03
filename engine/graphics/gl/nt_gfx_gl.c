@@ -1188,9 +1188,9 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     if (program == 0) {
         return;
     }
-    /* glDeleteProgram + glCreateProgram usually reuse the GL name, so a stale
-     * mirror would send the next uniform write into a different program. */
+    /* GL defers deletion while a program remains current. */
     if (s_gl_cache.program == program) {
+        glUseProgram(0);
         s_gl_cache.program = 0;
     }
     glDeleteProgram(program);
