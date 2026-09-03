@@ -1097,6 +1097,24 @@ static void test_reflection_reports_active_uniforms_with_glsl_declarations(void)
     TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
 }
 
+/* One sampler past the unit budget is a link failure, not a sampler on unit 0. */
+static void test_program_with_more_samplers_than_units_asserts(void) {
+    _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS == 8, "shader below declares NT_GFX_MAX_TEXTURE_SLOTS + 1 samplers");
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u0, u1, u2, u3, u4, u5, u6, u7, u8;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() {\n"
+                                         "    vec2 uv = vec2(0.5);\n"
+                                         "    frag_color = texture(u0, uv) + texture(u1, uv) + texture(u2, uv) + texture(u3, uv) + texture(u4, uv)\n"
+                                         "               + texture(u5, uv) + texture(u6, uv) + texture(u7, uv) + texture(u8, uv);\n"
+                                         "}\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_GFX_MAX_TEXTURE_SLOTS"));
+}
+
 static nt_texture_t make_unit_test_texture(const uint8_t rgba[4]) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 1,
@@ -1369,6 +1387,7 @@ int main(void) {
     RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
+    RUN_TEST(test_program_with_more_samplers_than_units_asserts);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);
     RUN_TEST(test_set_uniform_int_on_a_sampler_asserts);
