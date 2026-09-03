@@ -1399,8 +1399,8 @@ void nt_sprite_renderer_flush(void) {
             NT_ASSERT(c->resolved_tex[t] != 0 && "sprite cmd slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
         }
 
-        /* Sampler-unit hashes come from the cmd, so a cmd whose material died still
-         * replays them; params are read from the live material when the material or the
+        /* Sampler names come from the cmd, so a cmd whose material died still resolves
+         * its units; params are read from the live material when the material or the
          * pipeline changed. */
         const nt_material_info_t *mi = (c->material.id != bound.material) ? nt_material_get_info(c->material) : NULL;
         const nt_renderer_material_view_t view = {
@@ -1411,10 +1411,12 @@ void nt_sprite_renderer_flush(void) {
             .param_count = (mi != NULL) ? mi->param_count : 0,
             .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
             .params = (mi != NULL) ? mi->params : NULL,
+            .label = (mi != NULL) ? mi->label : NULL,
         };
         nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
-        /* Per cmd, not per material: one material's page can change on a page split. */
-        nt_renderer_apply_texture_slots(&bound, &view);
+        /* Per cmd, not per material: one material's page can change on a page split.
+         * Units come from the pipeline's program, so a dead material still binds right. */
+        nt_renderer_apply_texture_slots(&bound, nt_gfx_pipeline_program(c->pipeline), &view);
 
         /* Per-cmd vertex delta — avoids stats inflation across state splits. */
         uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;

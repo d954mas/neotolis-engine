@@ -25,8 +25,11 @@
 #include "unity.h"
 
 static nt_material_t make_material(bool with_page_sampler) {
+    /* The program's samplers are the contract: a sprite material covers u_texture, and a
+     * text program is the two font textures the text renderer binds itself. */
+    const char *fs_source = with_page_sampler ? "uniform sampler2D u_texture; void main(){}" : "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source, .label = "walker_fs"});
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
@@ -35,8 +38,8 @@ static nt_material_t make_material(bool with_page_sampler) {
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
-    /* Sprite materials sample the atlas page at slot 0; text materials declare nothing
-     * (units 0/1 are the font's). */
+    /* Sprite materials name the atlas page's sampler; text materials declare nothing --
+     * the font textures are the text renderer's own binds. */
     if (with_page_sampler) {
         desc.textures[0].name = "u_texture";
         desc.texture_count = 1;

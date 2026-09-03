@@ -726,6 +726,19 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 // #endregion
 
 // #region Flush
+/* Units come from the pipeline's program, not the material: the material may have died
+ * since the batch opened, and the units are fixed at link either way. */
+static void bind_font_textures(nt_pipeline_t pipeline) {
+    const nt_program_t prog = nt_gfx_pipeline_program(pipeline);
+    const int curve_unit = nt_gfx_program_sampler_unit(prog, s_u_curve_texture);
+    const int band_unit = nt_gfx_program_sampler_unit(prog, s_u_band_texture);
+    NT_ASSERT(curve_unit >= 0 && band_unit >= 0 && "text program must sample u_curve_texture and u_band_texture");
+    NT_ASSERT(nt_gfx_program_sampler_mask(prog) == ((1U << (uint32_t)curve_unit) | (1U << (uint32_t)band_unit)) && "text program samples more than the two font textures");
+    nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_INVALID, (uint32_t)curve_unit);
+    nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_INVALID, (uint32_t)band_unit);
+    nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
+}
+
 void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
@@ -761,20 +774,15 @@ void nt_text_renderer_flush(void) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 
-    /* Bind font textures */
     if (s_text.font.id != 0) {
-        nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_INVALID, 0);
-        nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_INVALID, 1);
-        nt_gfx_set_uniform_int(s_u_curve_texture, 0);
-        nt_gfx_set_uniform_int(s_u_band_texture, 1);
-        nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
+        bind_font_textures(pipeline);
     }
 
     /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         if (mi != NULL) {
-            NT_ASSERT(mi->tex_count == 0 && "text material declares textures: units 0/1 belong to the font");
+            NT_ASSERT(mi->tex_count == 0 && "text material declares textures: every sampler unit belongs to the font");
             const nt_renderer_material_view_t view = nt_renderer_material_view(mi);
             nt_renderer_set_material_uniforms(&view);
         }

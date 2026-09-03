@@ -72,7 +72,6 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 typedef struct {
     uint32_t name_hash;
     GLint location;
-    bool is_sampler;
 } nt_cached_uniform_t;
 
 /* One entry per active sampler element; the unit is fixed at link. */
@@ -999,6 +998,7 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     GLint loc = program_get_uniform_h(program_backend, name_hash);
+    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -1211,7 +1211,6 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                 if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
                     out[uniform_count].name_hash = nt_hash32_str(uname).value;
                     out[uniform_count].location = loc;
-                    out[uniform_count].is_sampler = is_sampler;
                 }
                 if (is_sampler) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");

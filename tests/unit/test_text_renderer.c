@@ -134,7 +134,7 @@ static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
 static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
         .program = nt_gfx_make_program(vs, fs),
         .blend = blend,
@@ -166,7 +166,12 @@ static nt_resource_t publish_stage(const char *name, uint32_t shader_id) {
 
 static void republish_stage(const char *name, uint32_t shader_id) { nt_resource_register(nt_hash32_str(name), nt_hash64_str(name), NT_ASSET_SHADER_CODE, shader_id); }
 
-static nt_shader_t make_stage(nt_shader_type_t type) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = type, .source = "void main(){}"}); }
+/* Text programs must sample the two font textures; the renderer binds them at the
+ * units the link assigned and asserts the program samples nothing else. */
+static nt_shader_t make_stage(nt_shader_type_t type) {
+    return nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = type, .source = (type == NT_SHADER_FRAGMENT) ? "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}" : "void main(){}"});
+}
 
 static nt_gfx_test_draw_t warm_material_program(nt_material_t material, nt_program_t program) {
     nt_material_set_program(material, program);
@@ -306,14 +311,32 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t actual = nt_gfx_stub_test_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 
-    /* The font owns units 0 and 1; the third int carries the curve texture width. */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_texture").value, nt_gfx_stub_test_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_band_texture").value, nt_gfx_stub_test_uniform_int_hash_at(1));
-    TEST_ASSERT_EQUAL_INT(1, nt_gfx_stub_test_uniform_int_value_at(1));
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_stub_test_uniform_int_hash_at(2));
-    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_stub_test_uniform_int_value_at(2));
+    /* Sampler units are fixed at link: the only int a flush writes is the curve width. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_stub_test_uniform_int_hash_at(0));
+    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_stub_test_uniform_int_value_at(0));
+}
+
+/* The two font textures land on the units their program assigned, in declaration
+ * order, and nothing writes a sampler int. */
+void test_text_renderer_font_textures_land_on_program_units(void) {
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_text_renderer_set_material(material);
+    nt_gfx_stub_test_reset();
+    draw_and_flush();
+
+    const nt_program_t prog = nt_material_get_info(material)->program;
+    const int curve_unit = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_curve_texture"));
+    const int band_unit = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_band_texture"));
+    TEST_ASSERT_EQUAL_INT(0, curve_unit);
+    TEST_ASSERT_EQUAL_INT(1, band_unit);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_stub_test_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_stub_test_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_band_texture(s_font)), nt_gfx_stub_test_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)band_unit, nt_gfx_stub_test_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
 }
 
 /* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */
@@ -386,7 +409,7 @@ void test_vertex_count_4_per_glyph(void) {
  * that declares its own would have them silently overwritten. */
 void test_text_material_with_textures_asserts_at_flush(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
         .program = nt_gfx_make_program(vs, fs),
         .cull_mode = NT_CULL_NONE,
@@ -510,7 +533,7 @@ void test_failed_restore_releases_partial_buffers(void) {
  * the pipeline signature, not the material's identity. */
 void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -529,7 +552,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
 /* Render state is folded in, so one program with two states is two pipelines. */
 void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -558,7 +581,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 
     nt_gfx_destroy_program(dead);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
     nt_program_t reborn = nt_gfx_make_program(vs, fs); /* same pool slot, new generation */
     TEST_ASSERT_NOT_EQUAL_UINT32(dead.id, reborn.id);
 
@@ -829,7 +852,7 @@ void test_switching_back_to_a_material_reuses_its_pipeline(void) {
 void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"});
 
     nt_gfx_stub_test_reset();
     nt_text_renderer_set_material(mat);
@@ -914,8 +937,9 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     TEST_ASSERT_NOT_NULL(nt_material_get_info(handle_before));
 
     /* The game's gate relinks and re-assigns onto the same material. */
-    nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+    nt_program_t second =
+        nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                            nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "uniform sampler2D u_curve_texture; uniform usampler2D u_band_texture; void main(){}"}));
     nt_material_set_program(material, second);
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, second.id);
 
@@ -1369,6 +1393,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_utf8_decode_ascii);
     RUN_TEST(test_text_renderer_forwards_material_blend_state);
+    RUN_TEST(test_text_renderer_font_textures_land_on_program_units);
     RUN_TEST(test_utf8_decode_cyrillic);
     RUN_TEST(test_utf8_decode_cjk);
     RUN_TEST(test_measure_returns_nonzero);

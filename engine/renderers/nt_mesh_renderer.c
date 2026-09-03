@@ -564,7 +564,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 nt_renderer_bind_pipeline(&bound, pip);
                 nt_renderer_apply_material_uniforms(&bound, run_mat.id, &view);
                 /* Mesh renderer texture slots come from the material alone. */
-                nt_renderer_apply_texture_slots(&bound, &view);
+                nt_renderer_apply_texture_slots(&bound, mat_info->program, &view);
             }
             nt_renderer_bind_vertex_input(&bound, vi);
             prev_mat = run_mat;

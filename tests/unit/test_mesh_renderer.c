@@ -131,6 +131,16 @@ static nt_program_t create_test_program(void) {
     return nt_gfx_make_program(vs, fs);
 }
 
+/* A textured material must cover its program's sampler interface, so the program has to
+ * declare the sampler the material names. */
+static nt_program_t create_test_sampler_program(const char *fs_source) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "test_smp_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source, .label = "test_smp_fs"});
+    return nt_gfx_make_program(vs, fs);
+}
+
+static nt_program_t create_test_tex_program(void) { return create_test_sampler_program("uniform sampler2D u_tex; void main(){}"); }
+
 static nt_material_t create_test_material_with_attr(nt_program_t program, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
@@ -616,16 +626,15 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* Sampler units are program state, shared by every material on the program, so
- * a declared slot must be written even when its texture has not resolved --
- * otherwise the material inherits whatever unit the previous one set. */
-void test_declared_sampler_unit_written_without_texture(void) {
+/* An unresolved slot binds nothing, but it still covers its program's sampler: the
+ * interface assert must not fire, and no sampler int is ever written. */
+void test_declared_sampler_unresolved_covers_the_interface(void) {
     nt_mesh_t mesh = create_test_mesh();
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.program = create_test_program();
-    desc.textures[0].name = "u_unresolved";
+    desc.program = create_test_tex_program();
+    desc.textures[0].name = "u_tex";
     desc.textures[0].resource = nt_resource_request(nt_hash64_str("never_registered"), NT_ASSET_TEXTURE);
     desc.texture_count = 1;
     desc.attr_map[0].stream_name = "position";
@@ -643,9 +652,68 @@ void test_declared_sampler_unit_written_without_texture(void) {
     nt_gfx_stub_test_reset();
     nt_mesh_renderer_draw_list(items, 1);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_unresolved").value, nt_gfx_stub_test_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_stub_test_uniform_int_value_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
+}
+
+/* The declared name is what selects the unit, so a material whose program has no such
+ * sampler simply skips the slot -- and the program's empty interface stays covered. */
+void test_declared_sampler_unknown_to_the_program_is_ignored(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_count());
+}
+
+/* A material that leaves one of its program's samplers undeclared would sample
+ * whatever the previous material left on that unit. */
+void test_material_missing_a_program_sampler_asserts(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t two = create_test_sampler_program("uniform sampler2D u_tex; uniform sampler2D u_second; void main(){}");
+    nt_material_t mat = create_test_material_textured(two, nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
+}
+
+/* The texture goes to the unit the link assigned, not to the material slot index. */
+void test_texture_lands_on_the_program_sampler_unit(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t second_unit = create_test_sampler_program("uniform sampler2D u_other; uniform sampler2D u_tex; void main(){}");
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = second_unit;
+    desc.textures[0].name = "u_tex";
+    desc.textures[0].resource = test_texture(0);
+    desc.textures[1].name = "u_other";
+    desc.textures[1].resource = test_texture(1);
+    desc.texture_count = 2;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map_count = 1;
+    desc.label = "swapped_slot_material";
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_stub_test_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+
+    /* Slot 0 names u_tex, which the program put on unit 1; slot 1 names u_other, unit 0. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))}), nt_gfx_stub_test_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(1))}), nt_gfx_stub_test_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
 }
 
 // #region state transitions
@@ -662,7 +730,7 @@ static void fill_items(nt_render_item_t *items, const nt_entity_t *entities, con
 
 void test_state_same_material_three_meshes(void) {
     nt_mesh_t meshes[3] = {create_test_mesh(), create_test_mesh(), create_test_mesh()};
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_t mats[3] = {mat, mat, mat};
     nt_entity_t entities[3] = {create_test_entity(meshes[0], mat), create_test_entity(meshes[1], mat), create_test_entity(meshes[2], mat)};
 
@@ -675,7 +743,7 @@ void test_state_same_material_three_meshes(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_sampler_count());
@@ -683,7 +751,7 @@ void test_state_same_material_three_meshes(void) {
 
 void test_state_three_materials_same_mesh(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
+    nt_program_t program = create_test_tex_program();
     nt_material_t mats[3] = {
         create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID),
         create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID),
@@ -701,7 +769,7 @@ void test_state_three_materials_same_mesh(void) {
     /* Same program + same render state => one pipeline; same derived layout => one VI. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_vec4_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_sampler_count());
@@ -709,7 +777,7 @@ void test_state_three_materials_same_mesh(void) {
 
 void test_state_render_state_split(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
+    nt_program_t program = create_test_tex_program();
     nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_t mat_b = create_test_material_textured(program, nt_blend_alpha(), NT_SAMPLER_INVALID);
     nt_material_t mats[3] = {mat_a, mat_b, mat_a};
@@ -735,7 +803,7 @@ void test_state_render_state_split(void) {
 
 void test_state_runtime_set_param_between_calls(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
@@ -759,7 +827,7 @@ void test_state_runtime_set_param_between_calls(void) {
 
 void test_state_program_replaced_between_calls(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
@@ -768,7 +836,7 @@ void test_state_program_replaced_between_calls(void) {
     nt_gfx_test_draw_trace_reset(true);
     nt_mesh_renderer_draw_list(items, 1);
 
-    nt_program_t p2 = create_test_program();
+    nt_program_t p2 = create_test_tex_program();
     nt_material_set_program(mat, p2);
     nt_mesh_renderer_draw_list(items, 1);
 
@@ -777,7 +845,9 @@ void test_state_program_replaced_between_calls(void) {
     const nt_gfx_test_draw_t second = nt_gfx_test_draw_trace_at(1);
     TEST_ASSERT_EQUAL_UINT32(p2.id, second.program.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(first.pipeline.id, second.pipeline.id);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_uniform_int_count());
+    /* Bound state is call-scoped, so the new program's unit is filled again. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
     nt_gfx_test_draw_trace_reset(false);
 }
 
@@ -785,7 +855,7 @@ void test_state_program_replaced_between_calls(void) {
  * even when the previous material left an override on the unit. */
 void test_state_texture_sampler_transitions(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
+    nt_program_t program = create_test_tex_program();
     nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
         .min_filter = NT_FILTER_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,
@@ -825,7 +895,7 @@ void test_state_override_binds_one_sampler_per_texture_change(void) {
     });
     TEST_ASSERT_TRUE(override.id != 0);
 
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), override);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), override);
     nt_material_t mats[3] = {mat, mat, mat};
     nt_entity_t entities[3] = {create_test_entity(meshes[0], mat), create_test_entity(meshes[1], mat), create_test_entity(meshes[2], mat)};
 
@@ -845,7 +915,7 @@ void test_state_override_binds_one_sampler_per_texture_change(void) {
  * changes, and the sampler unit is rewritten with it. */
 void test_state_distinct_textures_a_b_a(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
+    nt_program_t program = create_test_tex_program();
     nt_material_t mat_a = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_INVALID, 0);
     nt_material_t mat_b = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_INVALID, 1);
     const uint32_t tex_x = nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))});
@@ -866,7 +936,7 @@ void test_state_distinct_textures_a_b_a(void) {
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_stub_test_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(tex_y, nt_gfx_stub_test_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(tex_x, nt_gfx_stub_test_bound_texture_at(2));
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
 }
 
 /* An unready run issues no GL call, so it neither breaks the next run nor
@@ -874,8 +944,8 @@ void test_state_distinct_textures_a_b_a(void) {
  * through the same pipeline without replaying its uniforms. */
 void test_state_skip_mid_list_resolves_next_run(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t not_ready = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t not_ready = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
 
     nt_material_t mats[3] = {mat_a, not_ready, mat_a};
@@ -900,8 +970,8 @@ void test_state_skip_mid_list_resolves_next_run(void) {
  * still sees the state the run before it left bound. */
 void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t mat_b = create_test_material_textured(create_test_program(), nt_blend_alpha(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat_b = create_test_material_textured(create_test_tex_program(), nt_blend_alpha(), NT_SAMPLER_INVALID);
 
     nt_material_t mats[3] = {mat_a, mat_b, mat_a};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
@@ -927,7 +997,7 @@ void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
 
 void test_state_same_tex_same_sampler_diff_params(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
+    nt_program_t program = create_test_tex_program();
     nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_t mat_b = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_t mats[2] = {mat_a, mat_b};
@@ -942,7 +1012,7 @@ void test_state_same_tex_same_sampler_diff_params(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_sampler_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_uniform_vec4_count());
 }
 
@@ -955,7 +1025,7 @@ void test_state_chunk_boundary_same_run(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&rdesc));
 
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
     nt_material_t mats[3] = {mat, mat, mat};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
     nt_entity_t entities[3] = {create_test_entity(mesh, mat), create_test_entity(mesh, mat), create_test_entity(mesh, mat)};
@@ -969,7 +1039,7 @@ void test_state_chunk_boundary_same_run(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_uniform_vec4_count());
 }
 // #endregion
@@ -1529,7 +1599,10 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
-    RUN_TEST(test_declared_sampler_unit_written_without_texture);
+    RUN_TEST(test_declared_sampler_unresolved_covers_the_interface);
+    RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
+    RUN_TEST(test_material_missing_a_program_sampler_asserts);
+    RUN_TEST(test_texture_lands_on_the_program_sampler_unit);
     RUN_TEST(test_state_same_material_three_meshes);
     RUN_TEST(test_state_three_materials_same_mesh);
     RUN_TEST(test_state_render_state_split);

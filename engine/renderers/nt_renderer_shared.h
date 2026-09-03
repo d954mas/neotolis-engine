@@ -66,6 +66,7 @@ typedef struct {
     uint8_t param_count;
     const uint32_t *param_name_hashes; /* [param_count] */
     const float (*params)[4];
+    const char *label; /* diagnostics only; NULL when the material is gone */
 } nt_renderer_material_view_t;
 
 /* Zero-init = nothing bound; lives for ONE draw_list or flush. Material uniforms replay on
@@ -74,8 +75,10 @@ typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
     uint32_t material;
-    uint32_t tex[NT_MATERIAL_MAX_TEXTURES];
-    uint32_t sampler[NT_MATERIAL_MAX_TEXTURES];
+    /* Indexed by program sampler unit, not by material slot: two materials on one
+     * program can list the same sampler in different slots. */
+    uint32_t tex[NT_GFX_MAX_TEXTURE_SLOTS];
+    uint32_t sampler[NT_GFX_MAX_TEXTURE_SLOTS];
 } nt_renderer_bound_t;
 
 static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
@@ -97,12 +100,9 @@ static inline void nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vert
     b->vertex_input = vi.id;
 }
 
-/* Stateless program state: sampler unit for every declared slot (written whether or not
- * the texture resolved -- shared with other materials on the program) + every vec4 param. */
+/* Stateless program state: every vec4 param. Sampler units are fixed at link and
+ * nobody writes them. */
 static inline void nt_renderer_set_material_uniforms(const nt_renderer_material_view_t *v) {
-    for (uint8_t t = 0; t < v->tex_count; t++) {
-        nt_gfx_set_uniform_int((nt_hash32_t){.value = v->tex_name_hashes[t]}, (int)t);
-    }
     for (uint8_t p = 0; p < v->param_count; p++) {
         nt_gfx_set_uniform_vec4((nt_hash32_t){.value = v->param_name_hashes[p]}, v->params[p]);
     }
@@ -116,26 +116,48 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
     b->material = material_id;
 }
 
-/* Context state: texture + effective sampler per slot, only where the slot's binding
- * changed. Unresolved slots are left alone (the unit keeps whatever it held). */
-static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, const nt_renderer_material_view_t *v) {
-    for (uint8_t t = 0; t < v->tex_count; t++) {
-        if (v->resolved_tex[t] == 0) {
-            continue;
-        }
-        const nt_texture_t tex = {.id = v->resolved_tex[t]};
-        /* Resolved here so the dedup key is the sampler GL ends up with, not "no override". */
-        uint32_t want = v->resolved_sampler[t].id;
-        if (want == 0) {
-            want = nt_gfx_get_texture_default_sampler(tex).id;
-        }
-        if (v->resolved_tex[t] == b->tex[t] && want == b->sampler[t]) {
-            continue;
-        }
-        nt_gfx_bind_texture(tex, (nt_sampler_t){.id = want}, t);
-        b->tex[t] = v->resolved_tex[t];
-        b->sampler[t] = want;
+/* Context state: texture + effective sampler on the unit the program gave that sampler
+ * name, only where the unit's binding changed. Unresolved slots are left alone (the unit
+ * keeps whatever it held) but still count as covering their sampler. */
+static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, nt_program_t prog, const nt_renderer_material_view_t *v, uint8_t t) {
+    /* Negative: the program has no such active sampler (never declared, or the
+     * driver eliminated it). Ignored, so a shared material can over-declare. */
+    const int unit = nt_gfx_program_sampler_unit(prog, (nt_hash32_t){.value = v->tex_name_hashes[t]});
+    if (unit < 0 || v->resolved_tex[t] == 0) {
+        return unit;
     }
+    const nt_texture_t tex = {.id = v->resolved_tex[t]};
+    /* Resolved here so the dedup key is the sampler GL ends up with, not "no override". */
+    uint32_t want = v->resolved_sampler[t].id;
+    if (want == 0) {
+        want = nt_gfx_get_texture_default_sampler(tex).id;
+    }
+    if (v->resolved_tex[t] != b->tex[unit] || want != b->sampler[unit]) {
+        nt_gfx_bind_texture(tex, (nt_sampler_t){.id = want}, (uint32_t)unit);
+        b->tex[unit] = v->resolved_tex[t];
+        b->sampler[unit] = want;
+    }
+    return unit;
+}
+
+static inline void nt_renderer_apply_texture_slots(nt_renderer_bound_t *b, nt_program_t prog, const nt_renderer_material_view_t *v) {
+    uint32_t covered = 0;
+    for (uint8_t t = 0; t < v->tex_count; t++) {
+        const int unit = nt_renderer_bind_slot(b, prog, v, t);
+        if (unit < 0) {
+            continue;
+        }
+        const uint32_t bit = 1U << (uint32_t)unit;
+        NT_ASSERT((covered & bit) == 0 && "two texture slots name the same sampler uniform");
+        covered |= bit;
+    }
+    /* TRAP omits assert text; the log names the material that left a sampler uncovered. */
+    const uint32_t required = nt_gfx_program_sampler_mask(prog);
+    if (covered != required) {
+        NT_LOG_ERROR("material '%s' declares samplers 0x%x but its program uses 0x%x -- add a texture slot for every sampler the shader reads", (v->label != NULL) ? v->label : "(unlabeled)", covered,
+                     required);
+    }
+    NT_ASSERT(covered == required && "material must declare every sampler its program uses");
 }
 
 static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {
@@ -147,6 +169,7 @@ static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_mat
         .param_count = mi->param_count,
         .param_name_hashes = mi->param_name_hashes,
         .params = mi->params,
+        .label = mi->label,
     };
 }
 // #endregion

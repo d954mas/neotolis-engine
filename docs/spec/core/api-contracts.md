@@ -201,8 +201,15 @@ coverage analytically. Every other declared sprite slot must resolve to a
 texture — register a placeholder with `nt_resource_set_placeholder_texture` to
 survive async load races; a sampler override does not exempt a slot, since the
 override only picks filtering for a texture that still has to exist. A text
-material declares no textures at all — units 0 and 1 belong to the font's curve
-and band textures — and `nt_text_renderer_flush` asserts that.
+material declares no textures at all — the font's curve and band textures are
+the text renderer's own binds, on the units its program gave `u_curve_texture`
+and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
+material declares nothing, and that those two are the program's only samplers.
+
+Every other material declares a slot for every sampler its program uses, and the
+renderer binds each slot at the unit the program assigned that name; the material
+transition asserts the coverage. A declared name the program does not sample is
+ignored.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;

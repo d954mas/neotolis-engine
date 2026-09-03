@@ -147,6 +147,7 @@ static uint32_t s_stub_last_pass_target;
 static uint32_t s_stub_pass_targets[NT_GFX_STUB_HISTORY_CAPACITY];
 static uint32_t s_stub_pass_target_count;
 static uint32_t s_stub_bound_textures[NT_GFX_STUB_HISTORY_CAPACITY];
+static uint32_t s_stub_bound_texture_slots[NT_GFX_STUB_HISTORY_CAPACITY];
 static uint32_t s_stub_bound_texture_count;
 static uint32_t s_stub_render_target_create_count;
 static uint32_t s_stub_render_target_resize_count;
@@ -206,6 +207,7 @@ uint32_t nt_gfx_stub_test_pass_target_count(void) { return s_stub_pass_target_co
 uint32_t nt_gfx_stub_test_pass_target_at(uint32_t index) { return index < s_stub_pass_target_count ? s_stub_pass_targets[index] : 0; }
 uint32_t nt_gfx_stub_test_bound_texture_count(void) { return s_stub_bound_texture_count; }
 uint32_t nt_gfx_stub_test_bound_texture_at(uint32_t index) { return index < s_stub_bound_texture_count ? s_stub_bound_textures[index] : 0; }
+uint32_t nt_gfx_stub_test_bound_texture_slot_at(uint32_t index) { return index < s_stub_bound_texture_count ? s_stub_bound_texture_slots[index] : UINT32_MAX; }
 uint32_t nt_gfx_stub_test_render_target_create_count(void) { return s_stub_render_target_create_count; }
 uint32_t nt_gfx_stub_test_render_target_resize_count(void) { return s_stub_render_target_resize_count; }
 uint32_t nt_gfx_stub_test_render_target_destroy_count(void) { return s_stub_render_target_destroy_count; }
@@ -607,13 +609,14 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && "bind_texture: requires a live handle");
-    (void)slot;
 #ifdef NT_TEST_ACCESS
     if (s_stub_bound_texture_count < NT_GFX_STUB_HISTORY_CAPACITY) {
+        s_stub_bound_texture_slots[s_stub_bound_texture_count] = slot;
         s_stub_bound_textures[s_stub_bound_texture_count++] = backend_handle;
     }
 #else
     (void)backend_handle;
+    (void)slot;
 #endif
 }
 
@@ -761,6 +764,7 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 }
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
+    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
 #ifdef NT_TEST_ACCESS
     s_stub_last_uniform_program = program_backend;
     if (s_stub_uniform_int_count < NT_GFX_STUB_UNIFORM_NAMES) {

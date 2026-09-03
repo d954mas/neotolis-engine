@@ -472,8 +472,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(shadow_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, comparison, 0);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_shadow"), 0);
+    nt_gfx_bind_texture(depth_tex, comparison, (uint32_t)nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(shadow_pip), nt_hash32_str("u_shadow")));
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
@@ -498,8 +497,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(raw_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, raw, 0);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_depth"), 0);
+    nt_gfx_bind_texture(depth_tex, raw, (uint32_t)nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(raw_pip), nt_hash32_str("u_depth")));
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
@@ -1131,6 +1129,81 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     assert_rgba(pixel, 1, 255, 255, 0, 255);
 }
 
+/* Two materials on one program name the same samplers in opposite slot order: the unit
+ * comes from the name, so each draw samples its own textures. */
+static void test_opposite_slot_orders_on_one_program_sample_their_own_textures(void) {
+    static const char *vertex_source = "out vec2 v_uv;\n"
+                                       "void main() {\n"
+                                       "    float x = float((gl_VertexID << 1) & 2);\n"
+                                       "    float y = float(gl_VertexID & 2);\n"
+                                       "    v_uv = vec2(x, y);\n"
+                                       "    gl_Position = vec4((vec2(x, y) * 2.0) - 1.0, 0.0, 1.0);\n"
+                                       "}\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u_a;\n"
+                                         "uniform sampler2D u_b;\n"
+                                         "in vec2 v_uv;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(texture(u_a, v_uv).r, texture(u_b, v_uv).g, 0.0, 1.0); }\n";
+    nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    static const uint8_t red[4] = {255, 0, 0, 255};
+    static const uint8_t green[4] = {0, 255, 0, 255};
+    nt_texture_t tex_red = make_unit_test_texture(red);
+    nt_texture_t tex_green = make_unit_test_texture(green);
+
+    const int unit_a = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_a"));
+    const int unit_b = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b"));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_a);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_b);
+
+    uint8_t first[4] = {0};
+    uint8_t second[4] = {0};
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    bind_empty_vertex_input();
+
+    /* Material one: slot 0 = u_a (red), slot 1 = u_b (green). */
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_a);
+    nt_gfx_bind_texture(tex_green, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
+
+    /* Material two lists the same names in the other order and puts red in both slots:
+     * only u_b's unit changes, and u_a must keep reading red (red has no green). */
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    assert_rgba(first, 1, 255, 255, 0, 255);
+    assert_rgba(second, 1, 255, 0, 0, 255);
+}
+
+/* The link fixed the unit; a later write would silently redirect every material. */
+static void test_set_uniform_int_on_a_sampler_asserts(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D u_a;\n"
+                                         "uniform int u_mode;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(u_a, vec2(0.5)) * float(u_mode); }\n";
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(vertex_source, fragment_source)});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1); /* a plain int still writes */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_a"), 1));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 /* Writing the units must leave the bound pipeline's program current. */
 static void test_linking_a_program_keeps_the_bound_pipelines_program_current(void) {
     static const char *vertex_source = "void main() {\n"
@@ -1268,6 +1341,8 @@ int main(void) {
     RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
+    RUN_TEST(test_opposite_slot_orders_on_one_program_sample_their_own_textures);
+    RUN_TEST(test_set_uniform_int_on_a_sampler_asserts);
     RUN_TEST(test_linking_a_program_keeps_the_bound_pipelines_program_current);
     RUN_TEST(test_missing_active_uniform_count_releases_program_for_retry);
     RUN_TEST(test_missing_uniform_name_length_releases_program_for_retry);

@@ -131,12 +131,13 @@ end of that call; across calls the GL backend deduplicates program, VAO,
 pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
 front-end mirror), while uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
-at backend init and at context restore. A uniform a material
-does not declare retains the value last written on that program; this applies
-to sampler units and material params. Planned fixes are fixed sampler-unit
-assignments per program (#359) and per-material param UBOs bound at material
-transitions (#133). Until both land, two materials sharing one program must
-declare the same params and texture slots. Destroying a program destroys its
+at backend init and at context restore. Sampler uniforms are no longer part of
+this: their units are fixed at link and belong to the program, so nothing writes
+them and no material can redirect another's texture. A vec4 param a material
+does not declare still retains the value last written on that program; the
+planned fix is per-material param UBOs bound at material transitions (#133).
+Until that lands, two materials sharing one program must declare the same
+params. Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
@@ -154,9 +155,9 @@ array with a linear scan stays cheaper than a hash map at that scale. Every
 **State transitions.** The run-based renderers (mesh, sprite) drive one shared
 state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
 It separates five transitions, each with its own identity: pipeline (handle),
-vertex input (handle), material uniforms — sampler unit per declared slot plus
-every vec4 param, keyed by material id — per-slot texture and sampler (keyed by
-the resolved texture and the effective sampler), and the per-run instance range
+vertex input (handle), material uniforms — every vec4 param, keyed by material
+id — per-unit texture and sampler (keyed by the resolved texture and the
+effective sampler), and the per-run instance range
 plus draw. A run that changes only the mesh therefore does no material work at
 all. The tracked state lives for exactly one `draw_list` call or flush: inside
 that call the renderer is the only writer of GL draw state. Material uniforms
@@ -167,9 +168,12 @@ between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
 Texture and sampler travel together: `nt_gfx_bind_texture` takes the
 sampler the texture is read through, so a material without an override restores
-the texture's asset default in the same bind, and the per-slot key is the
-resolved texture plus the effective sampler. Fixed sampler-unit assignments
-(#359) will decouple the slot index from the texture unit. The text renderer
+the texture's asset default in the same bind, and the per-unit key is the
+resolved texture plus the effective sampler. The unit is not the material's slot
+index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
+a name the program does not sample is skipped, and the material transition
+asserts that the units it covered are exactly the program's sampler mask — a
+material must declare every sampler its program uses. The text renderer
 draws once per flush and other renderers draw in between, so it uses the
 stateless half of the helper and replays unconditionally.
 
