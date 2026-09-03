@@ -262,15 +262,15 @@ void test_bind_vi_reaches_backend(void) {
     nt_gfx_end_frame();
 }
 
-void test_bind_invalid_vi_unbinds(void) {
+void test_bind_invalid_vi_clears_mirror(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_destroy_vertex_input(vi);
-    nt_gfx_bind_vertex_input(vi); /* stale: clears the binding instead of trapping */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_last_bound_vertex_input());
+    nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -578,7 +578,7 @@ int main(void) {
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_bind_vi_reaches_backend);
-    RUN_TEST(test_bind_invalid_vi_unbinds);
+    RUN_TEST(test_bind_invalid_vi_clears_mirror);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);
     RUN_TEST(test_destroy_while_bound_clears_mirrors);
     RUN_TEST(test_begin_pass_clears_bound_vi);

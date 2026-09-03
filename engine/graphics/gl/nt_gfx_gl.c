@@ -302,6 +302,7 @@ static void nt_gfx_gl_cache_ground_state(void) {
     glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
     nt_gl_clear_depth(1.0F);
 
+    s_bound_framebuffer = 0;
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
     s_gl_cache.depth_test_enabled = false;
@@ -511,7 +512,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_targets && "gfx backend init: out of memory");
 
-    s_bound_framebuffer = 0;
     nt_gfx_gl_cache_ground_state();
 
     nt_gfx_gl_init_context_features();
@@ -844,16 +844,10 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_pipelines && "bind_pipeline: handle out of range");
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
-        return;
-    }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
     /* A zeroed record (context loss, destroyed pipeline) would bind program 0
      * and turn every following draw into a silent GL_INVALID_OPERATION. */
     NT_ASSERT(pip->program_slot != 0 && pip->program_slot <= s_init_desc.max_programs && "bind_pipeline: pipeline record without a live program");
-    if (pip->program_slot == 0 || pip->program_slot > s_init_desc.max_programs) {
-        return;
-    }
 
     GLuint program = s_programs[pip->program_slot].program;
     if (s_gl_cache.program != program) {
@@ -1181,9 +1175,6 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_programs && "destroy_program: handle out of range");
-    if (backend_handle > s_init_desc.max_programs) {
-        return;
-    }
     GLuint program = s_programs[backend_handle].program;
     if (program == 0) {
         return;
@@ -1231,9 +1222,6 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_pipelines && "destroy_pipeline: handle out of range");
-    if (backend_handle > s_init_desc.max_pipelines) {
-        return;
-    }
     /* The program is not ours to delete -- it outlives every pipeline built
      * on it; the pipeline owns no GL objects of its own. */
     memset(&s_pipelines[backend_handle], 0, sizeof(s_pipelines[backend_handle]));
@@ -1293,9 +1281,6 @@ void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_vertex_inputs && "destroy_vertex_input: handle out of range");
-    if (backend_handle > s_init_desc.max_vertex_inputs) {
-        return;
-    }
     nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[backend_handle];
     /* Deleting the bound VAO reverts the GL binding to 0 -- mirror it. */
     if (vi->vao && s_gl_cache.vao == vi->vao) {
@@ -1307,31 +1292,11 @@ void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
     memset(vi, 0, sizeof(*vi));
 }
 
-static void unbind_vertex_input_state(void) {
-    if (s_gl_cache.vao != 0) {
-        gl_bind_vao(0);
-        s_gl_cache.vao = 0;
-    }
-}
-
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
-    if (backend_handle == 0) {
-        unbind_vertex_input_state();
-        return;
-    }
-    NT_ASSERT(backend_handle <= s_init_desc.max_vertex_inputs && "bind_vertex_input: handle out of range");
-    if (backend_handle > s_init_desc.max_vertex_inputs) {
-        unbind_vertex_input_state();
-        return;
-    }
-    GLuint vao = s_vertex_inputs[backend_handle].vao;
     /* A zeroed record (context loss, destroyed vertex input) would leave the
      * previous VAO bound and draw the wrong geometry. */
-    NT_ASSERT(vao != 0 && "bind_vertex_input: record without a live VAO");
-    if (vao == 0) {
-        unbind_vertex_input_state();
-        return;
-    }
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_vertex_inputs && s_vertex_inputs[backend_handle].vao != 0 && "bind_vertex_input: requires a live vertex input");
+    GLuint vao = s_vertex_inputs[backend_handle].vao;
     if (s_gl_cache.vao != vao) {
         gl_bind_vao(vao);
         s_gl_cache.vao = vao;
@@ -1393,9 +1358,6 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_buffers && "destroy_buffer: handle out of range");
-    if (backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
     GLuint buf = s_buffer_gl[backend_handle];
     if (buf) {
         glDeleteBuffers(1, &buf);
@@ -1772,9 +1734,6 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
         return;
     }
     NT_ASSERT(backend_handle <= s_init_desc.max_textures && "destroy_texture: handle out of range");
-    if (backend_handle > s_init_desc.max_textures) {
-        return;
-    }
     GLuint tex = s_texture_gl[backend_handle];
     if (tex) {
         nt_gfx_gl_forget_texture(tex);
@@ -1895,11 +1854,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;
     }
-    bool valid_backend = backend_handle <= s_init_desc.max_render_targets && s_render_targets != NULL;
-    NT_ASSERT(valid_backend && "destroy_render_target: invalid GL backend handle");
-    if (!valid_backend) {
-        return;
-    }
+    NT_ASSERT(backend_handle <= s_init_desc.max_render_targets && s_render_targets != NULL && "destroy_render_target: invalid GL backend handle");
     nt_gfx_gl_render_target_t *rt = &s_render_targets[backend_handle];
     if (s_bound_framebuffer == rt->fbo) {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -2123,7 +2078,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_render_targets) {
         memset(s_render_targets, 0, (s_init_desc.max_render_targets + 1) * sizeof(nt_gfx_gl_render_target_t));
     }
-    s_bound_framebuffer = 0;
     nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();
     return true;

@@ -15,9 +15,9 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-/* destroy_* accepts 0 (no-op, as glDelete*); bind_vertex_input / bind_sampler
- * accept 0 as an explicit unbind; every other bind requires a live handle --
- * the front-end owns husk handling.
+/* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an
+ * explicit unbind; every other bind requires a live handle -- the front-end
+ * owns husk handling.
  * The backend keeps GL-mirror state only: what is logically bound lives in the
  * front-end, which names the program or vertex input a call operates on. */
 
@@ -48,7 +48,6 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
  * create_pipeline: returns `slot`, or 0 on failure. */
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-/* 0 unbinds (VAO 0). */
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);

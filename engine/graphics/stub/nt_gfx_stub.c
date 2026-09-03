@@ -312,6 +312,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && "bind_vertex_input: requires a live handle");
 #ifdef NT_TEST_ACCESS
     s_stub_bind_vertex_input_count++;
     s_stub_last_bound_vertex_input = backend_handle;
@@ -429,6 +430,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+    NT_ASSERT(backend_handle != 0 && "bind_texture: requires a live handle");
     (void)slot;
 #ifdef NT_TEST_ACCESS
     if (s_stub_bound_texture_count < NT_GFX_STUB_HISTORY_CAPACITY) {
@@ -506,6 +508,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 }
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && "bind_pipeline: requires a live handle");
 #ifdef NT_TEST_ACCESS
     s_stub_bind_pipeline_count++;
 #endif
@@ -513,6 +516,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
+    NT_ASSERT(vertex_input_backend != 0 && buffer_backend != 0 && "bind_instance_buffer: requires live handles");
     (void)buffer_backend;
 #ifdef NT_TEST_ACCESS
     s_stub_last_instance_offset = byte_offset;
@@ -532,6 +536,7 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 }
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+    NT_ASSERT(backend_handle != 0 && "bind_uniform_buffer: requires a live handle");
     (void)backend_handle;
     (void)slot;
 }

@@ -1487,11 +1487,9 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
-        /* Parallel to bind_pipeline's invalid path: clear the mirrors and
-         * bind VAO 0 so later draws cannot use stale vertex-input state. */
+        /* Clearing the mirrors is the whole unbind: draws trap on it. */
         s_gfx.bound_vertex_input = 0;
         s_gfx.bound_index_type = NT_INDEX_NONE;
-        nt_gfx_backend_bind_vertex_input(0);
         NT_LOG_ERROR("bind_vertex_input: invalid handle");
         return;
     }
