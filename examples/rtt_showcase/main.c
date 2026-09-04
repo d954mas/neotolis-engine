@@ -183,6 +183,7 @@ static bool make_quad_resources(void) {
     if (!nt_gfx_program_ready(s_demo.quad_program)) {
         return false;
     }
+    NT_ASSERT(nt_gfx_program_sampler_count(s_demo.quad_program) == 1 && "RTT quad program must expose exactly u_texture");
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,

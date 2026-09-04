@@ -1179,6 +1179,15 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     }
 }
 
+static void assert_uniform_hash_unique(const nt_gfx_gl_program_t *rec, uint32_t uniform_count, uint32_t name_hash) {
+    for (uint32_t i = 0; i < uniform_count && i < NT_MAX_CACHED_UNIFORMS; i++) {
+        NT_ASSERT(rec->uniforms[i].name_hash != name_hash && "active uniform name hash collision");
+    }
+    for (uint8_t i = 0; i < rec->sampler_count; i++) {
+        NT_ASSERT(rec->sampler_units[i].name_hash != name_hash && "active uniform name hash collision");
+    }
+}
+
 /* Cache locations off the hot path; NT_ASSERT expansion inflates complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
@@ -1220,13 +1229,11 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
+                const uint32_t name_hash = nt_hash32_str(uname).value;
+                assert_uniform_hash_unique(rec, uniform_count, name_hash);
                 nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
                 if (uniform_sampler_class(utype, &sampler_class)) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    const uint32_t name_hash = nt_hash32_str(uname).value;
-                    for (uint8_t i = 0; i < rec->sampler_count; i++) {
-                        NT_ASSERT(rec->sampler_units[i].name_hash != name_hash && "active sampler name hash collision");
-                    }
                     const uint8_t unit = rec->sampler_count;
                     rec->sampler_units[unit].name_hash = name_hash;
                     rec->sampler_units[unit].location = loc;
@@ -1234,7 +1241,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                     rec->sampler_count++;
                 } else {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
-                        out[uniform_count].name_hash = nt_hash32_str(uname).value;
+                        out[uniform_count].name_hash = name_hash;
                         out[uniform_count].location = loc;
                     }
                     uniform_count++;

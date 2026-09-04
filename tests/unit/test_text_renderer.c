@@ -343,14 +343,7 @@ void test_text_renderer_requires_both_font_samplers(void) {
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
-
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F));
 }
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {

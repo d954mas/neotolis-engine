@@ -204,20 +204,22 @@ declares its page sampler at slot 0; that slot's resource is never sampled,
 because the renderer substitutes the page texture there per command. A material
 declaring no textures never receives the page and is for shaders that compute
 coverage analytically. Every declared slot the program samples must resolve to a
-texture, in every material-driven renderer — the bind asserts it, because a slot
-that binds nothing leaves the previous material's texture on that unit. Register
-a placeholder with `nt_resource_set_placeholder_texture` to survive async load
-races; a sampler override does not exempt a slot, since the override only picks
-filtering for a texture that still has to exist. A text
+texture, in every material-driven renderer. The renderer submits one complete
+name-keyed set per material transition; gfx resolves backend units, validates
+coverage, and publishes only the full valid set. A rejected set invalidates the
+logical binding state, so a draw cannot reuse the previous material's textures.
+Register a placeholder with `nt_resource_set_placeholder_texture` to survive
+async load races; a sampler override does not exempt a slot, since the override
+only picks filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
 and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
 material declares nothing, and that those two are the program's only samplers.
 
-Every other material declares a slot for every sampler its program uses, and the
-renderer binds each slot at the unit the program assigned that name; the coverage
-is asserted at every material transition, and at every cmd in the sprite renderer. A declared name the program does not sample is
-ignored.
+Every other material declares a slot for every sampler its program uses. A
+renderer applies the complete name-keyed set at every material transition and at
+every command in the sprite renderer. A declared name the program does not
+sample is ignored.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;

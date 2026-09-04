@@ -123,7 +123,6 @@ static nt_program_t s_binding_program;
 static nt_pipeline_t s_binding_pipeline;
 static nt_vertex_input_t s_binding_vi;
 static nt_texture_t s_binding_red, s_binding_green;
-static nt_render_target_t s_binding_target;
 static bool s_binding_probe_done;
 static bool s_binding_probe_ok;
 
@@ -223,7 +222,8 @@ static bool binding_probe_create(void) {
                                    "uniform sampler2D u_a;\n"
                                    "uniform sampler2D u_b;\n"
                                    "out vec4 frag_color;\n"
-                                   "void main(){frag_color=texture(u_a,vec2(0.5))+texture(u_b,vec2(0.5));}\n";
+                                   "void main(){vec4 a=texture(u_a,vec2(0.5));vec4 b=texture(u_b,vec2(0.5));"
+                                   "frag_color=vec4(a.r,b.g,0.0,1.0);}\n";
     static const uint8_t red[4] = {255, 0, 0, 255};
     static const uint8_t green[4] = {0, 255, 0, 255};
     s_binding_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source, .label = "binding_probe_vs"});
@@ -233,29 +233,13 @@ static bool binding_probe_create(void) {
     s_binding_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "binding_probe_vi"});
     s_binding_red = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = red, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "binding_probe_red"});
     s_binding_green = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = green, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "binding_probe_green"});
-    s_binding_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 1,
-        .height = 1,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
-        .depth_format = NT_TEXTURE_FORMAT_INVALID,
-        .label = "binding_probe_target",
-    });
     s_binding_probe_done = false;
     s_binding_probe_ok = false;
-    return s_binding_pipeline.id != 0 && s_binding_vi.id != 0 && s_binding_red.id != 0 && s_binding_green.id != 0 && s_binding_target.id != 0;
+    return s_binding_pipeline.id != 0 && s_binding_vi.id != 0 && s_binding_red.id != 0 && s_binding_green.id != 0;
 }
 
 #ifndef NT_PLATFORM_WEB
 static void binding_probe_destroy(void) {
-    if (s_binding_target.id != 0) {
-        nt_gfx_destroy_render_target(s_binding_target);
-        s_binding_target = NT_RENDER_TARGET_INVALID;
-    }
     if (s_binding_green.id != 0) {
         nt_gfx_destroy_texture(s_binding_green);
         s_binding_green = (nt_texture_t){0};
@@ -282,7 +266,7 @@ static void binding_probe_run(void) {
         return;
     }
     uint8_t pixel[4] = {0};
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_binding_target, .clear_color = {0}, .clear_depth = 1.0F});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0}, .clear_depth = 1.0F});
     nt_gfx_set_viewport(0, 0, 1, 1);
     nt_gfx_bind_pipeline(s_binding_pipeline);
     nt_gfx_bind_vertex_input(s_binding_vi);
