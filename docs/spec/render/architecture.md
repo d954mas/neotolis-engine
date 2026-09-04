@@ -161,7 +161,8 @@ out-of-range value can never truncate onto a valid neighbour and turn into a
 cache hit. gfx owns the lane widths, and pins the desc size and field offsets
 with static asserts as a partial tripwire: a new field that moves a later offset
 trips it, one that fits a padding hole does not and must be added by hand. The
-packer is one pure TU compiled into the real gfx and the stub alike. The cached pipelines borrow
+packer is header-inline, so every gfx composition (real, stub, test fake) carries it
+with no link-order dependency. The cached pipelines borrow
 programs the game owns, so a cache entry never extends a program's lifetime.
 The population is distinct material states, tens of values in a real game, so
 a fixed array with a linear scan stays cheaper than a hash map at that scale.

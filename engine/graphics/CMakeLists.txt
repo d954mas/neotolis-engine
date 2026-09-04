@@ -10,7 +10,6 @@ nt_declare_interface(nt_gfx)
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
-        nt_gfx_pipeline_key.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_web.c
         nt_gfx.h
@@ -21,7 +20,6 @@ if(EMSCRIPTEN)
 else()
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
-        nt_gfx_pipeline_key.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_native.c
         nt_gfx.h
@@ -37,7 +35,6 @@ endif()
 # Null graphics implementation for executables that do not render.
 nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
     stub/nt_gfx_stub.c
-    nt_gfx_pipeline_key.c
     nt_gfx.h
 )
 target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_gfx_interface)
