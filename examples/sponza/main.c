@@ -109,45 +109,9 @@ static nt_resource_t s_mesh_handles[MAX_SCENE_NODES];
 static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, specular per node */
 
 /* A material must cover every sampler its program reads, so a node without a normal
- * or specular map still declares the slot and points it at a game-owned 1x1 neutral
- * published through a virtual pack. */
-static nt_hash32_t s_neutral_pack_id;
-static nt_texture_t s_neutral_white_tex;
-static nt_texture_t s_neutral_normal_tex;
+ * or specular map still declares the slot and points it at a 1x1 neutral from the core pack. */
 static nt_resource_t s_neutral_white_handle;
 static nt_resource_t s_neutral_normal_handle;
-
-static nt_hash64_t neutral_white_rid(void) { return nt_hash64_str("sponza/neutral_white"); }
-static nt_hash64_t neutral_normal_rid(void) { return nt_hash64_str("sponza/neutral_normal"); }
-
-/* Virtual packs are skipped by nt_resource_invalidate, so a context restore has to
- * rebuild these two by hand and re-publish the new handles. */
-static void publish_neutral_textures(void) {
-    static const uint8_t white_pixel[4] = {255, 255, 255, 255};
-    static const uint8_t flat_normal_pixel[4] = {128, 128, 255, 255};
-    /* Primary textures survive a loss as husks; the owner frees them. */
-    if (s_neutral_white_tex.id != 0) {
-        nt_gfx_destroy_texture(s_neutral_white_tex);
-        nt_gfx_destroy_texture(s_neutral_normal_tex);
-    }
-    s_neutral_white_tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 1,
-        .height = 1,
-        .data = white_pixel,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .label = "sponza_neutral_white",
-    });
-    s_neutral_normal_tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 1,
-        .height = 1,
-        .data = flat_normal_pixel,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .label = "sponza_neutral_normal",
-    });
-    NT_ASSERT(s_neutral_white_tex.id != 0 && s_neutral_normal_tex.id != 0 && "neutral fallback texture creation failed");
-    nt_resource_register(s_neutral_pack_id, neutral_white_rid(), NT_ASSET_TEXTURE, s_neutral_white_tex.id);
-    nt_resource_register(s_neutral_pack_id, neutral_normal_rid(), NT_ASSET_TEXTURE, s_neutral_normal_tex.id);
-}
 
 /* ---- Shader resource handles (6 shaders, 3 permutations) ---- */
 
@@ -571,8 +535,6 @@ static void frame(void) {
         item_count = 0;
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
-        /* Invalidation skips virtual packs, so the neutrals are rebuilt explicitly. */
-        publish_neutral_textures();
 
         nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -719,13 +681,8 @@ int main(void) {
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
     s_fallback_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER, NT_ASSET_TEXTURE);
 
-    /* Neutral 1x1 maps for nodes whose glTF material lacks a normal or specular map.
-     * Lowest priority: nothing else publishes these ids, so it never competes. */
-    s_neutral_pack_id = nt_hash32_str("sponza_neutral");
-    nt_resource_create_pack(s_neutral_pack_id, 5);
-    publish_neutral_textures();
-    s_neutral_white_handle = nt_resource_request(neutral_white_rid(), NT_ASSET_TEXTURE);
-    s_neutral_normal_handle = nt_resource_request(neutral_normal_rid(), NT_ASSET_TEXTURE);
+    s_neutral_white_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE, NT_ASSET_TEXTURE);
+    s_neutral_normal_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL, NT_ASSET_TEXTURE);
 
     /* 13. Create frame uniforms UBO (updated each frame) */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -788,8 +745,6 @@ int main(void) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_texture(s_neutral_white_tex);
-    nt_gfx_destroy_texture(s_neutral_normal_tex);
     nt_gfx_destroy_buffer(s_light_ubo);
     nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
