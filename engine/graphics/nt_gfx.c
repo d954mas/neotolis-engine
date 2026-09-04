@@ -853,16 +853,21 @@ static bool blend_constant_color_valid(const float color[4]) {
     return true;
 }
 
+/* Ranges hold whether or not blending is enabled; the WebGL combination rules
+ * only matter for a blend that will run. */
 static bool blend_state_valid(const nt_blend_state_t *blend) {
+    if (!(blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) && blend_factor_valid(blend->dst_alpha) &&
+          blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX)) {
+        return false;
+    }
     if (!blend->enabled) {
         return true;
     }
 
     bool uses_constant_color = blend_factor_uses_constant_color(blend->src_rgb) || blend_factor_uses_constant_color(blend->dst_rgb);
     bool uses_constant_alpha = blend_factor_uses_constant_alpha(blend->src_rgb) || blend_factor_uses_constant_alpha(blend->dst_rgb);
-    return blend_constant_color_valid(blend->constant_color) && blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) &&
-           blend_factor_valid(blend->dst_alpha) && blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE &&
-           blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
+    return blend_constant_color_valid(blend->constant_color) && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE && blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE &&
+           !(uses_constant_color && uses_constant_alpha);
 }
 
 /* A location used twice (within a layout or across vertex/instance layouts) means
@@ -903,11 +908,11 @@ nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
     NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_ALWAYS && "depth_func out of range");
-    /* A disabled blend is opaque whatever its factors say: one pipeline, not one per preset. */
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
+    /* Identity only: a disabled blend is opaque whatever its (valid) factors say. */
     const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
-    NT_ASSERT(blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
-              blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
-    NT_ASSERT(blend.op_rgb <= NT_BLEND_OP_MAX && blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
     nt_gfx_pipeline_key_t key;
     key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
                (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 38 | (uint64_t)blend.src_rgb << 40 | (uint64_t)blend.dst_rgb << 44 |

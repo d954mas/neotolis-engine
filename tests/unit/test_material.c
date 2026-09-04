@@ -275,11 +275,11 @@ void test_create_asserts_out_of_range_key_lanes(void) {
     d.attr_map[0].location = 16;
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 
-    /* A disabled blend is canonical opaque: its factor bytes are not looked at. */
+    /* Ranges hold for a disabled blend too: garbage is a bug, not "don't care". */
     d = make_test_desc();
     d.blend = nt_blend_opaque();
     d.blend.src_rgb = 16;
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_material_create(&d).id);
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 }
 
 /* ---- Test 7: attr_map stored correctly ---- */

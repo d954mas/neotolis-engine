@@ -154,9 +154,9 @@ canonicalisations apply, both in the packer: a disabled blend packs as opaque
 (factors, ops and constant ignored) and a disabled polygon offset packs its
 factor/units as zero; nothing else is normalised, so depth lanes are exact even
 when depth test is off. Lane inputs are range-checked twice: `nt_material_create`
-asserts them at the API boundary (blend lanes only when blending is enabled —
-a disabled blend is canonical opaque) and the packer asserts the canonicalised
-descriptor again, so under TRAP/FULL an out-of-range value can never truncate
+asserts them at the API boundary and the packer asserts them again — both
+unconditionally, a disabled blend included: canonicalisation is about identity,
+validity has no exceptions — so under TRAP/FULL an out-of-range value can never truncate
 onto a valid neighbour (OFF is undefined behaviour here as everywhere). gfx
 owns the lane widths: every `nt_pipeline_desc_t` field offset is pinned by a
 static assert, so a field inserted anywhere trips it and must be added to the

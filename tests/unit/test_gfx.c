@@ -866,6 +866,11 @@ void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
     blend = nt_blend_alpha();
     blend.dst_rgb = UINT8_MAX;
     expect_pipeline_blend_assert(blend);
+
+    /* Ranges hold for a disabled blend too: garbage is a bug, not "don't care". */
+    blend = nt_blend_opaque();
+    blend.src_rgb = 16;
+    expect_pipeline_blend_assert(blend);
 }
 
 void test_gfx_pipeline_rejects_invalid_blend_operation(void) {

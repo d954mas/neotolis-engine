@@ -89,12 +89,10 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
     /* Range-check at the API boundary, before a slot is taken: the pipeline and
      * vertex-input keys pack these into fixed lanes and would trap on the first draw.
-     * A disabled blend is canonical opaque, so its factors are not looked at. */
-    if (desc->blend.enabled) {
-        NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
-                  desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "invalid blend factor");
-        NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "invalid blend op");
-    }
+     * Unconditional: a disabled blend still has to hold valid values, not garbage. */
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "invalid blend factor");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "invalid blend op");
     NT_ASSERT((uint32_t)desc->cull_mode <= NT_CULL_FRONT && "invalid cull_mode -- use NT_CULL_NONE/BACK/FRONT");
     NT_ASSERT(desc->attr_map_count <= NT_MATERIAL_MAX_ATTR_MAP);
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
