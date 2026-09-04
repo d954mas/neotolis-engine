@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 985cb8d
+# Commit: 623116f
 
 ## WASM Section Sizes
 
@@ -13,49 +13,49 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  22 B
-Code               73690 B
+Code               75674 B
 Data                8272 B
 Custom              4214 B
 ---------------- ----------
-TOTAL              87190 B
+TOTAL              89174 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-15112 B   frame
-14082 B   main
- 3009 B   rebuild_shapes
+15509 B   frame
+14222 B   main
  3002 B   fmt_fp
+ 2931 B   rebuild_shapes
  2613 B   printf_core
- 2399 B   emit_capsule_wire
- 1950 B   emit_cylinder_wire
- 1943 B   nt_shape_renderer_flush
+ 2525 B   nt_input_web_on_blur
+ 2492 B   emit_capsule_wire
+ 2043 B   emit_cylinder_wire
+ 1950 B   nt_shape_renderer_flush
  1847 B   __rem_pio2f
- 1669 B   nt_gfx_make_program
- 1378 B   render_target_recreate_attachment
- 1254 B   nt_gfx_make_vertex_input
- 1119 B   nt_input_web_on_blur
- 1100 B   nt_hash32_str
-  988 B   nt_gfx_bind_pipeline
+ 1677 B   nt_gfx_make_program
+ 1303 B   render_target_recreate_attachment
+ 1274 B   nt_gfx_make_vertex_input
+ 1136 B   nt_hash32_str
   961 B   nt_shape_renderer_triangle
-  842 B   nt_input_web_on_pointer_move
-  832 B   nt_gfx_make_pipeline
-  802 B   nt_input_web_on_pointer_down
+  929 B   nt_gfx_bind_pipeline
+  852 B   nt_input_web_on_pointer_move
+  841 B   nt_gfx_make_pipeline
+  812 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
   540 B   claim_more_memory
   519 B   __memcpy
   504 B   emmalloc_memalign
   487 B   nt_gfx_make_buffer
   462 B   nt_log_write
-  430 B   push_instance
+  424 B   push_instance
   418 B   nt_gfx_bind_instance_buffer
   409 B   attempt_allocate
   395 B   nt_shape_renderer_shutdown
   385 B   sinf
 
 Total functions: 99
-Total code size: 73526 B
+Total code size: 75510 B
 
 ## Built Engine Archives
 
@@ -79,7 +79,7 @@ libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                82640 B
+libnt_gfx.a                82700 B
 libnt_gfx_stub.a            5262 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -90,11 +90,11 @@ libnt_introspect.a          5080 B
 libnt_log.a                11954 B
 libnt_log_ring.a          595390 B
 libnt_log_stub.a             746 B
-libnt_material.a            4780 B
+libnt_material.a            4750 B
 libnt_material_comp.a       2302 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2164 B
-libnt_mesh_renderer.a      11132 B
+libnt_mesh_renderer.a      11592 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -107,8 +107,8 @@ libnt_resource.a          188970 B
 libnt_shape_renderer.a   1144652 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
-libnt_sprite_renderer.a    52790 B
-libnt_text_renderer.a    1242858 B
+libnt_sprite_renderer.a    54934 B
+libnt_text_renderer.a    1243718 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
 libnt_ui.a                614044 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5919308 B
+TOTAL (archives)         5922802 B
 
 ## Data Segments Summary
 

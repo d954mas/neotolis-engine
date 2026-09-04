@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 985cb8d
+# Commit: 623116f
 
 ## WASM Section Sizes
 
@@ -7,55 +7,55 @@ Section                Size
 ---------------- ----------
 Type                 397 B
 Import               633 B
-Function             249 B
+Function             248 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  70 B
-Code              387014 B
+Code              402620 B
 Data               19993 B
-Custom              8055 B
+Custom              8030 B
 ---------------- ----------
-TOTAL             416515 B
+TOTAL             432095 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-183486 B   frame
-21397 B   dispatch_command
-15228 B   nt_font_lookup_glyph_offset
-11044 B   nt_shape_renderer_init
-10849 B   main
-10684 B   declare_slider_control
- 7799 B   Clay__ConfigureOpenElementPtr
+186740 B   frame
+25118 B   nt_font_lookup_glyph_offset
+21043 B   dispatch_command
+11154 B   nt_shape_renderer_init
+10924 B   main
+10387 B   declare_slider_control
+ 7672 B   Clay__ConfigureOpenElementPtr
  6049 B   Clay__SizeContainersAlongAxis
  5644 B   Clay__InitializeEphemeralMemory
- 4726 B   nt_ui_internal_scroll_pane_offset
- 3993 B   Clay__MeasureTextCached
+ 4776 B   nt_ui_internal_scroll_pane_offset
+ 3950 B   Clay__MeasureTextCached
+ 3436 B   nt_sprite_renderer_set_material
  3341 B   Clay__CloseElement
  3009 B   fmt_fp
- 2841 B   nt_sprite_renderer_set_material
- 2627 B   nt_http_request_ex
+ 2637 B   nt_http_request_ex
+ 2525 B   nt_input_web_on_blur
  2429 B   printf_core
- 2153 B   Clay__OpenTextElement
+ 2164 B   Clay__OpenTextElement
+ 2128 B   nt_sprite_renderer_emit_region
+ 2124 B   Clay__RenderDebugViewColor
  2104 B   Clay__InitializePersistentMemory
- 2099 B   Clay__RenderDebugViewColor
- 1864 B   nt_gfx_resize_render_target
  1851 B   __rem_pio2f
- 1846 B   nt_sprite_renderer_emit_region
  1784 B   poly_inradius_pole
  1747 B   nt_hash64
- 1688 B   nt_sprite_renderer_emit_geometry
- 1672 B   nt_gfx_make_program
+ 1742 B   nt_sprite_renderer_emit_geometry
+ 1717 B   nt_gfx_resize_render_target
+ 1680 B   nt_gfx_make_program
+ 1658 B   atlas_on_resolve
  1652 B   Clay__RenderDebugLayoutSizing
- 1620 B   atlas_on_resolve
- 1405 B   ui_hit_test
- 1315 B   nt_ui_image
+ 1392 B   ui_hit_test
 
-Total functions: 247
-Total code size: 386592 B
+Total functions: 246
+Total code size: 402199 B
 
 ## Built Engine Archives
 
@@ -79,7 +79,7 @@ libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                82640 B
+libnt_gfx.a                82700 B
 libnt_gfx_stub.a            5262 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -90,11 +90,11 @@ libnt_introspect.a          5080 B
 libnt_log.a                11954 B
 libnt_log_ring.a          595390 B
 libnt_log_stub.a             746 B
-libnt_material.a            4780 B
+libnt_material.a            4750 B
 libnt_material_comp.a       2302 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2164 B
-libnt_mesh_renderer.a      11132 B
+libnt_mesh_renderer.a      11592 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -107,8 +107,8 @@ libnt_resource.a          188970 B
 libnt_shape_renderer.a   1144652 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
-libnt_sprite_renderer.a    52790 B
-libnt_text_renderer.a    1242858 B
+libnt_sprite_renderer.a    54934 B
+libnt_text_renderer.a    1243718 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
 libnt_ui.a                614044 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5919308 B
+TOTAL (archives)         5922802 B
 
 ## Data Segments Summary
 
