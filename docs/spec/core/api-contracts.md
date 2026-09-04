@@ -215,8 +215,8 @@ and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
 material declares nothing, and that those two are the program's only samplers.
 
 Every other material declares a slot for every sampler its program uses, and the
-renderer binds each slot at the unit the program assigned that name; the material
-transition asserts the coverage. A declared name the program does not sample is
+renderer binds each slot at the unit the program assigned that name; the coverage
+is asserted at every material transition, and at every cmd in the sprite renderer. A declared name the program does not sample is
 ignored.
 
 Pipeline cache keys include the program handle, so replacement selects a

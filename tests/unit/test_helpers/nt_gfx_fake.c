@@ -284,10 +284,8 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
     (void)h;
 }
 
-/* Deterministic synthetic readback (no GL). Encodes the GL row index (r) and
- * column index (g) per pixel so the shared-layer Y-flip is observable in CTest:
- * after the flip, out row 0 must carry GL row (h-1). Bottom-left order, matching
- * the real glReadPixels backend. b = 0x40 marker, a = 0xFF (opaque). */
+/* Synthetic readback: r = GL row, g = column, bottom-left order like glReadPixels,
+ * so the shared-layer Y-flip is observable (out row 0 must carry GL row h-1). */
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     (void)x;
     (void)y;

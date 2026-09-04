@@ -860,7 +860,7 @@ void test_state_texture_sampler_transitions(void) {
 
     /* Texture and sampler travel together, so each of A / B / A is one bind of
      * each: override, default, override. The texture repeats, and only the GL
-     * cache absorbs that -- the stub counts every call. */
+     * cache absorbs that -- the fake counts every call. */
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(override), nt_gfx_fake_last_sampler(0));

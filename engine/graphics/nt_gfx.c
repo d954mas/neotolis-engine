@@ -585,10 +585,8 @@ void nt_gfx_begin_frame(void) {
         s_gfx.bound_pipeline = 0;
         s_gfx.bound_vertex_input = 0;
         s_gfx.bound_index_type = NT_INDEX_NONE;
-        /* Sampler cache: zero only the GL backend ids — keys, descs
-         * and sampler_count stay so material-stored sampler.id values
-         * remain valid slot references. Backend is lazy-recreated on
-         * the next nt_gfx_make_sampler hit or on bind_texture. */
+        /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
+         * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
         for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
             s_gfx.sampler_cache[i].backend = 0;
         }
@@ -1578,10 +1576,8 @@ void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) 
         return;
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
-    /* Husk: loss zeroed the backend -- either an RT attachment whose restore failed
-     * (GPU failure) or a primary texture the owner never recreated. Bind cannot tell
-     * them apart, so it reports. Rejected before the default sampler is read: loss
-     * zeroes that too. */
+    /* Husk: loss zeroed the backend (failed RT restore or a primary the owner never recreated);
+     * bind cannot tell them apart, so it reports. Rejected before the default sampler is read: loss zeroes that too. */
     if (s_gfx.texture_backends[idx] == 0) {
         NT_LOG_ERROR_ONCE("bind_texture: texture has no GPU resource (restore failed)");
         return;

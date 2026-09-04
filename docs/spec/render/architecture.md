@@ -131,9 +131,9 @@ end of that call; across calls the GL backend deduplicates program, VAO,
 pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
 front-end mirror), while uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
-at backend init and at context restore. Sampler uniforms are no longer part of
-this: their units are fixed at link and belong to the program, so nothing writes
-them and no material can redirect another's texture. A vec4 param a material
+at backend init and at context restore. Sampler uniforms are not written at all:
+their units are fixed at link and belong to the program, so no material can
+redirect another's texture. A vec4 param a material
 does not declare still retains the value last written on that program; the
 planned fix is per-material param UBOs bound at material transitions (#133).
 Until that lands, two materials sharing one program must declare the same
@@ -167,8 +167,9 @@ nothing for this: a pipeline change there always implies a material change.
 Texture and sampler travel together: `nt_gfx_bind_texture` takes the
 sampler the texture is read through, so a material without an override restores
 the texture's asset default in the same bind. The renderer keeps no mirror of
-those binds — it issues one `nt_gfx_bind_texture` per cmd per sampled slot and
-the backend GL cache drops the repeats. The unit is not the material's slot
+those binds — it issues one `nt_gfx_bind_texture` per sampled slot at every
+material transition (the sprite renderer at every cmd) and the backend GL cache
+drops the repeats. The unit is not the material's slot
 index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
 a name the program does not sample is skipped, and the coverage assert compares
 the units covered against the program's sampler mask — a material must declare
