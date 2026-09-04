@@ -118,6 +118,12 @@ unregister", "until replaced", "until context destroy", "until shutdown", or
 
 ## Handles
 
+The contracts below describe the real implementation. `nt_gfx_stub` is the
+explicit no-graphics composition: creation/activation returns invalid handles,
+queries return empty results, and commands are inert. It has no GPU resources
+or shader interface to validate. Headless applications omit renderer calls;
+see [stub semantics](module-layout.md#stub-semantics-and-capability-queries).
+
 Generational handles are values, not owned pointers. Passing a handle does not
 transfer ownership of the backing resource. An API that destroys, unregisters,
 invalidates, or releases backing state must say so explicitly.
@@ -197,12 +203,21 @@ Texture slots differ by renderer. A sprite material that samples the atlas
 declares its page sampler at slot 0; that slot's resource is never sampled,
 because the renderer substitutes the page texture there per command. A material
 declaring no textures never receives the page and is for shaders that compute
-coverage analytically. Every other declared sprite slot must resolve to a
-texture — register a placeholder with `nt_resource_set_placeholder_texture` to
-survive async load races; a sampler override does not exempt a slot, since the
-override only picks filtering for a texture that still has to exist. A text
-material declares no textures at all — units 0 and 1 belong to the font's curve
-and band textures — and `nt_text_renderer_flush` asserts that.
+coverage analytically. Every declared slot the program samples must resolve to a
+texture, in every material-driven renderer — the bind asserts it, because a slot
+that binds nothing leaves the previous material's texture on that unit. Register
+a placeholder with `nt_resource_set_placeholder_texture` to survive async load
+races; a sampler override does not exempt a slot, since the override only picks
+filtering for a texture that still has to exist. A text
+material declares no textures at all — the font's curve and band textures are
+the text renderer's own binds, on the units its program gave `u_curve_texture`
+and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
+material declares nothing, and that those two are the program's only samplers.
+
+Every other material declares a slot for every sampler its program uses, and the
+renderer binds each slot at the unit the program assigned that name; the coverage
+is asserted at every material transition, and at every cmd in the sprite renderer. A declared name the program does not sample is
+ignored.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;
@@ -220,8 +235,9 @@ false without mutating the material.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
-A separately bound sampler must obey the same format restrictions; it cannot
-replace the explicit texture state with an incompatible filter. Depth comparison
+A sampler override passed to `nt_gfx_bind_texture` must obey the same format
+restrictions; it cannot replace the explicit texture state with an
+incompatible filter. Depth comparison
 is the one documented exception, and it is sampler state only: `DEPTH*` accepts
 `LINEAR` from a sampler whose `compare_func` is not `NONE`, because the filtering
 then applies to comparison results rather than to raw depth. The texture keeps

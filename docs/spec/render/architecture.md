@@ -128,15 +128,16 @@ share every uniform value, and binding one does not reset what the other set —
 each consumer sets every uniform it needs on every material transition inside
 one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
-pipeline state, texture, viewport and clear-value binds (scissor-enable is deduplicated by the
-front-end mirror), while sampler binds and uniform writes are always issued. The
+pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
+front-end mirror), while uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
-at backend init and at context restore. A uniform a material
-does not declare retains the value last written on that program; this applies
-to sampler units and material params. Planned fixes are fixed sampler-unit
-assignments per program (#359) and per-material param UBOs bound at material
-transitions (#133). Until both land, two materials sharing one program must
-declare the same params and texture slots. Destroying a program destroys its
+at backend init and at context restore. Sampler uniforms are not written at all:
+their units are fixed at link and belong to the program, so no material can
+redirect another's texture. A vec4 param a material
+does not declare still retains the value last written on that program; the
+planned fix is per-material param UBOs bound at material transitions (#133).
+Until that lands, two materials sharing one program must declare the same
+params. Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
@@ -153,22 +154,29 @@ array with a linear scan stays cheaper than a hash map at that scale. Every
 
 **State transitions.** The run-based renderers (mesh, sprite) drive one shared
 state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
-It separates five transitions, each with its own identity: pipeline (handle),
-vertex input (handle), material uniforms — sampler unit per declared slot plus
-every vec4 param, keyed by material id — per-slot texture and sampler (keyed by
-the resolved texture and the effective sampler), and the per-run instance range
-plus draw. A run that changes only the mesh therefore does no material work at
-all. The tracked state lives for exactly one `draw_list` call or flush: inside
+It separates four transitions, each with its own identity: pipeline (handle),
+vertex input (handle), material uniforms — every vec4 param, keyed by material
+id — and the per-run instance range plus draw. A run that changes only the mesh
+therefore does no material work at all. The tracked state lives for exactly one `draw_list` call or flush: inside
 that call the renderer is the only writer of GL draw state. Material uniforms
 replay on a material change *or* a pipeline change, because uniform values are
 program state and the new pipeline may sit on another program — one flush can
 hold one material id on two programs when a game replaces the material's program
 between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
-Sampler tracking is per slot because
-`nt_gfx_bind_texture` re-installs the texture's asset default, so a material
-without an override has to restore that default after one that overrode it;
-fixed sampler-unit assignments (#359) will collapse this. The text renderer
+Texture and sampler travel together: `nt_gfx_bind_texture` takes the
+sampler the texture is read through, so a material without an override restores
+the texture's asset default in the same bind. The renderer keeps no mirror of
+those binds — it issues one `nt_gfx_bind_texture` per sampled slot at every
+material transition (the sprite renderer at every cmd) and the backend GL cache
+drops the repeats. The unit is not the material's slot
+index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
+a name the program does not sample is skipped, and the coverage assert compares
+the units covered against the program's sampler mask — a material must declare
+every sampler its program uses. That check runs per material transition in the
+mesh renderer and per cmd in the sprite renderer, where one material's atlas page
+can change on a page split. The program and its mask are read once per pipeline
+change, not per cmd. The text renderer
 draws once per flush and other renderers draw in between, so it uses the
 stateless half of the helper and replays unconditionally.
 
@@ -267,10 +275,11 @@ description is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one
 still cannot filter depth.
 
-Sampler binds follow the texture bind for a unit, because
-`nt_gfx_bind_texture` installs the texture's own default sampler and discards
-whatever the unit held. A comparison sampler bound to a unit with no live
-texture is therefore rejected rather than silently replaced.
+A texture and the sampler it is read through are bound in one call, so the
+sampler is validated against that texture and not against whatever the unit held;
+`NT_SAMPLER_DEFAULT` selects the texture's own default. A comparison sampler is
+therefore rejected against a non-depth texture in the same call, and a unit never
+holds a texture without its sampler.
 
 With comparison on, `LINEAR` filters the 0/1 comparison results instead of the
 raw depths — the ordering a shadow edge needs, since averaging depths first

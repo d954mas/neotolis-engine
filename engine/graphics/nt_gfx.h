@@ -67,6 +67,8 @@ typedef struct {
 } nt_sampler_t;
 
 #define NT_SAMPLER_INVALID ((nt_sampler_t){0})
+/* Same value, read as "no override": nt_gfx_bind_texture then uses the texture's asset-baked default. */
+#define NT_SAMPLER_DEFAULT NT_SAMPLER_INVALID
 
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
@@ -473,6 +475,8 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
+/* nt_gfx_stub has no resources: creates return INVALID, queries are empty and
+ * commands are inert. Headless callers omit renderer initialization and draws. */
 void nt_gfx_init(const nt_gfx_desc_t *desc);
 void nt_gfx_shutdown(void);
 
@@ -489,10 +493,9 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links valid stages; link errors and the GL cache limit (16 uniform locations) assert.
- * Returns invalid while the context is lost or begin_frame has not completed recovery, and
- * for a live stage handle whose GPU object an earlier loss discarded -- recreate the stages
- * and link again. Only a stale stage handle asserts. */
+/* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
+ * Returns invalid while the context is lost / begin_frame has not finished recovery, and for a live stage
+ * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
@@ -560,6 +563,15 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
+/* Sampler uniforms are program state: units are fixed at link, nobody writes
+ * them. Returns the unit the named sampler reads from, or -1 when the program
+ * has no active sampler of that name. Program must be ready (asserted). */
+int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
+/* Every unit the program samples, as 1<<unit bits -- the interface a material
+ * must cover. Program must be ready (asserted). */
+uint32_t nt_gfx_program_sampler_mask(nt_program_t prog);
+/* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
+nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height);
 /* Returns INVALID for invalid or stale handles. */
@@ -575,14 +587,10 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * either may change without re-binding the other. Every draw requires a bound
  * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
-/* Bind sampler to texture unit `slot`, after nt_gfx_bind_texture for that slot —
- * bind_texture installs the texture's own default sampler and discards this one.
- * Pass NT_SAMPLER_INVALID to fall back to texture state. RG16UI requires NEAREST
- * min/mag, and so does DEPTH* unless compare_func is set; a set compare_func
- * requires a bound DEPTH* texture. Mipmap min filters require a complete chain;
- * a 1x1 base level is already complete. */
-void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
+/* Binds the texture on unit `slot` with the sampler it is read through; NT_SAMPLER_DEFAULT selects
+ * the texture's asset-baked default. A unit never holds a texture without its sampler. Format/filter
+ * compatibility is asserted (rules: docs/spec/core/api-contracts.md, "Texture descriptors"). */
+void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
 
 /* ---- Scissor and viewport ----
  *

@@ -14,7 +14,7 @@ void nt_gfx_gl_ctx_destroy(void);
 bool nt_gfx_gl_ctx_is_lost(void);
 
 /* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —
- * the stub backend also implements it, so the declaration lives at the
+ * the test backend also implements it, so the declaration lives at the
  * shared internal layer, not the GL-only header. */
 
 /* Enable EXT_disjoint_timer_query_webgl2 (web) or check ARB_timer_query

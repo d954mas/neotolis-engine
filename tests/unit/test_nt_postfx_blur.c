@@ -2,6 +2,7 @@
 #include "graphics/nt_gfx_internal.h"
 #include "postfx/nt_postfx_blur.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "unity.h"
 
 #include <math.h>
@@ -54,7 +55,8 @@ void setUp(void) {
         .max_vertex_inputs = 8,
         .max_render_targets = 4,
     });
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
+    nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
     nt_postfx_blur_test_reset_counters();
 }
@@ -260,10 +262,10 @@ static void test_incomplete_targets_assert_without_draw(void) {
     nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_stub_test_fail_next_render_target_create();
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_fail_next_render_target_create();
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(temp));
@@ -320,7 +322,7 @@ static void test_enabled_scissor_asserts_without_draw(void) {
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stub_test_pass_target_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_count());
 }
 
 static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
@@ -332,7 +334,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
     nt_texture_t source = nt_gfx_render_target_color(source_rt);
     nt_texture_t temp_color = nt_gfx_render_target_color(temp);
-    uint32_t creates_before = nt_gfx_stub_test_render_target_create_count();
+    uint32_t creates_before = nt_gfx_fake_render_target_create_count();
 
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
@@ -343,15 +345,15 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     });
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_stub_test_render_target_create_count());
+    TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_pass_target_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_stub_test_pass_target_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(dest), nt_gfx_stub_test_pass_target_at(1));
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_stub_test_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(source), nt_gfx_stub_test_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_stub_test_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_fake_pass_target_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(dest), nt_gfx_fake_pass_target_at(1));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(source), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_fake_bound_texture_at(1));
 }
 
 static void test_blur_lifecycle_misuse_asserts(void) {
@@ -378,12 +380,12 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
     const nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = temp, .dest = dest, .radius = 4.0F};
 
-    nt_gfx_stub_test_lose_context_on_program_create();
+    nt_gfx_fake_lose_context_on_program_create();
     TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
 
     /* A pass while the rebuild is still pending skips instead of trapping: the
      * state is recoverable, so it must not crash a game that blurs every frame. */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_postfx_blur_test_reset_counters();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);

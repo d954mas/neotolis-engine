@@ -59,18 +59,36 @@ programs that declare the block. The registry borrows each name without copying;
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
 survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`.
 
-The GL backend caches at most 16 active standalone uniform locations per
-program. Each active array element consumes one entry; uniforms in blocks do
-not consume entries. Exceeding the cache capacity asserts at link time instead
-of silently omitting values. Reflection reads the complete reported names and
-uses temporary storage only while linking; setting a uniform performs no
-allocation.
+The GL backend caches at most 16 active standalone non-sampler uniform locations
+per program. Each active array element consumes one entry; uniforms in blocks do
+not consume entries, and samplers do not either — they live in a separate table
+capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts at link
+time instead of silently omitting values. Reflection reads the complete reported names into
+a fixed link-time buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at
+link); neither linking nor setting a uniform allocates.
 
 The cache is keyed by the `nt_hash32_str` hash of the uniform's complete name,
 including explicit array indices such as `colors[1]` or `lights[0].color`. The
 setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and its
 three siblings — and there is no string form: a caller hashes the name once at
 init, or inline where the cost does not matter.
+
+Sampler uniforms are program state, not material state: their texture units are
+fixed at link and nobody writes them afterwards. Reflection classifies every
+active uniform by type — `sampler2D`, `sampler2DShadow`, `isampler2D` and
+`usampler2D` are supported; the other WebGL2 sampler types (cube, 3D, array, and
+their integer forms) assert at link. The production gfx stub neither compiles
+nor inspects shader sources and creates no programs; see
+[stub semantics](../core/module-layout.md#stub-semantics-and-capability-queries). Each
+sampler element, array elements included, takes one unit, numbered 0..n-1 in
+reflection order. A program may not use more than `NT_GFX_MAX_TEXTURE_SLOTS`
+sampler units (asserted at link). The backend writes the units once with
+`glUniform1i` immediately after reflection, restoring the program that was
+current, because linking may happen while a pipeline is bound.
+`nt_gfx_program_sampler_unit(prog, name)` reports the unit a named sampler reads
+from, or -1 when the program has no active sampler of that name (the driver
+eliminates unused ones); `nt_gfx_program_sampler_mask(prog)` reports every unit
+the program samples as `1 << unit` bits. Both require a ready program.
 
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location

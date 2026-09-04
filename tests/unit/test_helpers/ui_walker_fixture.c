@@ -1,4 +1,5 @@
 #include "test_helpers/ui_walker_fixture.h"
+#include "test_helpers/nt_gfx_fake.h"
 
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
@@ -25,18 +26,17 @@
 #include "unity.h"
 
 static nt_material_t make_material(bool with_page_sampler) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
-
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = nt_gfx_make_program(vs, fs);
+    desc.program = with_page_sampler ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1) : nt_gfx_fake_make_program((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
+    /* Programs the engine links later (shape renderer) must not inherit this template. */
+    nt_gfx_fake_set_samplers(NULL, 0);
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
     desc.color_mode = NT_COLOR_MODE_NONE;
-    /* Sprite materials sample the atlas page at slot 0; text materials declare nothing
-     * (units 0/1 are the font's). */
+    /* Sprite materials name the atlas page's sampler; text materials declare nothing --
+     * the font textures are the text renderer's own binds. */
     if (with_page_sampler) {
         desc.textures[0].name = "u_texture";
         desc.texture_count = 1;

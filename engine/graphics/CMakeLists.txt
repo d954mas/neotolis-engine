@@ -32,12 +32,9 @@ else()
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
 endif()
 
-# Stub implementation for headless builds (CI, builder, tests)
+# Null graphics implementation for executables that do not render.
 nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
-    nt_gfx.c
     stub/nt_gfx_stub.c
     nt_gfx.h
-    nt_gfx_internal.h
 )
-
-target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_pool nt_log_stub nt_hash nt_gfx_interface nt_basisu_transcoder_interface nt_meshwire_interface)
+target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_gfx_interface)

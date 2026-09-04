@@ -110,6 +110,10 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         slot->tex_resources[i] = desc->textures[i].resource;
         slot->info.tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
         slot->info.resolved_sampler[i] = desc->textures[i].sampler;
+        for (uint8_t j = 0; j < i; j++) {
+            /* Two slots on one sampler name would fight over its unit at every draw. */
+            NT_ASSERT(slot->info.tex_name_hashes[j] != slot->info.tex_name_hashes[i] && "two material texture slots name the same sampler uniform");
+        }
     }
 
     /* Params */

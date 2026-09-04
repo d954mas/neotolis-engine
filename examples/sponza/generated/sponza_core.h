@@ -7,6 +7,8 @@
 
 /* --- TEXTURE --- */
 #define ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER ((nt_hash64_t){0x72D307FEB41957B7ULL}) /* sponza/fallback_checker */
+#define ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL ((nt_hash64_t){0xA270A1092C18B59DULL}) /* sponza/neutral_normal */
+#define ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE ((nt_hash64_t){0x464A8AA330C4020CULL}) /* sponza/neutral_white */
 #define ASSET_TEXTURE_SPONZA_TEX_0 ((nt_hash64_t){0x55D9071955217613ULL}) /* sponza/tex/0 */
 #define ASSET_TEXTURE_SPONZA_TEX_11 ((nt_hash64_t){0x6E7FE15C5F5D0561ULL}) /* sponza/tex/11 */
 #define ASSET_TEXTURE_SPONZA_TEX_12 ((nt_hash64_t){0x29F74769D26F6CF1ULL}) /* sponza/tex/12 */
@@ -73,6 +75,8 @@ static inline void sponza_core_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sponza_full.vert");
     (void)nt_hash64_str("sponza/fallback_checker");
     (void)nt_hash64_str("sponza/manifest");
+    (void)nt_hash64_str("sponza/neutral_normal");
+    (void)nt_hash64_str("sponza/neutral_white");
     (void)nt_hash64_str("sponza/tex/0");
     (void)nt_hash64_str("sponza/tex/11");
     (void)nt_hash64_str("sponza/tex/12");

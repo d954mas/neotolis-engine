@@ -219,6 +219,17 @@ static void add_fallback_checker(NtBuilderContext *ctx) {
     (void)printf("  Fallback checkerboard added\n");
 }
 
+/* --- Neutral 1x1 maps for a material slot with no map: white keeps albedo x1 and, with G=255,
+ * the glTF default roughness 1.0 in the specular slot; the flat normal is (0,0,1) --- */
+
+static void add_neutral_textures(NtBuilderContext *ctx) {
+    static const uint8_t s_white_rgba[4] = {255, 255, 255, 255};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_RGB8;
+    nt_builder_add_texture_raw(ctx, s_white_rgba, 1, 1, "sponza/neutral_white", &opts);
+    nt_builder_add_texture_raw(ctx, s_flat_normal_rgba, 1, 1, "sponza/neutral_normal", &opts);
+}
+
 /* --- Add all 6 shader files --- */
 
 static void add_shaders(NtBuilderContext *ctx) {
@@ -445,6 +456,7 @@ static void populate_core(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     add_shaders(ctx);
     build_manifest_blob(ctx, scene);
     add_fallback_checker(ctx);
+    add_neutral_textures(ctx);
     add_placeholder_textures(ctx, scene);
 }
 

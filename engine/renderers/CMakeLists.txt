@@ -3,7 +3,7 @@ nt_add_module(nt_shape_renderer LOG_DOMAIN "shape_renderer"
     nt_shape_renderer.h
 )
 target_link_libraries(nt_shape_renderer PUBLIC nt_core nt_math)
-# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_stub)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
 nt_add_module(nt_mesh_renderer LOG_DOMAIN "mesh_renderer"
     nt_mesh_renderer.c
@@ -12,7 +12,7 @@ nt_add_module(nt_mesh_renderer LOG_DOMAIN "mesh_renderer"
 target_link_libraries(nt_mesh_renderer PUBLIC
     nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_material
 )
-# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_stub)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
 nt_add_module(nt_text_renderer LOG_DOMAIN "text_renderer"
     nt_text_renderer.c
@@ -20,7 +20,7 @@ nt_add_module(nt_text_renderer LOG_DOMAIN "text_renderer"
 )
 target_link_libraries(nt_text_renderer PUBLIC nt_core nt_font nt_material)
 target_link_libraries(nt_text_renderer PRIVATE nt_utf8)
-# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_stub)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
 nt_add_module(nt_sprite_renderer LOG_DOMAIN "sprite_renderer"
     nt_sprite_renderer.c
@@ -30,4 +30,4 @@ target_link_libraries(nt_sprite_renderer PUBLIC
     nt_core nt_render nt_atlas nt_sprite_comp nt_drawable_comp nt_material_comp
     nt_transform_comp nt_material nt_entity
 )
-# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_stub)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)

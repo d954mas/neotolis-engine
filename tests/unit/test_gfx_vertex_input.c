@@ -2,6 +2,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "unity.h"
 
 #include <setjmp.h>
@@ -36,13 +37,13 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 4});
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 void tearDown(void) {
     nt_assert_handler = NULL;
     nt_gfx_shutdown();
-    nt_gfx_stub_test_reset();
+    nt_gfx_fake_reset();
 }
 
 /* --- Fixtures --- */
@@ -75,7 +76,7 @@ void test_vi_make_valid_destroy(void) {
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vi.id);
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     nt_gfx_destroy_vertex_input(vi);
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
 }
@@ -107,7 +108,7 @@ void test_vi_empty_layout_is_attributeless(void) {
 
 void test_vi_backend_failure_releases_reserved_slot(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_gfx_stub_test_fail_next_vertex_input_create();
+    nt_gfx_fake_fail_next_vertex_input_create();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
     TEST_ASSERT_EQUAL_UINT32(0, vi.id);
     /* Filling the whole pool exposes even one leaked reservation. */
@@ -256,8 +257,8 @@ void test_bind_vi_reaches_backend(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_stub_test_last_bound_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_bound_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -270,7 +271,7 @@ void test_bind_invalid_vi_clears_mirror(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stub_test_bind_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -290,7 +291,7 @@ void test_bind_pipeline_preserves_bound_vi(void) {
     TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
     nt_gfx_bind_instance_buffer(stream, 16); /* still points into the bound vertex input */
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -339,8 +340,8 @@ void test_bind_instance_buffer_uses_bound_vi(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 16); /* no pipeline needed on this path */
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_stub_test_last_instance_offset());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_stub_test_last_bound_vertex_input(), nt_gfx_stub_test_last_instance_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -453,7 +454,7 @@ void test_bind_instance_buffer_rejects_unaligned_offset(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 4);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_stub_test_last_instance_offset()); /* aligned offset reached the backend */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_last_instance_offset()); /* aligned offset reached the backend */
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 1));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -478,10 +479,10 @@ void test_draw_without_vertex_input_asserts(void) {
 
 void test_vi_make_during_context_loss_returns_invalid(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
     TEST_ASSERT_EQUAL_UINT32(0, vi.id);
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
 }
 
 /* Destroying a pointed instance buffer unpoints dependents: the next
@@ -513,9 +514,9 @@ void test_destroying_instance_buffer_unpoints_dependents(void) {
 void test_bind_instance_buffer_asserts_on_stale_buffer(void) {
     nt_buffer_t stale = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame(); /* latches the loss, wipes backend tables */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame(); /* recovery completes */
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -536,9 +537,9 @@ void test_vi_slots_freed_by_context_loss(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
 
-    nt_gfx_stub_test_set_context_lost(true);
+    nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame(); /* latches the loss, frees vertex-input slots */
-    nt_gfx_stub_test_set_context_lost(false);
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));

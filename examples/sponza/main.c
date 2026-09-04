@@ -104,8 +104,14 @@ static nt_hash32_t s_full_pack_id;
 
 static nt_resource_t s_manifest_handle;
 static nt_resource_t s_fallback_handle;
+
 static nt_resource_t s_mesh_handles[MAX_SCENE_NODES];
 static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, specular per node */
+
+/* A material must cover every sampler its program reads, so a node without a normal
+ * or specular map still declares the slot and points it at a 1x1 neutral from the core pack. */
+static nt_resource_t s_neutral_white_handle;
+static nt_resource_t s_neutral_normal_handle;
 
 /* ---- Shader resource handles (6 shaders, 3 permutations) ---- */
 
@@ -274,22 +280,10 @@ static void load_scene_from_manifest(void) {
         /* Textures and attr_map depend on shader type */
         if (mn->shader_type == SPONZA_SHADER_FULL) {
             /* Full: diffuse + normal + specular, 4 streams */
-            mat_desc.texture_count = 0;
-            if (mn->diffuse_rid != 0) {
-                mat_desc.textures[mat_desc.texture_count].name = "u_diffuse";
-                mat_desc.textures[mat_desc.texture_count].resource = s_tex_handles[tex_base + 0];
-                mat_desc.texture_count++;
-            }
-            if (mn->normal_rid != 0) {
-                mat_desc.textures[mat_desc.texture_count].name = "u_normal";
-                mat_desc.textures[mat_desc.texture_count].resource = s_tex_handles[tex_base + 1];
-                mat_desc.texture_count++;
-            }
-            if (mn->specular_rid != 0) {
-                mat_desc.textures[mat_desc.texture_count].name = "u_specular";
-                mat_desc.textures[mat_desc.texture_count].resource = s_tex_handles[tex_base + 2];
-                mat_desc.texture_count++;
-            }
+            mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
+            mat_desc.textures[1] = (nt_material_texture_desc_t){.name = "u_normal", .resource = (mn->normal_rid != 0) ? s_tex_handles[tex_base + 1] : s_neutral_normal_handle};
+            mat_desc.textures[2] = (nt_material_texture_desc_t){.name = "u_specular", .resource = (mn->specular_rid != 0) ? s_tex_handles[tex_base + 2] : s_neutral_white_handle};
+            mat_desc.texture_count = 3;
             mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
             mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
             mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
@@ -297,12 +291,8 @@ static void load_scene_from_manifest(void) {
             mat_desc.attr_map_count = 4;
         } else if (mn->shader_type == SPONZA_SHADER_ALPHA) {
             /* Alpha: diffuse only, 3 streams, double-sided */
-            mat_desc.texture_count = 0;
-            if (mn->diffuse_rid != 0) {
-                mat_desc.textures[mat_desc.texture_count].name = "u_diffuse";
-                mat_desc.textures[mat_desc.texture_count].resource = s_tex_handles[tex_base + 0];
-                mat_desc.texture_count++;
-            }
+            mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
+            mat_desc.texture_count = 1;
             mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
             mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
             mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
@@ -313,12 +303,8 @@ static void load_scene_from_manifest(void) {
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {
             /* Diffuse: diffuse only, 3 streams */
-            mat_desc.texture_count = 0;
-            if (mn->diffuse_rid != 0) {
-                mat_desc.textures[mat_desc.texture_count].name = "u_diffuse";
-                mat_desc.textures[mat_desc.texture_count].resource = s_tex_handles[tex_base + 0];
-                mat_desc.texture_count++;
-            }
+            mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
+            mat_desc.texture_count = 1;
             mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
             mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
             mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
@@ -694,6 +680,9 @@ int main(void) {
     /* 12. Request manifest and fallback texture resource handles */
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
     s_fallback_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER, NT_ASSET_TEXTURE);
+
+    s_neutral_white_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE, NT_ASSET_TEXTURE);
+    s_neutral_normal_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL, NT_ASSET_TEXTURE);
 
     /* 13. Create frame uniforms UBO (updated each frame) */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){

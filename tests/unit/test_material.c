@@ -328,6 +328,16 @@ void test_create_asserts_null_param_name(void) {
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 }
 
+/* Two slots on one sampler name would fight over its unit at every draw. */
+void test_create_asserts_duplicate_texture_name(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.textures[1].name = d.textures[0].name;
+    d.textures[1].resource = (nt_resource_t){.id = 4};
+    d.texture_count = 2;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "same sampler uniform"));
+}
+
 /* ---- Test 10: valid returns true for live handle ---- */
 
 void test_valid_true_after_create(void) {
@@ -613,6 +623,7 @@ int main(void) {
     RUN_TEST(test_create_hashes_param_names);
     RUN_TEST(test_create_asserts_null_texture_name);
     RUN_TEST(test_create_asserts_null_param_name);
+    RUN_TEST(test_create_asserts_duplicate_texture_name);
     RUN_TEST(test_create_stores_entity_params);
 
     /* Valid / destroy */
