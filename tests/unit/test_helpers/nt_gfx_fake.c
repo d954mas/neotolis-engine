@@ -10,6 +10,7 @@
 typedef struct {
     bool used;
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS];
+    uint8_t sampler_classes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
 } nt_gfx_fake_program_t;
 
@@ -25,8 +26,13 @@ void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) {
     }
 }
 
-nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) {
+nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program_typed(names, NULL, count); }
+
+nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
     nt_gfx_fake_set_samplers(names, count);
+    if (sampler_classes != NULL) {
+        memcpy(s_fake_program_template.sampler_classes, sampler_classes, count);
+    }
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     return nt_gfx_make_program(vs, fs);
@@ -50,7 +56,7 @@ bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
         if (rec->sampler_hashes[i] == name_hash) {
             out_info->unit = i;
-            out_info->sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
+            out_info->sampler_class = rec->sampler_classes[i];
             return true;
         }
     }
@@ -116,6 +122,7 @@ static uint32_t s_fake_bind_vertex_input_count;
 static uint32_t s_fake_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
 static uint32_t s_fake_last_uniform_program;    /* recorder: last program a uniform write named */
 static bool s_fake_fail_next_vertex_input_create;
+static bool s_fake_fail_next_sampler_create;
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
@@ -183,6 +190,7 @@ uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_i
 uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
 uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
+void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 
 void nt_gfx_fake_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
@@ -220,6 +228,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_bound_vertex_input = 0;
     s_fake_last_uniform_program = 0;
     s_fake_fail_next_vertex_input_create = false;
+    s_fake_fail_next_sampler_create = false;
     s_fake_context_lost = false;
     s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
@@ -494,6 +503,10 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
+    if (s_fake_fail_next_sampler_create) {
+        s_fake_fail_next_sampler_create = false;
+        return 0;
+    }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */
 }

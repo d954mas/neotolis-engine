@@ -144,16 +144,27 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
-    uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
+    uint32_t bound_pipeline; /* full handle of the bound pipeline, 0 = none */
+    uint32_t bound_program;  /* full handle borrowed by bound_pipeline */
+    uint32_t texture_binding_program;
+    uint32_t texture_binding_handles[NT_GFX_MAX_TEXTURE_SLOTS];
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
-    bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
+    uint8_t required_texture_mask;
+    uint8_t applied_texture_mask;
+    bool scissor_enabled; /* mirrors GL_SCISSOR_TEST */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
     int scissor_rect[4];  /* GL bottom-left x,y,w,h */
     int viewport_rect[4]; /* GL bottom-left x,y,w,h */
 } s_gfx;
+
+static void invalidate_texture_bindings(void) {
+    s_gfx.texture_binding_program = 0;
+    s_gfx.applied_texture_mask = 0;
+    memset(s_gfx.texture_binding_handles, 0, sizeof(s_gfx.texture_binding_handles));
+}
 
 #ifdef NT_TEST_ACCESS
 static nt_gfx_test_draw_t s_test_draws[128];
@@ -441,6 +452,12 @@ static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owne
         NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
         return;
     }
+    for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
+        if (s_gfx.texture_binding_handles[unit] == tex.id) {
+            s_gfx.texture_binding_handles[unit] = 0;
+            s_gfx.applied_texture_mask &= (uint8_t)~(uint8_t)(1U << unit);
+        }
+    }
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
     memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
@@ -583,6 +600,9 @@ void nt_gfx_begin_frame(void) {
          * call deactivate_mesh() which returns slots to mesh pool.
          * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
         s_gfx.bound_pipeline = 0;
+        s_gfx.bound_program = 0;
+        s_gfx.required_texture_mask = 0;
+        invalidate_texture_bindings();
         s_gfx.bound_vertex_input = 0;
         s_gfx.bound_index_type = NT_INDEX_NONE;
         /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
@@ -753,6 +773,9 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.render_state = NT_GFX_STATE_PASS;
     /* Bound state is pass-scoped: the pass clear touches draw state. */
     s_gfx.bound_pipeline = 0;
+    s_gfx.bound_program = 0;
+    s_gfx.required_texture_mask = 0;
+    invalidate_texture_bindings();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     nt_gfx_backend_begin_pass(desc, render_target_backend);
@@ -1259,6 +1282,9 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     /* A stale non-zero handle means the owner lost track of which programs it
      * still holds -- the one mistake this ownership model cannot absorb. */
     NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, prog.id) && "destroy_program: stale handle -- clear the handle to NT_PROGRAM_INVALID when you destroy it");
+    if (s_gfx.texture_binding_program == prog.id) {
+        invalidate_texture_bindings();
+    }
     /* Dependent pipelines cannot draw again; reclaim their slots and VAOs now. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (s_gfx.pipeline_programs[i] != prog.id) {
@@ -1280,6 +1306,9 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     uint32_t slot = nt_pool_slot_index(pip.id);
     if (s_gfx.bound_pipeline == pip.id) {
         s_gfx.bound_pipeline = 0;
+        s_gfx.bound_program = 0;
+        s_gfx.required_texture_mask = 0;
+        invalidate_texture_bindings();
     }
     nt_gfx_backend_destroy_pipeline(slot);
     s_gfx.pipeline_programs[slot] = 0;
@@ -1487,12 +1516,21 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         /* Clearing the mirror is the whole unbind: later draws and uniform
          * writes trap on it. The bound vertex input is orthogonal state. */
         s_gfx.bound_pipeline = 0;
+        s_gfx.bound_program = 0;
+        s_gfx.required_texture_mask = 0;
+        invalidate_texture_bindings();
         NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
+    uint32_t program = s_gfx.pipeline_programs[slot];
+    if (s_gfx.texture_binding_program != 0 && s_gfx.texture_binding_program != program) {
+        invalidate_texture_bindings();
+    }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
+    s_gfx.bound_program = program;
+    s_gfx.required_texture_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(program)]);
     nt_gfx_backend_bind_pipeline(slot);
 }
 
@@ -1568,7 +1606,86 @@ static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler,
         /* Lazy recreate after context-loss recovery — desc was preserved. */
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
     }
+    if (e->backend == 0) {
+        NT_LOG_ERROR("bind_texture: sampler backend recreation failed");
+        return false;
+    }
     *out_backend = e->backend;
+    return true;
+}
+
+static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sampler_desc_t *sampler, uint8_t sampler_class) {
+    const uint8_t format = s_gfx.texture_metas[texture_slot].format;
+    const bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    const bool integer = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI;
+    const bool compares = sampler->compare_func != NT_COMPARE_NONE;
+    switch ((nt_gfx_sampler_class_t)sampler_class) {
+    case NT_GFX_SAMPLER_CLASS_FLOAT:
+        return !integer && !compares;
+    case NT_GFX_SAMPLER_CLASS_SHADOW:
+        return depth && compares;
+    case NT_GFX_SAMPLER_CLASS_UINT:
+        return integer && !compares;
+    case NT_GFX_SAMPLER_CLASS_SINT:
+        return false;
+    }
+    return false;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
+bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
+    invalidate_texture_bindings();
+    if (g_nt_gfx.context_lost) {
+        return false;
+    }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
+    NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
+    NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
+    NT_ASSERT(count <= NT_GFX_MAX_TEXTURE_SLOTS && "apply_texture_bindings: count exceeds NT_GFX_MAX_TEXTURE_SLOTS");
+    if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0) || count > NT_GFX_MAX_TEXTURE_SLOTS) {
+        return false;
+    }
+
+    nt_gfx_resolved_texture_binding_t resolved[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
+    uint32_t handles[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
+    uint8_t applied_mask = 0;
+    const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(s_gfx.bound_program)];
+    for (uint8_t i = 0; i < count; i++) {
+        nt_gfx_sampler_info_t info = {0};
+        if (!nt_gfx_backend_program_sampler_info(program_backend, bindings[i].name.value, &info)) {
+            continue;
+        }
+        const uint8_t bit = (uint8_t)(1U << info.unit);
+        NT_ASSERT((applied_mask & bit) == 0 && "apply_texture_bindings: active sampler appears more than once");
+        NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
+        const uint32_t texture_slot = nt_pool_slot_index(bindings[i].texture.id);
+        if (s_gfx.texture_backends[texture_slot] == 0) {
+            NT_LOG_ERROR_ONCE("apply_texture_bindings: texture has no GPU resource (restore failed)");
+            return false;
+        }
+        uint32_t sampler_backend = 0;
+        if (!resolve_sampler_backend(texture_slot, bindings[i].sampler, &sampler_backend)) {
+            return false;
+        }
+        const nt_sampler_t effective = bindings[i].sampler.id != 0 ? bindings[i].sampler : s_gfx.texture_metas[texture_slot].default_sampler;
+        const nt_sampler_desc_t *sampler_desc = &s_gfx.sampler_cache[effective.id - 1].desc;
+        NT_ASSERT(texture_matches_sampler_class(texture_slot, sampler_desc, info.sampler_class) && "apply_texture_bindings: texture and sampler do not match the program sampler type");
+        resolved[info.unit] = (nt_gfx_resolved_texture_binding_t){
+            .texture_backend = s_gfx.texture_backends[texture_slot],
+            .sampler_backend = sampler_backend,
+        };
+        handles[info.unit] = bindings[i].texture.id;
+        applied_mask |= bit;
+    }
+
+    NT_ASSERT(applied_mask == s_gfx.required_texture_mask && "apply_texture_bindings: active sampler coverage is incomplete");
+    if (applied_mask != s_gfx.required_texture_mask) {
+        return false;
+    }
+    nt_gfx_backend_apply_texture_bindings(resolved, applied_mask);
+    s_gfx.texture_binding_program = s_gfx.bound_program;
+    memcpy(s_gfx.texture_binding_handles, handles, sizeof(handles));
+    s_gfx.applied_texture_mask = applied_mask;
     return true;
 }
 
@@ -1657,6 +1774,10 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
 
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
+
+uint32_t nt_gfx_test_texture_binding_program(void) { return s_gfx.texture_binding_program; }
+
+uint8_t nt_gfx_test_applied_texture_mask(void) { return s_gfx.applied_texture_mask; }
 #endif
 
 /* ---- Sampler (deduplicated cache) ---- */

@@ -181,6 +181,8 @@ uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
+uint32_t nt_gfx_test_texture_binding_program(void);
+uint8_t nt_gfx_test_applied_texture_mask(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 void nt_gfx_test_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
 #endif

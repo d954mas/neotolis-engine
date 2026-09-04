@@ -71,8 +71,14 @@ typedef struct {
 } nt_sampler_t;
 
 #define NT_SAMPLER_INVALID ((nt_sampler_t){0})
-/* Same value, read as "no override": nt_gfx_bind_texture then uses the texture's asset-baked default. */
+/* Same value, read as "no override": texture binding uses the texture's asset-baked default. */
 #define NT_SAMPLER_DEFAULT NT_SAMPLER_INVALID
+
+typedef struct {
+    nt_hash32_t name;
+    nt_texture_t texture;
+    nt_sampler_t sampler;
+} nt_gfx_texture_binding_t;
 
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
@@ -648,6 +654,12 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * the texture's asset-baked default. A unit never holds a texture without its sampler. Format/filter
  * compatibility is asserted (rules: docs/spec/core/api-contracts.md, "Texture descriptors"). */
 void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
+/* Applies the complete active sampler interface of the bound pipeline's program.
+ * `bindings` is borrowed only for this call and may be NULL iff count is zero.
+ * Inactive names are ignored before their handles are read. Contract violations
+ * assert; context loss, texture husks and sampler recreation failure return false
+ * after publishing no logical set or backend binds. */
+bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 
 /* ---- Scissor and viewport ----
  *

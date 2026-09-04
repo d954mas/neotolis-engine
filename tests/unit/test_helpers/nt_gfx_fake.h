@@ -10,6 +10,7 @@ void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count);
 /* Links a program whose active samplers are exactly `names`. The fake ignores shader
  * source, so the stages are placeholders. */
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
+nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
 /* Test-only backend observations and failure injection. */
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot);
@@ -61,6 +62,7 @@ uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 uint32_t nt_gfx_fake_last_uniform_program(void);
 void nt_gfx_fake_fail_next_vertex_input_create(void);
+void nt_gfx_fake_fail_next_sampler_create(void);
 void nt_gfx_fake_reset(void);
 
 #endif

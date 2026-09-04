@@ -235,14 +235,25 @@ false without mutating the material.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
-A sampler override passed to `nt_gfx_bind_texture` must obey the same format
-restrictions; it cannot replace the explicit texture state with an
+A sampler override passed in `nt_gfx_texture_binding_t` must obey the same
+format restrictions; it cannot replace the explicit texture state with an
 incompatible filter. Depth comparison
 is the one documented exception, and it is sampler state only: `DEPTH*` accepts
 `LINEAR` from a sampler whose `compare_func` is not `NONE`, because the filtering
 then applies to comparison results rather than to raw depth. The texture keeps
 `NEAREST` either way, and the same descriptor field is rejected on non-depth
 storage.
+
+`nt_gfx_apply_texture_bindings` borrows its array only for the call and requires
+an active pass and bound pipeline. The array describes the complete active
+sampler interface by name, not by texture unit. Names absent from the linked
+program are ignored before their handles are inspected; active names are mapped
+to the immutable units recorded at link. Missing or duplicate active names,
+invalid handles, and sampler/texture type mismatches are developer errors and
+assert. Resolution is atomic: context loss, a texture without live backend
+storage, or failed sampler recreation returns `false` before any backend bind and
+publishes no logical set. Resolution uses fixed stack storage and allocates no
+heap memory.
 
 ### Render-target handles
 
