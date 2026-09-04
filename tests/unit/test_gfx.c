@@ -642,16 +642,45 @@ void test_gfx_apply_texture_bindings_maps_names_to_canonical_units(void) {
     end_texture_binding_test_pass();
 }
 
-void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(void) {
-    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
-    nt_texture_t texture = make_binding_test_texture(1);
+void test_gfx_program_sampler_count_reports_interface_cardinality(void) {
+    nt_program_t empty = make_sampler_program(NULL, 0);
+    nt_program_t pair = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+
+    TEST_ASSERT_EQUAL_UINT8(0, nt_gfx_program_sampler_count(empty));
+    TEST_ASSERT_EQUAL_UINT8(2, nt_gfx_program_sampler_count(pair));
+}
+
+void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void) {
+    nt_program_t program = make_sampler_program(NULL, 0);
     begin_texture_binding_test_pass(program);
 
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_a"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
-    EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(&binding, 1));
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_apply_texture_bindings_count());
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+    end_texture_binding_test_pass();
+}
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t texture_a = make_binding_test_texture(1);
+    nt_texture_t texture_b = make_binding_test_texture(2);
+    begin_texture_binding_test_pass(program);
+
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_a"), .texture = texture_a, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = texture_b, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(bindings, 2));
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+
+    EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(bindings, 1));
+
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
     end_texture_binding_test_pass();
 }
 
@@ -769,6 +798,9 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     nt_gfx_bind_pipeline(same_program_pipeline);
     TEST_ASSERT_EQUAL_UINT32(first_program.id, nt_gfx_test_texture_binding_program());
     TEST_ASSERT_EQUAL_HEX8(0x01, nt_gfx_test_applied_texture_mask());
+    bind_test_vertex_input();
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
 
     nt_gfx_bind_pipeline(second_pipeline);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
@@ -791,12 +823,23 @@ void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
 }
 
 void test_gfx_apply_texture_bindings_returns_false_while_context_is_lost(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t texture = make_binding_test_texture(1);
+    begin_texture_binding_test_pass(program);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+    end_texture_binding_test_pass();
+
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_apply_texture_bindings(NULL, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
 }
 
 void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
@@ -808,14 +851,20 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
 
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t live = make_binding_test_texture(2);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = husk, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = live, .sampler = NT_SAMPLER_DEFAULT};
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
 
+    binding.texture = husk;
     TEST_ASSERT_FALSE(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
     TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
     end_texture_binding_test_pass();
 }
@@ -838,12 +887,42 @@ void test_gfx_apply_texture_bindings_rejects_sampler_recreation_failure_without_
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
+    const nt_gfx_texture_binding_t default_binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&default_binding, 1));
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
     nt_gfx_fake_fail_next_sampler_create();
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = sampler};
 
     TEST_ASSERT_FALSE(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_texture_binding_set_clears_on_failed_bind_and_program_destroy(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_texture_t unrelated = make_binding_test_texture(2);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+
+    nt_gfx_destroy_texture(unrelated);
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_test_texture_binding_program());
+    nt_gfx_bind_pipeline((nt_pipeline_t){UINT32_MAX});
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+
+    nt_gfx_bind_pipeline(pipeline);
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_destroy_program(program);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
     TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
     end_texture_binding_test_pass();
 }
@@ -2710,6 +2789,8 @@ int main(void) {
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
     RUN_TEST(test_gfx_backend_texture_binding_batch_visits_only_active_units);
     RUN_TEST(test_gfx_apply_texture_bindings_maps_names_to_canonical_units);
+    RUN_TEST(test_gfx_program_sampler_count_reports_interface_cardinality);
+    RUN_TEST(test_gfx_apply_texture_bindings_skips_backend_for_textureless_program);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind);
     RUN_TEST(test_gfx_apply_texture_bindings_ignores_inactive_entry_before_handle);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind);
@@ -2722,6 +2803,7 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_returns_false_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_sampler_recreation_failure_without_backend_binds);
+    RUN_TEST(test_gfx_texture_binding_set_clears_on_failed_bind_and_program_destroy);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);

@@ -183,6 +183,7 @@ uint32_t nt_gfx_test_bound_pipeline(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
 uint32_t nt_gfx_test_texture_binding_program(void);
 uint8_t nt_gfx_test_applied_texture_mask(void);
+void nt_gfx_test_fail_next_texture_apply(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);

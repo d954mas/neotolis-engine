@@ -887,6 +887,30 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
 }
 
+void test_sprite_renderer_skips_failed_page_and_draws_the_next_command(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xEBULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = sprite_batch_key(e0, mat)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = sprite_batch_key(e1, mat)},
+    };
+    nt_gfx_fake_reset();
+    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_test_fail_next_texture_apply();
+
+    nt_sprite_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_test_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    nt_gfx_test_draw_trace_reset(false);
+}
+
 /* A material that declares no textures never takes the page, so crossing pages
  * must not split the run — contrast the two-page test above, which draws twice. */
 void test_sprite_renderer_textureless_material_ignores_page_change(void) {
@@ -988,9 +1012,9 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     mdesc.cull_mode = NT_CULL_NONE;
     mdesc.textures[0].name = "u_texture";
     mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
-    /* u_other exists only so the coverage assert passes; any resolved texture serves. */
+    /* A distinct page makes swapped or duplicated bindings observable. */
     mdesc.textures[1].name = "u_other";
-    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 0);
+    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_page_on_unit_1";
     nt_material_t mat = nt_material_create(&mdesc);
@@ -1005,6 +1029,8 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1721,6 +1747,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
+    RUN_TEST(test_sprite_renderer_skips_failed_page_and_draws_the_next_command);
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_binds_on_program_unit);

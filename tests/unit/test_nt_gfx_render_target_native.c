@@ -1041,6 +1041,7 @@ static void test_supported_sampler_types_retain_their_classes(void) {
                                          "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
                                          "}\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
+    TEST_ASSERT_EQUAL_UINT8(3, nt_gfx_program_sampler_count(prog));
 
     nt_gfx_sampler_info_t infos[3] = {0};
     TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_color"), &infos[0]));

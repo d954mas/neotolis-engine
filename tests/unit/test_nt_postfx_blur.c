@@ -356,6 +356,30 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_fake_bound_texture_at(1));
 }
 
+static void test_texture_apply_failure_closes_first_pass_and_skips_second(void) {
+    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_gfx_begin_frame();
+    nt_gfx_test_fail_next_texture_apply();
+
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    });
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_pass_target_count());
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
 static void test_blur_lifecycle_misuse_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_init());
 
@@ -451,6 +475,7 @@ int main(void) {
     RUN_TEST(test_mixed_size_targets_assert_without_draw);
     RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
+    RUN_TEST(test_texture_apply_failure_closes_first_pass_and_skips_second);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
     RUN_TEST(test_failed_restore_is_retried_by_the_next_one);
     RUN_TEST(test_blur_fs_keeps_the_masked_kernel_index);

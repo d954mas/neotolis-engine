@@ -626,6 +626,8 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
+/* Returns the linked semantic sampler count. Program must be ready; units stay backend-private. */
+uint8_t nt_gfx_program_sampler_count(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
@@ -646,7 +648,7 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
- * assert; context loss, texture husks and sampler recreation failure return false
+ * assert; processed context loss, texture husks and sampler recreation failure return false
  * after publishing no logical set or backend binds. */
 bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 

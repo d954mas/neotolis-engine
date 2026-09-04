@@ -155,7 +155,7 @@ pools, parse shaders, or record draw state. Creation and activation return
 invalid handles, validity/readiness queries return false, and draw/state calls
 do nothing. Capabilities, capacities and statistics remain zero. Data views are
 empty; texture-size and timer outputs are zeroed. Readback returns false without
-writing pixels. Sampler lookup returns -1 and its mask is zero.
+writing pixels. Program sampler count is zero.
 
 A headless executable owns the decision to omit graphics initialization and
 renderer calls while running its gameplay systems. Linking the stub does not

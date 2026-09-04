@@ -171,12 +171,15 @@ static nt_gfx_test_draw_t s_test_draws[128];
 static uint32_t s_test_draw_count;
 static bool s_test_draw_enabled;
 static bool s_test_draw_overflow;
+static bool s_test_fail_next_texture_apply;
 
 void nt_gfx_test_draw_trace_reset(bool enabled) {
     s_test_draw_count = 0;
     s_test_draw_overflow = false;
     s_test_draw_enabled = enabled;
 }
+
+void nt_gfx_test_fail_next_texture_apply(void) { s_test_fail_next_texture_apply = true; }
 
 uint32_t nt_gfx_test_draw_trace_count(void) { return s_test_draw_count; }
 bool nt_gfx_test_draw_trace_overflowed(void) { return s_test_draw_overflow; }
@@ -238,6 +241,7 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
 #ifdef NT_TEST_ACCESS
     nt_gfx_test_draw_trace_reset(false);
+    s_test_fail_next_texture_apply = false;
 #endif
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
@@ -454,8 +458,8 @@ static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owne
     }
     for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
         if (s_gfx.texture_binding_handles[unit] == tex.id) {
-            s_gfx.texture_binding_handles[unit] = 0;
-            s_gfx.applied_texture_mask &= (uint8_t)~(uint8_t)(1U << unit);
+            invalidate_texture_bindings();
+            break;
         }
     }
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
@@ -1450,6 +1454,20 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
 }
 
+uint8_t nt_gfx_program_sampler_count(nt_program_t prog) {
+    NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_count: program is not linked");
+    if (!nt_gfx_program_ready(prog)) {
+        return 0;
+    }
+    uint32_t mask = nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
+    uint8_t count = 0;
+    while (mask != 0) {
+        count += (uint8_t)(mask & 1U);
+        mask >>= 1U;
+    }
+    return count;
+}
+
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return NT_PROGRAM_INVALID;
@@ -1631,6 +1649,16 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0) || count > NT_GFX_MAX_TEXTURE_SLOTS) {
         return false;
     }
+#ifdef NT_TEST_ACCESS
+    if (s_test_fail_next_texture_apply) {
+        s_test_fail_next_texture_apply = false;
+        return false;
+    }
+#endif
+    if (s_gfx.required_texture_mask == 0) {
+        s_gfx.texture_binding_program = s_gfx.bound_program;
+        return true;
+    }
 
     nt_gfx_resolved_texture_binding_t resolved[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
     uint32_t handles[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
@@ -1643,6 +1671,11 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         }
         const uint8_t bit = (uint8_t)(1U << info.unit);
         NT_ASSERT((applied_mask & bit) == 0 && "apply_texture_bindings: active sampler appears more than once");
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+        if (!nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id)) {
+            NT_LOG_ERROR("apply_texture_bindings: program=%08x sampler=%08x has no texture; register an explicit placeholder for async resources", s_gfx.bound_program, bindings[i].name.value);
+        }
+#endif
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
         const uint32_t texture_slot = nt_pool_slot_index(bindings[i].texture.id);
         if (s_gfx.texture_backends[texture_slot] == 0) {
@@ -1664,6 +1697,11 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         applied_mask |= bit;
     }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    if (applied_mask != s_gfx.required_texture_mask) {
+        NT_LOG_ERROR("apply_texture_bindings: program=%08x sampler coverage missing=%02x", s_gfx.bound_program, (uint8_t)(s_gfx.required_texture_mask & (uint8_t)~applied_mask));
+    }
+#endif
     NT_ASSERT(applied_mask == s_gfx.required_texture_mask && "apply_texture_bindings: active sampler coverage is incomplete");
     if (applied_mask != s_gfx.required_texture_mask) {
         return false;

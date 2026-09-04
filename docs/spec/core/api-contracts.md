@@ -244,6 +244,9 @@ then applies to comparison results rather than to raw depth. The texture keeps
 `NEAREST` either way, and the same descriptor field is rejected on non-depth
 storage.
 
+`nt_gfx_program_sampler_count` exposes only the cardinality of a ready program's
+semantic sampler interface; unit assignments remain backend-private.
+
 `nt_gfx_apply_texture_bindings` borrows its array only for the call and requires
 an active pass and bound pipeline. The array describes the complete active
 sampler interface by name, not by texture unit. Names absent from the linked
@@ -252,8 +255,20 @@ to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, and sampler/texture type mismatches are developer errors and
 assert. Resolution is atomic: context loss, a texture without live backend
 storage, or failed sampler recreation returns `false` before any backend bind and
-publishes no logical set. Resolution uses fixed stack storage and allocates no
-heap memory.
+publishes no logical set. Context loss means loss already observed by
+`nt_gfx_begin_frame`; material transitions do not poll the platform. Resolution
+uses fixed stack storage and allocates no heap memory.
+
+The sampler class is part of the linked interface:
+
+| Shader sampler | Required texture | Required sampler state |
+| --- | --- | --- |
+| `sampler2D` | Color, normalized, float, or depth | Comparison disabled |
+| `sampler2DShadow` | Depth | Comparison enabled |
+| `usampler2D` | Unsigned integer | Comparison disabled |
+
+`isampler2D` and sampler dimensions other than 2D are rejected at link because
+the public texture formats cannot satisfy them.
 
 ### Render-target handles
 

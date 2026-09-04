@@ -164,6 +164,11 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     return false;
 }
 
+uint8_t nt_gfx_program_sampler_count(nt_program_t prog) {
+    (void)prog;
+    return 0;
+}
+
 void nt_gfx_set_scissor(int x, int y, int w, int h) {
     (void)x;
     (void)y;

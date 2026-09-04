@@ -725,7 +725,9 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 // #endregion
 
 // #region Flush
-static bool bind_font_textures(void) {
+static bool bind_font_textures(nt_pipeline_t pipeline) {
+    const nt_program_t program = nt_gfx_pipeline_program(pipeline);
+    NT_ASSERT(nt_gfx_program_sampler_count(program) == 2 && "text program must expose exactly two font samplers");
     const nt_gfx_texture_binding_t bindings[] = {
         {.name = s_u_curve_texture, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
         {.name = s_u_band_texture, .texture = nt_font_get_band_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
@@ -764,20 +766,18 @@ void nt_text_renderer_flush(void) {
         return;
     }
 
-    /* Upload staging buffer to GPU. Orphan-style upload (glBufferData with
-     * GL_DYNAMIC_DRAW) so the driver allocates fresh storage and avoids
-     * stalling on the previous frame's draw of the same VBO. */
-    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
-
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 
-    if (s_text.font.id != 0 && !bind_font_textures()) {
+    if (s_text.font.id != 0 && !bind_font_textures(pipeline)) {
         s_text.vertex_count = 0;
         s_text.glyph_count = 0;
         s_text.batch_pipeline = (nt_pipeline_t){0};
         return;
     }
+
+    /* Upload only after every recoverable draw prerequisite succeeded. */
+    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
     /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {

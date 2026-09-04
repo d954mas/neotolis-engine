@@ -26,6 +26,7 @@ static void test_stub_has_no_graphics_resources(void) {
     TEST_ASSERT_FALSE(nt_gfx_texture_ready((nt_texture_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready((nt_render_target_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_apply_texture_bindings(NULL, 0));
+    TEST_ASSERT_EQUAL_UINT8(0, nt_gfx_program_sampler_count(NT_PROGRAM_INVALID));
     TEST_ASSERT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){1}));
     TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
 }
