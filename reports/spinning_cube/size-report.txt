@@ -1,61 +1,61 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 2261f03
+# Commit: 985cb8d
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 196 B
-Import               570 B
-Function             111 B
+Import               584 B
+Function             112 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  40 B
-Code               74992 B
+Code               71584 B
 Data                8935 B
-Custom              4381 B
+Custom              4428 B
 ---------------- ----------
-TOTAL              89311 B
+TOTAL              85965 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-21040 B   frame
-15021 B   main
+18083 B   frame
+15099 B   main
  3002 B   fmt_fp
  2607 B   printf_core
- 2358 B   nt_input_web_on_blur
- 1862 B   nt_shape_renderer_flush
- 1843 B   __rem_pio2f
- 1359 B   nt_gfx_make_program
- 1297 B   render_target_recreate_attachment
- 1274 B   nt_gfx_make_vertex_input
- 1260 B   nt_hash32_str
-  929 B   nt_gfx_bind_pipeline
-  824 B   nt_gfx_make_pipeline
-  819 B   nt_input_web_on_pointer_move
-  779 B   nt_input_web_on_pointer_down
+ 1854 B   nt_shape_renderer_flush
+ 1847 B   __rem_pio2f
+ 1594 B   nt_gfx_make_program
+ 1372 B   render_target_recreate_attachment
+ 1254 B   nt_gfx_make_vertex_input
+ 1220 B   nt_hash32_str
+ 1024 B   nt_input_web_on_blur
+  988 B   nt_gfx_bind_pipeline
+  832 B   nt_gfx_make_pipeline
+  809 B   nt_input_web_on_pointer_move
+  769 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
-  578 B   transform_apply
+  596 B   transform_apply
   540 B   claim_more_memory
   519 B   __memcpy
   504 B   emmalloc_memalign
   487 B   nt_gfx_make_buffer
   460 B   nt_log_write
   436 B   vsnprintf
-  420 B   nt_gfx_gl_cache_ground_state
+  422 B   push_instance
   418 B   nt_gfx_bind_instance_buffer
-  416 B   push_instance
   409 B   attempt_allocate
+  394 B   apply_rotation
   385 B   sinf
   377 B   nt_app_web_frame
   368 B   __memset
 
-Total functions: 110
-Total code size: 74814 B
+Total functions: 111
+Total code size: 71403 B
 
 ## Built Engine Archives
 
@@ -79,8 +79,8 @@ libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                81302 B
-libnt_gfx_stub.a           51570 B
+libnt_gfx.a                82640 B
+libnt_gfx_stub.a            5262 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -90,25 +90,25 @@ libnt_introspect.a          5080 B
 libnt_log.a                11954 B
 libnt_log_ring.a          595390 B
 libnt_log_stub.a             746 B
-libnt_material.a            4718 B
+libnt_material.a            4780 B
 libnt_material_comp.a       2302 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2164 B
-libnt_mesh_renderer.a      10878 B
+libnt_mesh_renderer.a      11132 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a            56720 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         8590 B
+libnt_postfx_blur.a         8700 B
 libnt_render.a              7674 B
 libnt_resource.a          188970 B
 libnt_shape_renderer.a   1144652 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a        10010 B
-libnt_sprite_renderer.a    52578 B
-libnt_text_renderer.a    1242672 B
+libnt_sprite_renderer.a    52790 B
+libnt_text_renderer.a    1242858 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      6872 B
 libnt_ui.a                614044 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5963454 B
+TOTAL (archives)         5919308 B
 
 ## Data Segments Summary
 
