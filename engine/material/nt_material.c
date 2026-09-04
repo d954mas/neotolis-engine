@@ -87,6 +87,17 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         return NT_MATERIAL_INVALID;
     }
 
+    /* Range-check before a slot is taken: the cache keys pack these into fixed bit
+     * lanes. Unconditional -- a disabled blend still has to hold valid values. */
+    NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
+              desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "invalid blend factor");
+    NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "invalid blend op");
+    NT_ASSERT((uint32_t)desc->cull_mode <= NT_CULL_FRONT && "invalid cull_mode -- use NT_CULL_NONE/BACK/FRONT");
+    NT_ASSERT(desc->attr_map_count <= NT_MATERIAL_MAX_ATTR_MAP);
+    for (uint8_t i = 0; i < desc->attr_map_count; i++) {
+        NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
+    }
+
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
         NT_LOG_ERROR("pool full -- increase max_materials");
@@ -126,7 +137,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
 
     /* Attr map */
-    NT_ASSERT(desc->attr_map_count <= NT_MATERIAL_MAX_ATTR_MAP);
     slot->info.attr_map_count = desc->attr_map_count;
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         slot->info.attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
@@ -152,15 +162,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.depth_test = desc->depth_test;
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
-    NT_ASSERT(desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
+    NT_ASSERT((uint32_t)desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
     slot->info.color_mode = desc->color_mode;
-
-    const nt_blend_state_t hash_blend = slot->info.blend.enabled ? slot->info.blend : nt_blend_opaque();
-    slot->info.render_state_hash = nt_hash64(&hash_blend, sizeof(hash_blend)).value;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_test;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.depth_write;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.cull_mode;
-    slot->info.render_state_hash = slot->info.render_state_hash * 0x9E3779B97F4A7C15ULL + (uint64_t)slot->info.color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */
     slot->info.label = desc->label;

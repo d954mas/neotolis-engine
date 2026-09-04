@@ -142,15 +142,37 @@ pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
 
-**Cache identity.** Renderers key their pipeline caches on a 64-bit
-hash of the pipeline signature — program handle and render
-state — and treat that hash as identity: descriptors are never compared on a
-hit. The cached pipelines borrow programs the game owns, so a cache entry never
-extends a program's lifetime.
-The hashed population is distinct material states, tens of values
-in a real game, so a 64-bit collision is not a practical risk, and a fixed
-array with a linear scan stays cheaper than a hash map at that scale. Every
-`nt_pipeline_desc_t` field a renderer varies must be folded into its key.
+**Cache identity.** Renderers key their pipeline caches on the exact
+identity of the descriptor, `nt_gfx_pipeline_key_t` from
+`nt_gfx_pipeline_key(desc)`: every enum and bool field packed bit-exact into
+one 64-bit word (program handle, depth, cull, polygon-offset enable, blend
+factors and ops) plus the float payloads (blend constant, polygon-offset
+factor/units) that cannot pack. Equal keys mean identical pipelines; a hit
+compares the packed word and, only when it matches, the floats. No hash is
+involved, so identity does not rest on a collision argument. Two
+canonicalisations apply, both in the packer: a disabled blend packs as opaque
+(factors, ops and constant ignored) and a disabled polygon offset packs its
+factor/units as zero; nothing else is normalised, so depth lanes are exact even
+when depth test is off. Lane inputs are range-asserted: material-owned lanes at
+`nt_material_create` and again in the packer, renderer-owned lanes (`depth_func`,
+polygon offset) in the packer alone — unconditionally, a disabled blend included:
+canonicalisation is about identity, validity has no exceptions. So an
+out-of-range value can never truncate onto a valid neighbour and turn into a
+cache hit. gfx owns the lane widths, and pins the desc size and field offsets
+with static asserts as a partial tripwire: a new field that moves a later offset
+trips it, one that fits a padding hole does not and must be added by hand. The
+packer is header-inline, so every gfx composition (real, stub, test fake) carries it
+with no link-order dependency. The cached pipelines borrow
+programs the game owns, so a cache entry never extends a program's lifetime.
+The population is distinct material states, tens of values in a real game, so
+a fixed array with a linear scan stays cheaper than a hash map at that scale.
+
+A linear fold is not an identity: nested folds hand the handle and some state
+lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and
+`(p+1, cull-1)` collide exactly, and pool handles are sequential, so that is
+the common case, not a corner case. No renderer cache key may fold handles or enums that way: pack exactly,
+or hash the whole canonical identity with `nt_hash64` where the identity is
+content rather than a handful of small fields.
 
 **State transitions.** The run-based renderers (mesh, sprite) drive one shared
 state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
@@ -180,25 +202,27 @@ change, not per cmd. The text renderer
 draws once per flush and other renderers draw in between, so it uses the
 stateless half of the helper and replays unconditionally.
 
-The material-driven mesh, sprite, and text renderer caches key pipelines on
-`program.id` folded with `nt_material_info_t.render_state_hash`. Layouts live
-on vertex-input objects, so materials differing only in layout share one
-pipeline. `render_state_hash` folds `color_mode`, so mesh pipelines still
-split per color mode even though nothing in the slimmed pipeline depends on
-it — an accepted over-split (removing it would touch the material module and
-all three caches).
+The material-driven mesh, sprite, and text renderer caches build the
+`nt_pipeline_desc_t` from the material's render state and key on its
+`nt_gfx_pipeline_key_t`. Layouts and `color_mode` live on vertex-input
+objects, so materials differing only in layout or color mode share one
+pipeline. The sprite renderer resolves the pipeline once per material change
+inside a `draw_list` call, not once per run: runs also split per atlas page,
+and nothing can replace a material's program inside the call.
 
-Vertex-input caches follow the same hash-as-identity standard for *derived*
-layouts. The mesh renderer keeps a per-mesh versions table
+Vertex-input caches use exact identity for *derived* layouts too. The mesh
+renderer keeps a per-mesh versions table
 (`[nt_gfx_max_meshes()][nt_mesh_renderer_desc_t.max_mesh_layouts]`). Each row
 stores its mesh's full generation-checked handle. A different generation
 clears the entire row, including bufferless vertex inputs that have no
-destroy-cascade hook. Within the row, entry identity is the hash of the
-derived layout (mesh streams × material attr_map — attr_map entries
-matching no stream do not split; a material
-mapping none of the streams derives an empty layout and takes the
-attribute-less gl_VertexID path) plus color mode. Handles are revalidated on
-lookup because buffer destruction can invalidate cached versions.
+destroy-cascade hook. Within the row the mesh's stream types, counts, offsets
+and stride are fixed, so entry identity packs only what varies: per stream a
+presence bit and the mapped location (mesh streams × material attr_map —
+attr_map entries matching no stream do not split; a material mapping none of
+the streams derives an empty layout and takes the attribute-less gl_VertexID
+path) plus the color mode that selects the instance layout. The sprite
+renderer packs the attr_map count and every location the same way. Handles are
+revalidated on lookup because buffer destruction can invalidate cached versions.
 Exhausting a mesh's version row asserts, naming the knob — silent eviction would hide VAO re-creation
 thrash as an invisible perf regression.
 

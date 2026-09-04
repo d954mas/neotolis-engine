@@ -76,10 +76,20 @@ static void test_stub_drops_draws_and_state_changes(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
 }
 
+/* The packer is pure and part of the gfx surface, so the stub links and runs it. */
+static void test_stub_packs_pipeline_keys(void) {
+    nt_pipeline_desc_t a = {.program.id = 5, .cull_mode = 1};
+    nt_pipeline_desc_t b = {.program.id = 5, .cull_mode = 2};
+    const nt_gfx_pipeline_key_t ka = nt_gfx_pipeline_key(&a);
+    const nt_gfx_pipeline_key_t kb = nt_gfx_pipeline_key(&b);
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kb));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stub_has_no_graphics_resources);
     RUN_TEST(test_stub_returns_empty_queries_without_fabricating_pixels);
     RUN_TEST(test_stub_drops_draws_and_state_changes);
+    RUN_TEST(test_stub_packs_pipeline_keys);
     return UNITY_END();
 }

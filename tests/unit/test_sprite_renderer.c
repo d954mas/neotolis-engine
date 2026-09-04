@@ -609,6 +609,46 @@ void test_sprite_renderer_pipeline_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
+/* Programs come out of the pool in creation order, so two shader pairs get
+ * neighbouring ids; one depth_write step on the neighbour must not land on the same key. */
+void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelines(void) {
+    nt_sprite_renderer_desc_t rdesc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rdesc));
+    s_atlas_res = register_test_atlas(0xA2ULL);
+
+    nt_program_t p0 = nt_gfx_fake_make_program(NULL, 0);
+    nt_program_t p1 = nt_gfx_fake_make_program(NULL, 0);
+    TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.depth_test = false;
+    desc.blend = nt_blend_opaque();
+    desc.cull_mode = NT_CULL_NONE;
+    desc.program = p0;
+    desc.depth_write = true;
+    nt_material_t mat_a = nt_material_create(&desc);
+    desc.program = p1;
+    desc.depth_write = false;
+    nt_material_t mat_b = nt_material_create(&desc);
+    nt_material_step();
+
+    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_a);
+    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = sprite_batch_key(e0, mat_a)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = sprite_batch_key(e1, mat_b)},
+    };
+
+    nt_gfx_test_draw_trace_reset(true);
+    nt_sprite_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_test_draw_trace_at(1).program.id);
+}
+
 /* Context restore drops queued commands and cached pipelines without destroying borrowed programs. */
 void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -1168,6 +1208,23 @@ void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
+/* The vertex-input key packs every attr_map location: one location step on the
+ * same program and state is a second vertex input, still one pipeline. */
+void test_sprite_renderer_attr_map_location_step_splits_vertex_inputs(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xA7ULL);
+
+    nt_material_t mat_loc4 = create_radial_test_material("a_radial", 4);
+    nt_material_t mat_loc5 = create_radial_test_material("a_radial", 5);
+
+    nt_sprite_renderer_set_material(mat_loc4);
+    nt_sprite_renderer_set_material(mat_loc5);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
+}
+
 void test_sprite_renderer_retries_vertex_input_after_backend_failure(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -1655,6 +1712,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
+    RUN_TEST(test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelines);
     RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
     RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
     RUN_TEST(test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter);
@@ -1674,6 +1732,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
     RUN_TEST(test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines);
+    RUN_TEST(test_sprite_renderer_attr_map_location_step_splits_vertex_inputs);
     RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);

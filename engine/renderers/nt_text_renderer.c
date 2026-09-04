@@ -119,8 +119,8 @@ static void generate_quad_indices(void) {
 // #endregion
 
 // #region Pipeline cache
-/* The key omits depth_func and label because they are constant here; vertex
- * input is a separate owned object, not pipeline state. */
+/* Keyed by the exact desc identity; vertex input is a separate owned object,
+ * not pipeline state. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
     const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
@@ -129,12 +129,6 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     if (!info || !nt_gfx_program_ready(program)) {
         nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info);
         return (nt_pipeline_t){0};
-    }
-
-    const uint64_t key = ((uint64_t)program.id * 0x9E3779B97F4A7C15ULL) + info->render_state_hash;
-    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, s_text.pipeline_count, key);
-    if (cached.id != 0) {
-        return cached;
     }
 
     /* Read render state from material — same pattern as mesh_renderer */
@@ -147,7 +141,12 @@ static nt_pipeline_t find_or_create_pipeline(void) {
         .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     };
-    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, key, &desc, &s_text.warned_no_pipeline);
+    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
+    const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_text.pipelines, s_text.pipeline_count, &key);
+    if (cached.id != 0) {
+        return cached;
+    }
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
 }
 // #endregion
 

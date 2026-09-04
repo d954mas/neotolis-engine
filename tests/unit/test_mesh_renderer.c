@@ -116,6 +116,35 @@ static nt_mesh_t create_test_mesh_nonindexed(void) {
     return (nt_mesh_t){.id = handle};
 }
 
+/* Two streams (position, normal), non-indexed: for tests that map a subset. */
+static nt_mesh_t create_test_mesh_two_streams(void) {
+    uint32_t vdata_size = 3 * 6 * (uint32_t)sizeof(float);
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + (2 * (uint32_t)sizeof(NtStreamDesc)) + vdata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 72];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 2;
+    hdr->index_type = 0;
+    hdr->vertex_count = 3;
+    hdr->index_count = 0;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = 0;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[0].name_hash = nt_hash32_str("position").value;
+    sd[0].type = NT_STREAM_FLOAT32;
+    sd[0].count = 3;
+    sd[1].name_hash = nt_hash32_str("normal").value;
+    sd[1].type = NT_STREAM_FLOAT32;
+    sd[1].count = 3;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    return (nt_mesh_t){.id = handle};
+}
+
 /* ---- Helper: link a real GFX program, then create a material on it ---- */
 
 static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(NULL, 0); }
@@ -609,6 +638,46 @@ void test_pipeline_cache_different_layouts(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* Programs come out of the pool in creation order, so two shader pairs get
+ * neighbouring ids; one cull step on the neighbour must not land on the same key. */
+void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t p0 = create_test_program();
+    nt_program_t p1 = create_test_program();
+    TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map[0].location = 0;
+    desc.attr_map_count = 1;
+    desc.depth_test = true;
+    desc.depth_write = true;
+    desc.blend = nt_blend_opaque();
+    desc.program = p0;
+    desc.cull_mode = NT_CULL_BACK;
+    nt_material_t mat_a = nt_material_create(&desc);
+    desc.program = p1;
+    desc.cull_mode = NT_CULL_NONE;
+    nt_material_t mat_b = nt_material_create(&desc);
+    nt_material_step();
+
+    nt_entity_t e0 = create_test_entity(mesh, mat_a);
+    nt_entity_t e1 = create_test_entity(mesh, mat_b);
+    nt_render_item_t items[2] = {
+        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
+        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
+    };
+
+    nt_gfx_test_draw_trace_reset(true);
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_test_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_test_draw_trace_at(1).program.id);
+}
+
 /* An unresolved slot would leave the previous material's texture on the unit, so the
  * placeholder contract is asserted instead. */
 void test_declared_sampler_without_a_resolved_texture_asserts(void) {
@@ -1064,6 +1133,69 @@ void test_pipeline_cache_shared_program_collapses(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
+/* color_mode is vertex-input identity (it selects the instance layout), not
+ * pipeline identity: one program with three color modes is one pipeline. */
+void test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_program_t shared = create_test_program();
+    nt_material_t mats[3] = {
+        create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque()),
+        create_test_material_with_attr(shared, NT_COLOR_MODE_RGBA8, "position", 0, nt_blend_opaque()),
+        create_test_material_with_attr(shared, NT_COLOR_MODE_FLOAT4, "position", 0, nt_blend_opaque()),
+    };
+    nt_render_item_t items[3];
+    for (uint32_t i = 0; i < 3; i++) {
+        nt_entity_t e = create_test_entity(mesh, mats[i]);
+        items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
+    }
+
+    nt_gfx_test_draw_trace_reset(true);
+    nt_mesh_renderer_draw_list(items, 3);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_draw_trace_at(0).pipeline.id, nt_gfx_test_draw_trace_at(2).pipeline.id);
+}
+
+/* Neighbour test for the mesh vertex-input key: one-step changes of each lane
+ * (which stream, its location, the presence bit) are four distinct vertex
+ * inputs on one pipeline. {normal->0} vs {position->0} is the presence bit alone. */
+void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines(void) {
+    nt_mesh_t mesh = create_test_mesh_two_streams();
+    nt_program_t shared = create_test_program();
+    nt_material_t mats[4];
+    mats[0] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    mats[1] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
+    mats[2] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "normal", 0, nt_blend_opaque());
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = shared;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map[0].location = 0;
+    desc.attr_map[1].stream_name = "normal";
+    desc.attr_map[1].location = 1;
+    desc.attr_map_count = 2;
+    desc.depth_test = true;
+    desc.depth_write = true;
+    desc.blend = nt_blend_opaque();
+    desc.cull_mode = NT_CULL_BACK;
+    mats[3] = nt_material_create(&desc);
+    nt_material_step();
+
+    nt_render_item_t items[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_entity_t e = create_test_entity(mesh, mats[i]);
+        items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
+    }
+
+    nt_mesh_renderer_draw_list(items, 4);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_mesh_renderer_test_vertex_input_count());
+}
+
 /* Equal program/state share a pipeline; distinct attr_maps derive separate VIs. */
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1487,7 +1619,7 @@ void test_draw_list_mixed_color_modes_multi_instance(void) {
 
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(9, nt_mesh_renderer_test_instance_total());
-    /* 3 different color modes = 3 pipelines */
+    /* 3 programs (one per material) = 3 pipelines */
     TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
     /* Last run's bind offset = upload base + preceding runs (3x NONE + 3x RGBA8) */
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + (3 * NT_INSTANCE_STRIDE_NONE) + (3 * NT_INSTANCE_STRIDE_RGBA8), nt_gfx_fake_last_instance_offset());
@@ -1582,6 +1714,9 @@ int main(void) {
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
+    RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
+    RUN_TEST(test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs);
+    RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
     RUN_TEST(test_material_missing_a_program_sampler_asserts);

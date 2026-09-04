@@ -11,18 +11,17 @@
 
 /* Internal to the renderers -- not a public header, not installed. */
 
-/* The key is identity: hash the program handle and every descriptor field the renderer varies.
- * Descriptors are not compared on a hit. */
+/* The key is the exact desc identity (nt_gfx_pipeline_key); a hit needs no desc compare. */
 typedef struct {
-    uint64_t key;
+    nt_gfx_pipeline_key_t key;
     nt_pipeline_t pipeline;
 } nt_renderer_pipeline_entry_t;
 
 /* Validate matched pipelines because program generations can wrap; dead matches return invalid.
  * Misses also return invalid. Cleanup is deferred to insertion. */
-static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pipeline_entry_t *entries, uint16_t count, uint64_t key) {
+static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pipeline_entry_t *entries, uint16_t count, const nt_gfx_pipeline_key_t *key) {
     for (uint16_t i = 0; i < count; i++) {
-        if (entries[i].key == key) {
+        if (nt_gfx_pipeline_key_equal(&entries[i].key, key)) {
             return nt_gfx_pipeline_valid(entries[i].pipeline) ? entries[i].pipeline : (nt_pipeline_t){0};
         }
     }
@@ -31,7 +30,8 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pi
 
 /* Reap dead entries before checking capacity; exhaustion asserts.
  * Leave failed pipeline creation uncached so a later miss retries. */
-static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeline_entry_t *entries, uint16_t *count, uint16_t cap, uint64_t key, const nt_pipeline_desc_t *desc, bool *warned) {
+static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeline_entry_t *entries, uint16_t *count, uint16_t cap, const nt_gfx_pipeline_key_t *key, const nt_pipeline_desc_t *desc,
+                                                              bool *warned) {
     for (uint16_t i = 0; i < *count;) {
         if (!nt_gfx_pipeline_valid(entries[i].pipeline)) {
             entries[i] = entries[--(*count)];
@@ -48,7 +48,7 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
     if (pip.id == 0) {
         return pip;
     }
-    entries[*count].key = key;
+    entries[*count].key = *key;
     entries[*count].pipeline = pip;
     (*count)++;
     *warned = false;

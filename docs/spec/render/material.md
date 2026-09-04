@@ -126,7 +126,11 @@ Material stores render state (blend state, depth test/write, cull mode) because 
 contains separate source and destination factors and operations for RGB and
 alpha, plus the constant blend color. Constant color components must be finite
 and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
-core factor and operation sets are public; invalid WebGL combinations assert
+core factor and operation sets are public. `nt_material_create` asserts the
+render-state ranges up front (blend factors and ops, enabled or not,
+`cull_mode`, every `attr_map` location below `NT_GFX_MAX_VERTEX_ATTRS`): the
+renderer cache keys pack them into fixed bit lanes, so the trap belongs at the
+API boundary, not on the first draw. Invalid WebGL combinations assert
 during pipeline creation.
 
 The fragment shader output is the source (`src`); the color already stored in

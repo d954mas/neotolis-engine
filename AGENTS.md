@@ -96,6 +96,7 @@ sources, delete the `.ntpack` before visual QA to force a repack.
 - If a temporary deviation from the spec is necessary, mark it explicitly in the change comment and the final report.
 - New UI widget demos go into the existing `examples/ui_showcase` vitrine (new tab) — never a new example dir.
 - Never id sibling widgets as `base_id + index`: Clay's anonymous child ids are additive (`seed + offset`), so consecutive seeds collide → DUPLICATE_ID. Salt sub-ids with a mixed hash (`nt_ui_child_id` / `nt_ui_fmix_id`). Virtualized widgets must RECYCLE ids (see `nt_ui_vlist`'s ring) or Clay's element hashmap saturates until `build_tree` asserts.
+- Never fold a pool handle or a small enum linearly into a cache key: nested folds give the handle and some state lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and `(p+1, cull-1)` collide, and pool handles are sequential, so neighbouring resources silently share the cached object. Pack the identity exactly (pipelines: `nt_gfx_pipeline_key_t`) or `nt_hash64` the whole canonical struct, and ship every new cache key with a neighbour test (consecutive handles × one-step change of each field → all keys distinct). See docs/spec/render/architecture.md §Cache identity.
 
 ## Performance and hot path
 

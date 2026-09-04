@@ -853,16 +853,21 @@ static bool blend_constant_color_valid(const float color[4]) {
     return true;
 }
 
+/* Ranges hold whether or not blending is enabled; the WebGL combination rules
+ * only matter for a blend that will run. */
 static bool blend_state_valid(const nt_blend_state_t *blend) {
+    if (!(blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) && blend_factor_valid(blend->dst_alpha) &&
+          blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX)) {
+        return false;
+    }
     if (!blend->enabled) {
         return true;
     }
 
     bool uses_constant_color = blend_factor_uses_constant_color(blend->src_rgb) || blend_factor_uses_constant_color(blend->dst_rgb);
     bool uses_constant_alpha = blend_factor_uses_constant_alpha(blend->src_rgb) || blend_factor_uses_constant_alpha(blend->dst_rgb);
-    return blend_constant_color_valid(blend->constant_color) && blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) &&
-           blend_factor_valid(blend->dst_alpha) && blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE &&
-           blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE && !(uses_constant_color && uses_constant_alpha);
+    return blend_constant_color_valid(blend->constant_color) && blend->dst_rgb != NT_BLEND_SRC_ALPHA_SATURATE && blend->dst_alpha != NT_BLEND_SRC_ALPHA_SATURATE &&
+           !(uses_constant_color && uses_constant_alpha);
 }
 
 /* A location used twice (within a layout or across vertex/instance layouts) means

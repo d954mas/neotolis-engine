@@ -740,6 +740,132 @@ void test_gfx_pipeline_backend_failure_returns_invalid(void) {
     nt_gfx_fake_reset();
 }
 
+/* ---- Pipeline key: exact identity ---- */
+
+static nt_pipeline_desc_t key_base_desc(uint32_t program_id) {
+    nt_pipeline_desc_t d;
+    memset(&d, 0, sizeof(d));
+    d.program.id = program_id;
+    d.depth_test = true;
+    d.depth_write = true;
+    d.blend = nt_blend_alpha();
+    d.cull_mode = 1;
+    d.label = "base";
+    return d;
+}
+
+/* One-step variants of every lane. Programs come out of the pool in creation
+ * order, so a lane step on a neighbouring program must never reach the same key. */
+static uint32_t key_variants(uint32_t program_id, nt_gfx_pipeline_key_t *out) {
+    uint32_t n = 0;
+    nt_pipeline_desc_t d = key_base_desc(program_id);
+#define VARIANT(stmt)                                                                                                                                                                                  \
+    do {                                                                                                                                                                                               \
+        d = key_base_desc(program_id);                                                                                                                                                                 \
+        stmt;                                                                                                                                                                                          \
+        out[n++] = nt_gfx_pipeline_key(&d);                                                                                                                                                            \
+    } while (0)
+    VARIANT((void)0);
+    VARIANT(d.depth_test = false);
+    VARIANT(d.depth_write = false);
+    VARIANT(d.depth_func = NT_DEPTH_LEQUAL);
+    VARIANT(d.cull_mode = 0);
+    VARIANT(d.cull_mode = 2);
+    VARIANT(d.polygon_offset = true);
+    VARIANT(d.blend.enabled = false);
+    VARIANT(d.blend.src_rgb = NT_BLEND_ONE);
+    VARIANT(d.blend.dst_rgb = NT_BLEND_ONE);
+    VARIANT(d.blend.src_alpha = NT_BLEND_ZERO);
+    VARIANT(d.blend.dst_alpha = NT_BLEND_ONE);
+    VARIANT(d.blend.op_rgb = NT_BLEND_OP_SUBTRACT);
+    VARIANT(d.blend.op_alpha = NT_BLEND_OP_MAX);
+    VARIANT(d.blend.constant_color[0] = 0.5F);
+    VARIANT(d.blend.constant_color[1] = 0.5F);
+    VARIANT(d.blend.constant_color[2] = 0.5F);
+    VARIANT(d.blend.constant_color[3] = 0.5F);
+    VARIANT(d.depth_func = NT_DEPTH_ALWAYS);
+    VARIANT(d.polygon_offset = true; d.polygon_offset_factor = 2.0F);
+    VARIANT(d.polygon_offset = true; d.polygon_offset_units = 2.0F);
+#undef VARIANT
+    return n;
+}
+
+#define KEY_VARIANT_COUNT 21
+
+void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
+    nt_gfx_pipeline_key_t keys[4 * KEY_VARIANT_COUNT];
+    uint32_t n = 0;
+    for (uint32_t p = 65550; p < 65554; p++) {
+        const uint32_t per_program = key_variants(p, &keys[n]);
+        TEST_ASSERT_EQUAL_UINT32(KEY_VARIANT_COUNT, per_program); /* keys[] is sized for exactly this many */
+        n += per_program;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT_FALSE_MESSAGE(nt_gfx_pipeline_key_equal(&keys[i], &keys[j]), "two distinct descs share a key");
+        }
+    }
+}
+
+/* A disabled blend is opaque whatever its factors or constant say. */
+void test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset(void) {
+    nt_pipeline_desc_t opaque = key_base_desc(7);
+    opaque.blend = nt_blend_opaque();
+    nt_pipeline_desc_t disabled = key_base_desc(7);
+    disabled.blend.enabled = false;
+    disabled.blend.constant_color[1] = 0.5F;
+    disabled.blend.op_rgb = NT_BLEND_OP_MAX;
+    disabled.blend.op_alpha = NT_BLEND_OP_MIN;
+    const nt_gfx_pipeline_key_t a = nt_gfx_pipeline_key(&opaque);
+    const nt_gfx_pipeline_key_t b = nt_gfx_pipeline_key(&disabled);
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&a, &b));
+
+    nt_pipeline_desc_t no_offset = key_base_desc(7);
+    no_offset.polygon_offset_factor = 3.0F;
+    no_offset.polygon_offset_units = 3.0F;
+    const nt_gfx_pipeline_key_t c = nt_gfx_pipeline_key(&no_offset);
+    const nt_gfx_pipeline_key_t base = nt_gfx_pipeline_key(&(nt_pipeline_desc_t){.program.id = 7, .depth_test = true, .depth_write = true, .blend = nt_blend_alpha(), .cull_mode = 1});
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&c, &base));
+}
+
+void test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads(void) {
+    nt_pipeline_desc_t a = key_base_desc(9);
+    nt_pipeline_desc_t b = key_base_desc(9);
+    b.label = "other";
+    const nt_gfx_pipeline_key_t ka = nt_gfx_pipeline_key(&a);
+    const nt_gfx_pipeline_key_t kb = nt_gfx_pipeline_key(&b);
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&ka, &kb));
+
+    b.blend.constant_color[3] = 0.25F;
+    const nt_gfx_pipeline_key_t kc = nt_gfx_pipeline_key(&b);
+    TEST_ASSERT_EQUAL_UINT64(ka.bits, kc.bits);
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kc));
+
+    /* Bit patterns, not values: -0.0 is a different pipeline from +0.0. */
+    b = key_base_desc(9);
+    b.blend.constant_color[0] = -0.0F;
+    const nt_gfx_pipeline_key_t kd = nt_gfx_pipeline_key(&b);
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kd));
+}
+
+/* An out-of-range lane value must trap before it can truncate onto a valid neighbour
+ * and hand a cache hit to a desc make_pipeline would have rejected. */
+void test_gfx_pipeline_key_asserts_out_of_range_lanes(void) {
+    nt_pipeline_desc_t d = key_base_desc(3);
+    d.cull_mode = 3;
+    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+    d = key_base_desc(3);
+    const int bad_depth_func = NT_DEPTH_ALWAYS + 1; /* memcpy: an enum cast of a literal trips the analyzer */
+    memcpy(&d.depth_func, &bad_depth_func, sizeof(d.depth_func));
+    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+    d = key_base_desc(3);
+    d.blend.src_rgb = 16;
+    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+    d = key_base_desc(3);
+    d.blend.op_alpha = 8;
+    EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
+}
+
 void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.src_rgb = UINT8_MAX;
@@ -747,6 +873,11 @@ void test_gfx_pipeline_rejects_invalid_blend_factor(void) {
 
     blend = nt_blend_alpha();
     blend.dst_rgb = UINT8_MAX;
+    expect_pipeline_blend_assert(blend);
+
+    /* Ranges hold for a disabled blend too: garbage is a bug, not "don't care". */
+    blend = nt_blend_opaque();
+    blend.src_rgb = 16;
     expect_pipeline_blend_assert(blend);
 }
 
@@ -2331,6 +2462,10 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_factors);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_constant_color);
+    RUN_TEST(test_gfx_pipeline_key_neighbouring_programs_never_alias);
+    RUN_TEST(test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset);
+    RUN_TEST(test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads);
+    RUN_TEST(test_gfx_pipeline_key_asserts_out_of_range_lanes);
     RUN_TEST(test_gfx_pipeline_rejects_src_alpha_saturate_as_destination_factor);
     RUN_TEST(test_gfx_pipeline_rejects_mixed_constant_color_and_alpha_factors);
     RUN_TEST(test_gfx_pipeline_accepts_constant_color_rgb_with_constant_alpha_source_alpha);
