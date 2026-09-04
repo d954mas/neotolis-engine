@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
-PATHS=('engine/graphics/*.c' 'engine/graphics/*.h' 'engine/renderers/*.c' 'engine/renderers/*.h' 'engine/material/*.c' 'engine/material/*.h')
+PATHS=('engine/graphics/*.c' 'engine/graphics/*.h' 'engine/graphics/gl/*.c' 'engine/graphics/stub/*.c' 'engine/renderers/*.c' 'engine/renderers/*.h' 'engine/material/*.c' 'engine/material/*.h')
 HITS="$( { git ls-files -- "${PATHS[@]}"; git ls-files --others --exclude-standard -- "${PATHS[@]}"; } | sort -u |
     xargs -r grep -niIH -E '0x9e3779b9' 2>/dev/null || true)"
 if [ -n "$HITS" ]; then

@@ -1158,12 +1158,16 @@ void test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs(vo
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_draw_trace_at(0).pipeline.id, nt_gfx_test_draw_trace_at(2).pipeline.id);
 }
 
-/* The vertex-input key carries a presence bit per stream: mapping one more
- * stream splits the vertex input even though every mapped location is unchanged. */
-void test_mapping_an_extra_stream_splits_vertex_inputs_not_pipelines(void) {
+/* Neighbour test for the mesh vertex-input key: one-step changes of each lane
+ * (which stream, its location, the presence bit) are four distinct vertex
+ * inputs on one pipeline. {normal->0} vs {position->0} is the presence bit alone. */
+void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines(void) {
     nt_mesh_t mesh = create_test_mesh_two_streams();
     nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mats[4];
+    mats[0] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    mats[1] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
+    mats[2] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "normal", 0, nt_blend_opaque());
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -1177,20 +1181,19 @@ void test_mapping_an_extra_stream_splits_vertex_inputs_not_pipelines(void) {
     desc.depth_write = true;
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_BACK;
-    nt_material_t mat_b = nt_material_create(&desc);
+    mats[3] = nt_material_create(&desc);
     nt_material_step();
 
-    nt_entity_t e0 = create_test_entity(mesh, mat_a);
-    nt_entity_t e1 = create_test_entity(mesh, mat_b);
-    nt_render_item_t items[2] = {
-        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
-        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
-    };
+    nt_render_item_t items[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_entity_t e = create_test_entity(mesh, mats[i]);
+        items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
+    }
 
-    nt_mesh_renderer_draw_list(items, 2);
+    nt_mesh_renderer_draw_list(items, 4);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_mesh_renderer_test_vertex_input_count());
 }
 
 /* Equal program/state share a pipeline; distinct attr_maps derive separate VIs. */
@@ -1713,7 +1716,7 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs);
-    RUN_TEST(test_mapping_an_extra_stream_splits_vertex_inputs_not_pipelines);
+    RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
     RUN_TEST(test_material_missing_a_program_sampler_asserts);

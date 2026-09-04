@@ -1,14 +1,12 @@
 #ifndef NT_GFX_H
 #define NT_GFX_H
 
-#include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
 
 #include <stddef.h>
-#include <string.h>
 
 /* ---- Index buffer type constants ---- */
 
@@ -369,35 +367,14 @@ typedef struct {
 _Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
 _Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
 _Static_assert(NT_DEPTH_ALWAYS < 4, "depth func lane is 2 bits");
-/* A new desc field must be added to the packer. These trip for an appended or
- * size-changing field only; a field slipped into existing padding must be added by hand. */
-_Static_assert(sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56), "nt_pipeline_desc_t changed -- update nt_gfx_pipeline_key");
-_Static_assert(offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52), "nt_pipeline_desc_t changed -- update nt_gfx_pipeline_key");
+/* A new desc field must be added to the packer: every field offset is pinned, so a
+ * field inserted anywhere -- padding holes included -- moves a later one and trips here. */
+_Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
+                   offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
+                   offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
+               "nt_pipeline_desc_t changed -- update nt_gfx_pipeline_key");
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static inline nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc) {
-    NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
-    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_ALWAYS && "depth_func out of range");
-    /* A disabled blend is opaque whatever its factors say: one pipeline, not one per preset. */
-    const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
-    NT_ASSERT(blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
-              blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
-    NT_ASSERT(blend.op_rgb <= NT_BLEND_OP_MAX && blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
-    nt_gfx_pipeline_key_t key;
-    key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
-               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 38 | (uint64_t)blend.src_rgb << 40 | (uint64_t)blend.dst_rgb << 44 |
-               (uint64_t)blend.src_alpha << 48 | (uint64_t)blend.dst_alpha << 52 | (uint64_t)blend.op_rgb << 56 | (uint64_t)blend.op_alpha << 59;
-    /* Bit patterns: exact, so -0.0 vs 0.0 can only over-split, never alias. Disabled offset packs as zero. */
-    const float dyn[6] = {blend.constant_color[0],
-                          blend.constant_color[1],
-                          blend.constant_color[2],
-                          blend.constant_color[3],
-                          desc->polygon_offset ? desc->polygon_offset_factor : 0.0F,
-                          desc->polygon_offset ? desc->polygon_offset_units : 0.0F};
-    memcpy(key.dyn, dyn, sizeof(key.dyn));
-    return key;
-}
+nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc);
 
 static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) {
     return a->bits == b->bits && a->dyn[0] == b->dyn[0] && a->dyn[1] == b->dyn[1] && a->dyn[2] == b->dyn[2] && a->dyn[3] == b->dyn[3] && a->dyn[4] == b->dyn[4] && a->dyn[5] == b->dyn[5];

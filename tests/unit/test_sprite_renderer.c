@@ -609,12 +609,6 @@ void test_sprite_renderer_pipeline_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
-static nt_program_t make_test_program(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "pair_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "pair_fs"});
-    return nt_gfx_make_program(vs, fs);
-}
-
 /* Programs come out of the pool in creation order, so two shader pairs get
  * neighbouring ids; one depth_write step on the neighbour must not land on the same key. */
 void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelines(void) {
@@ -622,8 +616,8 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rdesc));
     s_atlas_res = register_test_atlas(0xA2ULL);
 
-    nt_program_t p0 = make_test_program();
-    nt_program_t p1 = make_test_program();
+    nt_program_t p0 = nt_gfx_fake_make_program(NULL, 0);
+    nt_program_t p1 = nt_gfx_fake_make_program(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
 
     nt_material_create_desc_t desc;
@@ -631,8 +625,6 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
     desc.depth_test = false;
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_NONE;
-    desc.textures[0].name = "u_texture";
-    desc.texture_count = 1;
     desc.program = p0;
     desc.depth_write = true;
     nt_material_t mat_a = nt_material_create(&desc);
