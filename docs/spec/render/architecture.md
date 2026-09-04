@@ -166,9 +166,10 @@ programs the game owns, so a cache entry never extends a program's lifetime.
 The population is distinct material states, tens of values in a real game, so
 a fixed array with a linear scan stays cheaper than a hash map at that scale.
 
-Pool handles are sequential, so a linear fold (`a*K + b`) of a handle with a
-small field aliases neighbouring handles as the common case, not a corner
-case. No renderer cache key may fold handles or enums that way: pack exactly,
+A linear fold is not an identity: nested folds hand the handle and some state
+lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and
+`(p+1, cull-1)` collide exactly, and pool handles are sequential, so that is
+the common case, not a corner case. No renderer cache key may fold handles or enums that way: pack exactly,
 or hash the whole canonical identity with `nt_hash64` where the identity is
 content rather than a handful of small fields.
 

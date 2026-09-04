@@ -1,6 +1,7 @@
 #ifndef NT_GFX_H
 #define NT_GFX_H
 
+#include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
@@ -373,10 +374,12 @@ _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipe
                    offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
                "nt_pipeline_desc_t changed -- update nt_gfx_pipeline_key");
 
+/* desc / a / b are required and borrowed for the call; NULL asserts. */
 nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc);
 
 /* `bits` first: a miss costs one word, the floats are read only on a match. */
 static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) {
+    NT_ASSERT(a != NULL && b != NULL);
     return a->bits == b->bits && memcmp(a->float_bits, b->float_bits, sizeof(a->float_bits)) == 0;
 }
 

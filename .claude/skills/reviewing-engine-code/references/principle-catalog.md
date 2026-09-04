@@ -175,9 +175,10 @@ transitively (latent).
 **Rule:** a cache that hands back a GPU object (pipeline, vertex input, sampler) by key must
 derive that key either bit-exact (packed lanes with `_Static_assert`ed widths, every input
 range-asserted before packing) or as one `nt_hash64` over the whole canonical identity struct.
-Flag any `handle * K + field` / `h = h*K + small_int` chain used as identity: pool handles are
-sequential, so `(p, field)` and `(p+1, field-1)` collide as the common case and the second
-resource silently draws with the first one's object. P0 when the key gates a pipeline/program;
+Flag any `handle * K + field` / `h = h*K + small_int` chain used as identity: nested folds give
+the handle and some state lane the same coefficient, so `(p, field)` and `(p+1, field-1)` collide
+exactly, and pool handles are sequential, so the second resource silently draws with the first
+one's object as the common case. P0 when the key gates a pipeline/program;
 P1 for other caches. Also flag a new cache key without a neighbour test (consecutive handles ×
 one-step change of each field → all keys distinct).
 **Cite:** AGENTS.md §"Change rules" (never fold a pool handle…) + docs/spec/render/architecture.md §"Cache identity".
