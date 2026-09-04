@@ -68,6 +68,8 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 
 /* Per-program standalone locations, including each array element. */
 #define NT_MAX_CACHED_UNIFORMS 16
+/* Longest reflected uniform name plus room for an expanded array index; asserted at link. */
+#define NT_GFX_GL_MAX_UNIFORM_NAME 256
 
 typedef struct {
     uint32_t name_hash;
@@ -1138,15 +1140,15 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
     *suffix = '\0';
 }
 
-/* 1 = 2D sampler with a texture-unit story, -1 = sampler type that would bind
- * silently wrong and is rejected at link, 0 = not a sampler. */
-static int uniform_sampler_kind(GLenum utype) {
+/* Only 2D samplers have a texture-unit story here; the rest would bind
+ * silently wrong, so they are rejected at link instead. */
+static bool uniform_type_is_sampler(GLenum utype) {
     switch (utype) {
     case GL_SAMPLER_2D:
     case GL_SAMPLER_2D_SHADOW:
     case GL_INT_SAMPLER_2D:
     case GL_UNSIGNED_INT_SAMPLER_2D:
-        return 1;
+        return true;
     case GL_SAMPLER_3D:
     case GL_SAMPLER_CUBE:
     case GL_SAMPLER_CUBE_SHADOW:
@@ -1158,9 +1160,10 @@ static int uniform_sampler_kind(GLenum utype) {
     case GL_UNSIGNED_INT_SAMPLER_3D:
     case GL_UNSIGNED_INT_SAMPLER_CUBE:
     case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
-        return -1;
+        NT_ASSERT(false && "program declares an unsupported sampler type");
+        return false;
     default:
-        return 0;
+        return false;
     }
 }
 
@@ -1185,19 +1188,15 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         return false;
     }
     /* Expanded indices can be wider than reflection's terminal [0]. */
-    size_t name_capacity = (size_t)max_name_length + 10U;
-    char *uname = malloc(name_capacity);
-    NT_ASSERT(uname != NULL);
+    NT_ASSERT((size_t)max_name_length + 10U <= NT_GFX_GL_MAX_UNIFORM_NAME && "uniform name exceeds NT_GFX_GL_MAX_UNIFORM_NAME");
+    char uname[NT_GFX_GL_MAX_UNIFORM_NAME];
     uint32_t uniform_count = 0;
-    uint32_t sampler_count = 0;
-    bool unsupported_sampler = false;
     for (GLint ui = 0; ui < active_uniforms; ui++) {
         GLsizei ulen = 0;
         GLint usize = 0;
         GLenum utype = 0;
         glGetActiveUniform(program, (GLuint)ui, max_name_length, &ulen, &usize, &utype, uname);
         if (ulen <= 0 || usize <= 0) {
-            free(uname);
             return false;
         }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
@@ -1208,15 +1207,11 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
-                const int kind = uniform_sampler_kind(utype);
-                if (kind < 0) {
-                    unsupported_sampler = true;
-                } else if (kind > 0) {
-                    if (sampler_count < NT_GFX_MAX_TEXTURE_SLOTS) {
-                        rec->sampler_units[sampler_count].name_hash = nt_hash32_str(uname).value;
-                        rec->sampler_units[sampler_count].location = loc;
-                    }
-                    sampler_count++;
+                if (uniform_type_is_sampler(utype)) {
+                    NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
+                    rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
+                    rec->sampler_units[rec->sampler_count].location = loc;
+                    rec->sampler_count++;
                 } else {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
                         out[uniform_count].name_hash = nt_hash32_str(uname).value;
@@ -1227,13 +1222,8 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
         }
     }
-    free(uname);
-    /* Every link assert sits after the free: an assert-trip test must not leak the name buffer. */
     NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
-    NT_ASSERT(!unsupported_sampler && "program declares an unsupported sampler type");
-    NT_ASSERT(sampler_count <= NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
     *out_count = (uint8_t)uniform_count;
-    rec->sampler_count = (uint8_t)sampler_count;
     return true;
 }
 

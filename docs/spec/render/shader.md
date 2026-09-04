@@ -63,9 +63,9 @@ The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do
 not consume entries, and samplers do not either — they live in a separate table
 capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts at link
-time instead of silently omitting values. Reflection reads the complete reported names and
-uses temporary storage only while linking; setting a uniform performs no
-allocation.
+time instead of silently omitting values. Reflection reads the complete reported names into
+a fixed link-time buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at
+link); neither linking nor setting a uniform allocates.
 
 The cache is keyed by the `nt_hash32_str` hash of the uniform's complete name,
 including explicit array indices such as `colors[1]` or `lights[0].color`. The
