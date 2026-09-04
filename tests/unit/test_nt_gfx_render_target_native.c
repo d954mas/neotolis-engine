@@ -1024,34 +1024,65 @@ static void assert_distinct_units_in_range(const int *units, uint32_t count) {
     }
 }
 
-static void test_every_supported_sampler_type_gets_its_own_unit(void) {
+static void test_supported_sampler_types_retain_their_classes(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     static const char *fragment_source = "precision highp float;\n"
                                          "uniform sampler2D u_color;\n"
-                                         "uniform highp isampler2D u_signed_ids;\n"
                                          "uniform highp usampler2D u_ids;\n"
                                          "uniform highp sampler2DShadow u_shadow;\n"
                                          "uniform float u_scale;\n"
                                          "out vec4 frag_color;\n"
                                          "void main() {\n"
                                          "    vec4 c = texture(u_color, vec2(0.5));\n"
-                                         "    ivec4 si = texture(u_signed_ids, vec2(0.5));\n"
                                          "    uvec4 i = texture(u_ids, vec2(0.5));\n"
                                          "    float s = texture(u_shadow, vec3(0.5));\n"
-                                         "    frag_color = (c + vec4(si) + vec4(i) + vec4(s)) * u_scale;\n"
+                                         "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
                                          "}\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
 
-    const int units[4] = {
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_signed_ids")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_ids")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")),
+    nt_gfx_sampler_info_t infos[3] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_color"), &infos[0]));
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_ids"), &infos[1]));
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_shadow"), &infos[2]));
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_FLOAT, infos[0].sampler_class);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_UINT, infos[1].sampler_class);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_SHADOW, infos[2].sampler_class);
+
+    const int units[3] = {
+        infos[0].unit,
+        infos[1].unit,
+        infos[2].unit,
     };
-    assert_distinct_units_in_range(units, 4);
-    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_program_sampler_mask(prog));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_scale")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_missing")));
+    assert_distinct_units_in_range(units, 3);
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+    TEST_ASSERT_FALSE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_scale"), &infos[0]));
+    TEST_ASSERT_FALSE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_missing"), &infos[0]));
+}
+
+static void test_signed_sampler_type_asserts_at_link(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform highp isampler2D u_signed_ids;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(texture(u_signed_ids, vec2(0.5))); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer texture format"));
+}
+
+static void test_active_sampler_hash_collision_asserts_at_link(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2D attr4040;\n"
+                                         "uniform sampler2D attr168680;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(attr4040, vec2(0.5)) + texture(attr168680, vec2(0.5)); }\n";
+    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("attr4040").value, nt_hash32_str("attr168680").value);
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "active sampler name hash collision"));
 }
 
 static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
@@ -1401,7 +1432,9 @@ int main(void) {
     RUN_TEST(test_uniform_cache_expands_only_terminal_struct_array_indices);
     RUN_TEST(test_uniform_cache_asserts_when_array_elements_exceed_capacity);
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
-    RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
+    RUN_TEST(test_supported_sampler_types_retain_their_classes);
+    RUN_TEST(test_signed_sampler_type_asserts_at_link);
+    RUN_TEST(test_active_sampler_hash_collision_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);

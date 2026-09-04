@@ -75,8 +75,9 @@ init, or inline where the cost does not matter.
 
 Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
-active uniform by type — `sampler2D`, `sampler2DShadow`, `isampler2D` and
-`usampler2D` are supported; the other WebGL2 sampler types (cube, 3D, array, and
+active uniform by type — `sampler2D`, `sampler2DShadow`, and `usampler2D` are
+supported. `isampler2D` asserts at link because the engine exposes no signed
+integer texture format; the other WebGL2 sampler types (cube, 3D, array, and
 their integer forms) assert at link. The production gfx stub neither compiles
 nor inspects shader sources and creates no programs; see
 [stub semantics](../core/module-layout.md#stub-semantics-and-capability-queries). Each

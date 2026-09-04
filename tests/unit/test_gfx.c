@@ -561,6 +561,23 @@ void test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table(void) {
     nt_gfx_destroy_program(fresh);
 }
 
+void test_gfx_backend_texture_binding_batch_visits_only_active_units(void) {
+    const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS] = {
+        [1] = {.texture_backend = 41, .sampler_backend = 51},
+        [6] = {.texture_backend = 46, .sampler_backend = 56},
+    };
+
+    nt_gfx_backend_apply_texture_bindings(bindings, (uint8_t)((1U << 1U) | (1U << 6U)));
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(41, nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(46, nt_gfx_fake_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(51, nt_gfx_fake_last_sampler(1));
+    TEST_ASSERT_EQUAL_UINT32(56, nt_gfx_fake_last_sampler(6));
+}
+
 /* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
 
 /* Games clear their handles on context loss and destroy them again at shutdown,
@@ -2421,6 +2438,7 @@ int main(void) {
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
     RUN_TEST(test_gfx_sampler_queries_use_each_program_backend);
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
+    RUN_TEST(test_gfx_backend_texture_binding_batch_visits_only_active_units);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);

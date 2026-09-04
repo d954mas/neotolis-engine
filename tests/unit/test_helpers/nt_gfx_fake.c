@@ -43,15 +43,18 @@ static uint32_t fake_alloc_slot(nt_gfx_fake_program_t *table, uint32_t capacity)
     return 0;
 }
 
-int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_sampler_unit: requires a live program");
+bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_sampler_info: requires a live program");
+    NT_ASSERT(out_info != NULL && "program_sampler_info: out_info is required");
     const nt_gfx_fake_program_t *rec = &s_fake_program_table[program_backend];
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
         if (rec->sampler_hashes[i] == name_hash) {
-            return (int)i;
+            out_info->unit = i;
+            out_info->sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
+            return true;
         }
     }
-    return -1;
+    return false;
 }
 
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
@@ -504,6 +507,16 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     s_fake_bind_sampler_count++;
 }
 
+void nt_gfx_backend_apply_texture_bindings(const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS], uint8_t active_mask) {
+    for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
+        if ((active_mask & (uint8_t)(1U << unit)) == 0) {
+            continue;
+        }
+        nt_gfx_backend_bind_texture(bindings[unit].texture_backend, unit);
+        nt_gfx_backend_bind_sampler(bindings[unit].sampler_backend, unit);
+    }
+}
+
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
     s_fake_update_texture_count++;
     (void)backend_handle;
@@ -574,7 +587,8 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 }
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    nt_gfx_sampler_info_t sampler_info = {0};
+    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
     s_fake_last_uniform_program = program_backend;
     if (s_fake_uniform_int_count < NT_GFX_FAKE_UNIFORM_NAMES) {
         s_fake_uniform_int_hashes[s_fake_uniform_int_count] = name_hash;

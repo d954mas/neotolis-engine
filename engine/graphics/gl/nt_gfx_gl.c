@@ -111,6 +111,7 @@ typedef struct {
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
+    uint16_t sampler_classes; /* two bits per sampler unit */
     uint8_t sampler_count;
 } nt_gfx_gl_program_t;
 
@@ -245,15 +246,18 @@ static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash)
     return program_uniform_location(&s_programs[program_backend], name_hash);
 }
 
-int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_unit: requires a live program");
+bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_info: requires a live program");
+    NT_ASSERT(out_info != NULL && "program_sampler_info: out_info is required");
     const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     for (uint8_t i = 0; i < prog->sampler_count; i++) {
         if (prog->sampler_units[i].name_hash == name_hash) {
-            return (int)i;
+            out_info->unit = i;
+            out_info->sampler_class = (uint8_t)((prog->sampler_classes >> (i * 2U)) & 3U);
+            return true;
         }
     }
-    return -1;
+    return false;
 }
 
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
@@ -1000,7 +1004,8 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     GLint loc = program_get_uniform_h(program_backend, name_hash);
-    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    nt_gfx_sampler_info_t sampler_info = {0};
+    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -1142,13 +1147,20 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
 
 /* Only 2D samplers have a texture-unit story here; the rest would bind
  * silently wrong, so they are rejected at link instead. */
-static bool uniform_type_is_sampler(GLenum utype) {
+static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_class) {
     switch (utype) {
     case GL_SAMPLER_2D:
-    case GL_SAMPLER_2D_SHADOW:
-    case GL_INT_SAMPLER_2D:
-    case GL_UNSIGNED_INT_SAMPLER_2D:
+        *out_class = NT_GFX_SAMPLER_CLASS_FLOAT;
         return true;
+    case GL_SAMPLER_2D_SHADOW:
+        *out_class = NT_GFX_SAMPLER_CLASS_SHADOW;
+        return true;
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+        *out_class = NT_GFX_SAMPLER_CLASS_UINT;
+        return true;
+    case GL_INT_SAMPLER_2D:
+        NT_ASSERT(false && "program sampler requires a signed integer texture format");
+        return false;
     case GL_SAMPLER_3D:
     case GL_SAMPLER_CUBE:
     case GL_SAMPLER_CUBE_SHADOW:
@@ -1173,6 +1185,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     nt_cached_uniform_t *out = rec->uniforms;
     uint8_t *out_count = &rec->uniform_count;
     rec->sampler_count = 0;
+    rec->sampler_classes = 0;
     *out_count = 0;
     GLint active_uniforms = -1;
     glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
@@ -1207,10 +1220,17 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
-                if (uniform_type_is_sampler(utype)) {
+                nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
+                if (uniform_sampler_class(utype, &sampler_class)) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
-                    rec->sampler_units[rec->sampler_count].location = loc;
+                    const uint32_t name_hash = nt_hash32_str(uname).value;
+                    for (uint8_t i = 0; i < rec->sampler_count; i++) {
+                        NT_ASSERT(rec->sampler_units[i].name_hash != name_hash && "active sampler name hash collision");
+                    }
+                    const uint8_t unit = rec->sampler_count;
+                    rec->sampler_units[unit].name_hash = name_hash;
+                    rec->sampler_units[unit].location = loc;
+                    rec->sampler_classes |= (uint16_t)((uint16_t)sampler_class << (unit * 2U));
                     rec->sampler_count++;
                 } else {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
@@ -2144,6 +2164,16 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 #endif
     glBindSampler(slot, sampler);
     s_gl_cache.bound_samplers[slot] = sampler;
+}
+
+void nt_gfx_backend_apply_texture_bindings(const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS], uint8_t active_mask) {
+    for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
+        if ((active_mask & (uint8_t)(1U << unit)) == 0) {
+            continue;
+        }
+        nt_gfx_backend_bind_texture(bindings[unit].texture_backend, unit);
+        nt_gfx_backend_bind_sampler(bindings[unit].sampler_backend, unit);
+    }
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

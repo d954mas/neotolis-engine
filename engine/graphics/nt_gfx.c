@@ -1423,7 +1423,11 @@ bool nt_gfx_program_ready(nt_program_t prog) {
 
 int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
     NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_unit: program is not linked");
-    return nt_gfx_backend_program_sampler_unit(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value);
+    nt_gfx_sampler_info_t info = {0};
+    if (!nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, &info)) {
+        return -1;
+    }
+    return info.unit;
 }
 
 uint32_t nt_gfx_program_sampler_mask(nt_program_t prog) {
@@ -1567,6 +1571,16 @@ static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler,
     *out_backend = e->backend;
     return true;
 }
+
+#ifdef NT_TEST_ACCESS
+bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info) {
+    NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_info: program is not linked");
+    NT_ASSERT(out_info != NULL && "test_program_sampler_info: out_info is required");
+    return nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, out_info);
+}
+
+void nt_gfx_test_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) { nt_gfx_bind_texture(tex, sampler, slot); }
+#endif
 
 void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) {
     if (g_nt_gfx.context_lost) {
