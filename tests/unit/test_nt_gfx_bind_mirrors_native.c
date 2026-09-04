@@ -643,27 +643,37 @@ static void test_ground_state_disables_scissor(void) {
 /* The cache survives end_frame, so a frame that repeats the previous one reaches
  * GL with no state calls at all. */
 static void test_identical_second_frame_issues_no_bind_calls(void) {
+    static const char *textured_fs = "precision mediump float;\n"
+                                     "uniform sampler2D u_texture;\n"
+                                     "out vec4 frag_color;\n"
+                                     "void main() { frag_color = texture(u_texture, vec2(0.5)); }\n";
     static const uint8_t pixel[4] = {255, 255, 255, 255};
-    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
+    nt_pipeline_t pip = make_pipeline_ex(s_vs_src, textured_fs, false, true, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    const nt_gfx_texture_binding_t binding = {
+        .name = nt_hash32_str("u_texture"),
+        .texture = tex,
+        .sampler = NT_SAMPLER_DEFAULT,
+    };
 
     nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
+    nt_gfx_gl_test_reset_counters();
     install_state_counters();
     nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     remove_state_counters();
@@ -680,6 +690,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.blend_func_separate);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_sampler_binds());
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.viewport);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_color);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_depth);
