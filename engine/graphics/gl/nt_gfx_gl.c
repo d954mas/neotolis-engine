@@ -1005,7 +1005,7 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     GLint loc = program_get_uniform_h(program_backend, name_hash);
     nt_gfx_sampler_info_t sampler_info = {0};
-    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     if (loc >= 0) {
         glUniform1i(loc, val);
     }

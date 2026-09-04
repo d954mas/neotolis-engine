@@ -626,13 +626,6 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
-/* Sampler uniforms are program state: units are fixed at link, nobody writes
- * them. Returns the unit the named sampler reads from, or -1 when the program
- * has no active sampler of that name. Program must be ready (asserted). */
-int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
-/* Every unit the program samples, as 1<<unit bits -- the interface a material
- * must cover. Program must be ready (asserted). */
-uint32_t nt_gfx_program_sampler_mask(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
@@ -640,9 +633,9 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- Pipeline, vertex input, instance pointers and uniforms are
- * pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass discards them.
- * Texture, sampler and uniform-buffer binds are context state. */
+/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
+ * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
+ * discards them. Physical texture/sampler and uniform-buffer binds are context state. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -650,10 +643,6 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * either may change without re-binding the other. Every draw requires a bound
  * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-/* Binds the texture on unit `slot` with the sampler it is read through; NT_SAMPLER_DEFAULT selects
- * the texture's asset-baked default. A unit never holds a texture without its sampler. Format/filter
- * compatibility is asserted (rules: docs/spec/core/api-contracts.md, "Texture descriptors"). */
-void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations

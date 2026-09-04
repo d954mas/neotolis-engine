@@ -15,6 +15,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
@@ -28,7 +29,9 @@
 static nt_material_t make_material(bool with_page_sampler) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = with_page_sampler ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1) : nt_gfx_fake_make_program((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
+    desc.program = with_page_sampler
+                       ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1)
+                       : nt_gfx_fake_make_program_typed((const char *const[]){"u_curve_texture", "u_band_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_UINT}, 2);
     /* Programs the engine links later (shape renderer) must not inherit this template. */
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.depth_test = false;

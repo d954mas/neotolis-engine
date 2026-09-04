@@ -18,21 +18,21 @@ static nt_gfx_fake_program_t s_fake_program_template;
 static nt_gfx_fake_program_t *s_fake_program_table;
 static uint32_t s_fake_max_programs;
 
-void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) {
+void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) { nt_gfx_fake_set_samplers_typed(names, NULL, count); }
+
+void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
     NT_ASSERT(count <= NT_GFX_MAX_TEXTURE_SLOTS);
     s_fake_program_template = (nt_gfx_fake_program_t){.used = true, .sampler_count = count};
     for (uint8_t i = 0; i < count; i++) {
         s_fake_program_template.sampler_hashes[i] = nt_hash32_str(names[i]).value;
+        s_fake_program_template.sampler_classes[i] = sampler_classes != NULL ? sampler_classes[i] : NT_GFX_SAMPLER_CLASS_FLOAT;
     }
 }
 
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program_typed(names, NULL, count); }
 
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
-    nt_gfx_fake_set_samplers(names, count);
-    if (sampler_classes != NULL) {
-        memcpy(s_fake_program_template.sampler_classes, sampler_classes, count);
-    }
+    nt_gfx_fake_set_samplers_typed(names, sampler_classes, count);
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     return nt_gfx_make_program(vs, fs);
@@ -601,7 +601,7 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     nt_gfx_sampler_info_t sampler_info = {0};
-    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     s_fake_last_uniform_program = program_backend;
     if (s_fake_uniform_int_count < NT_GFX_FAKE_UNIFORM_NAMES) {
         s_fake_uniform_int_hashes[s_fake_uniform_int_count] = name_hash;

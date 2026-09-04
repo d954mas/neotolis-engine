@@ -1003,8 +1003,8 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     nt_sprite_renderer_flush();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1073,7 +1073,7 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "resolved_tex"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "texture_pool"));
 }
 
 /* Flush resolves units from the pipeline's program, so a material that leaves one of
@@ -1097,7 +1097,7 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "sampler_mask"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "applied_mask"));
 }
 
 /* A declared name the program never samples maps to no unit: the slot is skipped and

@@ -534,15 +534,15 @@ void test_gfx_sampler_queries_use_each_program_backend(void) {
     nt_program_t first = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
     nt_program_t second = make_sampler_program((const char *const[]){"u_b"}, 1);
 
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_b")));
-    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(first));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_missing")));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_test_program_sampler_mask(first));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_missing")));
 
     /* The second program's table is its own: same name, its own unit. */
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_b")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(second));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(second, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(second, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_test_program_sampler_mask(second));
 
     nt_gfx_destroy_program(second);
     nt_gfx_destroy_program(first);
@@ -550,13 +550,13 @@ void test_gfx_sampler_queries_use_each_program_backend(void) {
 
 void test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table(void) {
     nt_program_t old = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
-    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(old));
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_test_program_sampler_mask(old));
     nt_gfx_destroy_program(old);
 
     nt_program_t fresh = make_sampler_program((const char *const[]){"u_c"}, 1);
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_c")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(fresh));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(fresh, nt_hash32_str("u_c")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(fresh, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_test_program_sampler_mask(fresh));
 
     nt_gfx_destroy_program(fresh);
 }
@@ -773,6 +773,20 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     nt_gfx_bind_pipeline(second_pipeline);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
     TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    begin_texture_binding_test_pass(program);
+    bind_test_vertex_input();
+
+    EXPECT_ASSERT(nt_gfx_draw(0, 0));
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 0, 1));
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
+    EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 0, 0, 1));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
     end_texture_binding_test_pass();
 }
 
@@ -1351,7 +1365,7 @@ void test_gfx_bind_texture_valid(void) {
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0);
+    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_destroy_texture(tex);
 }
 
@@ -1359,7 +1373,7 @@ void test_gfx_bind_texture_valid(void) {
 
 void test_gfx_bind_texture_invalid(void) {
     nt_texture_t tex = {.id = 0};
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* must not crash */
+    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0); /* must not crash */
 }
 
 /* ---- Texture: destroy and reuse slot ---- */
@@ -2332,7 +2346,7 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* logs, no trap */
+    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0); /* logs, no trap */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     /* The sampler bind rides on the texture bind: skipping one skips both. */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
@@ -2360,9 +2374,9 @@ void test_gfx_bind_texture_rejects_sampler_incompatible_with_its_texture(void) {
 
     nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
     nt_gfx_begin_frame();
-    nt_gfx_bind_texture(color, linear, 0);
+    nt_gfx_test_bind_texture_unit(color, linear, 0);
     /* LINEAR on raw depth is incomplete sampling, even on the unit colour just left. */
-    EXPECT_ASSERT(nt_gfx_bind_texture(depth, linear, 0));
+    EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(depth, linear, 0));
     nt_gfx_end_frame();
 }
 
@@ -2704,6 +2718,7 @@ int main(void) {
     RUN_TEST(test_gfx_destroy_texture_invalidates_every_aliased_binding);
     RUN_TEST(test_gfx_begin_pass_invalidates_texture_binding_set);
     RUN_TEST(test_gfx_pipeline_change_preserves_texture_set_only_for_same_program);
+    RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_returns_false_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_sampler_recreation_failure_without_backend_binds);

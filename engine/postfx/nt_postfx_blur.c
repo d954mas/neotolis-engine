@@ -396,13 +396,15 @@ static void upload_kernel(uint32_t radius, const float packed[20]) {
     }
 }
 
-static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const float direction[4], uint32_t radius, const float packed[20]) {
+static bool draw_blur_pass(nt_texture_t source, nt_render_target_t target, const float direction[4], uint32_t radius, const float packed[20]) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
-    const int source_unit = nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(s_blur.pipeline), s_u_source);
-    NT_ASSERT(source_unit >= 0 && "blur program must sample u_source");
-    nt_gfx_bind_texture(source, NT_SAMPLER_DEFAULT, (uint32_t)source_unit);
+    const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = NT_SAMPLER_DEFAULT};
+    if (!nt_gfx_apply_texture_bindings(&binding, 1)) {
+        nt_gfx_end_pass();
+        return false;
+    }
     nt_gfx_set_uniform_vec4(s_u_direction, direction);
     upload_kernel(radius, packed);
     nt_gfx_draw(0, 3);
@@ -410,6 +412,7 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
 #ifdef NT_TEST_ACCESS
     s_blur.draw_count++;
 #endif
+    return true;
 }
 
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
@@ -423,7 +426,9 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
 
     static const float horizontal[4] = {1.0F, 0.0F, 0.0F, 0.0F};
     static const float vertical[4] = {0.0F, 1.0F, 0.0F, 0.0F};
-    draw_blur_pass(pass->source, pass->temp, horizontal, radius, packed);
+    if (!draw_blur_pass(pass->source, pass->temp, horizontal, radius, packed)) {
+        return;
+    }
     draw_blur_pass(nt_gfx_render_target_color(pass->temp), pass->dest, vertical, radius, packed);
 }
 

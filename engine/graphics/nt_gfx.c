@@ -1450,20 +1450,6 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
 }
 
-int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
-    NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_unit: program is not linked");
-    nt_gfx_sampler_info_t info = {0};
-    if (!nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, &info)) {
-        return -1;
-    }
-    return info.unit;
-}
-
-uint32_t nt_gfx_program_sampler_mask(nt_program_t prog) {
-    NT_ASSERT(nt_gfx_program_ready(prog) && "program_sampler_mask: program is not linked");
-    return nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
-}
-
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return NT_PROGRAM_INVALID;
@@ -1696,10 +1682,17 @@ bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gf
     return nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, out_info);
 }
 
-void nt_gfx_test_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) { nt_gfx_bind_texture(tex, sampler, slot); }
-#endif
+int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
+    nt_gfx_sampler_info_t info = {0};
+    return nt_gfx_test_program_sampler_info(prog, name, &info) ? info.unit : -1;
+}
 
-void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) {
+uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog) {
+    NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_mask: program is not linked");
+    return nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
+}
+
+void nt_gfx_test_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -1725,6 +1718,7 @@ void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) 
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
     nt_gfx_backend_bind_sampler(sampler_backend, slot);
 }
+#endif
 
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
@@ -1940,6 +1934,11 @@ static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_
 /* Every draw reads vertex-input state; attribute-less draws bind an empty one. */
 static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input != 0 && "draw: no vertex input bound -- bind one with nt_gfx_bind_vertex_input"); }
 
+static void assert_texture_bindings_complete(void) {
+    NT_ASSERT((s_gfx.required_texture_mask == 0 || (s_gfx.texture_binding_program == s_gfx.bound_program && s_gfx.applied_texture_mask == s_gfx.required_texture_mask)) &&
+              "draw: bound program requires a complete texture set -- call nt_gfx_apply_texture_bindings");
+}
+
 /* Enabled-but-unpointed instance attribs are invalid GL that fails silently. */
 static void assert_instance_attribs_pointed(void) {
     if (s_gfx.bound_vertex_input == 0) {
@@ -1970,6 +1969,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
         NT_LOG_ERROR("draw called without bound pipeline");
         return;
     }
+    assert_texture_bindings_complete();
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
@@ -1997,6 +1997,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
         NT_LOG_ERROR("draw_instanced called without bound pipeline");
         return;
     }
+    assert_texture_bindings_complete();
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
@@ -2026,6 +2027,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
         NT_LOG_ERROR("draw_indexed called without bound pipeline");
         return;
     }
+    assert_texture_bindings_complete();
     assert_vertex_input_bound();
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
@@ -2055,6 +2057,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
         NT_LOG_ERROR("draw_indexed_instanced called without bound pipeline");
         return;
     }
+    assert_texture_bindings_complete();
     assert_vertex_input_bound();
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();

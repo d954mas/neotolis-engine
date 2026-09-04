@@ -26,18 +26,15 @@ to; `nt_material_create` asserts a non-NULL name for both and keeps its
 param without a name is a declaration nothing can bind, so presence is decided
 by `index < count` and consumers never test the name for NULL.
 
-A material declares every sampler its program uses; the renderer asserts it at
-every material transition (the sprite renderer at every cmd, since a page split
-can change the atlas page mid-material), because a sampler the material leaves out would
-read whatever texture the previous material left on that unit. Each covering slot
-must also resolve to a texture — an unresolved one would leave that same stale
-texture on the unit, so register a placeholder with
+A material declares every sampler its program uses; gfx validates the complete
+set at every material transition (the sprite renderer at every cmd, since a page
+split can change the atlas page mid-material). Each active slot must resolve to a
+texture, so register a placeholder with
 `nt_resource_set_placeholder_texture` for slots that load asynchronously. A
-declared name the program does not sample is ignored — its unit lookup returns
--1 — so one material can over-declare for a family of shaders. The slot index is
-not the texture unit: the unit comes from the program
-(`nt_gfx_program_sampler_unit`), fixed at link, and two materials may list the
-same samplers in any order. A material carries at most
+declared name the program does not sample is ignored before its handle is
+inspected, so one material can over-declare for a family of shaders. The slot
+index is not the texture unit: gfx resolves the semantic name through immutable
+program reflection, and two materials may list the same samplers in any order. A material carries at most
 `NT_MATERIAL_MAX_TEXTURES` (4) slots, so a material-driven program may sample at
 most 4 of the 8 units a program can link.
 

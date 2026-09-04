@@ -567,7 +567,13 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 nt_renderer_bind_pipeline(&bound, pip);
                 nt_renderer_apply_material_uniforms(&bound, run_mat.id, &view);
                 /* Mesh renderer texture slots come from the material alone. */
-                nt_renderer_apply_texture_slots(&bound, &view);
+                if (!nt_renderer_apply_texture_slots(&view)) {
+                    draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+                    run_start = run_end;
+                    prev_mat = (nt_material_t){0};
+                    prev_mesh = (nt_mesh_t){0};
+                    continue;
+                }
             }
             nt_renderer_bind_vertex_input(&bound, vi);
             prev_mat = run_mat;
