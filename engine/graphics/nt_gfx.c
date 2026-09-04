@@ -144,6 +144,7 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
+    uint32_t active_render_target;
     uint32_t bound_pipeline; /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_program;  /* full handle borrowed by bound_pipeline */
     uint32_t texture_binding_program;
@@ -605,6 +606,7 @@ void nt_gfx_begin_frame(void) {
          * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
         s_gfx.bound_pipeline = 0;
         s_gfx.bound_program = 0;
+        s_gfx.active_render_target = 0;
         s_gfx.required_texture_mask = 0;
         invalidate_texture_bindings();
         s_gfx.bound_vertex_input = 0;
@@ -775,6 +777,7 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_PASS;
+    s_gfx.active_render_target = desc->target.id;
     /* Bound state is pass-scoped: the pass clear touches draw state. */
     s_gfx.bound_pipeline = 0;
     s_gfx.bound_program = 0;
@@ -797,6 +800,7 @@ void nt_gfx_end_pass(void) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_FRAME;
+    s_gfx.active_render_target = 0;
     nt_gfx_backend_end_pass();
 }
 
@@ -1636,6 +1640,14 @@ static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sample
     return false;
 }
 
+static bool texture_is_active_attachment(nt_texture_t texture) {
+    if (s_gfx.active_render_target == 0) {
+        return false;
+    }
+    const nt_gfx_render_target_meta_t *target = &s_gfx.render_target_metas[nt_pool_slot_index(s_gfx.active_render_target)];
+    return texture.id == target->color.id || texture.id == target->depth.id;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
 bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     invalidate_texture_bindings();
@@ -1660,8 +1672,7 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         return true;
     }
 
-    nt_gfx_resolved_texture_binding_t resolved[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
-    uint32_t handles[NT_GFX_MAX_TEXTURE_SLOTS] = {0};
+    nt_gfx_resolved_texture_binding_t resolved[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t applied_mask = 0;
     const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(s_gfx.bound_program)];
     for (uint8_t i = 0; i < count; i++) {
@@ -1677,6 +1688,7 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         }
 #endif
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
+        NT_ASSERT(!texture_is_active_attachment(bindings[i].texture) && "apply_texture_bindings: cannot sample the active render target's attachment");
         const uint32_t texture_slot = nt_pool_slot_index(bindings[i].texture.id);
         if (s_gfx.texture_backends[texture_slot] == 0) {
             NT_LOG_ERROR_ONCE("apply_texture_bindings: texture has no GPU resource (restore failed)");
@@ -1693,7 +1705,7 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
             .texture_backend = s_gfx.texture_backends[texture_slot],
             .sampler_backend = sampler_backend,
         };
-        handles[info.unit] = bindings[i].texture.id;
+        s_gfx.texture_binding_handles[info.unit] = bindings[i].texture.id;
         applied_mask |= bit;
     }
 
@@ -1708,7 +1720,6 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     }
     nt_gfx_backend_apply_texture_bindings(resolved, applied_mask);
     s_gfx.texture_binding_program = s_gfx.bound_program;
-    memcpy(s_gfx.texture_binding_handles, handles, sizeof(handles));
     s_gfx.applied_texture_mask = applied_mask;
     return true;
 }

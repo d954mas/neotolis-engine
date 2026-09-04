@@ -648,8 +648,9 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
- * assert; processed context loss, texture husks and sampler recreation failure return false
- * after publishing no logical set or backend binds. */
+ * assert, including sampling an attachment of the active render target; processed
+ * context loss, texture husks and sampler recreation failure return false after
+ * publishing no logical set or backend binds. */
 bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 
 /* ---- Scissor and viewport ----

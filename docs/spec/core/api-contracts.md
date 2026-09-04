@@ -254,10 +254,11 @@ an active pass and bound pipeline. The array describes the complete active
 sampler interface by name, not by texture unit. Names absent from the linked
 program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
-invalid handles, and sampler/texture type mismatches are developer errors and
-assert. Resolution is atomic: context loss, a texture without live backend
-storage, or failed sampler recreation returns `false` before any backend bind and
-publishes no logical set. Context loss means loss already observed by
+invalid handles, sampler/texture type mismatches, and sampling a color or depth
+attachment of the active render target are developer errors and assert. Resolution
+is atomic: context loss, a texture without live backend storage, or failed sampler
+recreation returns `false` before any backend bind and publishes no logical set.
+Context loss means loss already observed by
 `nt_gfx_begin_frame`; material transitions do not poll the platform. Resolution
 uses fixed stack storage and allocates no heap memory.
 

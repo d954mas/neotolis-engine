@@ -259,8 +259,10 @@ state and the backend deduplicates them across passes. The clear forces the dept
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
-`nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
-private to the concrete graphics implementation.
+`nt_texture_t` handles for later sampling. Sampling either attachment while its
+target is the active pass would create a framebuffer feedback loop and asserts
+before any backend bind. Backend FBO/renderbuffer ids stay private to the concrete
+graphics implementation.
 
 `nt_render_target_desc_t` explicitly selects the color format and default sampler
 state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
