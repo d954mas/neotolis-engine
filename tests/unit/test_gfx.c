@@ -947,7 +947,7 @@ void test_gfx_bind_texture_valid(void) {
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0);
+    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_destroy_texture(tex);
 }
 
@@ -955,7 +955,7 @@ void test_gfx_bind_texture_valid(void) {
 
 void test_gfx_bind_texture_invalid(void) {
     nt_texture_t tex = {.id = 0};
-    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0); /* must not crash */
+    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* must not crash */
 }
 
 /* ---- Texture: destroy and reuse slot ---- */
@@ -1928,7 +1928,7 @@ void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_bind_texture(tex, NT_SAMPLER_INVALID, 0); /* logs, no trap */
+    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* logs, no trap */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     /* The sampler bind rides on the texture bind: skipping one skips both. */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());

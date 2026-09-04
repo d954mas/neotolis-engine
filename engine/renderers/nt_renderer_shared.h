@@ -131,7 +131,7 @@ static inline int nt_renderer_bind_slot(nt_renderer_bound_t *b, const nt_rendere
     /* nt_resource_set_placeholder_texture exists to keep slots resolvable through async
      * load races; binding nothing would leave the previous material's texture on the unit. */
     NT_ASSERT(v->resolved_tex[t] != 0 && "material slot has no resolved texture -- register a placeholder via nt_resource_set_placeholder_texture");
-    /* NT_SAMPLER_INVALID already means "the texture's own default" inside nt_gfx_bind_texture. */
+    /* NT_SAMPLER_DEFAULT means "the texture's own default" inside nt_gfx_bind_texture. */
     nt_gfx_bind_texture((nt_texture_t){.id = v->resolved_tex[t]}, v->resolved_sampler[t], (uint32_t)unit);
     return unit;
 }

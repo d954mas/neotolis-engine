@@ -277,7 +277,7 @@ still cannot filter depth.
 
 A texture and the sampler it is read through are bound in one call, so the
 sampler is validated against that texture and not against whatever the unit held;
-`NT_SAMPLER_INVALID` selects the texture's own default. A comparison sampler is
+`NT_SAMPLER_DEFAULT` selects the texture's own default. A comparison sampler is
 therefore rejected against a non-depth texture in the same call, and a unit never
 holds a texture without its sampler.
 

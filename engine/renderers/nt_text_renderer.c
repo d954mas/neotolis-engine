@@ -734,8 +734,8 @@ static void bind_font_textures(nt_pipeline_t pipeline) {
     const int band_unit = nt_gfx_program_sampler_unit(prog, s_u_band_texture);
     NT_ASSERT(curve_unit >= 0 && band_unit >= 0 && "text program must sample u_curve_texture and u_band_texture");
     NT_ASSERT(nt_gfx_program_sampler_mask(prog) == ((1U << (uint32_t)curve_unit) | (1U << (uint32_t)band_unit)) && "text program samples more than the two font textures");
-    nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_INVALID, (uint32_t)curve_unit);
-    nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_INVALID, (uint32_t)band_unit);
+    nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_DEFAULT, (uint32_t)curve_unit);
+    nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_DEFAULT, (uint32_t)band_unit);
     nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
 }
 

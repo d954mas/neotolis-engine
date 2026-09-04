@@ -490,7 +490,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     const int tex_unit = nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(s_demo.quad_pipeline), nt_hash32_str("u_texture"));
     NT_ASSERT(tex_unit >= 0 && "rtt quad program must sample u_texture");
-    nt_gfx_bind_texture(texture, NT_SAMPLER_INVALID, (uint32_t)tex_unit);
+    nt_gfx_bind_texture(texture, NT_SAMPLER_DEFAULT, (uint32_t)tex_unit);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);

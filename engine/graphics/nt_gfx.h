@@ -67,6 +67,8 @@ typedef struct {
 } nt_sampler_t;
 
 #define NT_SAMPLER_INVALID ((nt_sampler_t){0})
+/* Same value, read as "no override": nt_gfx_bind_texture then uses the texture's asset-baked default. */
+#define NT_SAMPLER_DEFAULT NT_SAMPLER_INVALID
 
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
@@ -585,7 +587,7 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * either may change without re-binding the other. Every draw requires a bound
  * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-/* Binds the texture on unit `slot` with the sampler it is read through; NT_SAMPLER_INVALID selects
+/* Binds the texture on unit `slot` with the sampler it is read through; NT_SAMPLER_DEFAULT selects
  * the texture's asset-baked default. A unit never holds a texture without its sampler. Format/filter
  * compatibility is asserted (rules: docs/spec/core/api-contracts.md, "Texture descriptors"). */
 void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);

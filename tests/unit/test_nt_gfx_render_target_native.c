@@ -115,7 +115,7 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), NT_SAMPLER_INVALID, 0);
+    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), NT_SAMPLER_DEFAULT, 0);
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
@@ -528,7 +528,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_color(target), NT_SAMPLER_INVALID, 0);
+    nt_gfx_bind_texture(nt_gfx_render_target_color(target), NT_SAMPLER_DEFAULT, 0);
     GLint internal_format = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);
@@ -1182,8 +1182,8 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_a);
-    nt_gfx_bind_texture(tex_green, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_a);
+    nt_gfx_bind_texture(tex_green, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
@@ -1230,13 +1230,13 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     bind_empty_vertex_input();
 
     /* First draw: red through u_a, green through u_b. */
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_a);
-    nt_gfx_bind_texture(tex_green, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_a);
+    nt_gfx_bind_texture(tex_green, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
 
     /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_INVALID, (uint32_t)unit_b);
+    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
     nt_gfx_end_pass();

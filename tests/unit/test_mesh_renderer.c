@@ -640,7 +640,7 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
  * sampler simply skips the slot -- and the program's empty interface stays covered. */
 void test_declared_sampler_unknown_to_the_program_is_ignored(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
@@ -656,7 +656,7 @@ void test_declared_sampler_unknown_to_the_program_is_ignored(void) {
 void test_material_missing_a_program_sampler_asserts(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t two = create_test_sampler_program((const char *const[]){"u_tex", "u_second"}, 2);
-    nt_material_t mat = create_test_material_textured(two, nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(two, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
@@ -711,7 +711,7 @@ static void fill_items(nt_render_item_t *items, const nt_entity_t *entities, con
 
 void test_state_same_material_three_meshes(void) {
     nt_mesh_t meshes[3] = {create_test_mesh(), create_test_mesh(), create_test_mesh()};
-    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_material_t mats[3] = {mat, mat, mat};
     nt_entity_t entities[3] = {create_test_entity(meshes[0], mat), create_test_entity(meshes[1], mat), create_test_entity(meshes[2], mat)};
 
@@ -734,9 +734,9 @@ void test_state_three_materials_same_mesh(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t program = create_test_tex_program();
     nt_material_t mats[3] = {
-        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID),
-        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID),
-        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID),
+        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT),
+        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT),
+        create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT),
     };
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
     nt_entity_t entities[3] = {create_test_entity(mesh, mats[0]), create_test_entity(mesh, mats[1]), create_test_entity(mesh, mats[2])};
@@ -760,8 +760,8 @@ void test_state_three_materials_same_mesh(void) {
 void test_state_render_state_split(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t program = create_test_tex_program();
-    nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t mat_b = create_test_material_textured(program, nt_blend_alpha(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_material_t mat_b = create_test_material_textured(program, nt_blend_alpha(), NT_SAMPLER_DEFAULT);
     nt_material_t mats[3] = {mat_a, mat_b, mat_a};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
     nt_entity_t entities[3] = {create_test_entity(mesh, mat_a), create_test_entity(mesh, mat_b), create_test_entity(mesh, mat_a)};
@@ -785,7 +785,7 @@ void test_state_render_state_split(void) {
 
 void test_state_runtime_set_param_between_calls(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
@@ -809,7 +809,7 @@ void test_state_runtime_set_param_between_calls(void) {
 
 void test_state_program_replaced_between_calls(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
@@ -847,7 +847,7 @@ void test_state_texture_sampler_transitions(void) {
     TEST_ASSERT_TRUE(override.id != 0);
 
     nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), override);
-    nt_material_t mat_b = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat_b = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_material_t mats[3] = {mat_a, mat_b, mat_a};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
     nt_entity_t entities[3] = {create_test_entity(mesh, mat_a), create_test_entity(mesh, mat_b), create_test_entity(mesh, mat_a)};
@@ -899,8 +899,8 @@ void test_state_override_binds_one_sampler_per_texture_change(void) {
 void test_state_distinct_textures_a_b_a(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t program = create_test_tex_program();
-    nt_material_t mat_a = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_INVALID, 0);
-    nt_material_t mat_b = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_INVALID, 1);
+    nt_material_t mat_a = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT, 0);
+    nt_material_t mat_b = create_test_material_on_texture(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT, 1);
     const uint32_t tex_x = nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))});
     const uint32_t tex_y = nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(1))});
     TEST_ASSERT_NOT_EQUAL_UINT32(tex_x, tex_y);
@@ -927,8 +927,8 @@ void test_state_distinct_textures_a_b_a(void) {
  * through the same pipeline without replaying its uniforms. */
 void test_state_skip_mid_list_resolves_next_run(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t not_ready = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_material_t not_ready = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_material_set_program(not_ready, NT_PROGRAM_INVALID);
 
     nt_material_t mats[3] = {mat_a, not_ready, mat_a};
@@ -953,8 +953,8 @@ void test_state_skip_mid_list_resolves_next_run(void) {
  * still sees the state the run before it left bound. */
 void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t mat_b = create_test_material_textured(create_test_tex_program(), nt_blend_alpha(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_material_t mat_b = create_test_material_textured(create_test_tex_program(), nt_blend_alpha(), NT_SAMPLER_DEFAULT);
 
     nt_material_t mats[3] = {mat_a, mat_b, mat_a};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
@@ -981,8 +981,8 @@ void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
 void test_state_same_tex_same_sampler_diff_params(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t program = create_test_tex_program();
-    nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
-    nt_material_t mat_b = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat_a = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_material_t mat_b = create_test_material_textured(program, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_material_t mats[2] = {mat_a, mat_b};
     nt_mesh_t meshes[2] = {mesh, mesh};
     nt_entity_t entities[2] = {create_test_entity(mesh, mat_a), create_test_entity(mesh, mat_b)};
@@ -1008,7 +1008,7 @@ void test_state_chunk_boundary_same_run(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&rdesc));
 
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_INVALID);
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_material_t mats[3] = {mat, mat, mat};
     nt_mesh_t meshes[3] = {mesh, mesh, mesh};
     nt_entity_t entities[3] = {create_test_entity(mesh, mat), create_test_entity(mesh, mat), create_test_entity(mesh, mat)};
