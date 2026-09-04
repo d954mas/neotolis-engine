@@ -13,6 +13,7 @@ if(NOT EMSCRIPTEN)
     add_compile_definitions(NT_TEST_ACCESS)
     add_library(nt_gfx_fake STATIC
         ../engine/graphics/nt_gfx.c
+        ../engine/graphics/nt_gfx_pipeline_key.c
         unit/test_helpers/nt_gfx_fake.c
     )
     target_include_directories(nt_gfx_fake PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/unit")

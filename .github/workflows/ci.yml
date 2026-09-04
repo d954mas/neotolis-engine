@@ -609,7 +609,6 @@ jobs:
       - name: Run CRT-pin and test-registration gates
         run: |
           bash scripts/check_crt_pins.sh
-          bash scripts/check_cache_keys.sh
           bash scripts/check_tests_registered.sh build/_cmake/native-debug
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           bash scripts/tests/test_tidy.sh

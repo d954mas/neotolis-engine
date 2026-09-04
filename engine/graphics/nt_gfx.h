@@ -7,6 +7,7 @@
 #include "nt_texture_format.h"
 
 #include <stddef.h>
+#include <string.h>
 
 /* ---- Index buffer type constants ---- */
 
@@ -353,13 +354,11 @@ typedef struct {
 } nt_pipeline_desc_t;
 
 /* ---- Pipeline identity ----
- * Exact identity of a desc, label excluded: equal keys <=> the backend bakes identical
- * state. `bits` packs every enum/bool lane; `dyn` holds the float payloads that cannot
- * pack. Renderers key their pipeline caches on it and compare `bits` first. Pool handles
- * are sequential, so a linear fold (a*K + b) aliases neighbours -- never key on one. */
+ * Exact identity of a desc, label excluded: equal keys <=> identical baked state.
+ * `bits` packs every enum/bool lane; the float payloads ride along as bit patterns. */
 typedef struct {
     uint64_t bits;
-    uint32_t dyn[6]; /* bit patterns of blend.constant_color, polygon_offset_factor, polygon_offset_units */
+    uint32_t float_bits[6]; /* blend.constant_color, polygon_offset_factor, polygon_offset_units */
 } nt_gfx_pipeline_key_t;
 
 /* Lane widths. The packer asserts each input fits: an out-of-range value must not
@@ -367,8 +366,8 @@ typedef struct {
 _Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
 _Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
 _Static_assert(NT_DEPTH_ALWAYS < 4, "depth func lane is 2 bits");
-/* A new desc field must be added to the packer: every field offset is pinned, so a
- * field inserted anywhere -- padding holes included -- moves a later one and trips here. */
+/* Partial tripwire for the packer: catches a desc field that moves a later offset or the
+ * size. A field that fits an existing padding hole moves nothing -- review by hand. */
 _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
                    offsetof(nt_pipeline_desc_t, polygon_offset) == 40 && offsetof(nt_pipeline_desc_t, polygon_offset_factor) == 44 && offsetof(nt_pipeline_desc_t, polygon_offset_units) == 48 &&
                    offsetof(nt_pipeline_desc_t, label) == (sizeof(void *) == 8 ? 56 : 52) && sizeof(nt_pipeline_desc_t) == (sizeof(void *) == 8 ? 64 : 56),
@@ -376,8 +375,9 @@ _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipe
 
 nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc);
 
+/* `bits` first: a miss costs one word, the floats are read only on a match. */
 static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, const nt_gfx_pipeline_key_t *b) {
-    return a->bits == b->bits && a->dyn[0] == b->dyn[0] && a->dyn[1] == b->dyn[1] && a->dyn[2] == b->dyn[2] && a->dyn[3] == b->dyn[3] && a->dyn[4] == b->dyn[4] && a->dyn[5] == b->dyn[5];
+    return a->bits == b->bits && memcmp(a->float_bits, b->float_bits, sizeof(a->float_bits)) == 0;
 }
 
 typedef struct {

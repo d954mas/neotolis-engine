@@ -87,9 +87,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         return NT_MATERIAL_INVALID;
     }
 
-    /* Range-check at the API boundary, before a slot is taken: the pipeline and
-     * vertex-input keys pack these into fixed lanes and would trap on the first draw.
-     * Unconditional: a disabled blend still has to hold valid values, not garbage. */
+    /* Range-check before a slot is taken: the cache keys pack these into fixed bit
+     * lanes. Unconditional -- a disabled blend still has to hold valid values. */
     NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
               desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "invalid blend factor");
     NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "invalid blend op");
@@ -163,7 +162,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.depth_test = desc->depth_test;
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
-    NT_ASSERT(desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
+    NT_ASSERT((uint32_t)desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
     slot->info.color_mode = desc->color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */

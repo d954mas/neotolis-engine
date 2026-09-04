@@ -299,7 +299,6 @@ _Static_assert(4 + NT_MATERIAL_MAX_ATTR_MAP * 4 <= 64, "sprite VI key overflows 
 static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
     uint64_t key = mat_info->attr_map_count;
     for (uint8_t ai = 0; ai < mat_info->attr_map_count; ai++) {
-        NT_ASSERT(mat_info->attr_map_locations[ai] < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
         key |= (uint64_t)mat_info->attr_map_locations[ai] << (4 + ai * 4);
     }
     return key;
@@ -1334,7 +1333,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         /* Each batch_key boundary opens a fresh cmd. */
         if (mat->id != memo_mat) {
             memo_pip = find_or_create_pipeline(mat_info);
-            /* A failed resolve stays unmemoised so a later run retries, as before. */
+            /* A failed resolve stays unmemoised so a later run retries. */
             memo_mat = (memo_pip.id != 0) ? mat->id : 0;
         }
         const nt_pipeline_t pip = memo_pip;

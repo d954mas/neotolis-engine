@@ -192,10 +192,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 /* Derived layout = mesh streams x material attr_map: only mapped streams
  * become attributes, so materials whose extra attr_map entries match none of
  * this mesh's streams share a vertex input. */
-/* Exact identity of a derived layout within one mesh row: the row is per mesh, so
- * stream type/count/offset/stride are fixed and only which streams map, their
- * locations, and the instance layout (color_mode) vary. 5 bits per stream
- * (presence + location) plus 2 for color_mode. */
+/* Row-exact key: the mesh fixes stream types/offsets/stride, so only presence +
+ * location per stream (5 bits) and color_mode (2 bits) vary. */
 #define NT_MESH_VI_KEY_STREAM_BITS 5
 _Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "mesh VI key packs a location in 4 bits");
 _Static_assert(NT_MESH_MAX_STREAMS *NT_MESH_VI_KEY_STREAM_BITS + 2 <= 64, "mesh VI key overflows uint64");
@@ -225,7 +223,6 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
 
         if (found) {
             NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
-            NT_ASSERT(location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
             key |= (1ULL | (uint64_t)location << 1) << (si * NT_MESH_VI_KEY_STREAM_BITS);
             layout.attrs[layout.attr_count].location = location;
             layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);

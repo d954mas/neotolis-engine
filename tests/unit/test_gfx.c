@@ -814,6 +814,8 @@ void test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset(void) {
     nt_pipeline_desc_t disabled = key_base_desc(7);
     disabled.blend.enabled = false;
     disabled.blend.constant_color[1] = 0.5F;
+    disabled.blend.op_rgb = NT_BLEND_OP_MAX;
+    disabled.blend.op_alpha = NT_BLEND_OP_MIN;
     const nt_gfx_pipeline_key_t a = nt_gfx_pipeline_key(&opaque);
     const nt_gfx_pipeline_key_t b = nt_gfx_pipeline_key(&disabled);
     TEST_ASSERT_TRUE(nt_gfx_pipeline_key_equal(&a, &b));
@@ -838,6 +840,12 @@ void test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads(void) {
     const nt_gfx_pipeline_key_t kc = nt_gfx_pipeline_key(&b);
     TEST_ASSERT_EQUAL_UINT64(ka.bits, kc.bits);
     TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kc));
+
+    /* Bit patterns, not values: -0.0 is a different pipeline from +0.0. */
+    b = key_base_desc(9);
+    b.blend.constant_color[0] = -0.0F;
+    const nt_gfx_pipeline_key_t kd = nt_gfx_pipeline_key(&b);
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kd));
 }
 
 /* An out-of-range lane value must trap before it can truncate onto a valid neighbour

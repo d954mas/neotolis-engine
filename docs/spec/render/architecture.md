@@ -153,14 +153,15 @@ involved, so identity does not rest on a collision argument. Two
 canonicalisations apply, both in the packer: a disabled blend packs as opaque
 (factors, ops and constant ignored) and a disabled polygon offset packs its
 factor/units as zero; nothing else is normalised, so depth lanes are exact even
-when depth test is off. Lane inputs are range-checked twice: `nt_material_create`
-asserts them at the API boundary and the packer asserts them again — both
-unconditionally, a disabled blend included: canonicalisation is about identity,
-validity has no exceptions — so under TRAP/FULL an out-of-range value can never truncate
-onto a valid neighbour (OFF is undefined behaviour here as everywhere). gfx
-owns the lane widths: every `nt_pipeline_desc_t` field offset is pinned by a
-static assert, so a field inserted anywhere trips it and must be added to the
-packer. The cached pipelines borrow
+when depth test is off. Lane inputs are range-asserted: material-owned lanes at
+`nt_material_create` and again in the packer, renderer-owned lanes (`depth_func`,
+polygon offset) in the packer alone — unconditionally, a disabled blend included:
+canonicalisation is about identity, validity has no exceptions. So an
+out-of-range value can never truncate onto a valid neighbour and turn into a
+cache hit. gfx owns the lane widths, and pins the desc size and field offsets
+with static asserts as a partial tripwire: a new field that moves a later offset
+trips it, one that fits a padding hole does not and must be added by hand. The
+packer is one pure TU compiled into the real gfx and the stub alike. The cached pipelines borrow
 programs the game owns, so a cache entry never extends a program's lifetime.
 The population is distinct material states, tens of values in a real game, so
 a fixed array with a linear scan stays cheaper than a hash map at that scale.
