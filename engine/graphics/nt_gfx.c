@@ -447,8 +447,12 @@ static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owne
         NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
         return;
     }
-    /* The set may have sampled this texture; no mirror says so, so discard it. */
-    discard_texture_set();
+    /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
+    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
+        NT_LOG_ERROR("destroy_texture called inside a pass");
+        return;
+    }
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
     memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));

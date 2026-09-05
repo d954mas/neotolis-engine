@@ -259,9 +259,12 @@ static void test_emit_groups_text_by_font(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "set_font called once per DISTINCT font (4), not once per transition (7)");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "multi-face block still emits draw_n spans");
 
+    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
+    nt_gfx_end_pass();
     for (int i = 1; i < 4; i++) {
         nt_font_destroy(fam[i]);
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* (1d) a SINGLE-face block (one font, two color runs) calls set_font exactly once (no per-run regression
@@ -320,9 +323,12 @@ static void test_emit_real_italic_face_no_oblique(void) {
     frame_multi_face(fam); /* pushes italic / bold-italic against a family that HAS those faces */
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_oblique() == 0.0F, "real italic face -> no synthetic shear reaches the renderer");
     TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
+    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
+    nt_gfx_end_pass();
     for (int i = 1; i < 4; i++) {
         nt_font_destroy(fam[i]);
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* Build a block whose LAST run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD.
@@ -372,9 +378,12 @@ static void test_emit_real_bold_face_no_weight(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_multi_face(fam); /* pushes bold / italic / bold-italic against a family that HAS those faces */
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() == 0.0F, "real bold face -> no synthetic weight reaches the renderer");
+    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
+    nt_gfx_end_pass();
     for (int i = 1; i < 4; i++) {
         nt_font_destroy(fam[i]);
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* Build a block with SIX distinct font families on one band (one regular-face text run each), more than
@@ -432,9 +441,12 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, nt_text_renderer_test_set_font_calls(), "six distinct fonts -> set_font called six times (no cap)");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(text_atoms, nt_ui_rich_test_emit_span_count(s_fx.ctx), "every TEXT atom emits a span -> no font dropped past 4");
 
+    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
+    nt_gfx_end_pass();
     for (int i = 1; i < 6; i++) {
         nt_font_destroy(fam[i]);
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* ===== Inline IMAGE emit ===== */
@@ -2195,9 +2207,12 @@ static void test_font_group_per_layer(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "font gather is per-layer: 2 fonts in band 0 + 2 in band 1 = 4 set_font calls");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "layered multi-face block still emits draw_n spans");
 
+    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
+    nt_gfx_end_pass();
     for (int i = 1; i < 4; i++) {
         nt_font_destroy(fam[i]);
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* (L4) a SINGLE face reused across TWO layers calls set_font ONCE PER BAND (2 total), not once for the

@@ -252,9 +252,11 @@ Pass color and depth clears are pass-owned operations. In particular,
 state; pipeline write masks affect draws, not the next pass initialization. Bound
 pipeline, vertex input, and the logical complete texture set are pass-scoped:
 `begin_pass` discards them. The texture set is additionally tied to the bound
-program and is discarded when that program changes, when the bound pipeline is
-destroyed, or when any texture is destroyed. Pipeline and vertex-input binds, texture-set application,
+program and is discarded when that program changes or when the bound pipeline is
+destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
+Destroying a texture or a render target inside a pass asserts: pass-scoped draw
+state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state and the backend deduplicates them across passes. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.

@@ -125,6 +125,9 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
         nt_ui_destroy_context(fx->ctx);
         fx->ctx = NULL;
     }
+    /* Texture destruction is pass-forbidden: close the fixture pass first. */
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     if (nt_font_valid(fx->stub_font)) {
         nt_font_destroy(fx->stub_font);
     }
@@ -133,8 +136,6 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_material_shutdown();
     nt_font_shutdown();

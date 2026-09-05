@@ -893,20 +893,14 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     end_texture_binding_test_pass();
 }
 
-void test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_destroy(void) {
+void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_texture_t texture = make_binding_test_texture(1);
-    nt_texture_t other = make_binding_test_texture(2);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
-    apply_texture_set(&binding, 1);
-
-    nt_gfx_destroy_texture(other);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-
     apply_texture_set(&binding, 1);
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -921,6 +915,16 @@ void test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_dest
     apply_texture_set(&binding, 1);
     nt_gfx_destroy_program(program);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    end_texture_binding_test_pass();
+}
+
+/* A pass may still sample the texture; lifetime changes belong outside passes. */
+void test_gfx_destroy_texture_inside_pass_asserts(void) {
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
     end_texture_binding_test_pass();
 }
 
@@ -2722,7 +2726,8 @@ int main(void) {
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
-    RUN_TEST(test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_destroy);
+    RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy);
+    RUN_TEST(test_gfx_destroy_texture_inside_pass_asserts);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
