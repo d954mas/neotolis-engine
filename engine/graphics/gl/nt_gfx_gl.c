@@ -68,6 +68,7 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 
 /* Per-program standalone locations, including each array element. */
 #define NT_MAX_CACHED_UNIFORMS 16
+_Static_assert(NT_MAX_CACHED_UNIFORMS <= 16, "vec4_mask and vec4_valid are 16-bit");
 /* Longest reflected uniform name plus room for an expanded array index; asserted at link. */
 #define NT_GFX_GL_MAX_UNIFORM_NAME 256
 
@@ -998,7 +999,7 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
     }
     nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     const uint16_t bit = (uint16_t)(1U << (uint32_t)index);
-    // Other setters can change boolean uniforms that also accept glUniform4fv.
+    // Preserve uncached GL handling for other uniform types.
     const bool cacheable = (prog->vec4_mask & bit) != 0;
     if (cacheable && (prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
         return;

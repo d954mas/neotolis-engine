@@ -125,9 +125,9 @@ write with nothing bound asserts. A pipeline is fixed-function render
 state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
-share every uniform value, and binding one does not reset what the other set —
-each consumer sets every uniform it needs on every material transition inside
-one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
+share every uniform value, and binding one does not reset what the other set.
+Renderers replay declared material params on each material or pipeline transition
+inside one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
 pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
 front-end mirror). Standalone float vec4 writes are skipped when their bytes
@@ -145,8 +145,11 @@ are inspected. Context loss, a texture husk, or failed sampler recreation
 publishes no set and issues no backend bind: gfx reports the failure and skips
 the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program.
-Consumers must supply every numeric value they rely on; the vec4 cache neither
-validates material completeness nor resets omitted values. Destroying a program destroys its
+Before each draw, the game and renderer must ensure the program holds every
+numeric uniform value that draw needs. Materials supply only their declared
+params; any required value they omit must be explicitly established by the game
+or renderer. The vec4 cache neither validates material completeness nor resets
+omitted values. Destroying a program destroys its
 pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
