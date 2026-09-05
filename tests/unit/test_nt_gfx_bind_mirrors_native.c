@@ -592,6 +592,14 @@ static GLint texture_name_on_unit(uint32_t slot) {
     return name;
 }
 
+/* GL-cache probes drive a unit directly: their subject is the backend cache,
+ * not the program-driven semantic set. */
+static void backend_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t unit) {
+    const nt_sampler_t effective = sampler.id != 0 ? sampler : nt_gfx_get_texture_default_sampler(tex);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(tex), unit);
+    nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(effective), unit);
+}
+
 /* A compressed create that fails after binding its own texture uploads on the
  * scratch unit, so slot 0 still holds A in GL and in the cache: re-binding A
  * costs nothing and a draw still samples A. */
@@ -605,7 +613,7 @@ static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_a.id);
 
-    nt_gfx_test_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
     GLint name_a = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &name_a);
     TEST_ASSERT_NOT_EQUAL_INT(0, name_a);
@@ -616,7 +624,7 @@ static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
     TEST_ASSERT_EQUAL_UINT32(0, failed);
 
     install_state_counters();
-    nt_gfx_test_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
     remove_state_counters();
 
     GLint bound = texture_name_on_unit(0);
@@ -662,7 +670,8 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -673,7 +682,8 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     remove_state_counters();
@@ -1085,8 +1095,8 @@ static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, keep.id);
     TEST_ASSERT_NOT_EQUAL_INT(0, name_keep);
 
-    nt_gfx_test_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
-    nt_gfx_test_bind_texture_unit(keep, NT_SAMPLER_DEFAULT, 1);
+    backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(keep, NT_SAMPLER_DEFAULT, 1);
 
     nt_gfx_destroy_texture(tex_a);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
@@ -1097,7 +1107,7 @@ static void test_gl_name_reuse_after_destroying_bound_texture(void) {
     GLint name_b = current_texture_name();
     TEST_ASSERT_NOT_EQUAL_INT(0, name_b);
 
-    nt_gfx_test_bind_texture_unit(tex_b, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_b, NT_SAMPLER_DEFAULT, 0);
     TEST_ASSERT_EQUAL_INT(name_b, texture_name_on_unit(0));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
@@ -1117,7 +1127,7 @@ static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
 
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     /* A failed create would leave slot 0 untouched and false-pass the next line. */
     nt_texture_t created_mid_pass = make_pixel_texture(grey);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, created_mid_pass.id);
@@ -1130,7 +1140,7 @@ static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     GLint slot0 = texture_name_on_unit(0);
 
     install_state_counters();
-    nt_gfx_test_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     remove_state_counters();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -1158,7 +1168,7 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
 
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
 
     install_state_counters();
     nt_gfx_update_texture(tex_2, 0, 0, 1, 1, white);
@@ -1169,7 +1179,7 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     uint32_t burst_bind = s_gl_calls.bind_texture;
 
     install_state_counters();
-    nt_gfx_test_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     remove_state_counters();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -1197,7 +1207,7 @@ static void test_resize_render_target_forgets_cached_color_name(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
 
-    nt_gfx_test_bind_texture_unit(nt_gfx_render_target_color(rt), NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(nt_gfx_render_target_color(rt), NT_SAMPLER_DEFAULT, 0);
     /* Without this the probe below would pass on a texture that never cached. */
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
 
@@ -1282,17 +1292,17 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
     nt_gfx_gl_test_reset_counters();
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_end_pass();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -1322,8 +1332,8 @@ static void test_override_binds_one_sampler(void) {
     nt_gfx_gl_test_reset_counters();
     nt_gfx_begin_frame();
     begin_black_pass();
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
-    nt_gfx_test_bind_texture_unit(tex, override, 1);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, override, 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -1340,7 +1350,7 @@ static void test_override_binds_one_sampler(void) {
 static void test_ground_state_reissues_sampler_bind(void) {
     static const uint8_t white[4] = {255, 255, 255, 255};
     nt_texture_t tex = make_pixel_texture(white);
-    nt_gfx_test_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     GLint bound_before = sampler_name_on_unit(0);
     TEST_ASSERT_NOT_EQUAL_INT(0, bound_before);
 
@@ -1354,7 +1364,7 @@ static void test_ground_state_reissues_sampler_bind(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fresh.id);
 
     nt_gfx_gl_test_reset_counters();
-    nt_gfx_test_bind_texture_unit(fresh, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(fresh, NT_SAMPLER_DEFAULT, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
     TEST_ASSERT_NOT_EQUAL_INT(0, sampler_name_on_unit(0));
 }

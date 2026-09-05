@@ -72,16 +72,15 @@ static void test_destroy_render_target_invalidates_applied_color_attachment(void
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     /* The set must still be live here, or destroy proves nothing. */
-    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_test_texture_binding_program());
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 
     nt_gfx_destroy_render_target(rt);
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_binding_program());
-    TEST_ASSERT_EQUAL_HEX8(0, nt_gfx_test_applied_texture_mask());
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
 }
 
 static void test_active_color_attachment_cannot_be_sampled(void) {
@@ -411,6 +410,20 @@ static void test_make_render_target_rejects_invalid_sampler_modes(void) {
 }
 // NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
 
+/* Sampler compatibility is checked where a texture reaches a unit: the semantic set. */
+static void begin_single_sampler_pass(uint8_t sampler_class) {
+    const nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_tex"}, &sampler_class, 1);
+    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+}
+
+static void apply_one_texture(nt_texture_t texture, nt_sampler_t sampler) {
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = sampler};
+    nt_gfx_apply_texture_bindings(&binding, 1);
+}
+
 static void test_depth_texture_rejects_linear_sampler_override(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
@@ -423,9 +436,11 @@ static void test_depth_texture_rejects_linear_sampler_override(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(depth, linear, 0));
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
+    NT_TEST_EXPECT_ASSERT(apply_one_texture(depth, linear));
 
-    nt_gfx_test_bind_texture_unit(color, linear, 0);
+    apply_one_texture(color, linear);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 }
 
 static void test_integer_texture_rejects_linear_sampler_override(void) {
@@ -445,7 +460,8 @@ static void test_integer_texture_rejects_linear_sampler_override(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
     });
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(integer, linear, 0));
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_UINT);
+    NT_TEST_EXPECT_ASSERT(apply_one_texture(integer, linear));
 }
 
 static nt_sampler_t make_comparison_sampler(void) {
@@ -464,8 +480,12 @@ static void test_depth_texture_accepts_linear_comparison_sampler(void) {
     nt_sampler_t comparison = make_comparison_sampler();
     TEST_ASSERT_NOT_EQUAL_UINT32(0, comparison.id);
 
-    nt_gfx_test_bind_texture_unit(nt_gfx_render_target_depth(rt), comparison, 0);
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_SHADOW);
+    apply_one_texture(nt_gfx_render_target_depth(rt), comparison);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_render_target(rt);
 }
 
@@ -476,8 +496,11 @@ static void test_color_texture_rejects_comparison_sampler(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t comparison = make_comparison_sampler();
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(nt_gfx_render_target_color(rt), comparison, 0));
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
+    NT_TEST_EXPECT_ASSERT(apply_one_texture(nt_gfx_render_target_color(rt), comparison));
 
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_render_target(rt);
 }
 
@@ -501,8 +524,11 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
         .compare_func = NT_COMPARE_LEQUAL,
     });
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(integer, comparison, 0));
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_UINT);
+    NT_TEST_EXPECT_ASSERT(apply_one_texture(integer, comparison));
 
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_texture(integer);
 }
 
@@ -566,7 +592,8 @@ static void test_render_target_color_rejects_mipmap_sampler_override(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_test_bind_texture_unit(nt_gfx_render_target_color(rt), mipmap_sampler, 0));
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
+    NT_TEST_EXPECT_ASSERT(apply_one_texture(nt_gfx_render_target_color(rt), mipmap_sampler));
 }
 
 static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
@@ -583,7 +610,9 @@ static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
     });
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
-    nt_gfx_test_bind_texture_unit(texture, mipmap_sampler, 0);
+    begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
+    apply_one_texture(texture, mipmap_sampler);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 }
 
 static void test_invalid_render_target_lifecycle_arguments_assert(void) {

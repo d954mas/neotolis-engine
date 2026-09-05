@@ -23,7 +23,6 @@ uint32_t nt_gfx_fake_pass_target_at(uint32_t index);
 uint32_t nt_gfx_fake_bound_texture_count(void);
 uint32_t nt_gfx_fake_bound_texture_at(uint32_t index);
 uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index);
-uint32_t nt_gfx_fake_apply_texture_bindings_count(void);
 uint32_t nt_gfx_fake_render_target_create_count(void);
 uint32_t nt_gfx_fake_render_target_resize_count(void);
 uint32_t nt_gfx_fake_render_target_destroy_count(void);

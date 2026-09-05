@@ -183,7 +183,6 @@ static bool make_quad_resources(void) {
     if (!nt_gfx_program_ready(s_demo.quad_program)) {
         return false;
     }
-    NT_ASSERT(nt_gfx_program_sampler_count(s_demo.quad_program) == 1 && "RTT quad program must expose exactly u_texture");
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,
@@ -490,9 +489,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
-    if (!nt_gfx_apply_texture_bindings(&binding, 1)) {
-        return;
-    }
+    nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);

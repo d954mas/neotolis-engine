@@ -730,7 +730,7 @@ void test_material_missing_a_program_sampler_asserts(void) {
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "applied_mask"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "coverage is incomplete"));
 }
 
 /* The texture goes to the unit the link assigned, not to the material slot index. */
@@ -933,25 +933,6 @@ void test_state_texture_sampler_transitions(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(override), nt_gfx_fake_last_sampler(0));
-}
-
-void test_state_texture_apply_failure_skips_run_and_retries_next_mesh(void) {
-    nt_mesh_t meshes[2] = {create_test_mesh(), create_test_mesh()};
-    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
-    nt_material_t mats[2] = {mat, mat};
-    nt_entity_t entities[2] = {create_test_entity(meshes[0], mat), create_test_entity(meshes[1], mat)};
-    nt_render_item_t items[2];
-    fill_items(items, entities, mats, meshes, 2);
-    nt_gfx_fake_reset();
-    nt_gfx_test_draw_trace_reset(true);
-    nt_gfx_test_fail_next_texture_apply();
-
-    nt_mesh_renderer_draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + NT_INSTANCE_STRIDE_NONE, nt_gfx_fake_last_instance_offset());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    nt_gfx_test_draw_trace_reset(false);
 }
 
 /* An override costs one sampler bind per texture change, never a default bind
@@ -1746,7 +1727,6 @@ int main(void) {
     RUN_TEST(test_state_runtime_set_param_between_calls);
     RUN_TEST(test_state_program_replaced_between_calls);
     RUN_TEST(test_state_texture_sampler_transitions);
-    RUN_TEST(test_state_texture_apply_failure_skips_run_and_retries_next_mesh);
     RUN_TEST(test_state_override_binds_one_sampler_per_texture_change);
     RUN_TEST(test_state_distinct_textures_a_b_a);
     RUN_TEST(test_state_skip_mid_list_resolves_next_run);

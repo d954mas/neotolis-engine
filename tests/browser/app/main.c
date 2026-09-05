@@ -274,13 +274,11 @@ static void binding_probe_run(void) {
         {.name = nt_hash32_str("u_b"), .texture = s_binding_green, .sampler = NT_SAMPLER_DEFAULT},
         {.name = nt_hash32_str("u_a"), .texture = s_binding_red, .sampler = NT_SAMPLER_DEFAULT},
     };
-    const bool applied = nt_gfx_apply_texture_bindings(bindings, 2);
-    if (applied) {
-        nt_gfx_draw(0, 3);
-    }
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    nt_gfx_draw(0, 3);
     const bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    s_binding_probe_ok = applied && read && pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255;
+    s_binding_probe_ok = read && pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255;
     s_binding_probe_done = true;
 }
 // #endregion

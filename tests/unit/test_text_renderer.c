@@ -339,13 +339,6 @@ void test_text_renderer_font_textures_land_on_program_units(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
 }
 
-void test_text_renderer_requires_both_font_samplers(void) {
-    nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
-    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
-    nt_text_renderer_set_material(material);
-    NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F));
-}
-
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture", "u_extra"}, 2);
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
@@ -356,32 +349,6 @@ void test_text_renderer_rejects_unrelated_second_sampler(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
 
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-}
-
-void test_text_renderer_recovers_after_texture_apply_failure_without_upload(void) {
-    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
-    nt_text_renderer_set_material(material);
-    nt_gfx_fake_reset();
-    nt_gfx_test_draw_trace_reset(true);
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_test_fail_next_texture_apply();
-
-    nt_text_renderer_flush();
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_orphan_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_text_renderer_test_glyph_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_text_renderer_test_vertex_count());
-
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_text_renderer_flush();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_orphan_buffer_count());
-    nt_gfx_test_draw_trace_reset(false);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -1468,9 +1435,7 @@ int main(void) {
     RUN_TEST(test_utf8_decode_ascii);
     RUN_TEST(test_text_renderer_forwards_material_blend_state);
     RUN_TEST(test_text_renderer_font_textures_land_on_program_units);
-    RUN_TEST(test_text_renderer_requires_both_font_samplers);
     RUN_TEST(test_text_renderer_rejects_unrelated_second_sampler);
-    RUN_TEST(test_text_renderer_recovers_after_texture_apply_failure_without_upload);
     RUN_TEST(test_utf8_decode_cyrillic);
     RUN_TEST(test_utf8_decode_cjk);
     RUN_TEST(test_measure_returns_nonzero);

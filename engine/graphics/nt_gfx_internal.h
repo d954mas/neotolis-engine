@@ -24,10 +24,11 @@ typedef struct {
     uint8_t sampler_class;
 } nt_gfx_sampler_info_t;
 
-typedef struct {
-    uint32_t texture_backend;
-    uint32_t sampler_backend;
-} nt_gfx_resolved_texture_binding_t;
+typedef enum {
+    NT_GFX_TEXTURE_SET_NONE = 0,
+    NT_GFX_TEXTURE_SET_APPLIED,
+    NT_GFX_TEXTURE_SET_FAILED,
+} nt_gfx_texture_set_state_t;
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
@@ -90,7 +91,6 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
  * unit; backend_handle == 0 (revert to the texture's own filter state) is left
  * for backend ground state, the front-end always resolves a real sampler. */
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
-void nt_gfx_backend_apply_texture_bindings(const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS], uint8_t active_mask);
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 /* Re-points the named vertex input's instance attribs at byte_offset. */
@@ -180,13 +180,10 @@ uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
-uint32_t nt_gfx_test_texture_binding_program(void);
-uint8_t nt_gfx_test_applied_texture_mask(void);
-void nt_gfx_test_fail_next_texture_apply(void);
+uint8_t nt_gfx_test_texture_set_state(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);
-void nt_gfx_test_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

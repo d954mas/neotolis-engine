@@ -887,30 +887,6 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
 }
 
-void test_sprite_renderer_skips_failed_page_and_draws_the_next_command(void) {
-    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-
-    s_atlas_res = register_test_atlas(0xEBULL);
-    nt_material_t mat = create_test_material();
-    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
-    nt_render_item_t items[2] = {
-        {.sort_key = 0, .entity = e0.id, .batch_key = sprite_batch_key(e0, mat)},
-        {.sort_key = 1, .entity = e1.id, .batch_key = sprite_batch_key(e1, mat)},
-    };
-    nt_gfx_fake_reset();
-    nt_gfx_test_draw_trace_reset(true);
-    nt_gfx_test_fail_next_texture_apply();
-
-    nt_sprite_renderer_draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_test_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_test_draw_trace_at(0).first_index);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    nt_gfx_test_draw_trace_reset(false);
-}
-
 /* A material that declares no textures never takes the page, so crossing pages
  * must not split the run — contrast the two-page test above, which draws twice. */
 void test_sprite_renderer_textureless_material_ignores_page_change(void) {
@@ -1123,7 +1099,7 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "applied_mask"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "coverage is incomplete"));
 }
 
 /* A declared name the program never samples maps to no unit: the slot is skipped and
@@ -1747,7 +1723,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
-    RUN_TEST(test_sprite_renderer_skips_failed_page_and_draws_the_next_command);
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_binds_on_program_unit);

@@ -1006,7 +1006,8 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     GLint loc = program_get_uniform_h(program_backend, name_hash);
     nt_gfx_sampler_info_t sampler_info = {0};
-    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
+    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
+    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -2172,16 +2173,6 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 #endif
     glBindSampler(slot, sampler);
     s_gl_cache.bound_samplers[slot] = sampler;
-}
-
-void nt_gfx_backend_apply_texture_bindings(const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS], uint8_t active_mask) {
-    for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
-        if ((active_mask & (uint8_t)(1U << unit)) == 0) {
-            continue;
-        }
-        nt_gfx_backend_bind_texture(bindings[unit].texture_backend, unit);
-        nt_gfx_backend_bind_sampler(bindings[unit].sampler_backend, unit);
-    }
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

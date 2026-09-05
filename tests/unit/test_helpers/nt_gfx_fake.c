@@ -79,7 +79,6 @@ static uint32_t s_fake_pass_target_count;
 static uint32_t s_fake_bound_textures[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_bound_texture_slots[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_bound_texture_count;
-static uint32_t s_fake_apply_texture_bindings_count;
 static uint32_t s_fake_render_target_create_count;
 static uint32_t s_fake_render_target_resize_count;
 static uint32_t s_fake_render_target_destroy_count;
@@ -141,7 +140,6 @@ uint32_t nt_gfx_fake_pass_target_at(uint32_t index) { return index < s_fake_pass
 uint32_t nt_gfx_fake_bound_texture_count(void) { return s_fake_bound_texture_count; }
 uint32_t nt_gfx_fake_bound_texture_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_textures[index] : 0; }
 uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_texture_slots[index] : UINT32_MAX; }
-uint32_t nt_gfx_fake_apply_texture_bindings_count(void) { return s_fake_apply_texture_bindings_count; }
 uint32_t nt_gfx_fake_render_target_create_count(void) { return s_fake_render_target_create_count; }
 uint32_t nt_gfx_fake_render_target_resize_count(void) { return s_fake_render_target_resize_count; }
 uint32_t nt_gfx_fake_render_target_destroy_count(void) { return s_fake_render_target_destroy_count; }
@@ -205,7 +203,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_pass_target = 0;
     s_fake_pass_target_count = 0;
     s_fake_bound_texture_count = 0;
-    s_fake_apply_texture_bindings_count = 0;
     s_fake_render_target_create_count = 0;
     s_fake_render_target_resize_count = 0;
     s_fake_render_target_destroy_count = 0;
@@ -527,17 +524,6 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     s_fake_bind_sampler_count++;
 }
 
-void nt_gfx_backend_apply_texture_bindings(const nt_gfx_resolved_texture_binding_t bindings[NT_GFX_MAX_TEXTURE_SLOTS], uint8_t active_mask) {
-    s_fake_apply_texture_bindings_count++;
-    for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
-        if ((active_mask & (uint8_t)(1U << unit)) == 0) {
-            continue;
-        }
-        nt_gfx_backend_bind_texture(bindings[unit].texture_backend, unit);
-        nt_gfx_backend_bind_sampler(bindings[unit].sampler_backend, unit);
-    }
-}
-
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
     s_fake_update_texture_count++;
     (void)backend_handle;
@@ -609,7 +595,8 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     nt_gfx_sampler_info_t sampler_info = {0};
-    NT_ASSERT(!nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info) && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
+    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
+    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     s_fake_last_uniform_program = program_backend;
     if (s_fake_uniform_int_count < NT_GFX_FAKE_UNIFORM_NAMES) {
         s_fake_uniform_int_hashes[s_fake_uniform_int_count] = name_hash;

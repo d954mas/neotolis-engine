@@ -115,7 +115,9 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
 
-    nt_gfx_test_bind_texture_unit(nt_gfx_render_target_depth(target), NT_SAMPLER_DEFAULT, 0);
+    const nt_texture_t depth_texture = nt_gfx_render_target_depth(target);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(depth_texture), 0);
+    nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(depth_texture)), 0);
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
@@ -473,7 +475,8 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_bind_pipeline(shadow_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
     const nt_gfx_texture_binding_t shadow_binding = {.name = nt_hash32_str("u_shadow"), .texture = depth_tex, .sampler = comparison};
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&shadow_binding, 1));
+    nt_gfx_apply_texture_bindings(&shadow_binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
@@ -499,7 +502,8 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_bind_pipeline(raw_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
     const nt_gfx_texture_binding_t raw_binding = {.name = nt_hash32_str("u_depth"), .texture = depth_tex, .sampler = raw};
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&raw_binding, 1));
+    nt_gfx_apply_texture_bindings(&raw_binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
@@ -530,7 +534,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
-    nt_gfx_test_bind_texture_unit(nt_gfx_render_target_color(target), NT_SAMPLER_DEFAULT, 0);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_color(target)), 0);
     GLint internal_format = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);
@@ -1041,7 +1045,6 @@ static void test_supported_sampler_types_retain_their_classes(void) {
                                          "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
                                          "}\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
-    TEST_ASSERT_EQUAL_UINT8(3, nt_gfx_program_sampler_count(prog));
 
     nt_gfx_sampler_info_t infos[3] = {0};
     TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_color"), &infos[0]));
@@ -1248,7 +1251,8 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
         {.name = nt_hash32_str("u_a"), .texture = tex_red, .sampler = NT_SAMPLER_DEFAULT},
         {.name = nt_hash32_str("u_b"), .texture = tex_green, .sampler = NT_SAMPLER_DEFAULT},
     };
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(bindings, 2));
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
@@ -1299,13 +1303,15 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
         {.name = nt_hash32_str("u_a"), .texture = tex_red, .sampler = NT_SAMPLER_DEFAULT},
         {.name = nt_hash32_str("u_b"), .texture = tex_green, .sampler = NT_SAMPLER_DEFAULT},
     };
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(bindings, 2));
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
 
     /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
     bindings[1].texture = tex_red;
-    TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(bindings, 2));
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
     nt_gfx_end_pass();
