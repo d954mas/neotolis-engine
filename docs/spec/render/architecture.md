@@ -200,8 +200,8 @@ between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
-transition (every sprite command), the renderer resolves the material's declared
-`nt_resource_t` texture handles and submits the complete semantic set once. The
+transition the renderer resolves the material's declared `nt_resource_t` texture
+handles, and every sprite command submits the complete semantic set once. The
 gfx front-end maps names to the bound program's canonical units,
 ignores inactive declarations, validates complete active coverage, and calls the
 backend only after the whole set resolves. The backend GL cache drops repeated

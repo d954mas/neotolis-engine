@@ -776,8 +776,7 @@ void nt_text_renderer_flush(void) {
         const nt_material_info_t *mi = nt_material_get_info(s_text.material);
         if (mi != NULL) {
             NT_ASSERT(mi->tex_count == 0 && "text material declares textures: every sampler unit belongs to the font");
-            uint32_t resolved[NT_MATERIAL_MAX_TEXTURES] = {0};
-            const nt_renderer_material_view_t view = nt_renderer_material_view(mi, resolved);
+            const nt_renderer_material_view_t view = {.param_count = mi->param_count, .param_name_hashes = mi->param_name_hashes, .params = mi->params};
             nt_renderer_set_material_uniforms(&view);
         }
     }

@@ -1053,16 +1053,49 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(replacement), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_NOT_EQUAL_UINT32(before, nt_gfx_fake_bound_texture_at(0));
 
-    /* Batch 3: the cmd resolved at open, so a material destroyed before flush
-     * still replays slot 1 -- the resolve cannot be deferred to flush. */
+    /* Batch 3: the cmd resolved when it opened, so neither a later publication nor
+     * the material's death changes what it binds -- the resolve cannot be deferred
+     * to flush. */
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+
+    nt_texture_t third = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page1_v3"});
+    TEST_ASSERT_TRUE(third.id != 0);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, third.id));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(third.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
+
     nt_material_destroy(mat);
     nt_sprite_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(replacement), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
+
+    /* Batch 4: a page split re-opens the cmd from a snapshot, so BOTH halves keep the
+     * slot-1 texture the live material resolved at open while unit 1 follows the page. */
+    nt_material_t mat2 = nt_material_create(&mdesc);
+    TEST_ASSERT_TRUE(mat2.id != 0);
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat2);
+    /* Region 0 lives on page 0, region 1 on page 1. */
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
+    /* "u_other" is unit 0: the current publication, identical across the split. */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(2));
+    /* "u_texture" is unit 1: page 0 then page 1. */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(3));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(3));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one

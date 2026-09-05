@@ -120,19 +120,29 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
 material state: the mesh renderer at each material change inside a `draw_list`,
-the sprite renderer when a command opens (a page split copies the open command's
-snapshot and substitutes only the page). A text material declares no textures,
-so the text renderer resolves nothing. There is no material step.
+the sprite renderer when a command opens. A sprite command snapshots its
+textures at open and its params at flush, so a mid-frame `nt_material_set_param`
+also applies to queued commands. Slot 0 of a sprite material is the atlas page:
+the renderer substitutes the page into the open command before it stages any
+index (splitting the command when it already holds indices, which copies the
+snapshot), so the declared slot-0 resource is never resolved. A text material
+declares no textures, so the text renderer resolves no material textures; it
+binds the font's own textures. There is no material step.
 
-The published view of a resource changes only inside `nt_resource_step`, so a
-frame that steps resources before it renders sees one set of handles across every
-renderer, and a material created mid-frame binds its textures on its first draw.
+For a handle the game holds, the published view changes only inside
+`nt_resource_step`; `nt_resource_shutdown` unpublishes every slot, so a material
+that outlives the resource module resolves to 0 and trips the gfx coverage
+assert. A frame that steps resources before it emits or draws sees one set of
+handles across every renderer, and a material created mid-frame binds its
+textures on its first draw. Stepping resources between submissions within one
+frame is unsupported: commands already open keep the handles they resolved.
 
 Publication is not GPU lifetime. `nt_resource_invalidate` and
-`nt_resource_unmount` destroy GPU objects immediately, while the slot keeps
-publishing the dead handle until the next `nt_resource_step`. A game that
-invalidates textures — after a context restore, for instance — steps resources
-before it draws, or skips that frame.
+`nt_resource_unmount` destroy the GPU objects of file-pack assets immediately
+(virtual-pack handles stay game-owned), while the slot keeps publishing the dead
+handle until the next `nt_resource_step`. A game that invalidates textures —
+after a context restore, for instance — steps resources before it emits or
+draws, or skips that frame.
 
 ## Render state and material
 

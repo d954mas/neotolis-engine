@@ -31,9 +31,8 @@ typedef struct {
     nt_pipeline_t pipeline;
     /* Captured independently because custom layouts may share a pipeline. */
     nt_vertex_input_t vertex_input;
-    nt_material_t material; /* handle for material-param lookup at flush; param values
-                               are NOT snapshotted — they are re-fetched live via
-                               nt_material_get_info at flush time */
+    nt_material_t material; /* params stay live to flush by contract, so a game may mutate
+                               them after emit; textures are snapshotted below */
     /* Snapshot taken when the cmd opens; publication changes only inside nt_resource_step. */
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
@@ -410,9 +409,13 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
      * per-emit, so the plain fast path stays a constant 20). */
     s_sprite.cur_stride = (uint32_t)NT_SPRITE_BASE_STRIDE + s_sprite.cur_material_custom_bytes;
     c->tex_count = mi->tex_count;
-    /* Slot 0 resolves like the rest; the page substitutes into it below. */
-    for (uint8_t i = 0; i < mi->tex_count; i++) {
+    /* Slot 0 is the atlas page by contract: ensure_current_cmd_page_texture substitutes
+     * into it before any index is staged, so resolving the material's value is dead work. */
+    c->resolved_tex[0] = 0;
+    for (uint8_t i = 1; i < mi->tex_count; i++) {
         c->resolved_tex[i] = nt_resource_get(mi->tex_resources[i]);
+    }
+    for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->tex_name_hashes[i] = mi->tex_name_hashes[i];
         c->tex_samplers[i] = mi->tex_samplers[i];
     }
@@ -1400,15 +1403,15 @@ void nt_sprite_renderer_flush(void) {
          * its units; params are read from the live material when the material or the
          * pipeline changed. */
         const nt_material_info_t *mi = (c->material.id != bound.material) ? nt_material_get_info(c->material) : NULL;
-        const nt_renderer_material_view_t view = {
+        nt_renderer_material_view_t view = {
             .tex_count = c->tex_count,
             .tex_name_hashes = c->tex_name_hashes,
-            .resolved_tex = c->resolved_tex,
             .tex_samplers = c->tex_samplers,
             .param_count = (mi != NULL) ? mi->param_count : 0,
             .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
             .params = (mi != NULL) ? mi->params : NULL,
         };
+        memcpy(view.resolved_tex, c->resolved_tex, sizeof(view.resolved_tex));
         nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
         /* Per cmd, not per material: one material's page can change on a page split.
          * Units come from the pipeline's program, so a dead material still binds right. */

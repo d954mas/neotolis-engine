@@ -563,8 +563,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             }
 
             if (mat_changed) {
-                uint32_t resolved[NT_MATERIAL_MAX_TEXTURES] = {0};
-                const nt_renderer_material_view_t view = nt_renderer_material_view(mat_info, resolved);
+                const nt_renderer_material_view_t view = nt_renderer_material_view(mat_info);
                 nt_renderer_bind_pipeline(&bound, pip);
                 nt_renderer_apply_material_uniforms(&bound, run_mat.id, &view);
                 /* Mesh renderer texture slots come from the material alone. */

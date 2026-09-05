@@ -18,7 +18,7 @@ nt_add_module(nt_text_renderer LOG_DOMAIN "text_renderer"
     nt_text_renderer.c
     nt_text_renderer.h
 )
-target_link_libraries(nt_text_renderer PUBLIC nt_core nt_font nt_material nt_resource)
+target_link_libraries(nt_text_renderer PUBLIC nt_core nt_font nt_material)
 target_link_libraries(nt_text_renderer PRIVATE nt_utf8)
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
