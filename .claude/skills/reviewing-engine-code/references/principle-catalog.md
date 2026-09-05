@@ -27,6 +27,7 @@ smell**. Skip anything clang-format / clang-tidy / the size tracker already enfo
 12. No gold-plating / speculative generality
 13. EM_JS_DEPS covers every referenced JS runtime helper
 14. Cache identity is exact, or hashed whole — never a linear fold
+15. No ceremony — code that serves other new code
 
 ---
 
@@ -185,3 +186,20 @@ one-step change of each field → all keys distinct).
 **Scope:** `engine/renderers/`, `engine/graphics/`, `engine/material/`, any `*_cache_find`.
 ✅ `key = nt_gfx_pipeline_key(&desc)`; `key |= (1ULL | location << 1) << (si * 5)` with static asserts.
 ❌ `key = program.id * 0x9E3779B97F4A7C15ULL + render_state_hash` compared with `==` on a hit.
+
+## 15. No ceremony — code that serves other new code — P2
+
+**Rule:** flag code whose only consumer is other code introduced by the same branch: a return
+value every caller must branch on identically, a test hook compiled into production code, a
+second field that is written and cleared together with an existing one, a public API / backend
+hook / stub entry added only so another new piece can be checked, a `NT_TEST_ACCESS` copy of a
+replaced code path, a guard for a scenario no engine path produces. For each one ask whether
+existing state, an existing assert, or an existing skip path already covers the need, and whether
+the branch that needs it is reachable at all. Review rounds are where this accumulates: an
+"untested branch" finding gets a hook instead of the question whether the branch is reachable —
+report the unreachable branch, not the missing coverage. Do NOT flag error returns that a public
+API contract promises, or hooks the fake backend provides.
+**Cite:** AGENTS.md §"No ceremony" + §Philosophy (Keep it simple).
+**Scope:** all engine code and test helpers.
+✅ draw skips on "set failed" inside gfx, the caller just calls `apply`.
+❌ `bool apply` + five callers copying a "skip the draw" block + a production hook to force `false`.

@@ -98,6 +98,19 @@ sources, delete the `.ntpack` before visual QA to force a repack.
 - Never id sibling widgets as `base_id + index`: Clay's anonymous child ids are additive (`seed + offset`), so consecutive seeds collide → DUPLICATE_ID. Salt sub-ids with a mixed hash (`nt_ui_child_id` / `nt_ui_fmix_id`). Virtualized widgets must RECYCLE ids (see `nt_ui_vlist`'s ring) or Clay's element hashmap saturates until `build_tree` asserts.
 - Never fold a pool handle or a small enum linearly into a cache key: nested folds give the handle and some state lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and `(p+1, cull-1)` collide, and pool handles are sequential, so neighbouring resources silently share the cached object. Pack the identity exactly (pipelines: `nt_gfx_pipeline_key_t`) or `nt_hash64` the whole canonical struct, and ship every new cache key with a neighbour test (consecutive handles × one-step change of each field → all keys distinct). See docs/spec/render/architecture.md §Cache identity.
 
+## No ceremony
+
+Code that serves other new code rather than the game or the engine contract is
+ceremony: a return value every caller must branch on, a test hook in production
+code, a mirror of state that already exists, an API or backend hook added only to
+check another new piece, a guard for a scenario no engine path produces. Before
+adding any of these, check whether the need is real: can existing state, an
+existing assert, or an existing skip path already cover it, and is the branch
+that needs it reachable at all. If the work still seems to require new public
+API, new state, a new backend hook, or a new obligation on every caller: stop and
+ask the developer with one paragraph — what breaks without it, the smallest
+alternative, what each catches. The developer decides.
+
 ## Performance and hot path
 
 - Hot path includes at minimum: frame loop, fixed update loop, render item generation, batching, resource resolve per frame, and any dense ECS/SoA iterations.
