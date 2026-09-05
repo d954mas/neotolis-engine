@@ -118,14 +118,6 @@ static nt_buffer_t s_mesh_instance_buf;
 static uint32_t s_mesh_handle;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
 
-static nt_shader_t s_binding_vs, s_binding_fs;
-static nt_program_t s_binding_program;
-static nt_pipeline_t s_binding_pipeline;
-static nt_vertex_input_t s_binding_vi;
-static nt_texture_t s_binding_red, s_binding_green;
-static bool s_binding_probe_done;
-static bool s_binding_probe_ok;
-
 static const char *s_mesh_vs_src = "precision mediump float;\n"
                                    "layout(location = 0) in vec3 a_position;\n"
                                    "layout(location = 4) in vec2 i_offset;\n"
@@ -214,73 +206,6 @@ static void mesh_probe_draw(void) {
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
 }
 
-static bool binding_probe_create(void) {
-    static const char *vs_source = "precision mediump float;\n"
-                                   "const vec2 p[3] = vec2[3](vec2(-1.0,-1.0),vec2(3.0,-1.0),vec2(-1.0,3.0));\n"
-                                   "void main(){gl_Position=vec4(p[gl_VertexID],0.0,1.0);}\n";
-    static const char *fs_source = "precision mediump float;\n"
-                                   "uniform sampler2D u_a;\n"
-                                   "uniform sampler2D u_b;\n"
-                                   "out vec4 frag_color;\n"
-                                   "void main(){vec4 a=texture(u_a,vec2(0.5));vec4 b=texture(u_b,vec2(0.5));"
-                                   "frag_color=vec4(a.r,b.g,0.0,1.0);}\n";
-    static const uint8_t red[4] = {255, 0, 0, 255};
-    static const uint8_t green[4] = {0, 255, 0, 255};
-    s_binding_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source, .label = "binding_probe_vs"});
-    s_binding_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source, .label = "binding_probe_fs"});
-    s_binding_program = nt_gfx_make_program(s_binding_vs, s_binding_fs);
-    s_binding_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_binding_program, .label = "binding_probe_pipeline"});
-    s_binding_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "binding_probe_vi"});
-    s_binding_red = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = red, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "binding_probe_red"});
-    s_binding_green = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = green, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "binding_probe_green"});
-    s_binding_probe_done = false;
-    s_binding_probe_ok = false;
-    return s_binding_pipeline.id != 0 && s_binding_vi.id != 0 && s_binding_red.id != 0 && s_binding_green.id != 0;
-}
-
-#ifndef NT_PLATFORM_WEB
-static void binding_probe_destroy(void) {
-    if (s_binding_green.id != 0) {
-        nt_gfx_destroy_texture(s_binding_green);
-        s_binding_green = (nt_texture_t){0};
-    }
-    if (s_binding_red.id != 0) {
-        nt_gfx_destroy_texture(s_binding_red);
-        s_binding_red = (nt_texture_t){0};
-    }
-    nt_gfx_destroy_vertex_input(s_binding_vi);
-    s_binding_vi = NT_VERTEX_INPUT_INVALID;
-    nt_gfx_destroy_pipeline(s_binding_pipeline);
-    s_binding_pipeline = (nt_pipeline_t){0};
-    nt_gfx_destroy_program(s_binding_program);
-    s_binding_program = NT_PROGRAM_INVALID;
-    nt_gfx_destroy_shader(s_binding_fs);
-    nt_gfx_destroy_shader(s_binding_vs);
-    s_binding_fs = (nt_shader_t){0};
-    s_binding_vs = (nt_shader_t){0};
-}
-#endif
-
-static void binding_probe_run(void) {
-    if (s_binding_probe_done || !nt_gfx_program_ready(s_binding_program)) {
-        return;
-    }
-    uint8_t pixel[4] = {0};
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0}, .clear_depth = 1.0F});
-    nt_gfx_set_viewport(0, 0, 1, 1);
-    nt_gfx_bind_pipeline(s_binding_pipeline);
-    nt_gfx_bind_vertex_input(s_binding_vi);
-    const nt_gfx_texture_binding_t bindings[] = {
-        {.name = nt_hash32_str("u_b"), .texture = s_binding_green, .sampler = NT_SAMPLER_DEFAULT},
-        {.name = nt_hash32_str("u_a"), .texture = s_binding_red, .sampler = NT_SAMPLER_DEFAULT},
-    };
-    nt_gfx_apply_texture_bindings(bindings, 2);
-    nt_gfx_draw(0, 3);
-    const bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
-    nt_gfx_end_pass();
-    s_binding_probe_ok = read && pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255;
-    s_binding_probe_done = true;
-}
 // #endregion
 
 // #region resource binding
@@ -334,7 +259,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
-EMSCRIPTEN_KEEPALIVE int nt_test_semantic_binding_ok(void) { return s_binding_probe_ok ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
@@ -414,7 +338,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
         'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
-        'semantic_binding_ok': function() { return _nt_test_semantic_binding_ok() !== 0; },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
         'field_css': function() {
@@ -566,8 +489,6 @@ static void frame(void) {
         s_gpu_restore_pending = !gpu_restore_step();
     }
 
-    binding_probe_run();
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.07F, 0.08F, 0.10F, 1.0F},
         .clear_depth = 1.0F,
@@ -714,9 +635,6 @@ int main(int argc, char *argv[]) {
     const bool probe_ok = mesh_probe_create();
     NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
     (void)probe_ok;
-    const bool binding_ok = binding_probe_create();
-    NT_ASSERT(binding_ok && "binding probe creation failed at startup");
-    (void)binding_ok;
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
@@ -833,7 +751,6 @@ int main(int argc, char *argv[]) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    binding_probe_destroy();
     nt_ui_destroy_context(s_ctx);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();

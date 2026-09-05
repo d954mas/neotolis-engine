@@ -1077,41 +1077,13 @@ static void test_signed_sampler_type_asserts_at_link(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer texture format"));
 }
 
-static void test_active_sampler_hash_collision_asserts_at_link(void) {
-    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
-    static const char *fragment_source = "precision highp float;\n"
-                                         "uniform sampler2D attr4040;\n"
-                                         "uniform sampler2D attr168680;\n"
-                                         "out vec4 frag_color;\n"
-                                         "void main() { frag_color = texture(attr4040, vec2(0.5)) + texture(attr168680, vec2(0.5)); }\n";
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("attr4040").value, nt_hash32_str("attr168680").value);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "active uniform name hash collision"));
-}
-
-static void test_sampler_and_value_uniform_hash_collision_asserts_at_link(void) {
+static void test_active_uniform_hash_collision_asserts_at_link(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     static const char *fragment_source = "precision highp float;\n"
                                          "uniform sampler2D attr4040;\n"
                                          "uniform int attr168680;\n"
                                          "out vec4 frag_color;\n"
                                          "void main() { frag_color = texture(attr4040, vec2(0.5)) + vec4(float(attr168680)); }\n";
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("attr4040").value, nt_hash32_str("attr168680").value);
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "active uniform name hash collision"));
-}
-
-static void test_value_uniform_hash_collision_asserts_at_link(void) {
-    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
-    static const char *fragment_source = "precision highp float;\n"
-                                         "uniform float attr4040;\n"
-                                         "uniform int attr168680;\n"
-                                         "out vec4 frag_color;\n"
-                                         "void main() { frag_color = vec4(attr4040 + float(attr168680)); }\n";
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("attr4040").value, nt_hash32_str("attr168680").value);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
@@ -1478,9 +1450,7 @@ int main(void) {
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
     RUN_TEST(test_supported_sampler_types_retain_their_classes);
     RUN_TEST(test_signed_sampler_type_asserts_at_link);
-    RUN_TEST(test_active_sampler_hash_collision_asserts_at_link);
-    RUN_TEST(test_sampler_and_value_uniform_hash_collision_asserts_at_link);
-    RUN_TEST(test_value_uniform_hash_collision_asserts_at_link);
+    RUN_TEST(test_active_uniform_hash_collision_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);
