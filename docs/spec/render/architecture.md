@@ -135,11 +135,11 @@ backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. Sampler uniforms are not written at all:
 their units are fixed at link and belong to the program, so no material can
 redirect another's texture. `nt_gfx_apply_texture_bindings` accepts a complete
-name-keyed set for the bound program, resolves it into those units with fixed
-stack storage, then publishes the logical set and issues backend binds together.
+name-keyed set for the bound program, resolves it into those units,
+then publishes the logical set and issues backend binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before backend binds; inactive names are ignored before their handles
-are inspected. Context loss, a texture husk, or failed sampler recreation
+are inspected. Context loss or a texture husk
 publishes no set and issues no backend bind: gfx reports the failure and skips
 the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program; the

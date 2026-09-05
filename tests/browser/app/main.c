@@ -205,7 +205,6 @@ static void mesh_probe_draw(void) {
     nt_gfx_bind_instance_buffer(s_mesh_instance_buf, 8);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
 }
-
 // #endregion
 
 // #region resource binding
@@ -493,7 +492,6 @@ static void frame(void) {
         .clear_color = {0.07F, 0.08F, 0.10F, 1.0F},
         .clear_depth = 1.0F,
     });
-    nt_gfx_set_viewport(0, 0, (int)fb_w, (int)fb_h);
 
     nt_font_step();
 

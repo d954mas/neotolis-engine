@@ -761,12 +761,15 @@ void nt_text_renderer_flush(void) {
         return;
     }
 
+    /* Upload staging buffer to GPU. Orphan-style upload (glBufferData with
+     * GL_DYNAMIC_DRAW) so the driver allocates fresh storage and avoids
+     * stalling on the previous frame's draw of the same VBO. */
+    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
+
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 
     bind_font_textures();
-
-    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
     /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {

@@ -1559,31 +1559,6 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
     return !mipmap_filter || texture_has_complete_mip_chain(meta);
 }
 
-/* Effective sampler for the texture being bound: an explicit override, else the
- * texture's own default. False rejects the pair; a zero backend is GL's "use the
- * texture's filter state" and only follows a failed recreate. */
-static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler, uint32_t *out_backend) {
-    nt_sampler_t effective = sampler.id != 0 ? sampler : s_gfx.texture_metas[texture_slot].default_sampler;
-    NT_ASSERT(effective.id != 0 && "apply_texture_bindings: live texture without a default sampler");
-    NT_ASSERT(effective.id <= s_gfx.sampler_count && "apply_texture_bindings: invalid sampler handle");
-    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[effective.id - 1];
-    bool compatible = texture_sampler_compatible(texture_slot, &e->desc);
-    NT_ASSERT(compatible && "apply_texture_bindings: sampler is incompatible with texture storage");
-    if (!compatible) {
-        return false;
-    }
-    if (e->backend == 0) {
-        /* Lazy recreate after context-loss recovery — desc was preserved. */
-        e->backend = nt_gfx_backend_create_sampler(&e->desc);
-    }
-    if (e->backend == 0) {
-        NT_LOG_ERROR("apply_texture_bindings: sampler backend recreation failed");
-        return false;
-    }
-    *out_backend = e->backend;
-    return true;
-}
-
 static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sampler_desc_t *sampler, uint8_t sampler_class) {
     const uint8_t format = s_gfx.texture_metas[texture_slot].format;
     const bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
@@ -1598,6 +1573,30 @@ static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sample
         return integer && !compares;
     }
     return false;
+}
+
+/* Effective sampler for the texture being bound: an explicit override, else the
+ * texture's own default. False rejects the pair; a zero backend is GL's "use the
+ * texture's filter state" and only follows a failed recreate. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
+static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler, uint8_t sampler_class, uint32_t *out_backend) {
+    nt_sampler_t effective = sampler.id != 0 ? sampler : s_gfx.texture_metas[texture_slot].default_sampler;
+    NT_ASSERT(effective.id != 0 && "apply_texture_bindings: live texture without a default sampler");
+    NT_ASSERT(effective.id <= s_gfx.sampler_count && "apply_texture_bindings: invalid sampler handle");
+    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[effective.id - 1];
+    bool compatible = texture_sampler_compatible(texture_slot, &e->desc);
+    NT_ASSERT(compatible && "apply_texture_bindings: sampler is incompatible with texture storage");
+    if (!compatible) {
+        return false;
+    }
+    const bool class_ok = texture_matches_sampler_class(texture_slot, &e->desc, sampler_class);
+    NT_ASSERT(class_ok && "apply_texture_bindings: texture and sampler do not match the program sampler type");
+    if (e->backend == 0) {
+        /* Lazy recreate after context-loss recovery — desc was preserved. */
+        e->backend = nt_gfx_backend_create_sampler(&e->desc);
+    }
+    *out_backend = e->backend;
+    return true;
 }
 
 static bool texture_is_active_attachment(nt_texture_t texture) {
@@ -1617,17 +1616,12 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
-    NT_ASSERT(count <= NT_GFX_MAX_TEXTURE_SLOTS && "apply_texture_bindings: count exceeds NT_GFX_MAX_TEXTURE_SLOTS");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0) || count > NT_GFX_MAX_TEXTURE_SLOTS) {
+    if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0)) {
         return;
     }
     const uint32_t program = s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)];
     const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
     const uint8_t required_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(program_backend);
-    if (required_mask == 0) {
-        s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
-        return;
-    }
 
     /* Resolve everything first: a failure late in the set must leave no bind behind. */
     uint32_t texture_backends[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -1653,13 +1647,10 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
             return;
         }
         uint32_t sampler_backend = 0;
-        if (!resolve_sampler_backend(texture_slot, bindings[i].sampler, &sampler_backend)) {
+        if (!resolve_sampler_backend(texture_slot, bindings[i].sampler, info.sampler_class, &sampler_backend)) {
             s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
             return;
         }
-        const nt_sampler_t effective = bindings[i].sampler.id != 0 ? bindings[i].sampler : s_gfx.texture_metas[texture_slot].default_sampler;
-        const bool class_ok = texture_matches_sampler_class(texture_slot, &s_gfx.sampler_cache[effective.id - 1].desc, info.sampler_class);
-        NT_ASSERT(class_ok && "apply_texture_bindings: texture and sampler do not match the program sampler type");
         texture_backends[info.unit] = s_gfx.texture_backends[texture_slot];
         sampler_backends[info.unit] = sampler_backend;
         applied_mask |= bit;

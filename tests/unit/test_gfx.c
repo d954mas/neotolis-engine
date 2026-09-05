@@ -779,7 +779,7 @@ void test_gfx_apply_texture_bindings_rejects_stale_texture_handle(void) {
     end_texture_binding_test_pass();
 }
 
-void test_gfx_apply_texture_bindings_requires_pass_pipeline_and_bounded_count(void) {
+void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_texture_t texture = make_binding_test_texture(1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
@@ -790,7 +790,6 @@ void test_gfx_apply_texture_bindings_requires_pass_pipeline_and_bounded_count(vo
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* no pipeline bound */
     nt_gfx_bind_pipeline(pipeline);
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, NT_GFX_MAX_TEXTURE_SLOTS + 1));
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(NULL, 1));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -924,42 +923,6 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     /* A reported failure skips the draw instead of drawing the previous set. */
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_get_frame_draw_calls());
-    end_texture_binding_test_pass();
-}
-
-void test_gfx_apply_texture_bindings_rejects_sampler_recreation_failure_without_backend_binds(void) {
-    nt_sampler_t sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){
-        .min_filter = NT_FILTER_LINEAR,
-        .mag_filter = NT_FILTER_LINEAR,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, sampler.id);
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-
-    nt_texture_t texture = make_binding_test_texture(1);
-    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_texture_binding_t bindings[] = {
-        {.name = nt_hash32_str("u_a"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
-        {.name = nt_hash32_str("u_b"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
-    };
-    apply_texture_set(bindings, 2);
-    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
-    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
-
-    nt_gfx_fake_fail_next_sampler_create();
-    bindings[1].sampler = sampler;
-    nt_gfx_apply_texture_bindings(bindings, 2);
-
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
-    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
     end_texture_binding_test_pass();
 }
 
@@ -2814,14 +2777,13 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_shadow_sampler_without_comparison);
     RUN_TEST(test_gfx_apply_texture_bindings_enforces_float_sampler_class);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_stale_texture_handle);
-    RUN_TEST(test_gfx_apply_texture_bindings_requires_pass_pipeline_and_bounded_count);
+    RUN_TEST(test_gfx_apply_texture_bindings_requires_pass_and_pipeline);
     RUN_TEST(test_gfx_begin_pass_invalidates_texture_binding_set);
     RUN_TEST(test_gfx_pipeline_change_preserves_texture_set_only_for_same_program);
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_does_not_poll_for_context_loss);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
-    RUN_TEST(test_gfx_apply_texture_bindings_rejects_sampler_recreation_failure_without_backend_binds);
     RUN_TEST(test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_destroy);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);

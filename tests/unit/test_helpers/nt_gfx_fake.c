@@ -95,7 +95,6 @@ static uint32_t s_fake_uniform_vec4_count;
 static uint32_t s_fake_bind_pipeline_count;
 static uint32_t s_fake_update_texture_count;
 static uint32_t s_fake_update_buffer_count;
-static uint32_t s_fake_orphan_buffer_count;
 static uint32_t s_fake_backend_restore_count;
 static uint32_t s_fake_gpu_caps_probe_count;
 static uint16_t s_fake_last_render_target_width;
@@ -123,7 +122,6 @@ static uint32_t s_fake_bind_vertex_input_count;
 static uint32_t s_fake_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
 static uint32_t s_fake_last_uniform_program;    /* recorder: last program a uniform write named */
 static bool s_fake_fail_next_vertex_input_create;
-static bool s_fake_fail_next_sampler_create;
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
@@ -160,7 +158,6 @@ void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]) {
 }
 uint32_t nt_gfx_fake_update_texture_count(void) { return s_fake_update_texture_count; }
 uint32_t nt_gfx_fake_update_buffer_count(void) { return s_fake_update_buffer_count; }
-uint32_t nt_gfx_fake_orphan_buffer_count(void) { return s_fake_orphan_buffer_count; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void) { return s_fake_gpu_caps_probe_count; }
 uint16_t nt_gfx_fake_last_render_target_width(void) { return s_fake_last_render_target_width; }
@@ -192,7 +189,6 @@ uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_i
 uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
 uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
-void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 
 void nt_gfx_fake_reset(void) {
     for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
@@ -214,7 +210,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_bind_pipeline_count = 0;
     s_fake_update_texture_count = 0;
     s_fake_update_buffer_count = 0;
-    s_fake_orphan_buffer_count = 0;
     s_fake_backend_restore_count = 0;
     s_fake_gpu_caps_probe_count = 0;
     s_fake_last_render_target_width = 0;
@@ -231,7 +226,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_bound_vertex_input = 0;
     s_fake_last_uniform_program = 0;
     s_fake_fail_next_vertex_input_create = false;
-    s_fake_fail_next_sampler_create = false;
     s_fake_context_lost = false;
     s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
@@ -487,7 +481,6 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     (void)backend_handle;
     (void)data;
     (void)size;
-    s_fake_orphan_buffer_count++;
 }
 
 void nt_gfx_backend_begin_segment(const char *name) { (void)name; }
@@ -507,10 +500,6 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
-    if (s_fake_fail_next_sampler_create) {
-        s_fake_fail_next_sampler_create = false;
-        return 0;
-    }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */
 }

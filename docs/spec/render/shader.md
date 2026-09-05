@@ -89,9 +89,7 @@ current, because linking may happen while a pipeline is bound.
 The unit table is backend-private: `nt_gfx_apply_texture_bindings` consumes it to
 map a complete name-keyed set to units, and callers never observe or choose unit
 numbers. A name absent after driver optimization is inactive and ignored before
-its texture or sampler handle is inspected. Two active uniform names whose
-`nt_hash32_str` values collide assert at link, because a hash is all a caller
-names them by.
+its texture or sampler handle is inspected.
 
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location

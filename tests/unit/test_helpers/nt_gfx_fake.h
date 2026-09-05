@@ -46,7 +46,6 @@ nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);
 uint32_t nt_gfx_fake_update_buffer_count(void);
-uint32_t nt_gfx_fake_orphan_buffer_count(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 void nt_gfx_fake_fail_texture_creates(uint8_t mask);
@@ -64,7 +63,6 @@ uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 uint32_t nt_gfx_fake_last_uniform_program(void);
 void nt_gfx_fake_fail_next_vertex_input_create(void);
-void nt_gfx_fake_fail_next_sampler_create(void);
 void nt_gfx_fake_reset(void);
 
 #endif

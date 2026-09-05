@@ -255,12 +255,12 @@ program are ignored before their handles are inspected; active names are mapped
 to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
 attachment of the active render target are developer errors and assert. Resolution
-is atomic: context loss, a texture without live backend storage, or failed sampler
-recreation publishes no logical set and issues no backend bind. Those failures are
+is atomic: context loss or a texture without live backend storage publishes no
+logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
 already observed by `nt_gfx_begin_frame`; material transitions do not poll the
-platform. Resolution uses fixed stack storage and allocates no heap memory.
+platform.
 
 The sampler class is part of the linked interface:
 

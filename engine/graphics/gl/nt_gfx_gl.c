@@ -81,6 +81,7 @@ typedef struct {
 typedef struct {
     uint32_t name_hash;
     GLint location;
+    uint8_t sampler_class;
 } nt_gfx_gl_sampler_unit_t;
 
 typedef struct {
@@ -111,7 +112,6 @@ typedef struct {
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
-    uint16_t sampler_classes; /* two bits per sampler unit */
     uint8_t sampler_count;
 } nt_gfx_gl_program_t;
 
@@ -199,7 +199,6 @@ static uint32_t s_transcode_buf_idle = 0;
  * is below the 16 fragment units WebGL2/GL 3.3 guarantee. */
 #define NT_GFX_GL_UPLOAD_TEXTURE_UNIT ((GLenum)(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS))
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS < 16, "scratch upload unit must stay inside the guaranteed unit range");
-_Static_assert(NT_GFX_MAX_TEXTURE_SLOTS * 2 <= 16, "sampler_classes packs two bits per unit into uint16_t");
 
 static struct {
     GLuint vao;
@@ -254,7 +253,7 @@ bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name
     for (uint8_t i = 0; i < prog->sampler_count; i++) {
         if (prog->sampler_units[i].name_hash == name_hash) {
             out_info->unit = i;
-            out_info->sampler_class = (uint8_t)((prog->sampler_classes >> (i * 2U)) & 3U);
+            out_info->sampler_class = prog->sampler_units[i].sampler_class;
             return true;
         }
     }
@@ -1205,22 +1204,12 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     }
 }
 
-static void assert_uniform_hash_unique(const nt_gfx_gl_program_t *rec, uint32_t uniform_count, uint32_t name_hash) {
-    for (uint32_t i = 0; i < uniform_count && i < NT_MAX_CACHED_UNIFORMS; i++) {
-        NT_ASSERT(rec->uniforms[i].name_hash != name_hash && "active uniform name hash collision");
-    }
-    for (uint8_t i = 0; i < rec->sampler_count; i++) {
-        NT_ASSERT(rec->sampler_units[i].name_hash != name_hash && "active uniform name hash collision");
-    }
-}
-
 /* Cache locations off the hot path; NT_ASSERT expansion inflates complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     nt_cached_uniform_t *out = rec->uniforms;
     uint8_t *out_count = &rec->uniform_count;
     rec->sampler_count = 0;
-    rec->sampler_classes = 0;
     *out_count = 0;
     GLint active_uniforms = -1;
     glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
@@ -1256,14 +1245,13 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
                 const uint32_t name_hash = nt_hash32_str(uname).value;
-                assert_uniform_hash_unique(rec, uniform_count, name_hash);
                 nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
                 if (uniform_sampler_class(utype, &sampler_class)) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
                     const uint8_t unit = rec->sampler_count;
                     rec->sampler_units[unit].name_hash = name_hash;
                     rec->sampler_units[unit].location = loc;
-                    rec->sampler_classes |= (uint16_t)((uint16_t)sampler_class << (unit * 2U));
+                    rec->sampler_units[unit].sampler_class = (uint8_t)sampler_class;
                     rec->sampler_count++;
                 } else {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
