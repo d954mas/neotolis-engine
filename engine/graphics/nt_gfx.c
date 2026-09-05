@@ -161,6 +161,8 @@ static struct {
     int viewport_rect[4]; /* GL bottom-left x,y,w,h */
 } s_gfx;
 
+_Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
+
 static void invalidate_texture_bindings(void) {
     s_gfx.texture_binding_program = 0;
     s_gfx.applied_texture_mask = 0;
@@ -1634,8 +1636,6 @@ static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sample
         return depth && compares;
     case NT_GFX_SAMPLER_CLASS_UINT:
         return integer && !compares;
-    case NT_GFX_SAMPLER_CLASS_SINT:
-        return false;
     }
     return false;
 }
@@ -1682,11 +1682,10 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         }
         const uint8_t bit = (uint8_t)(1U << info.unit);
         NT_ASSERT((applied_mask & bit) == 0 && "apply_texture_bindings: active sampler appears more than once");
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
+        /* TRAP omits assert text; the log names the sampler that has no texture. */
         if (!nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id)) {
             NT_LOG_ERROR("apply_texture_bindings: program=%08x sampler=%08x has no texture; register an explicit placeholder for async resources", s_gfx.bound_program, bindings[i].name.value);
         }
-#endif
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
         NT_ASSERT(!texture_is_active_attachment(bindings[i].texture) && "apply_texture_bindings: cannot sample the active render target's attachment");
         const uint32_t texture_slot = nt_pool_slot_index(bindings[i].texture.id);
@@ -1709,11 +1708,9 @@ bool nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         applied_mask |= bit;
     }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
     if (applied_mask != s_gfx.required_texture_mask) {
-        NT_LOG_ERROR("apply_texture_bindings: program=%08x sampler coverage missing=%02x", s_gfx.bound_program, (uint8_t)(s_gfx.required_texture_mask & (uint8_t)~applied_mask));
+        NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler coverage missing=%02x", s_gfx.bound_program, (uint8_t)(s_gfx.required_texture_mask & (uint8_t)~applied_mask));
     }
-#endif
     NT_ASSERT(applied_mask == s_gfx.required_texture_mask && "apply_texture_bindings: active sampler coverage is incomplete");
     if (applied_mask != s_gfx.required_texture_mask) {
         return false;

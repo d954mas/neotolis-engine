@@ -199,6 +199,7 @@ static uint32_t s_transcode_buf_idle = 0;
  * is below the 16 fragment units WebGL2/GL 3.3 guarantee. */
 #define NT_GFX_GL_UPLOAD_TEXTURE_UNIT ((GLenum)(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS))
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS < 16, "scratch upload unit must stay inside the guaranteed unit range");
+_Static_assert(NT_GFX_MAX_TEXTURE_SLOTS * 2 <= 16, "sampler_classes packs two bits per unit into uint16_t");
 
 static struct {
     GLuint vao;

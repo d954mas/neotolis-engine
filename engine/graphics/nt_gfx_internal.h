@@ -17,7 +17,6 @@ typedef enum {
     NT_GFX_SAMPLER_CLASS_FLOAT = 0,
     NT_GFX_SAMPLER_CLASS_SHADOW,
     NT_GFX_SAMPLER_CLASS_UINT,
-    NT_GFX_SAMPLER_CLASS_SINT,
 } nt_gfx_sampler_class_t;
 
 typedef struct {

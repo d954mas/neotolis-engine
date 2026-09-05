@@ -75,6 +75,8 @@ static void test_destroy_render_target_invalidates_applied_color_attachment(void
     TEST_ASSERT_TRUE(nt_gfx_apply_texture_bindings(&binding, 1));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    /* The set must still be live here, or destroy proves nothing. */
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_test_texture_binding_program());
 
     nt_gfx_destroy_render_target(rt);
 

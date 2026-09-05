@@ -213,8 +213,9 @@ async load races; a sampler override does not exempt a slot, since the override
 only picks filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
-and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
-material declares nothing, and that those two are the program's only samplers.
+and `u_band_texture`. The text renderer asserts that the material declares
+nothing, that the program links exactly two samplers when its pipeline is
+created, and gfx's coverage check confirms those two names at every flush.
 
 Every other material declares a slot for every sampler its program uses. A
 renderer applies the complete name-keyed set at every material transition and at
