@@ -12,6 +12,7 @@ declare global {
     };
     __ntLossExtension?: WEBGL_lose_context;
     __ntBlockFloatLinear?: boolean;
+    __ntProbeUploads?: number;
   }
 }
 
@@ -42,11 +43,11 @@ function pixelsMatch(actual: number[], expected: number[]): boolean {
 }
 
 function expectMeshProbe(pixels: number[]): void {
-  let green = 0;
+  let colored = 0;
   for (let i = 0; i < pixels.length; i += 4) {
-    if (pixels[i] < 80 && pixels[i + 1] > 200 && pixels[i + 2] < 80) green++;
+    if (Math.abs(pixels[i] - 64) <= 1 && Math.abs(pixels[i + 1] - 128) <= 1 && Math.abs(pixels[i + 2] - 191) <= 1) colored++;
   }
-  expect(green, 'mesh probe must be solid green (instanced draw through an owned vertex input)').toBeGreaterThan((pixels.length / 4) * 0.9);
+  expect(colored, 'mesh probe must preserve its nonzero vec4 after program recreation').toBeGreaterThan((pixels.length / 4) * 0.9);
 }
 
 function expectVisibleProbes(sprite: number[], text: number[]): void {
@@ -72,6 +73,19 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
     if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
   });
   await page.addInitScript(() => {
+    const locations = new WeakSet<WebGLUniformLocation>();
+    const getLocation = WebGL2RenderingContext.prototype.getUniformLocation;
+    WebGL2RenderingContext.prototype.getUniformLocation = function(program, name) {
+      const location = getLocation.call(this, program, name);
+      if (name === 'u_probe_color' && location) locations.add(location);
+      return location;
+    };
+    const upload = WebGL2RenderingContext.prototype.uniform4fv;
+    window.__ntProbeUploads = 0;
+    WebGL2RenderingContext.prototype.uniform4fv = function(location, data, offset?, length?) {
+      if (location && locations.has(location)) window.__ntProbeUploads!++;
+      upload.call(this, location, data, offset, length);
+    };
     const getExtension = WebGL2RenderingContext.prototype.getExtension;
     WebGL2RenderingContext.prototype.getExtension = function(name: string) {
       if (name === 'OES_texture_float_linear' && window.__ntBlockFloatLinear) return null;
@@ -97,7 +111,7 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   // Right-side skin excludes the input text/caret; the caption is above the field.
   const spriteRect = { x: Math.round(canvas!.x + field.x + field.w / 2 - 32), y: Math.round(canvas!.y + field.y - 5), width: 20, height: 10 };
   const textRect = { x: Math.round(canvas!.x + 24), y: Math.round(canvas!.y + 24), width: 230, height: 24 };
-  // The wasm app's mesh probe: two instanced green quads in the bottom-right
+  // The wasm app's mesh probe: two instanced colored quads in the bottom-right
   // corner drawn through an owned vertex input (the WebGL2 VAO path). One rect
   // per quad -- the second (y 688..728) fails if only instance 0 is drawn.
   const meshRect = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 };
@@ -122,6 +136,8 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
       expect(pixelsMatch(await capturePixels(page, textRect), textBaseline)).toBe(true);
     });
   }
+
+  expect(await page.evaluate(() => window.__ntProbeUploads)).toBe(1);
 
   for (let cycle = 0; cycle < 2; cycle++) {
     await test.step('context loss/restore ' + (cycle + 1), async () => {
@@ -150,6 +166,7 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
       expectVisibleProbes(sprite, text);
       expectMeshProbe(await capturePixels(page, meshRect));
       expectMeshProbe(await capturePixels(page, meshRect2));
+      expect(await page.evaluate(() => window.__ntProbeUploads), 'first upload after each restore must reach GL once').toBe(cycle + 2);
       expect(pixelsMatch(sprite, spriteBaseline), 'sprite pixels after restore').toBe(true);
       expect(pixelsMatch(text, textBaseline), 'text pixels after restore').toBe(true);
       expect(errors, 'unexpected browser/gfx errors').toEqual([]);
@@ -158,3 +175,31 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
 
+
+
+test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
+  await page.addInitScript(() => {
+    const locations = new WeakSet<WebGLUniformLocation>();
+    const getLocation = WebGL2RenderingContext.prototype.getUniformLocation;
+    WebGL2RenderingContext.prototype.getUniformLocation = function(program, name) {
+      const location = getLocation.call(this, program, name);
+      if (name === 'u_probe_color' && location) locations.add(location);
+      return location;
+    };
+    const upload = WebGL2RenderingContext.prototype.uniform4fv;
+    WebGL2RenderingContext.prototype.uniform4fv = function(location, data, offset?, length?) {
+      if (location && locations.has(location)) return;
+      upload.call(this, location, data, offset, length);
+    };
+  });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.drawn_frames() > 3);
+  const canvas = await page.locator('canvas').boundingBox();
+  expect(canvas).not.toBeNull();
+  const pixels = await capturePixels(page, { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 });
+  let black = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 0) black++;
+  }
+  expect(black, 'without the upload GL retains default zero, visibly different from the expected color').toBeGreaterThan(pixels.length / 4 * 0.9);
+});

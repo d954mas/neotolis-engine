@@ -73,6 +73,16 @@ setters take that hash — `nt_gfx_set_uniform_vec4(nt_hash32_t name, …)` and 
 three siblings — and there is no string form: a caller hashes the name once at
 init, or inline where the cost does not matter.
 
+For active standalone float vec4 uniforms, the backend also remembers the last
+16 submitted bytes. Bit-identical repeats skip `glUniform4fv`; the first write,
+including zero, always reaches GL. Signed zero and distinct NaN payloads are
+compared by representation, without an epsilon. Values belong to the linked
+program and survive pipeline switches, passes and frames. Recreated programs
+start with invalid cached values. All gfx vec4 writers share this cache; other
+uniform types retain their existing setter behavior, including boolean targets
+that accept float-vector conversion. Inactive names remain no-ops. Cache lookup
+and updates allocate nothing.
+
 Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
 active uniform by type — `sampler2D`, `sampler2DShadow`, and `usampler2D` are

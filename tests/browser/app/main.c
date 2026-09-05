@@ -116,6 +116,7 @@ static nt_pipeline_t s_mesh_pipeline;
 static nt_vertex_input_t s_mesh_vi;
 static nt_buffer_t s_mesh_instance_buf;
 static uint32_t s_mesh_handle;
+static nt_hash32_t s_mesh_color_name;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
 
 static const char *s_mesh_vs_src = "precision mediump float;\n"
@@ -124,11 +125,13 @@ static const char *s_mesh_vs_src = "precision mediump float;\n"
                                    "void main() { gl_Position = vec4(a_position.xy * 0.1 + i_offset, 0.0, 1.0); }\n";
 static const char *s_mesh_fs_src = "precision mediump float;\n"
                                    "out vec4 frag_color;\n"
-                                   "void main() { frag_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
+                                   "uniform vec4 u_probe_color;\n"
+                                   "void main() { frag_color = u_probe_color; }\n";
 
 /* False when the context is (still) lost mid-restore: the caller retries on a
  * later frame; partial handles are {0}-safe for mesh_probe_destroy. */
 static bool mesh_probe_create(void) {
+    s_mesh_color_name = nt_hash32_str("u_probe_color");
     /* Unit quad, one float3 position stream, uint16 indices. */
     static const float verts[12] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
     static const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
@@ -201,6 +204,8 @@ static void mesh_probe_draw(void) {
     float inst[6] = {0.0F, 0.0F, 0.85F, -0.95F, 0.85F, -0.82F};
     nt_gfx_update_buffer(s_mesh_instance_buf, 0, inst, sizeof(inst));
     nt_gfx_bind_pipeline(s_mesh_pipeline);
+    const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
+    nt_gfx_set_uniform_vec4(s_mesh_color_name, color);
     nt_gfx_bind_vertex_input(s_mesh_vi);
     nt_gfx_bind_instance_buffer(s_mesh_instance_buf, 8);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
