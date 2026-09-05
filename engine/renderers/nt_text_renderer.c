@@ -766,7 +766,6 @@ void nt_text_renderer_flush(void) {
 
     bind_font_textures();
 
-    /* Upload only after every recoverable draw prerequisite succeeded. */
     nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
     /* Stateless: other renderers draw between two text flushes. */

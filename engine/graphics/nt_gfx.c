@@ -1574,11 +1574,11 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
  * texture's filter state" and only follows a failed recreate. */
 static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler, uint32_t *out_backend) {
     nt_sampler_t effective = sampler.id != 0 ? sampler : s_gfx.texture_metas[texture_slot].default_sampler;
-    NT_ASSERT(effective.id != 0 && "bind_texture: live texture without a default sampler");
-    NT_ASSERT(effective.id <= s_gfx.sampler_count && "bind_texture: invalid sampler handle");
+    NT_ASSERT(effective.id != 0 && "apply_texture_bindings: live texture without a default sampler");
+    NT_ASSERT(effective.id <= s_gfx.sampler_count && "apply_texture_bindings: invalid sampler handle");
     nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[effective.id - 1];
     bool compatible = texture_sampler_compatible(texture_slot, &e->desc);
-    NT_ASSERT(compatible && "bind_texture: sampler is incompatible with texture storage");
+    NT_ASSERT(compatible && "apply_texture_bindings: sampler is incompatible with texture storage");
     if (!compatible) {
         return false;
     }
@@ -1587,7 +1587,7 @@ static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler,
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
     }
     if (e->backend == 0) {
-        NT_LOG_ERROR("bind_texture: sampler backend recreation failed");
+        NT_LOG_ERROR("apply_texture_bindings: sampler backend recreation failed");
         return false;
     }
     *out_backend = e->backend;
