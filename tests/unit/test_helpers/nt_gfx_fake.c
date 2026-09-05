@@ -10,6 +10,7 @@
 typedef struct {
     bool used;
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS];
+    uint8_t sampler_classes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
 } nt_gfx_fake_program_t;
 
@@ -17,16 +18,21 @@ static nt_gfx_fake_program_t s_fake_program_template;
 static nt_gfx_fake_program_t *s_fake_program_table;
 static uint32_t s_fake_max_programs;
 
-void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) {
+void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count) { nt_gfx_fake_set_samplers_typed(names, NULL, count); }
+
+void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
     NT_ASSERT(count <= NT_GFX_MAX_TEXTURE_SLOTS);
     s_fake_program_template = (nt_gfx_fake_program_t){.used = true, .sampler_count = count};
     for (uint8_t i = 0; i < count; i++) {
         s_fake_program_template.sampler_hashes[i] = nt_hash32_str(names[i]).value;
+        s_fake_program_template.sampler_classes[i] = sampler_classes != NULL ? sampler_classes[i] : NT_GFX_SAMPLER_CLASS_FLOAT;
     }
 }
 
-nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) {
-    nt_gfx_fake_set_samplers(names, count);
+nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program_typed(names, NULL, count); }
+
+nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
+    nt_gfx_fake_set_samplers_typed(names, sampler_classes, count);
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     return nt_gfx_make_program(vs, fs);
@@ -43,15 +49,18 @@ static uint32_t fake_alloc_slot(nt_gfx_fake_program_t *table, uint32_t capacity)
     return 0;
 }
 
-int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_sampler_unit: requires a live program");
+bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_fake_max_programs && s_fake_program_table[program_backend].used && "program_sampler_info: requires a live program");
+    NT_ASSERT(out_info != NULL && "program_sampler_info: out_info is required");
     const nt_gfx_fake_program_t *rec = &s_fake_program_table[program_backend];
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
         if (rec->sampler_hashes[i] == name_hash) {
-            return (int)i;
+            out_info->unit = i;
+            out_info->sampler_class = rec->sampler_classes[i];
+            return true;
         }
     }
-    return -1;
+    return false;
 }
 
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
@@ -101,6 +110,7 @@ static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
 static bool s_fake_fail_next_pipeline_create;
+static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore;
 static bool s_fake_fail_next_render_target_create;
 static bool s_fake_fail_next_render_target_resize;
@@ -169,6 +179,7 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
+void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore(void) { s_fake_fail_next_backend_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
@@ -224,6 +235,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
     s_fake_fail_next_pipeline_create = false;
+    s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore = false;
     s_fake_fail_next_render_target_create = false;
     s_fake_fail_next_render_target_resize = false;
@@ -491,6 +503,10 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
+    if (s_fake_fail_next_sampler_create) {
+        s_fake_fail_next_sampler_create = false;
+        return 0;
+    }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */
 }
@@ -574,7 +590,9 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 }
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    nt_gfx_sampler_info_t sampler_info = {0};
+    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
+    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     s_fake_last_uniform_program = program_backend;
     if (s_fake_uniform_int_count < NT_GFX_FAKE_UNIFORM_NAMES) {
         s_fake_uniform_int_hashes[s_fake_uniform_int_count] = name_hash;
@@ -627,5 +645,5 @@ bool nt_gfx_backend_recreate_all_resources(void) {
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     s_fake_gpu_caps_probe_count++;
-    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true};
+    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true, .has_float_texture_linear = true};
 }

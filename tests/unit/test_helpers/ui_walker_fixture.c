@@ -15,6 +15,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
@@ -28,7 +29,9 @@
 static nt_material_t make_material(bool with_page_sampler) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = with_page_sampler ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1) : nt_gfx_fake_make_program((const char *const[]){"u_curve_texture", "u_band_texture"}, 2);
+    desc.program = with_page_sampler
+                       ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1)
+                       : nt_gfx_fake_make_program_typed((const char *const[]){"u_curve_texture", "u_band_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_UINT}, 2);
     /* Programs the engine links later (shape renderer) must not inherit this template. */
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.depth_test = false;
@@ -122,6 +125,9 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
         nt_ui_destroy_context(fx->ctx);
         fx->ctx = NULL;
     }
+    /* Texture destruction is pass-forbidden: close the fixture pass first. */
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     if (nt_font_valid(fx->stub_font)) {
         nt_font_destroy(fx->stub_font);
     }
@@ -130,8 +136,6 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_material_shutdown();
     nt_font_shutdown();

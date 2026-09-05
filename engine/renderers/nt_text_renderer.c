@@ -725,16 +725,12 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 // #endregion
 
 // #region Flush
-/* Units come from the pipeline's program, not the material: the material may have died
- * since the batch opened, and the units are fixed at link either way. */
-static void bind_font_textures(nt_pipeline_t pipeline) {
-    const nt_program_t prog = nt_gfx_pipeline_program(pipeline);
-    const int curve_unit = nt_gfx_program_sampler_unit(prog, s_u_curve_texture);
-    const int band_unit = nt_gfx_program_sampler_unit(prog, s_u_band_texture);
-    NT_ASSERT(curve_unit >= 0 && band_unit >= 0 && "text program must sample u_curve_texture and u_band_texture");
-    NT_ASSERT(nt_gfx_program_sampler_mask(prog) == ((1U << (uint32_t)curve_unit) | (1U << (uint32_t)band_unit)) && "text program samples more than the two font textures");
-    nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), NT_SAMPLER_DEFAULT, (uint32_t)curve_unit);
-    nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), NT_SAMPLER_DEFAULT, (uint32_t)band_unit);
+static void bind_font_textures(void) {
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = s_u_curve_texture, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
+        {.name = s_u_band_texture, .texture = nt_font_get_band_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
+    };
+    nt_gfx_apply_texture_bindings(bindings, 2);
     nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
 }
 
@@ -773,9 +769,7 @@ void nt_text_renderer_flush(void) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 
-    if (s_text.font.id != 0) {
-        bind_font_textures(pipeline);
-    }
+    bind_font_textures();
 
     /* Stateless: other renderers draw between two text flushes. */
     if (s_text.material.id != 0) {

@@ -431,11 +431,10 @@ static void frame(void) {
         can_render = false;
     }
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
-
-    /* Must run after nt_gfx_begin_frame(): context_restored is detected there,
-     * and nt_font_step() recreates font GPU textures on that flag. */
+    /* Restore may replace font textures; keep it outside the pass. */
     nt_font_step();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));

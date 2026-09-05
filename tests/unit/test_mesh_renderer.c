@@ -702,7 +702,7 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "resolved_tex"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "texture_pool"));
 }
 
 /* The declared name is what selects the unit, so a material whose program has no such
@@ -730,7 +730,7 @@ void test_material_missing_a_program_sampler_asserts(void) {
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "sampler_mask"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "coverage is incomplete"));
 }
 
 /* The texture goes to the unit the link assigned, not to the material slot index. */
@@ -757,12 +757,12 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     nt_gfx_fake_reset();
     nt_mesh_renderer_draw_list(items, 1);
 
-    /* Slot 0 names u_tex, which the program put on unit 1; slot 1 names u_other, unit 0. */
+    /* Backend application is canonical unit order: u_other/0, then u_tex/1. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))}), nt_gfx_fake_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(1))}), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(1))}), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(test_texture(0))}), nt_gfx_fake_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 

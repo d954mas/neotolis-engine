@@ -6,10 +6,12 @@
 /* Subsequent links copy this sampler list; reset clears observations, not this list.
  * Needed directly only where the engine links the program itself (postfx, text). */
 void nt_gfx_fake_set_samplers(const char *const *names, uint8_t count);
+void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
 /* Links a program whose active samplers are exactly `names`. The fake ignores shader
  * source, so the stages are placeholders. */
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
+nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
 /* Test-only backend observations and failure injection. */
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot);
@@ -37,6 +39,7 @@ void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
+void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_render_target_width(void);
 uint16_t nt_gfx_fake_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_fake_last_render_target_depth(void);

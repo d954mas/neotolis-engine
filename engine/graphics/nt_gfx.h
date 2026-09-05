@@ -71,8 +71,14 @@ typedef struct {
 } nt_sampler_t;
 
 #define NT_SAMPLER_INVALID ((nt_sampler_t){0})
-/* Same value, read as "no override": nt_gfx_bind_texture then uses the texture's asset-baked default. */
+/* Same value, read as "no override": texture binding uses the texture's asset-baked default. */
 #define NT_SAMPLER_DEFAULT NT_SAMPLER_INVALID
+
+typedef struct {
+    nt_hash32_t name;
+    nt_texture_t texture;
+    nt_sampler_t sampler;
+} nt_gfx_texture_binding_t;
 
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
@@ -433,7 +439,7 @@ typedef struct {
     nt_texture_filter_t mag_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
-    bool gen_mipmaps;               /* DEPTH* requires false */
+    bool gen_mipmaps;               /* DEPTH* requires false; RGBA32F requires float filtering + rendering caps */
     const char *label;
 } nt_texture_desc_t;
 
@@ -487,11 +493,12 @@ typedef struct {
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                 /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target; /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    uint32_t max_texture_size;    /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -620,13 +627,6 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
 /* Reports a live program backend, required by nt_gfx_make_pipeline.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
-/* Sampler uniforms are program state: units are fixed at link, nobody writes
- * them. Returns the unit the named sampler reads from, or -1 when the program
- * has no active sampler of that name. Program must be ready (asserted). */
-int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
-/* Every unit the program samples, as 1<<unit bits -- the interface a material
- * must cover. Program must be ready (asserted). */
-uint32_t nt_gfx_program_sampler_mask(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */
@@ -634,9 +634,9 @@ bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_he
 /* Returns INVALID for invalid or stale handles. */
 nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
-/* ---- Draw state ---- Pipeline, vertex input, instance pointers and uniforms are
- * pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass discards them.
- * Texture, sampler and uniform-buffer binds are context state. */
+/* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
+ * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
+ * discards them. Physical texture/sampler and uniform-buffer binds are context state. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -644,10 +644,14 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * either may change without re-binding the other. Every draw requires a bound
  * vertex input (asserted); attribute-less draws bind an empty one. */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-/* Binds the texture on unit `slot` with the sampler it is read through; NT_SAMPLER_DEFAULT selects
- * the texture's asset-baked default. A unit never holds a texture without its sampler. Format/filter
- * compatibility is asserted (rules: docs/spec/core/api-contracts.md, "Texture descriptors"). */
-void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot);
+/* Applies the complete active sampler interface of the bound pipeline's program.
+ * `bindings` is borrowed only for this call and may be NULL iff count is zero.
+ * Inactive names are ignored before their handles are read. Contract violations
+ * assert, including sampling an attachment of the active render target. The
+ * recoverable failures -- processed context loss, a texture husk or failed sampler recreation -- publish no
+ * set and no backend bind; gfx reports them and skips the following draws of that
+ * set, so the caller has nothing to check. */
+void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);
 
 /* ---- Scissor and viewport ----
  *

@@ -13,6 +13,23 @@ typedef enum {
     NT_GFX_STATE_PASS,
 } nt_gfx_render_state_t;
 
+typedef enum {
+    NT_GFX_SAMPLER_CLASS_FLOAT = 0,
+    NT_GFX_SAMPLER_CLASS_SHADOW,
+    NT_GFX_SAMPLER_CLASS_UINT,
+} nt_gfx_sampler_class_t;
+
+typedef struct {
+    uint8_t unit;
+    uint8_t sampler_class;
+} nt_gfx_sampler_info_t;
+
+typedef enum {
+    NT_GFX_TEXTURE_SET_NONE = 0,
+    NT_GFX_TEXTURE_SET_APPLIED,
+    NT_GFX_TEXTURE_SET_FAILED,
+} nt_gfx_texture_set_state_t;
+
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
 /* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an unbind;
@@ -37,9 +54,8 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
-/* Sampler units are program state, written once at link. -1 = not a sampler of
- * that program; the mask carries every unit the program samples. */
-int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash);
+/* Sampler units and classes are immutable program state, recorded at link. */
+bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info);
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 
 /* `slot` is the frontend pool slot: the pool owns allocation, the backend table
@@ -164,6 +180,10 @@ uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
+uint8_t nt_gfx_test_texture_set_state(void);
+bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
+int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
+uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

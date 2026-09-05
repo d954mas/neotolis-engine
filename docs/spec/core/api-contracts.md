@@ -204,20 +204,24 @@ declares its page sampler at slot 0; that slot's resource is never sampled,
 because the renderer substitutes the page texture there per command. A material
 declaring no textures never receives the page and is for shaders that compute
 coverage analytically. Every declared slot the program samples must resolve to a
-texture, in every material-driven renderer — the bind asserts it, because a slot
-that binds nothing leaves the previous material's texture on that unit. Register
-a placeholder with `nt_resource_set_placeholder_texture` to survive async load
-races; a sampler override does not exempt a slot, since the override only picks
-filtering for a texture that still has to exist. A text
+texture, in every material-driven renderer. The renderer submits one complete
+name-keyed set per material transition; gfx resolves backend units, validates
+coverage, and publishes only the full valid set. A rejected set discards the
+logical binding state, so a draw cannot reuse the previous material's textures.
+Register a placeholder with `nt_resource_set_placeholder_texture` to survive
+async load races; a sampler override does not exempt a slot, since the override
+only picks filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
-and `u_band_texture` — and `nt_text_renderer_flush` asserts both: that the
-material declares nothing, and that those two are the program's only samplers.
+and `u_band_texture`. `nt_text_renderer_flush` asserts that the material declares
+nothing and submits its font set unconditionally; gfx's coverage check confirms
+every sampler the program actually links, so a text program that samples only
+one of the two draws with that one.
 
-Every other material declares a slot for every sampler its program uses, and the
-renderer binds each slot at the unit the program assigned that name; the coverage
-is asserted at every material transition, and at every cmd in the sprite renderer. A declared name the program does not sample is
-ignored.
+Every other material declares a slot for every sampler its program uses. A
+renderer applies the complete name-keyed set at every material transition and at
+every command in the sprite renderer. A declared name the program does not
+sample is ignored.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;
@@ -235,14 +239,50 @@ false without mutating the material.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
-A sampler override passed to `nt_gfx_bind_texture` must obey the same format
-restrictions; it cannot replace the explicit texture state with an
+`RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
+both in the texture descriptor and in sampler overrides. Without it, texture
+descriptors require `NEAREST` minification and magnification and no generated
+mipmaps. Sampler overrides may additionally use `NEAREST_MIPMAP_NEAREST` with a
+complete mip chain (including a 1x1 base level). Creating mipmaps requires
+both `has_float_texture_linear` and `has_float_render_target`, because WebGL
+generation requires filterable, color-renderable storage. Unsupported combinations
+assert before creating storage or applying bindings; filters are never substituted.
+`RGBA16F` linear filtering is core and does not require the new capability.
+
+A sampler override passed in `nt_gfx_texture_binding_t` must obey the same
+format restrictions; it cannot replace the explicit texture state with an
 incompatible filter. Depth comparison
 is the one documented exception, and it is sampler state only: `DEPTH*` accepts
 `LINEAR` from a sampler whose `compare_func` is not `NONE`, because the filtering
 then applies to comparison results rather than to raw depth. The texture keeps
 `NEAREST` either way, and the same descriptor field is rejected on non-depth
 storage.
+
+`nt_gfx_apply_texture_bindings` borrows its array only for the call and requires
+an active pass and bound pipeline. The array describes the complete active
+sampler interface by name, not by texture unit. Names absent from the linked
+program are ignored before their handles are inspected; active names are mapped
+to the immutable units recorded at link. Missing or duplicate active names,
+invalid handles, sampler/texture type mismatches, and sampling a color or depth
+attachment of the active render target are developer errors and assert. Resolution
+is atomic: context loss, a texture without live backend storage, or failed
+sampler recreation publishes no
+logical set and issues no backend bind. Those failures are
+recoverable, so gfx reports them and skips the following draws of that set instead
+of returning a status the caller would have to branch on. Context loss means loss
+already observed by `nt_gfx_begin_frame`; material transitions do not poll the
+platform.
+
+The sampler class is part of the linked interface:
+
+| Shader sampler | Required texture | Required sampler state |
+| --- | --- | --- |
+| `sampler2D` | Color, normalized, float, or depth | Comparison disabled |
+| `sampler2DShadow` | Depth | Comparison enabled |
+| `usampler2D` | Unsigned integer | Comparison disabled |
+
+`isampler2D` and sampler dimensions other than 2D are rejected at link because
+the public texture formats cannot satisfy them.
 
 ### Render-target handles
 

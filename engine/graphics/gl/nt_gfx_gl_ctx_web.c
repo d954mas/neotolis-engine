@@ -42,7 +42,7 @@ bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_web
 
 /* Detect GPU capability extensions via JavaScript.
  * gl.getExtension() both checks AND enables the extension.
- * Bit 0 = ASTC, Bit 1 = BC7/BPTC, Bit 2 = ETC2, Bit 3 = float colour attachments. */
+ * Bit 0 = ASTC, Bit 1 = BC7/BPTC, Bit 2 = ETC2, Bit 3 = float colour attachments, Bit 4 = float filtering. */
 // clang-format off
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
@@ -54,6 +54,7 @@ EM_JS(int, nt_gfx_js_detect_gpu_caps, (void), {
     if (gl.getExtension('EXT_texture_compression_bptc')) caps |= 2;
     if (gl.getExtension('WEBGL_compressed_texture_etc')) caps |= 4;
     if (gl.getExtension('EXT_color_buffer_float')) caps |= 8;
+    if (gl.getExtension('OES_texture_float_linear')) caps |= 16;
     return caps;
 });
 #pragma clang diagnostic pop
@@ -77,6 +78,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_bc7 = (bits & 2) != 0;
     caps.has_etc2 = (bits & 4) != 0;
     caps.has_float_render_target = (bits & 8) != 0;
+    caps.has_float_texture_linear = (bits & 16) != 0;
     caps.max_texture_size = (uint32_t)nt_gfx_js_max_texture_size();
     return caps;
 }

@@ -137,17 +137,6 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     return false;
 }
 
-int nt_gfx_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
-    (void)prog;
-    (void)name;
-    return -1;
-}
-
-uint32_t nt_gfx_program_sampler_mask(nt_program_t prog) {
-    (void)prog;
-    return 0;
-}
-
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     (void)pip;
     return (nt_program_t){0};
@@ -169,10 +158,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) { (void)pip; }
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) { (void)vi; }
 
-void nt_gfx_bind_texture(nt_texture_t tex, nt_sampler_t sampler, uint32_t slot) {
-    (void)tex;
-    (void)sampler;
-    (void)slot;
+void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
+    (void)bindings;
+    (void)count;
 }
 
 void nt_gfx_set_scissor(int x, int y, int w, int h) {

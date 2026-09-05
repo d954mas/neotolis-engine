@@ -427,12 +427,12 @@ static void frame(void) {
          * the gate call nt_font_add twice, which asserts on the duplicate. */
     }
 
+    nt_font_step();
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.07F, 0.07F, 0.09F, 1.0F},
         .clear_depth = 1.0F,
     });
-
-    nt_font_step();
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);

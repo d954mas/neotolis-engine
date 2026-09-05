@@ -192,7 +192,9 @@ and game-side structures need no re-binding.
 A font keeps its `nt_font_add` source list of resource handles. Once the context
 is usable, `nt_font_step` recreates non-ready curve and band textures before its
 resource rescan; this does not require source-asset reactivation. Re-adding an
-existing source asserts on the duplicate. An atlas keeps its parsed regions and
+existing source asserts on the duplicate. Call `nt_font_step` after
+`nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
+the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
 
 Programs from file-backed stages come back over following frames: the

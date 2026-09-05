@@ -81,6 +81,7 @@ typedef struct {
 typedef struct {
     uint32_t name_hash;
     GLint location;
+    uint8_t sampler_class;
 } nt_gfx_gl_sampler_unit_t;
 
 typedef struct {
@@ -245,15 +246,18 @@ static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash)
     return program_uniform_location(&s_programs[program_backend], name_hash);
 }
 
-int nt_gfx_backend_program_sampler_unit(uint32_t program_backend, uint32_t name_hash) {
-    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_unit: requires a live program");
+bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
+    NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "program_sampler_info: requires a live program");
+    NT_ASSERT(out_info != NULL && "program_sampler_info: out_info is required");
     const nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     for (uint8_t i = 0; i < prog->sampler_count; i++) {
         if (prog->sampler_units[i].name_hash == name_hash) {
-            return (int)i;
+            out_info->unit = i;
+            out_info->sampler_class = prog->sampler_units[i].sampler_class;
+            return true;
         }
     }
-    return -1;
+    return false;
 }
 
 uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
@@ -1000,7 +1004,9 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     GLint loc = program_get_uniform_h(program_backend, name_hash);
-    NT_ASSERT(nt_gfx_backend_program_sampler_unit(program_backend, name_hash) < 0 && "sampler units are fixed at link; bind the texture at nt_gfx_program_sampler_unit instead");
+    nt_gfx_sampler_info_t sampler_info = {0};
+    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
+    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -1142,13 +1148,20 @@ static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
 
 /* Only 2D samplers have a texture-unit story here; the rest would bind
  * silently wrong, so they are rejected at link instead. */
-static bool uniform_type_is_sampler(GLenum utype) {
+static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_class) {
     switch (utype) {
     case GL_SAMPLER_2D:
-    case GL_SAMPLER_2D_SHADOW:
-    case GL_INT_SAMPLER_2D:
-    case GL_UNSIGNED_INT_SAMPLER_2D:
+        *out_class = NT_GFX_SAMPLER_CLASS_FLOAT;
         return true;
+    case GL_SAMPLER_2D_SHADOW:
+        *out_class = NT_GFX_SAMPLER_CLASS_SHADOW;
+        return true;
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+        *out_class = NT_GFX_SAMPLER_CLASS_UINT;
+        return true;
+    case GL_INT_SAMPLER_2D:
+        NT_ASSERT(false && "program sampler requires a signed integer texture format");
+        return false;
     case GL_SAMPLER_3D:
     case GL_SAMPLER_CUBE:
     case GL_SAMPLER_CUBE_SHADOW:
@@ -1160,6 +1173,34 @@ static bool uniform_type_is_sampler(GLenum utype) {
     case GL_UNSIGNED_INT_SAMPLER_3D:
     case GL_UNSIGNED_INT_SAMPLER_CUBE:
     case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+#ifndef NT_PLATFORM_WEB
+    /* Desktop-only families; absent from the GLES3 headers. */
+    case GL_SAMPLER_CUBE_MAP_ARRAY_ARB:
+    case GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW_ARB:
+    case GL_INT_SAMPLER_CUBE_MAP_ARRAY_ARB:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY_ARB:
+    case GL_SAMPLER_1D:
+    case GL_SAMPLER_1D_SHADOW:
+    case GL_SAMPLER_1D_ARRAY:
+    case GL_SAMPLER_1D_ARRAY_SHADOW:
+    case GL_SAMPLER_2D_RECT:
+    case GL_SAMPLER_2D_RECT_SHADOW:
+    case GL_SAMPLER_2D_MULTISAMPLE:
+    case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_SAMPLER_BUFFER:
+    case GL_INT_SAMPLER_1D:
+    case GL_INT_SAMPLER_1D_ARRAY:
+    case GL_INT_SAMPLER_2D_RECT:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_INT_SAMPLER_BUFFER:
+    case GL_UNSIGNED_INT_SAMPLER_1D:
+    case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+#endif
         NT_ASSERT(false && "program declares an unsupported sampler type");
         return false;
     default:
@@ -1207,14 +1248,18 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
             }
             GLint loc = glGetUniformLocation(program, uname);
             if (loc >= 0) {
-                if (uniform_type_is_sampler(utype)) {
+                const uint32_t name_hash = nt_hash32_str(uname).value;
+                nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
+                if (uniform_sampler_class(utype, &sampler_class)) {
                     NT_ASSERT(rec->sampler_count < NT_GFX_MAX_TEXTURE_SLOTS && "program declares more samplers than NT_GFX_MAX_TEXTURE_SLOTS");
-                    rec->sampler_units[rec->sampler_count].name_hash = nt_hash32_str(uname).value;
-                    rec->sampler_units[rec->sampler_count].location = loc;
+                    const uint8_t unit = rec->sampler_count;
+                    rec->sampler_units[unit].name_hash = name_hash;
+                    rec->sampler_units[unit].location = loc;
+                    rec->sampler_units[unit].sampler_class = (uint8_t)sampler_class;
                     rec->sampler_count++;
                 } else {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
-                        out[uniform_count].name_hash = nt_hash32_str(uname).value;
+                        out[uniform_count].name_hash = name_hash;
                         out[uniform_count].location = loc;
                     }
                     uniform_count++;

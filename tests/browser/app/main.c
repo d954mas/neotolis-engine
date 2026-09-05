@@ -258,6 +258,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
@@ -337,6 +338,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
         'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
+        'float_texture_linear': function() { return _nt_test_float_texture_linear() !== 0; },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
         'field_css': function() {
@@ -488,12 +490,12 @@ static void frame(void) {
         s_gpu_restore_pending = !gpu_restore_step();
     }
 
+    nt_font_step();
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.07F, 0.08F, 0.10F, 1.0F},
         .clear_depth = 1.0F,
     });
-
-    nt_font_step();
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);

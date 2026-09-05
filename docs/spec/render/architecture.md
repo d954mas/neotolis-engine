@@ -113,8 +113,9 @@ loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
-explicitly. Binding a husk texture reports once and leaves the unit as it was;
-binding a husk buffer, or writing into any husk, asserts.
+explicitly. Applying a texture set containing a husk reports once and issues no
+texture or sampler bind, and the draws of that set are skipped; binding a husk
+buffer, or writing into any husk, asserts.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -133,7 +134,14 @@ front-end mirror), while uniform writes are always issued. The
 backend GL cache persists across passes and frames; ground state is issued once
 at backend init and at context restore. Sampler uniforms are not written at all:
 their units are fixed at link and belong to the program, so no material can
-redirect another's texture. A vec4 param a material
+redirect another's texture. `nt_gfx_apply_texture_bindings` accepts a complete
+name-keyed set for the bound program, resolves it into those units,
+then publishes the logical set and issues backend binds together.
+A missing or duplicate active name, invalid handle, or sampler-type mismatch
+asserts before backend binds; inactive names are ignored before their handles
+are inspected. Context loss, a texture husk, or failed sampler recreation
+publishes no set and issues no backend bind: gfx reports the failure and skips
+the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program; the
 planned fix is per-material param UBOs bound at material transitions (#133).
 Until that lands, two materials sharing one program must declare the same
@@ -186,21 +194,14 @@ program state and the new pipeline may sit on another program — one flush can
 hold one material id on two programs when a game replaces the material's program
 between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
 nothing for this: a pipeline change there always implies a material change.
-Texture and sampler travel together: `nt_gfx_bind_texture` takes the
-sampler the texture is read through, so a material without an override restores
-the texture's asset default in the same bind. The renderer keeps no mirror of
-those binds — it issues one `nt_gfx_bind_texture` per sampled slot at every
-material transition (the sprite renderer at every cmd) and the backend GL cache
-drops the repeats. The unit is not the material's slot
-index: each declared slot is bound at `nt_gfx_program_sampler_unit` for its name,
-a name the program does not sample is skipped, and the coverage assert compares
-the units covered against the program's sampler mask — a material must declare
-every sampler its program uses. That check runs per material transition in the
-mesh renderer and per cmd in the sprite renderer, where one material's atlas page
-can change on a page split. The program and its mask are read once per pipeline
-change, not per cmd. The text renderer
-draws once per flush and other renderers draw in between, so it uses the
-stateless half of the helper and replays unconditionally.
+Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
+without an override selects the texture's asset default. At every material
+transition (every sprite command), the renderer submits the complete semantic
+set once. The gfx front-end maps names to the bound program's canonical units,
+ignores inactive declarations, validates complete active coverage, and calls the
+backend only after the whole set resolves. The backend GL cache drops repeated
+physical binds. The text renderer draws once per flush and other renderers draw
+in between, so it also submits its complete set unconditionally.
 
 The material-driven mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
@@ -249,15 +250,22 @@ bind or unbind render-target state outside the pass descriptor.
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
 state; pipeline write masks affect draws, not the next pass initialization. Bound
-pipeline and vertex input are pass-scoped: `begin_pass` discards them; pipeline
-and vertex-input binds, instance-buffer re-pointing, uniform writes and draws
-outside a pass assert. Texture, sampler and uniform-buffer binds are context
-state — they are not pass-scoped and do not assert. The clear forces the depth
+pipeline, vertex input, and the logical complete texture set are pass-scoped:
+`begin_pass` discards them. The texture set is additionally tied to the bound
+program and is discarded when that program changes or when the bound pipeline is
+destroyed. Pipeline and vertex-input binds, texture-set application,
+instance-buffer re-pointing, uniform writes and draws outside a pass assert.
+Destroying a texture or a render target inside a pass asserts: pass-scoped draw
+state may still sample it.
+Physical texture/sampler GL bindings and uniform-buffer binds remain context
+state and the backend deduplicates them across passes. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
-`nt_texture_t` handles for later sampling. Backend FBO/renderbuffer ids stay
-private to the concrete graphics implementation.
+`nt_texture_t` handles for later sampling. Sampling either attachment while its
+target is the active pass would create a framebuffer feedback loop and asserts
+before any backend bind. Backend FBO/renderbuffer ids stay private to the concrete
+graphics implementation.
 
 `nt_render_target_desc_t` explicitly selects the color format and default sampler
 state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
@@ -299,7 +307,7 @@ description is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one
 still cannot filter depth.
 
-A texture and the sampler it is read through are bound in one call, so the
+A texture and the sampler it is read through form one semantic binding, so the
 sampler is validated against that texture and not against whatever the unit held;
 `NT_SAMPLER_DEFAULT` selects the texture's own default. A comparison sampler is
 therefore rejected against a non-depth texture in the same call, and a unit never
@@ -315,6 +323,17 @@ GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Sampler overrides with a mipmap minification filter require complete mip
 storage for the bound texture. A 1x1 base level is already a complete chain.
+
+`gpu_caps.has_float_texture_linear` exposes `OES_texture_float_linear` on WebGL 2
+and core float filtering on desktop GL. It is probed and enabled at initialization
+and context restore, alongside the other GPU capabilities. `RGBA32F` texture
+defaults and sampler overrides require it for any linear filtering. Without it,
+`NEAREST` remains valid; sampler overrides may also use `NEAREST_MIPMAP_NEAREST`
+with a complete chain. Unsupported filter choices assert without silently
+changing the requested sampler.
+RGBA32F mipmap generation additionally requires `has_float_render_target`:
+WebGL requires the source storage to be both filterable and color-renderable.
+This does not add RGBA32F render-target support to the engine.
 
 This capability supplies low-level targets and depth textures only. It does not
 define light cameras, PCF, cascades, shadow atlases, material shadow integration,

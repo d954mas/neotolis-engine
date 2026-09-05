@@ -988,9 +988,9 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     mdesc.cull_mode = NT_CULL_NONE;
     mdesc.textures[0].name = "u_texture";
     mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
-    /* u_other exists only so the coverage assert passes; any resolved texture serves. */
+    /* A distinct page makes swapped or duplicated bindings observable. */
     mdesc.textures[1].name = "u_other";
-    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 0);
+    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_page_on_unit_1";
     nt_material_t mat = nt_material_create(&mdesc);
@@ -1003,8 +1003,10 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     nt_sprite_renderer_flush();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1073,7 +1075,7 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "resolved_tex"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "texture_pool"));
 }
 
 /* Flush resolves units from the pipeline's program, so a material that leaves one of
@@ -1097,7 +1099,7 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_flush());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "sampler_mask"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "coverage is incomplete"));
 }
 
 /* A declared name the program never samples maps to no unit: the slot is skipped and

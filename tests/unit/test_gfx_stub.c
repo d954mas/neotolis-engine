@@ -25,8 +25,6 @@ static void test_stub_has_no_graphics_resources(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid((nt_program_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_texture_ready((nt_texture_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready((nt_render_target_t){1}));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit((nt_program_t){1}, (nt_hash32_t){1}));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_program_sampler_mask((nt_program_t){1}));
     TEST_ASSERT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){1}));
     TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
 }
@@ -60,7 +58,7 @@ static void test_stub_drops_draws_and_state_changes(void) {
     nt_gfx_begin_pass(NULL);
     nt_gfx_bind_pipeline((nt_pipeline_t){1});
     nt_gfx_bind_vertex_input((nt_vertex_input_t){1});
-    nt_gfx_bind_texture((nt_texture_t){1}, (nt_sampler_t){1}, 0);
+    nt_gfx_apply_texture_bindings(NULL, 0);
     nt_gfx_set_uniform_int((nt_hash32_t){1}, 7);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_draw(0, 3);

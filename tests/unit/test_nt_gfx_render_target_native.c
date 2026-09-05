@@ -115,7 +115,9 @@ static void test_depth_texture_uses_explicit_format_and_wrap(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_depth(target), NT_SAMPLER_DEFAULT, 0);
+    const nt_texture_t depth_texture = nt_gfx_render_target_depth(target);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(depth_texture), 0);
+    nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(depth_texture)), 0);
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
@@ -472,7 +474,9 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(shadow_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, comparison, (uint32_t)nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(shadow_pip), nt_hash32_str("u_shadow")));
+    const nt_gfx_texture_binding_t shadow_binding = {.name = nt_hash32_str("u_shadow"), .texture = depth_tex, .sampler = comparison};
+    nt_gfx_apply_texture_bindings(&shadow_binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
@@ -497,7 +501,9 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
     nt_gfx_bind_pipeline(raw_pip);
     nt_gfx_bind_vertex_input(fullscreen_vi);
-    nt_gfx_bind_texture(depth_tex, raw, (uint32_t)nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(raw_pip), nt_hash32_str("u_depth")));
+    const nt_gfx_texture_binding_t raw_binding = {.name = nt_hash32_str("u_depth"), .texture = depth_tex, .sampler = raw};
+    nt_gfx_apply_texture_bindings(&raw_binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
@@ -528,7 +534,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
-    nt_gfx_bind_texture(nt_gfx_render_target_color(target), NT_SAMPLER_DEFAULT, 0);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_color(target)), 0);
     GLint internal_format = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);
@@ -545,6 +551,47 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     TEST_ASSERT_INT_WITHIN(10, 250, (int)(pixels[1] * 1000.0F));
 
     nt_gfx_destroy_render_target(target);
+}
+
+static void test_rgba32f_linear_filtering_and_generated_mips(void) {
+    TEST_ASSERT_TRUE(nt_gfx_gpu_caps()->has_float_texture_linear);
+    static const float texels[16] = {1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1};
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 2,
+        .height = 2,
+        .format = NT_TEXTURE_FORMAT_RGBA32F,
+        .data = texels,
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .gen_mipmaps = true,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    nt_pipeline_t pipeline = make_test_pipeline("void main() {\n"
+                                                "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+                                                "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+                                                "}\n",
+                                                "precision highp float;\n"
+                                                "uniform sampler2D u_tex;\n"
+                                                "out vec4 frag_color;\n"
+                                                "void main() {\n"
+                                                "    frag_color = (textureLod(u_tex, vec2(0.5), 0.0) + textureLod(u_tex, vec2(0.5), 1.0)) * 0.5;\n"
+                                                "}\n",
+                                                false);
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(vi);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    /* Both the bilinear base lookup and the reduced mip must average the four colors. */
+    assert_rgba(pixel, 1, 128, 128, 128, 255);
+    nt_gfx_destroy_texture(texture);
 }
 
 static void test_depth_buffer_uses_explicit_format(void) {
@@ -1024,34 +1071,51 @@ static void assert_distinct_units_in_range(const int *units, uint32_t count) {
     }
 }
 
-static void test_every_supported_sampler_type_gets_its_own_unit(void) {
+static void test_supported_sampler_types_retain_their_classes(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     static const char *fragment_source = "precision highp float;\n"
                                          "uniform sampler2D u_color;\n"
-                                         "uniform highp isampler2D u_signed_ids;\n"
                                          "uniform highp usampler2D u_ids;\n"
                                          "uniform highp sampler2DShadow u_shadow;\n"
                                          "uniform float u_scale;\n"
                                          "out vec4 frag_color;\n"
                                          "void main() {\n"
                                          "    vec4 c = texture(u_color, vec2(0.5));\n"
-                                         "    ivec4 si = texture(u_signed_ids, vec2(0.5));\n"
                                          "    uvec4 i = texture(u_ids, vec2(0.5));\n"
                                          "    float s = texture(u_shadow, vec3(0.5));\n"
-                                         "    frag_color = (c + vec4(si) + vec4(i) + vec4(s)) * u_scale;\n"
+                                         "    frag_color = (c + vec4(i) + vec4(s)) * u_scale;\n"
                                          "}\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
 
-    const int units[4] = {
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_color")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_signed_ids")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_ids")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_shadow")),
+    nt_gfx_sampler_info_t infos[3] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_color"), &infos[0]));
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_ids"), &infos[1]));
+    TEST_ASSERT_TRUE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_shadow"), &infos[2]));
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_FLOAT, infos[0].sampler_class);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_UINT, infos[1].sampler_class);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_SAMPLER_CLASS_SHADOW, infos[2].sampler_class);
+
+    const int units[3] = {
+        infos[0].unit,
+        infos[1].unit,
+        infos[2].unit,
     };
-    assert_distinct_units_in_range(units, 4);
-    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_program_sampler_mask(prog));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_scale")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_missing")));
+    assert_distinct_units_in_range(units, 3);
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_test_program_sampler_mask(prog));
+    TEST_ASSERT_FALSE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_scale"), &infos[0]));
+    TEST_ASSERT_FALSE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_missing"), &infos[0]));
+}
+
+static void test_signed_sampler_type_asserts_at_link(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform highp isampler2D u_signed_ids;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(texture(u_signed_ids, vec2(0.5))); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer texture format"));
 }
 
 static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
@@ -1064,12 +1128,12 @@ static void test_vertex_stage_and_array_samplers_get_distinct_units(void) {
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
 
     const int units[3] = {
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_heights")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_heights")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
     };
     assert_distinct_units_in_range(units, 3);
-    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_program_sampler_mask(prog));
+    TEST_ASSERT_EQUAL_UINT32(0x7U, nt_gfx_test_program_sampler_mask(prog));
 }
 
 static void test_reflection_reports_active_uniforms_with_glsl_declarations(void) {
@@ -1087,17 +1151,17 @@ static void test_reflection_reports_active_uniforms_with_glsl_declarations(void)
                                          "    + read_tex(a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x, vec2(0.5)); }\n";
     nt_program_t prog = make_sampler_program(vertex_source, fragment_source);
     const int units[] = {
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b")),
-        nt_gfx_program_sampler_unit(prog, nt_hash32_str("a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_arr[0]")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_arr[1]")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_b")),
+        nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("a_very_long_sampler_name_that_goes_well_past_eighty_characters_to_check_the_buffer_limit_x")),
     };
     assert_distinct_units_in_range(units, 4);
-    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_program_sampler_mask(prog));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_comment")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_unused")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("tex")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_arr")));
+    TEST_ASSERT_EQUAL_UINT32(0xFU, nt_gfx_test_program_sampler_mask(prog));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_comment")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_unused")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("tex")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_arr")));
 }
 
 /* An unsupported sampler type has no texture-unit story, so it is rejected at link
@@ -1112,6 +1176,52 @@ static void test_program_with_an_unsupported_sampler_type_asserts(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
+}
+
+/* Desktop GL accepts sampler types GLES never has; they are rejected the same way. */
+static void test_program_with_a_desktop_only_sampler_type_asserts(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2DRect u_rect;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(u_rect, vec2(0.0)); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
+}
+
+static void test_cube_array_sampler_types_assert_at_link(void) {
+    if (GLAD_GL_ARB_texture_cube_map_array == 0) {
+        TEST_IGNORE_MESSAGE("GL_ARB_texture_cube_map_array is unavailable");
+    }
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_sources[] = {
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform samplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = texture(u_env, vec4(0.0, 0.0, 1.0, 0.0)); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform samplerCubeArrayShadow u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0), 0.5)); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform isamplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0))); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform usamplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0))); }\n",
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    for (size_t i = 0; i < sizeof(fragment_sources) / sizeof(fragment_sources[0]); i++) {
+        nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_sources[i]});
+        NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
+        nt_gfx_destroy_shader(fs);
+    }
+    nt_gfx_destroy_shader(vs);
 }
 
 /* One sampler past the unit budget is a link failure, not a sampler on unit 0. */
@@ -1171,8 +1281,8 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     nt_texture_t tex_red = make_unit_test_texture(red);
     nt_texture_t tex_green = make_unit_test_texture(green);
 
-    const int unit_a = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_a"));
-    const int unit_b = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b"));
+    const int unit_a = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_a"));
+    const int unit_b = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_b"));
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_a);
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_b);
     TEST_ASSERT_NOT_EQUAL_INT(unit_a, unit_b);
@@ -1182,8 +1292,12 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_a);
-    nt_gfx_bind_texture(tex_green, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_a"), .texture = tex_red, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = tex_green, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
@@ -1217,8 +1331,8 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     nt_texture_t tex_red = make_unit_test_texture(red);
     nt_texture_t tex_green = make_unit_test_texture(green);
 
-    const int unit_a = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_a"));
-    const int unit_b = nt_gfx_program_sampler_unit(prog, nt_hash32_str("u_b"));
+    const int unit_a = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_a"));
+    const int unit_b = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_b"));
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_a);
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, unit_b);
 
@@ -1230,13 +1344,19 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     bind_empty_vertex_input();
 
     /* First draw: red through u_a, green through u_b. */
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_a);
-    nt_gfx_bind_texture(tex_green, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
+    nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_a"), .texture = tex_red, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = tex_green, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
 
     /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
-    nt_gfx_bind_texture(tex_red, NT_SAMPLER_DEFAULT, (uint32_t)unit_b);
+    bindings[1].texture = tex_red;
+    nt_gfx_apply_texture_bindings(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
     nt_gfx_end_pass();
@@ -1262,7 +1382,7 @@ static void test_set_uniform_int_on_a_sampler_asserts(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1); /* a plain int still writes */
     NT_TEST_EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_a"), 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program_sampler_unit"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "apply_texture_bindings"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -1292,7 +1412,7 @@ static void test_linking_a_program_keeps_the_bound_pipelines_program_current(voi
     bind_empty_vertex_input();
 
     nt_program_t linked_under_the_bind = make_sampler_program(vertex_source, sampler_fs);
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(linked_under_the_bind, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(linked_under_the_bind, nt_hash32_str("u_a")));
 
     const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), green);
@@ -1389,6 +1509,7 @@ int main(void) {
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
+    RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
     RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
@@ -1401,10 +1522,13 @@ int main(void) {
     RUN_TEST(test_uniform_cache_expands_only_terminal_struct_array_indices);
     RUN_TEST(test_uniform_cache_asserts_when_array_elements_exceed_capacity);
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
-    RUN_TEST(test_every_supported_sampler_type_gets_its_own_unit);
+    RUN_TEST(test_supported_sampler_types_retain_their_classes);
+    RUN_TEST(test_signed_sampler_type_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);
+    RUN_TEST(test_program_with_a_desktop_only_sampler_type_asserts);
+    RUN_TEST(test_cube_array_sampler_types_assert_at_link);
     RUN_TEST(test_program_with_more_samplers_than_units_asserts);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);

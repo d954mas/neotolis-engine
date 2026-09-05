@@ -46,6 +46,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     }
     /* Float colour attachments are core in GL 3.0+ — no extension needed */
     caps.has_float_render_target = gl_ver >= 30;
+    caps.has_float_texture_linear = gl_ver >= 30;
 
     GLint max_tex_size = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex_size);

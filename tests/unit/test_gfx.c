@@ -534,15 +534,15 @@ void test_gfx_sampler_queries_use_each_program_backend(void) {
     nt_program_t first = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
     nt_program_t second = make_sampler_program((const char *const[]){"u_b"}, 1);
 
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_INT(1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_b")));
-    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(first));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(first, nt_hash32_str("u_missing")));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_INT(1, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_test_program_sampler_mask(first));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(first, nt_hash32_str("u_missing")));
 
     /* The second program's table is its own: same name, its own unit. */
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_b")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(second, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(second));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(second, nt_hash32_str("u_b")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(second, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_test_program_sampler_mask(second));
 
     nt_gfx_destroy_program(second);
     nt_gfx_destroy_program(first);
@@ -550,15 +550,420 @@ void test_gfx_sampler_queries_use_each_program_backend(void) {
 
 void test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table(void) {
     nt_program_t old = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
-    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_program_sampler_mask(old));
+    TEST_ASSERT_EQUAL_UINT32(0x3U, nt_gfx_test_program_sampler_mask(old));
     nt_gfx_destroy_program(old);
 
     nt_program_t fresh = make_sampler_program((const char *const[]){"u_c"}, 1);
-    TEST_ASSERT_EQUAL_INT(0, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_c")));
-    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_program_sampler_unit(fresh, nt_hash32_str("u_a")));
-    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_program_sampler_mask(fresh));
+    TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(fresh, nt_hash32_str("u_c")));
+    TEST_ASSERT_EQUAL_INT(-1, nt_gfx_test_program_sampler_unit(fresh, nt_hash32_str("u_a")));
+    TEST_ASSERT_EQUAL_UINT32(0x1U, nt_gfx_test_program_sampler_mask(fresh));
 
     nt_gfx_destroy_program(fresh);
+}
+
+static nt_texture_t make_binding_test_texture(uint8_t marker) {
+    uint8_t pixels[4 * 4 * 4] = {marker};
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = pixels,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    return texture;
+}
+
+static nt_texture_t make_binding_test_texture_format(nt_texture_format_t format) {
+    const void *data = s_test_pixels_4x4;
+    if (format == NT_TEXTURE_FORMAT_DEPTH24) {
+        data = NULL;
+    } else if (format == NT_TEXTURE_FORMAT_RG16UI) {
+        data = s_test_rg16ui_4x4;
+    }
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = data,
+        .format = format,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    return texture;
+}
+
+static void begin_texture_binding_test_pass(nt_program_t program) {
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+}
+
+static void end_texture_binding_test_pass(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static void apply_texture_set(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
+    nt_gfx_apply_texture_bindings(bindings, count);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+}
+
+void test_gfx_apply_texture_bindings_maps_names_to_canonical_units(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t texture_a = make_binding_test_texture(1);
+    nt_texture_t texture_b = make_binding_test_texture(2);
+    begin_texture_binding_test_pass(program);
+
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_b"), .texture = texture_b, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_a"), .texture = texture_a, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(bindings, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(1));
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void) {
+    nt_program_t program = make_sampler_program(NULL, 0);
+    begin_texture_binding_test_pass(program);
+
+    /* bind_pipeline already applies the empty set, so a samplerless program draws without apply. */
+    bind_test_vertex_input();
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
+    apply_texture_set(NULL, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t texture_a = make_binding_test_texture(1);
+    nt_texture_t texture_b = make_binding_test_texture(2);
+    begin_texture_binding_test_pass(program);
+
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_a"), .texture = texture_a, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = texture_b, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(bindings, 2);
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 1));
+    EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(NULL, 0));
+
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_ignores_inactive_entry_before_handle(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_active"}, 1);
+    nt_texture_t texture = make_binding_test_texture(1);
+    begin_texture_binding_test_pass(program);
+
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_inactive"), .texture = {0}, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_active"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(bindings, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_active"}, 1);
+    nt_texture_t texture = make_binding_test_texture(1);
+    begin_texture_binding_test_pass(program);
+
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_active"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_active"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_enforces_uint_sampler_class(void) {
+    const uint8_t sampler_class = NT_GFX_SAMPLER_CLASS_UINT;
+    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_ids"}, &sampler_class, 1);
+    nt_texture_t color = make_binding_test_texture_format(NT_TEXTURE_FORMAT_RGBA8);
+    nt_texture_t integer = make_binding_test_texture_format(NT_TEXTURE_FORMAT_RG16UI);
+    begin_texture_binding_test_pass(program);
+
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_ids"), .texture = color, .sampler = NT_SAMPLER_DEFAULT};
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+
+    binding.texture = integer;
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(integer), nt_gfx_fake_bound_texture_at(0));
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_enforces_shadow_sampler_class(void) {
+    const uint8_t sampler_class = NT_GFX_SAMPLER_CLASS_SHADOW;
+    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_shadow"}, &sampler_class, 1);
+    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
+    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .compare_func = NT_COMPARE_LESS,
+    });
+    begin_texture_binding_test_pass(program);
+
+    /* Raw depth without comparison is a plain sampler2D read; a shadow sampler must compare. */
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = NT_SAMPLER_DEFAULT};
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+
+    binding.sampler = compare;
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
+    end_texture_binding_test_pass();
+}
+
+/* sampler2D accepts colour and raw depth, but neither an integer texture nor a comparison sampler. */
+void test_gfx_apply_texture_bindings_enforces_float_sampler_class(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t integer = make_binding_test_texture_format(NT_TEXTURE_FORMAT_RG16UI);
+    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
+    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .compare_func = NT_COMPARE_LESS,
+    });
+    begin_texture_binding_test_pass(program);
+
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = integer, .sampler = NT_SAMPLER_DEFAULT};
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    binding.texture = depth;
+    binding.sampler = compare;
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+
+    binding.sampler = NT_SAMPLER_DEFAULT;
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    /* Stale handle: the slot is live again under a new generation. */
+    nt_texture_t stale = make_binding_test_texture(2);
+    nt_gfx_destroy_texture(stale);
+    nt_texture_t reused = make_binding_test_texture(3);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(stale.id), nt_pool_slot_index(reused.id));
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t stale_binding = {.name = nt_hash32_str("u_tex"), .texture = stale, .sampler = NT_SAMPLER_DEFAULT};
+
+    nt_gfx_begin_frame();
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* outside a pass */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* no pipeline bound */
+    nt_gfx_bind_pipeline(pipeline);
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(NULL, 1));
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&stale_binding, 1));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) {
+    nt_program_t first_program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_program_t second_program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_pipeline_t first_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first_program});
+    nt_pipeline_t same_program_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first_program, .depth_test = true});
+    nt_pipeline_t second_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = second_program});
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(first_pipeline);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+
+    nt_gfx_bind_pipeline(same_program_pipeline);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    bind_test_vertex_input();
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_bind_pipeline(second_pipeline);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    EXPECT_ASSERT(nt_gfx_draw(0, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    begin_texture_binding_test_pass(program);
+    bind_test_vertex_input();
+
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 0, 1));
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
+    EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 0, 0, 1));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t texture = make_binding_test_texture(1);
+    begin_texture_binding_test_pass(program);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+
+    /* Loss is observed by begin_frame only: a material transition never polls the platform. */
+    nt_gfx_fake_set_context_lost(true);
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    nt_gfx_fake_set_context_lost(false);
+
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+    end_texture_binding_test_pass();
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    /* The loss branch itself drops the set; apply must not be what clears it. */
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+}
+
+/* The husk is second so the first entry proves the whole set is discarded, not just the tail. */
+void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
+    nt_texture_t husk = make_binding_test_texture(1);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
+    /* The restored frame rejects draws; the skip below has to be the set's doing. */
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t live = make_binding_test_texture(2);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    bind_test_vertex_input();
+    nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_a"), .texture = live, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = live, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(bindings, 2);
+    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
+    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+    const uint32_t draw_calls = nt_gfx_get_frame_draw_calls();
+
+    bindings[1].texture = husk;
+    nt_gfx_apply_texture_bindings(bindings, 2);
+
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+    /* A reported failure skips the draw instead of drawing the previous set. */
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_get_frame_draw_calls());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
+    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+
+    nt_texture_t color = make_binding_test_texture(1);
+    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
+    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_color", "u_shadow"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_SHADOW}, 2);
+    begin_texture_binding_test_pass(program);
+    bind_test_vertex_input();
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_color"), .texture = color, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare},
+    };
+    nt_gfx_fake_fail_next_sampler_create();
+    nt_gfx_apply_texture_bindings(bindings, 2);
+
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    nt_gfx_draw(0, 3);
+    nt_gfx_draw_instanced(0, 3, 1);
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+
+    apply_texture_set(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
+    nt_gfx_draw_indexed(0, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    end_texture_binding_test_pass();
+}
+
+void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+
+    nt_gfx_bind_pipeline(pipeline);
+    apply_texture_set(&binding, 1);
+    nt_gfx_bind_pipeline((nt_pipeline_t){UINT32_MAX});
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+
+    nt_gfx_bind_pipeline(pipeline);
+    apply_texture_set(&binding, 1);
+    nt_gfx_destroy_program(program);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    end_texture_binding_test_pass();
+}
+
+/* A pass may still sample the texture; lifetime changes belong outside passes. */
+void test_gfx_destroy_texture_inside_pass_asserts(void) {
+    nt_texture_t texture = make_binding_test_texture(1);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
+    end_texture_binding_test_pass();
 }
 
 /* ---- Program: destroy takes NT_PROGRAM_INVALID, nothing else stale ---- */
@@ -1066,27 +1471,6 @@ void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = false,
     }));
-}
-
-/* ---- Texture: bind with valid handle ---- */
-
-void test_gfx_bind_texture_valid(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0);
-    nt_gfx_destroy_texture(tex);
-}
-
-/* ---- Texture: bind with invalid handle is no-op ---- */
-
-void test_gfx_bind_texture_invalid(void) {
-    nt_texture_t tex = {.id = 0};
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* must not crash */
 }
 
 /* ---- Texture: destroy and reuse slot ---- */
@@ -1866,6 +2250,81 @@ void test_gfx_make_texture_rgba16f(void) {
     nt_gfx_destroy_texture(tex);
 }
 
+void test_gfx_rgba32f_filters_require_capability(void) {
+    nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    nt_texture_t nearest = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nearest));
+    nt_gfx_destroy_texture(nearest);
+
+    desc.min_filter = NT_FILTER_LINEAR;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    desc.min_filter = NT_FILTER_NEAREST;
+    desc.mag_filter = NT_FILTER_LINEAR;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+
+    /* Half-float filtering is core even without either float extension. */
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    desc.format = NT_TEXTURE_FORMAT_RGBA16F;
+    desc.min_filter = NT_FILTER_LINEAR;
+    nt_texture_t half = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(half));
+    nt_gfx_destroy_texture(half);
+
+    g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+    desc.format = NT_TEXTURE_FORMAT_RGBA32F;
+    nt_texture_t linear = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(linear));
+    nt_gfx_destroy_texture(linear);
+}
+
+void test_gfx_rgba32f_mipmap_generation_requires_both_capabilities(void) {
+    const float pixels[2 * 2 * 4] = {0};
+    const nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F, .data = pixels, .gen_mipmaps = true};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    nt_texture_t texture = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    nt_gfx_destroy_texture(texture);
+}
+
+void test_gfx_rgba32f_sampler_overrides_require_capability(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    /* A 1x1 chain isolates filtering support from mip completeness. */
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA32F});
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture};
+    const nt_sampler_desc_t filtered[] = {
+        {.min_filter = NT_FILTER_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST}, {.min_filter = NT_FILTER_NEAREST_MIPMAP_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR},
+        {.mag_filter = NT_FILTER_LINEAR},
+    };
+    for (uint32_t i = 0; i < sizeof(filtered) / sizeof(filtered[0]); i++) {
+        binding.sampler = nt_gfx_make_sampler(&filtered[i]);
+        g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+        uint32_t binds = nt_gfx_fake_bound_texture_count();
+        uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+        EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+        TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+        TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
+        TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+
+        g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+        apply_texture_set(&binding, 1);
+        TEST_ASSERT_EQUAL_UINT32(binds + 1, nt_gfx_fake_bound_texture_count());
+    }
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    binding.sampler = NT_SAMPLER_DEFAULT;
+    apply_texture_set(&binding, 1);
+    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST});
+    apply_texture_set(&binding, 1);
+    end_texture_binding_test_pass();
+}
+
 /* ---- RG16UI texture creation ---- */
 
 void test_gfx_make_texture_rg16ui(void) {
@@ -2036,60 +2495,6 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
-    nt_gfx_end_frame();
-}
-
-/* A texture husk can also be a render-target attachment whose restore failed --
- * a runtime GPU failure, so the bind reports it instead of trapping. */
-void test_gfx_bind_texture_on_husk_logs_and_skips_backend(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .data = s_test_pixels_4x4,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_bind_texture(tex, NT_SAMPLER_DEFAULT, 0); /* logs, no trap */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    /* The sampler bind rides on the texture bind: skipping one skips both. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
-    nt_gfx_end_frame();
-}
-
-/* The sampler is validated against the texture of the same call, so an override
- * that cannot sample that storage is rejected whatever the unit held before. */
-void test_gfx_bind_texture_rejects_sampler_incompatible_with_its_texture(void) {
-    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .data = s_test_pixels_4x4,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .format = NT_TEXTURE_FORMAT_DEPTH24,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-    });
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
-
-    nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
-    nt_gfx_begin_frame();
-    nt_gfx_bind_texture(color, linear, 0);
-    /* LINEAR on raw depth is incomplete sampling, even on the unit colour just left. */
-    EXPECT_ASSERT(nt_gfx_bind_texture(depth, linear, 0));
     nt_gfx_end_frame();
 }
 
@@ -2421,6 +2826,22 @@ int main(void) {
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
     RUN_TEST(test_gfx_sampler_queries_use_each_program_backend);
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);
+    RUN_TEST(test_gfx_apply_texture_bindings_maps_names_to_canonical_units);
+    RUN_TEST(test_gfx_apply_texture_bindings_skips_backend_for_textureless_program);
+    RUN_TEST(test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind);
+    RUN_TEST(test_gfx_apply_texture_bindings_ignores_inactive_entry_before_handle);
+    RUN_TEST(test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind);
+    RUN_TEST(test_gfx_apply_texture_bindings_enforces_uint_sampler_class);
+    RUN_TEST(test_gfx_apply_texture_bindings_enforces_shadow_sampler_class);
+    RUN_TEST(test_gfx_apply_texture_bindings_enforces_float_sampler_class);
+    RUN_TEST(test_gfx_apply_texture_bindings_requires_pass_and_pipeline);
+    RUN_TEST(test_gfx_pipeline_change_preserves_texture_set_only_for_same_program);
+    RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
+    RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
+    RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
+    RUN_TEST(test_gfx_failed_sampler_restore_rejects_whole_set_and_retries);
+    RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy);
+    RUN_TEST(test_gfx_destroy_texture_inside_pass_asserts);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
@@ -2481,8 +2902,6 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_mag_filter_rejects_mipmap);
     RUN_TEST(test_gfx_make_texture_gen_mipmaps);
     RUN_TEST(test_gfx_make_texture_mipmap_filter_no_mipmaps);
-    RUN_TEST(test_gfx_bind_texture_valid);
-    RUN_TEST(test_gfx_bind_texture_invalid);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
     RUN_TEST(test_gfx_double_destroy_texture);
     RUN_TEST(test_gfx_buffer_pool_full_asserts);
@@ -2522,6 +2941,9 @@ int main(void) {
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
+    RUN_TEST(test_gfx_rgba32f_filters_require_capability);
+    RUN_TEST(test_gfx_rgba32f_mipmap_generation_requires_both_capabilities);
+    RUN_TEST(test_gfx_rgba32f_sampler_overrides_require_capability);
     RUN_TEST(test_gfx_make_texture_rg16ui);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
@@ -2536,8 +2958,6 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_invalid_handle);
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
-    RUN_TEST(test_gfx_bind_texture_on_husk_logs_and_skips_backend);
-    RUN_TEST(test_gfx_bind_texture_rejects_sampler_incompatible_with_its_texture);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);

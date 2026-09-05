@@ -321,15 +321,15 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.05F, 0.05F, 0.1F, 1.0F},
-        .clear_depth = 1.0F,
-    });
-
     /* Step font system -- resolves pending resources, uploads GPU data */
     double t_font_step = nt_time_now();
     nt_font_step();
     t_font_step = (nt_time_now() - t_font_step) * 1000.0;
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .clear_color = {0.05F, 0.05F, 0.1F, 1.0F},
+        .clear_depth = 1.0F,
+    });
 
     double t_draw = 0.0;
     double t_flush = 0.0;

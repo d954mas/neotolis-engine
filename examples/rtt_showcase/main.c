@@ -386,7 +386,6 @@ static bool ui_ready(void) {
 }
 
 static void draw_ui_overlay(void) {
-    nt_font_step();
     if (!ui_ready()) {
         return;
     }
@@ -488,9 +487,8 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
-    const int tex_unit = nt_gfx_program_sampler_unit(nt_gfx_pipeline_program(s_demo.quad_pipeline), nt_hash32_str("u_texture"));
-    NT_ASSERT(tex_unit >= 0 && "rtt quad program must sample u_texture");
-    nt_gfx_bind_texture(texture, NT_SAMPLER_DEFAULT, (uint32_t)tex_unit);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);
@@ -582,6 +580,8 @@ static void frame(void) {
         nt_window_swap_buffers();
         return;
     }
+
+    nt_font_step();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = s_demo.scene,
