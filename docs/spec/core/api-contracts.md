@@ -239,6 +239,16 @@ false without mutating the material.
 `RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
+`RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
+both in the texture descriptor and in sampler overrides. Without it, texture
+descriptors require `NEAREST` minification and magnification and no generated
+mipmaps. Sampler overrides may additionally use `NEAREST_MIPMAP_NEAREST` with a
+complete mip chain (including a 1x1 base level). Creating mipmaps requires
+both `has_float_texture_linear` and `has_float_render_target`, because WebGL
+generation requires filterable, color-renderable storage. Unsupported combinations
+assert before creating storage or applying bindings; filters are never substituted.
+`RGBA16F` linear filtering is core and does not require the new capability.
+
 A sampler override passed in `nt_gfx_texture_binding_t` must obey the same
 format restrictions; it cannot replace the explicit texture state with an
 incompatible filter. Depth comparison

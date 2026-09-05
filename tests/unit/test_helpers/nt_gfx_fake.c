@@ -645,5 +645,5 @@ bool nt_gfx_backend_recreate_all_resources(void) {
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     s_fake_gpu_caps_probe_count++;
-    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true};
+    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true, .has_float_texture_linear = true};
 }

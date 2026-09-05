@@ -439,7 +439,7 @@ typedef struct {
     nt_texture_filter_t mag_filter; /* default: NEAREST; RG16UI/DEPTH* require NEAREST */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
-    bool gen_mipmaps;               /* DEPTH* requires false */
+    bool gen_mipmaps;               /* DEPTH* requires false; RGBA32F requires float filtering + rendering caps */
     const char *label;
 } nt_texture_desc_t;
 
@@ -493,11 +493,12 @@ typedef struct {
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                 /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target; /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    uint32_t max_texture_size;    /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */

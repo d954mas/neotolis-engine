@@ -429,6 +429,8 @@ static bool render_target_depth_sampler_valid(const nt_render_target_desc_t *des
 
 static bool texture_format_is_depth(nt_texture_format_t format) { return format >= NT_TEXTURE_FORMAT_DEPTH16 && format <= NT_TEXTURE_FORMAT_DEPTH32F; }
 
+static bool texture_filter_uses_linear(nt_texture_filter_t filter) { return filter != NT_FILTER_NEAREST && filter != NT_FILTER_NEAREST_MIPMAP_NEAREST; }
+
 static bool render_target_depth_format_valid(const nt_render_target_desc_t *desc) {
     if (desc->depth_storage == NT_RT_DEPTH_NONE) {
         return desc->depth_format == NT_TEXTURE_FORMAT_INVALID;
@@ -1099,6 +1101,13 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
         NT_ASSERT(!local_desc.gen_mipmaps && "depth texture mipmaps are not supported");
     }
+    if (local_desc.format == NT_TEXTURE_FORMAT_RGBA32F) {
+        NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || !texture_filter_uses_linear(local_desc.min_filter)) && "RGBA32F min_filter requires float texture linear support");
+        NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || local_desc.mag_filter == NT_FILTER_NEAREST) && "RGBA32F mag_filter requires float texture linear support");
+        /* WebGL mip generation requires both filterable and color-renderable storage. */
+        NT_ASSERT((!local_desc.gen_mipmaps || (g_nt_gfx.gpu_caps.has_float_texture_linear && g_nt_gfx.gpu_caps.has_float_render_target)) &&
+                  "RGBA32F mipmaps require float filtering and rendering support");
+    }
 
     /* Mipmap min_filter requires gen_mipmaps */
     NT_ASSERT((local_desc.gen_mipmaps || local_desc.min_filter <= NT_FILTER_LINEAR) && "make_texture: mipmap filter requires gen_mipmaps");
@@ -1557,6 +1566,9 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
      * instead. Integer storage has no such escape and stays NEAREST. */
     bool nearest_only = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI || (depth && !compares);
     if (nearest_only && (desc->min_filter != NT_FILTER_NEAREST || desc->mag_filter != NT_FILTER_NEAREST)) {
+        return false;
+    }
+    if (format == (uint8_t)NT_TEXTURE_FORMAT_RGBA32F && !g_nt_gfx.gpu_caps.has_float_texture_linear && (texture_filter_uses_linear(desc->min_filter) || desc->mag_filter != NT_FILTER_NEAREST)) {
         return false;
     }
     bool mipmap_filter = desc->min_filter > NT_FILTER_LINEAR;

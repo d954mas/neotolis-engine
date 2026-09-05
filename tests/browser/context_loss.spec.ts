@@ -6,10 +6,12 @@ declare global {
       ready: boolean;
       drawn_frames(): number;
       programs_ready(): boolean;
+      float_texture_linear(): boolean;
       field_css(): { x: number; y: number; w: number; h: number };
       hide_probe(mode: number): void;
     };
     __ntLossExtension?: WEBGL_lose_context;
+    __ntBlockFloatLinear?: boolean;
   }
 }
 
@@ -69,8 +71,16 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
     if (text === 'ERROR [gfx] WebGL context lost') return;
     if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
   });
+  await page.addInitScript(() => {
+    const getExtension = WebGL2RenderingContext.prototype.getExtension;
+    WebGL2RenderingContext.prototype.getExtension = function(name: string) {
+      if (name === 'OES_texture_float_linear' && window.__ntBlockFloatLinear) return null;
+      return getExtension.call(this, name);
+    };
+  });
   await page.goto('/index.html');
   await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+  expect(await page.evaluate(() => window.__nt!.float_texture_linear()), 'SwiftShader supports float filtering at init').toBe(true);
 
   const freshFrame = async () => {
     const before = await page.evaluate(() => window.__nt!.drawn_frames());
@@ -115,6 +125,8 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
 
   for (let cycle = 0; cycle < 2; cycle++) {
     await test.step('context loss/restore ' + (cycle + 1), async () => {
+      // Change availability across restores to catch a stale capability cache.
+      await page.evaluate((blocked) => { window.__ntBlockFloatLinear = blocked; }, cycle === 0);
       const hasExtension = await page.evaluate(() => {
         const gl = document.querySelector('canvas')!.getContext('webgl2')!;
         window.__ntLossExtension = gl.getExtension('WEBGL_lose_context') ?? undefined;
@@ -131,6 +143,7 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
 
       await page.evaluate(() => window.__ntLossExtension!.restoreContext());
       await page.waitForFunction(() => window.__nt!.programs_ready(), null, { timeout: 30_000 });
+      expect(await page.evaluate(() => window.__nt!.float_texture_linear()), 'capability must reflect the restored context').toBe(cycle !== 0);
       await freshFrame();
       const sprite = await capturePixels(page, spriteRect);
       const text = await capturePixels(page, textRect);

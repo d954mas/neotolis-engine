@@ -553,6 +553,47 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     nt_gfx_destroy_render_target(target);
 }
 
+static void test_rgba32f_linear_filtering_and_generated_mips(void) {
+    TEST_ASSERT_TRUE(nt_gfx_gpu_caps()->has_float_texture_linear);
+    static const float texels[16] = {1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1};
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 2,
+        .height = 2,
+        .format = NT_TEXTURE_FORMAT_RGBA32F,
+        .data = texels,
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .gen_mipmaps = true,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    nt_pipeline_t pipeline = make_test_pipeline("void main() {\n"
+                                                "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+                                                "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+                                                "}\n",
+                                                "precision highp float;\n"
+                                                "uniform sampler2D u_tex;\n"
+                                                "out vec4 frag_color;\n"
+                                                "void main() {\n"
+                                                "    frag_color = (textureLod(u_tex, vec2(0.5), 0.0) + textureLod(u_tex, vec2(0.5), 1.0)) * 0.5;\n"
+                                                "}\n",
+                                                false);
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(vi);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    /* Both the bilinear base lookup and the reduced mip must average the four colors. */
+    assert_rgba(pixel, 1, 128, 128, 128, 255);
+    nt_gfx_destroy_texture(texture);
+}
+
 static void test_depth_buffer_uses_explicit_format(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
@@ -1468,6 +1509,7 @@ int main(void) {
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
+    RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
     RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);

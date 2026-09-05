@@ -324,6 +324,17 @@ GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 Sampler overrides with a mipmap minification filter require complete mip
 storage for the bound texture. A 1x1 base level is already a complete chain.
 
+`gpu_caps.has_float_texture_linear` exposes `OES_texture_float_linear` on WebGL 2
+and core float filtering on desktop GL. It is probed and enabled at initialization
+and context restore, alongside the other GPU capabilities. `RGBA32F` texture
+defaults and sampler overrides require it for any linear filtering. Without it,
+`NEAREST` remains valid; sampler overrides may also use `NEAREST_MIPMAP_NEAREST`
+with a complete chain. Unsupported filter choices assert without silently
+changing the requested sampler.
+RGBA32F mipmap generation additionally requires `has_float_render_target`:
+WebGL requires the source storage to be both filterable and color-renderable.
+This does not add RGBA32F render-target support to the engine.
+
 This capability supplies low-level targets and depth textures only. It does not
 define light cameras, PCF, cascades, shadow atlases, material shadow integration,
 or a shadow-map system.

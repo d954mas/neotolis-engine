@@ -2250,6 +2250,81 @@ void test_gfx_make_texture_rgba16f(void) {
     nt_gfx_destroy_texture(tex);
 }
 
+void test_gfx_rgba32f_filters_require_capability(void) {
+    nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    nt_texture_t nearest = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nearest));
+    nt_gfx_destroy_texture(nearest);
+
+    desc.min_filter = NT_FILTER_LINEAR;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    desc.min_filter = NT_FILTER_NEAREST;
+    desc.mag_filter = NT_FILTER_LINEAR;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+
+    /* Half-float filtering is core even without either float extension. */
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    desc.format = NT_TEXTURE_FORMAT_RGBA16F;
+    desc.min_filter = NT_FILTER_LINEAR;
+    nt_texture_t half = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(half));
+    nt_gfx_destroy_texture(half);
+
+    g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+    desc.format = NT_TEXTURE_FORMAT_RGBA32F;
+    nt_texture_t linear = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(linear));
+    nt_gfx_destroy_texture(linear);
+}
+
+void test_gfx_rgba32f_mipmap_generation_requires_both_capabilities(void) {
+    const float pixels[2 * 2 * 4] = {0};
+    const nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F, .data = pixels, .gen_mipmaps = true};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    nt_texture_t texture = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    nt_gfx_destroy_texture(texture);
+}
+
+void test_gfx_rgba32f_sampler_overrides_require_capability(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    /* A 1x1 chain isolates filtering support from mip completeness. */
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA32F});
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture};
+    const nt_sampler_desc_t filtered[] = {
+        {.min_filter = NT_FILTER_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST}, {.min_filter = NT_FILTER_NEAREST_MIPMAP_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR},
+        {.mag_filter = NT_FILTER_LINEAR},
+    };
+    for (uint32_t i = 0; i < sizeof(filtered) / sizeof(filtered[0]); i++) {
+        binding.sampler = nt_gfx_make_sampler(&filtered[i]);
+        g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+        uint32_t binds = nt_gfx_fake_bound_texture_count();
+        uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
+        EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+        TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+        TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
+        TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
+
+        g_nt_gfx.gpu_caps.has_float_texture_linear = true;
+        apply_texture_set(&binding, 1);
+        TEST_ASSERT_EQUAL_UINT32(binds + 1, nt_gfx_fake_bound_texture_count());
+    }
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    binding.sampler = NT_SAMPLER_DEFAULT;
+    apply_texture_set(&binding, 1);
+    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST});
+    apply_texture_set(&binding, 1);
+    end_texture_binding_test_pass();
+}
+
 /* ---- RG16UI texture creation ---- */
 
 void test_gfx_make_texture_rg16ui(void) {
@@ -2866,6 +2941,9 @@ int main(void) {
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
+    RUN_TEST(test_gfx_rgba32f_filters_require_capability);
+    RUN_TEST(test_gfx_rgba32f_mipmap_generation_requires_both_capabilities);
+    RUN_TEST(test_gfx_rgba32f_sampler_overrides_require_capability);
     RUN_TEST(test_gfx_make_texture_rg16ui);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
     RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
