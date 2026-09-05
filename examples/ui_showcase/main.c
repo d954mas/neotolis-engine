@@ -3649,7 +3649,6 @@ static void frame(void) {
     }
 
     nt_resource_step();
-    nt_material_step();
     link_programs();
 
     /* Auto-animate progress when its panel toggle is on. On the off->on edge, derive the ramp direction

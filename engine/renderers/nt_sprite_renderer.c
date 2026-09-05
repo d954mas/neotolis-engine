@@ -32,12 +32,12 @@ typedef struct {
     /* Captured independently because custom layouts may share a pipeline. */
     nt_vertex_input_t vertex_input;
     nt_material_t material; /* handle for material-param lookup at flush; param values
-                               are NOT snapshotted — material info is stable within a
-                               frame (nt_material_step ran before render) so we
-                               re-fetch via nt_material_get_info at flush time */
+                               are NOT snapshotted — they are re-fetched live via
+                               nt_material_get_info at flush time */
+    /* Snapshot taken when the cmd opens; publication changes only inside nt_resource_step. */
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
+    nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
     uint8_t tex_count;
     uint32_t first_index; /* offset into s_sprite.indices[] */
     uint32_t index_count;
@@ -410,10 +410,11 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
      * per-emit, so the plain fast path stays a constant 20). */
     s_sprite.cur_stride = (uint32_t)NT_SPRITE_BASE_STRIDE + s_sprite.cur_material_custom_bytes;
     c->tex_count = mi->tex_count;
+    /* Slot 0 resolves like the rest; the page substitutes into it below. */
     for (uint8_t i = 0; i < mi->tex_count; i++) {
-        c->resolved_tex[i] = mi->resolved_tex[i];
+        c->resolved_tex[i] = nt_resource_get(mi->tex_resources[i]);
         c->tex_name_hashes[i] = mi->tex_name_hashes[i];
-        c->resolved_sampler[i] = mi->resolved_sampler[i];
+        c->tex_samplers[i] = mi->tex_samplers[i];
     }
     c->first_index = s_sprite.index_count;
     c->first_vertex = s_sprite.vertex_count;
@@ -1403,7 +1404,7 @@ void nt_sprite_renderer_flush(void) {
             .tex_count = c->tex_count,
             .tex_name_hashes = c->tex_name_hashes,
             .resolved_tex = c->resolved_tex,
-            .resolved_sampler = c->resolved_sampler,
+            .tex_samplers = c->tex_samplers,
             .param_count = (mi != NULL) ? mi->param_count : 0,
             .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
             .params = (mi != NULL) ? mi->params : NULL,

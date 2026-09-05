@@ -94,9 +94,11 @@ typedef struct {
      * program that died with the GL context or that its owner destroyed -- ask
      * nt_gfx_program_ready(program) before building a pipeline from it. */
     nt_program_t program;
-    uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
+    /* Declared at create and never rewritten (unlike params); renderers call
+     * nt_resource_get on these at draw. */
+    nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
+    nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];
@@ -118,7 +120,6 @@ typedef struct {
 
 nt_result_t nt_material_init(const nt_material_desc_t *desc);
 void nt_material_shutdown(void);
-void nt_material_step(void);
 
 /* ---- Create / Destroy / Query ---- */
 

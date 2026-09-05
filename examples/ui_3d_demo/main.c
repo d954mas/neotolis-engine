@@ -824,7 +824,6 @@ static void frame(void) {
     s_shape_yaw += s_speed_table[s_speed_kind] * dt;
 
     nt_resource_step();
-    nt_material_step();
     link_programs();
     try_bind_resources();
 

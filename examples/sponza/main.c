@@ -376,9 +376,8 @@ static void frame(void) {
         }
     }
 
-    /* Step resource + material systems */
+    /* Step resource system */
     nt_resource_step();
-    nt_material_step();
     link_programs();
 
     /* Sequential loading chain: core -> geo -> tex -> full */

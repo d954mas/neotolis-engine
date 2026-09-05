@@ -169,7 +169,6 @@ static nt_material_t create_test_material_with_attr(nt_program_t program, nt_col
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -227,7 +226,6 @@ static nt_material_t create_test_material_on_texture(nt_program_t program, nt_bl
     desc.cull_mode = NT_CULL_BACK;
     desc.label = "test_material_textured";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -660,7 +658,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     desc.program = p1;
     desc.cull_mode = NT_CULL_NONE;
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
@@ -693,10 +690,9 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     desc.attr_map_count = 1;
     desc.label = "unresolved_tex_material";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_EQUAL_UINT32(0, info->resolved_tex[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(info->tex_resources[0]));
 
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
@@ -749,7 +745,6 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     desc.attr_map_count = 1;
     desc.label = "swapped_slot_material";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
@@ -1182,7 +1177,6 @@ void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelin
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_BACK;
     mats[3] = nt_material_create(&desc);
-    nt_material_step();
 
     nt_render_item_t items[4];
     for (uint32_t i = 0; i < 4; i++) {
@@ -1271,7 +1265,6 @@ void test_vertex_input_shared_for_same_derived_layout(void) {
     desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "extra_attr_material";
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);

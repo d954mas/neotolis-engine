@@ -47,7 +47,6 @@ static nt_material_t make_material(bool with_page_sampler) {
     desc.label = "walker_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 

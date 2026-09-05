@@ -443,10 +443,10 @@ void test_set_program_clears_to_invalid(void) {
     TEST_ASSERT_EQUAL_UINT32(0, info->program.id);
 }
 
-/* ---- Test 20: step resolves textures ---- */
+/* ---- Test 20: create stores texture resources ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_resolves_textures(void) {
+void test_create_stores_texture_resources(void) {
     nt_resource_t tex_res = register_test_resource("test_tex", NT_ASSET_TEXTURE, 42);
     nt_resource_step();
 
@@ -456,11 +456,9 @@ void test_step_resolves_textures(void) {
     d.texture_count = 1;
     nt_material_t mat = nt_material_create(&d);
 
-    nt_material_step();
-
     const nt_material_info_t *info = nt_material_get_info(mat);
     TEST_ASSERT_NOT_NULL(info);
-    TEST_ASSERT_EQUAL_UINT32(42, info->resolved_tex[0]);
+    TEST_ASSERT_EQUAL_UINT32(tex_res.id, info->tex_resources[0].id);
 }
 
 /* ---- Test 21: get_info returns NULL for invalid handle ---- */
@@ -639,7 +637,7 @@ int main(void) {
     RUN_TEST(test_set_program_replaces_a_with_b);
     RUN_TEST(test_set_program_clears_to_invalid);
     RUN_TEST(test_set_program_on_a_destroyed_material_asserts);
-    RUN_TEST(test_step_resolves_textures);
+    RUN_TEST(test_create_stores_texture_resources);
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);

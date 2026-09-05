@@ -301,7 +301,6 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     desc.label = "test_sprite_material";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -324,7 +323,6 @@ static nt_material_t create_test_material_with_param(void) {
     desc.label = "test_sprite_material_param";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -340,7 +338,6 @@ static nt_material_t create_test_material_textureless(void) {
     desc.label = "test_sprite_material_textureless";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -377,7 +374,6 @@ static nt_material_t create_radial_test_material(const char *stream_name, uint8_
     }
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -631,7 +627,6 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
     desc.program = p1;
     desc.depth_write = false;
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_a);
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_b);
@@ -994,7 +989,6 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_page_on_unit_1";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_gfx_fake_reset();
@@ -1069,7 +1063,6 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_two_slots";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_sprite_renderer_set_material(mat);
@@ -1093,7 +1086,6 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_missing_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_sprite_renderer_set_material(mat);
@@ -1117,7 +1109,6 @@ void test_sprite_renderer_unknown_sampler_name_is_ignored(void) {
     mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_unknown_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_gfx_fake_reset();
@@ -1498,7 +1489,6 @@ static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
     desc.textures[0].sampler = override;
     desc.label = "test_mat_override";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 

@@ -221,9 +221,8 @@ static void frame(void) {
         print_status();
     }
 
-    /* Step resource + material systems */
+    /* Step resource system */
     nt_resource_step();
-    nt_material_step();
     link_programs();
 
     /* Dump pack contents when they become READY */

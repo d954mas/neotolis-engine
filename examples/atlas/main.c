@@ -114,7 +114,6 @@ static void frame(void) {
 #endif
 
     nt_resource_step();
-    nt_material_step();
     link_program();
 
     /* Dump pack contents when ready */

@@ -223,9 +223,8 @@ static void frame(void) {
     }
 #endif
 
-    /* Step resource + material systems */
+    /* Step resource system */
     nt_resource_step();
-    nt_material_step();
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }

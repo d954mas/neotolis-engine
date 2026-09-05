@@ -8,22 +8,11 @@
 #include "log/nt_log.h"
 #include "pool/nt_pool.h"
 
-/* ---- Internal slot struct ---- */
-
-typedef struct {
-    /* Read-only query data -- MUST be first member so nt_material_info_t* can alias */
-    nt_material_info_t info;
-
-    /* Creation-time resource handles (not in info) */
-    nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
-
-} nt_material_slot_t;
-
 /* ---- Module state ---- */
 
 static struct {
     nt_pool_t pool;
-    nt_material_slot_t *slots; /* [capacity+1], index 0 reserved */
+    nt_material_info_t *slots; /* [capacity+1], index 0 reserved */
     bool initialized;
 } s_mat;
 
@@ -40,7 +29,7 @@ nt_result_t nt_material_init(const nt_material_desc_t *desc) {
 
     nt_pool_init(&s_mat.pool, desc->max_materials);
 
-    s_mat.slots = (nt_material_slot_t *)calloc((size_t)desc->max_materials + 1, sizeof(nt_material_slot_t));
+    s_mat.slots = (nt_material_info_t *)calloc((size_t)desc->max_materials + 1, sizeof(nt_material_info_t));
     NT_ASSERT(s_mat.slots); /* alloc fail at init = fatal */
 
     s_mat.initialized = true;
@@ -54,27 +43,6 @@ void nt_material_shutdown(void) {
     free(s_mat.slots);
     nt_pool_shutdown(&s_mat.pool);
     memset(&s_mat, 0, sizeof(s_mat));
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_material_step(void) {
-    NT_ASSERT(s_mat.initialized); /* step before init is a dev mistake */
-    if (!s_mat.initialized) {
-        return;
-    }
-
-    for (uint32_t i = 1; i <= s_mat.pool.capacity; i++) {
-        if (!nt_pool_slot_alive(&s_mat.pool, i)) {
-            continue;
-        }
-
-        nt_material_slot_t *mat = &s_mat.slots[i];
-
-        /* Resolve textures */
-        for (uint8_t t = 0; t < mat->info.tex_count; t++) {
-            mat->info.resolved_tex[t] = nt_resource_get(mat->tex_resources[t]);
-        }
-    }
 }
 
 /* ---- Create / Destroy / Query ---- */
@@ -105,68 +73,68 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
 
     uint32_t slot_index = nt_pool_slot_index(id);
-    nt_material_slot_t *slot = &s_mat.slots[slot_index];
+    nt_material_info_t *info = &s_mat.slots[slot_index];
 
     /* Clear slot */
-    memset(slot, 0, sizeof(*slot));
+    memset(info, 0, sizeof(*info));
 
-    slot->info.program = desc->program;
+    info->program = desc->program;
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
-    slot->info.tex_count = desc->texture_count;
+    info->tex_count = desc->texture_count;
     for (uint8_t i = 0; i < desc->texture_count; i++) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
-        slot->tex_resources[i] = desc->textures[i].resource;
-        slot->info.tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
-        slot->info.resolved_sampler[i] = desc->textures[i].sampler;
+        info->tex_resources[i] = desc->textures[i].resource;
+        info->tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
+        info->tex_samplers[i] = desc->textures[i].sampler;
         for (uint8_t j = 0; j < i; j++) {
             /* Two slots on one sampler name would fight over its unit at every draw. */
-            NT_ASSERT(slot->info.tex_name_hashes[j] != slot->info.tex_name_hashes[i] && "two material texture slots name the same sampler uniform");
+            NT_ASSERT(info->tex_name_hashes[j] != info->tex_name_hashes[i] && "two material texture slots name the same sampler uniform");
         }
     }
 
     /* Params */
     NT_ASSERT(desc->param_count <= NT_MATERIAL_MAX_PARAMS);
-    slot->info.param_count = desc->param_count;
+    info->param_count = desc->param_count;
     for (uint8_t i = 0; i < desc->param_count; i++) {
         NT_ASSERT(desc->params[i].name != NULL && "material param needs a uniform name");
-        memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
-        slot->info.param_name_hashes[i] = nt_hash32_str(desc->params[i].name).value;
+        memcpy(info->params[i], desc->params[i].value, sizeof(float) * 4);
+        info->param_name_hashes[i] = nt_hash32_str(desc->params[i].name).value;
     }
 
     /* Attr map */
-    slot->info.attr_map_count = desc->attr_map_count;
+    info->attr_map_count = desc->attr_map_count;
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
-        slot->info.attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
-        slot->info.attr_map_locations[i] = desc->attr_map[i].location;
+        info->attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
+        info->attr_map_locations[i] = desc->attr_map[i].location;
     }
 
     /* Entity params */
     NT_ASSERT(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);
-    slot->info.entity_param_count = desc->entity_param_count;
+    info->entity_param_count = desc->entity_param_count;
     for (uint8_t i = 0; i < desc->entity_param_count; i++) {
-        slot->info.entity_param_hashes[i] = desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
+        info->entity_param_hashes[i] = desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
     }
 
     /* Render state */
-    memcpy(slot->info.blend.constant_color, desc->blend.constant_color, sizeof(slot->info.blend.constant_color));
-    slot->info.blend.src_rgb = desc->blend.src_rgb;
-    slot->info.blend.dst_rgb = desc->blend.dst_rgb;
-    slot->info.blend.src_alpha = desc->blend.src_alpha;
-    slot->info.blend.dst_alpha = desc->blend.dst_alpha;
-    slot->info.blend.op_rgb = desc->blend.op_rgb;
-    slot->info.blend.op_alpha = desc->blend.op_alpha;
-    slot->info.blend.enabled = desc->blend.enabled;
-    slot->info.depth_test = desc->depth_test;
-    slot->info.depth_write = desc->depth_write;
-    slot->info.cull_mode = desc->cull_mode;
+    memcpy(info->blend.constant_color, desc->blend.constant_color, sizeof(info->blend.constant_color));
+    info->blend.src_rgb = desc->blend.src_rgb;
+    info->blend.dst_rgb = desc->blend.dst_rgb;
+    info->blend.src_alpha = desc->blend.src_alpha;
+    info->blend.dst_alpha = desc->blend.dst_alpha;
+    info->blend.op_rgb = desc->blend.op_rgb;
+    info->blend.op_alpha = desc->blend.op_alpha;
+    info->blend.enabled = desc->blend.enabled;
+    info->depth_test = desc->depth_test;
+    info->depth_write = desc->depth_write;
+    info->cull_mode = desc->cull_mode;
     NT_ASSERT((uint32_t)desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
-    slot->info.color_mode = desc->color_mode;
+    info->color_mode = desc->color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */
-    slot->info.label = desc->label;
+    info->label = desc->label;
 
     return (nt_material_t){.id = id};
 }
@@ -195,7 +163,7 @@ static nt_material_info_t *get_mutable_info(nt_material_t mat) {
     if (!nt_pool_valid(&s_mat.pool, mat.id)) {
         return NULL;
     }
-    return &s_mat.slots[nt_pool_slot_index(mat.id)].info;
+    return &s_mat.slots[nt_pool_slot_index(mat.id)];
 }
 
 const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_mutable_info(mat); }

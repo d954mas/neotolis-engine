@@ -530,7 +530,6 @@ static void frame(void) {
         }
     }
     nt_resource_step();
-    nt_material_step();
     link_programs();
     try_bind_ui_resources();
 
