@@ -386,7 +386,6 @@ static bool ui_ready(void) {
 }
 
 static void draw_ui_overlay(void) {
-    nt_font_step();
     if (!ui_ready()) {
         return;
     }
@@ -581,6 +580,8 @@ static void frame(void) {
         nt_window_swap_buffers();
         return;
     }
+
+    nt_font_step();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = s_demo.scene,
