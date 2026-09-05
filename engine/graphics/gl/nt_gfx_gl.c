@@ -999,13 +999,12 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
     }
     nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     const uint16_t bit = (uint16_t)(1U << (uint32_t)index);
-    // Preserve uncached GL handling for other uniform types.
-    const bool cacheable = (prog->vec4_mask & bit) != 0;
-    if (cacheable && (prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
+    if ((prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
         return;
     }
     glUniform4fv(prog->uniforms[index].location, 1, vec);
-    if (cacheable) {
+    // Preserve uncached GL handling for other uniform types.
+    if ((prog->vec4_mask & bit) != 0) {
         memcpy(prog->vec4_values[index], vec, sizeof(prog->vec4_values[index]));
         prog->vec4_valid |= bit;
     }
