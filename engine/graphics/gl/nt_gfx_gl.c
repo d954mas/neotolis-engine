@@ -109,6 +109,9 @@ typedef struct {
     GLuint program;
     nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
     uint8_t uniform_count;
+    uint16_t vec4_mask;
+    uint16_t vec4_valid;
+    uint8_t vec4_values[NT_MAX_CACHED_UNIFORMS][4 * sizeof(float)];
     /* Sampler units are program state: assigned in reflection order at link,
      * written once, never rewritten by a material. */
     nt_gfx_gl_sampler_unit_t sampler_units[NT_GFX_MAX_TEXTURE_SLOTS];
@@ -230,20 +233,20 @@ static struct {
 
 /* ---- Per-program uniform location lookup ---- */
 
-static GLint program_uniform_location(const nt_gfx_gl_program_t *prog, uint32_t name_hash) {
+static int program_uniform_index(const nt_gfx_gl_program_t *prog, uint32_t name_hash) {
     for (uint8_t i = 0; i < prog->uniform_count; i++) {
         if (prog->uniforms[i].name_hash == name_hash) {
-            return prog->uniforms[i].location;
+            return i;
         }
     }
     return -1;
 }
 
-static GLint program_get_uniform_h(uint32_t program_backend, uint32_t name_hash) {
+static int program_get_uniform_index(uint32_t program_backend, uint32_t name_hash) {
     NT_ASSERT(program_backend != 0 && program_backend <= s_init_desc.max_programs && s_programs[program_backend].program != 0 && "set_uniform: requires a live program");
     /* glUniform* writes into the current program, so the named one must be it. */
     NT_ASSERT(s_programs[program_backend].program == s_gl_cache.program && "uniform write targets a program that is not current");
-    return program_uniform_location(&s_programs[program_backend], name_hash);
+    return program_uniform_index(&s_programs[program_backend], name_hash);
 }
 
 bool nt_gfx_backend_program_sampler_info(uint32_t program_backend, uint32_t name_hash, nt_gfx_sampler_info_t *out_info) {
@@ -982,33 +985,45 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 /* ---- Uniforms ---- */
 
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
-    GLint loc = program_get_uniform_h(program_backend, name_hash);
-    if (loc >= 0) {
-        glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
+    int index = program_get_uniform_index(program_backend, name_hash);
+    if (index >= 0) {
+        glUniformMatrix4fv(s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
     }
 }
 
 void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
-    GLint loc = program_get_uniform_h(program_backend, name_hash);
-    if (loc >= 0) {
-        glUniform4fv(loc, 1, vec);
+    int index = program_get_uniform_index(program_backend, name_hash);
+    if (index < 0) {
+        return;
+    }
+    nt_gfx_gl_program_t *prog = &s_programs[program_backend];
+    const uint16_t bit = (uint16_t)(1U << (uint32_t)index);
+    // Other setters can change boolean uniforms that also accept glUniform4fv.
+    const bool cacheable = (prog->vec4_mask & bit) != 0;
+    if (cacheable && (prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
+        return;
+    }
+    glUniform4fv(prog->uniforms[index].location, 1, vec);
+    if (cacheable) {
+        memcpy(prog->vec4_values[index], vec, sizeof(prog->vec4_values[index]));
+        prog->vec4_valid |= bit;
     }
 }
 
 void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
-    GLint loc = program_get_uniform_h(program_backend, name_hash);
-    if (loc >= 0) {
-        glUniform1f(loc, val);
+    int index = program_get_uniform_index(program_backend, name_hash);
+    if (index >= 0) {
+        glUniform1f(s_programs[program_backend].uniforms[index].location, val);
     }
 }
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
-    GLint loc = program_get_uniform_h(program_backend, name_hash);
+    int index = program_get_uniform_index(program_backend, name_hash);
     nt_gfx_sampler_info_t sampler_info = {0};
     const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
     NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
-    if (loc >= 0) {
-        glUniform1i(loc, val);
+    if (index >= 0) {
+        glUniform1i(s_programs[program_backend].uniforms[index].location, val);
     }
 }
 
@@ -1214,6 +1229,8 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     nt_cached_uniform_t *out = rec->uniforms;
     uint8_t *out_count = &rec->uniform_count;
     rec->sampler_count = 0;
+    rec->vec4_mask = 0;
+    rec->vec4_valid = 0;
     *out_count = 0;
     GLint active_uniforms = -1;
     glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
@@ -1261,6 +1278,9 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                     if (uniform_count < NT_MAX_CACHED_UNIFORMS) {
                         out[uniform_count].name_hash = name_hash;
                         out[uniform_count].location = loc;
+                        if (utype == GL_FLOAT_VEC4) {
+                            rec->vec4_mask |= (uint16_t)(1U << uniform_count);
+                        }
                     }
                     uniform_count++;
                 }
