@@ -110,6 +110,7 @@ static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
 static bool s_fake_fail_next_pipeline_create;
+static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore;
 static bool s_fake_fail_next_render_target_create;
 static bool s_fake_fail_next_render_target_resize;
@@ -178,6 +179,7 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
+void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore(void) { s_fake_fail_next_backend_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
@@ -233,6 +235,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
     s_fake_fail_next_pipeline_create = false;
+    s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore = false;
     s_fake_fail_next_render_target_create = false;
     s_fake_fail_next_render_target_resize = false;
@@ -500,6 +503,10 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
+    if (s_fake_fail_next_sampler_create) {
+        s_fake_fail_next_sampler_create = false;
+        return 0;
+    }
     static uint32_t s_counter;
     return ++s_counter; /* unique id so tests can differentiate samplers */
 }

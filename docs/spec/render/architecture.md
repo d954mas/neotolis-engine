@@ -139,7 +139,7 @@ name-keyed set for the bound program, resolves it into those units,
 then publishes the logical set and issues backend binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before backend binds; inactive names are ignored before their handles
-are inspected. Context loss or a texture husk
+are inspected. Context loss, a texture husk, or failed sampler recreation
 publishes no set and issues no backend bind: gfx reports the failure and skips
 the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program; the

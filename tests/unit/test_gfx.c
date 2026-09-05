@@ -893,6 +893,44 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     end_texture_binding_test_pass();
 }
 
+void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
+    nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+
+    nt_texture_t color = make_binding_test_texture(1);
+    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
+    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_color", "u_shadow"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_SHADOW}, 2);
+    begin_texture_binding_test_pass(program);
+    bind_test_vertex_input();
+    const nt_gfx_texture_binding_t bindings[] = {
+        {.name = nt_hash32_str("u_color"), .texture = color, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare},
+    };
+    nt_gfx_fake_fail_next_sampler_create();
+    nt_gfx_apply_texture_bindings(bindings, 2);
+
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
+    nt_gfx_draw(0, 3);
+    nt_gfx_draw_instanced(0, 3, 1);
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+
+    apply_texture_set(bindings, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
+    nt_gfx_draw_indexed(0, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    end_texture_binding_test_pass();
+}
+
 void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
@@ -2726,6 +2764,7 @@ int main(void) {
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
+    RUN_TEST(test_gfx_failed_sampler_restore_rejects_whole_set_and_retries);
     RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy);
     RUN_TEST(test_gfx_destroy_texture_inside_pass_asserts);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);

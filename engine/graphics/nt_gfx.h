@@ -647,7 +647,7 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
  * assert, including sampling an attachment of the active render target. The
- * recoverable failures -- processed context loss and a texture husk -- publish no
+ * recoverable failures -- processed context loss, a texture husk or failed sampler recreation -- publish no
  * set and no backend bind; gfx reports them and skips the following draws of that
  * set, so the caller has nothing to check. */
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count);

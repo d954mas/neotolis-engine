@@ -39,6 +39,7 @@ void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
+void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_render_target_width(void);
 uint16_t nt_gfx_fake_last_render_target_height(void);
 nt_render_target_depth_t nt_gfx_fake_last_render_target_depth(void);

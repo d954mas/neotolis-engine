@@ -1579,9 +1579,7 @@ static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sample
     return false;
 }
 
-/* Effective sampler for the texture being bound: an explicit override, else the
- * texture's own default. False rejects the pair; a zero backend is GL's "use the
- * texture's filter state" and only follows a failed recreate. */
+/* A failed recreate cannot replace an explicit override with texture defaults. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
 static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler, uint8_t sampler_class, uint32_t *out_backend) {
     nt_sampler_t effective = sampler.id != 0 ? sampler : s_gfx.texture_metas[texture_slot].default_sampler;
@@ -1598,6 +1596,10 @@ static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler,
     if (e->backend == 0) {
         /* Lazy recreate after context-loss recovery — desc was preserved. */
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
+        if (e->backend == 0) {
+            NT_LOG_ERROR_ONCE("apply_texture_bindings: sampler recreation failed");
+            return false;
+        }
     }
     *out_backend = e->backend;
     return true;
