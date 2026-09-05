@@ -83,13 +83,13 @@ static void test_destroy_render_target_invalidates_applied_color_attachment(void
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
 }
 
-static void test_active_color_attachment_cannot_be_sampled(void) {
-    const nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+static void test_active_attachments_cannot_be_sampled(void) {
+    const nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
     const nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-    const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_color"}, 1);
+    const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
-    const nt_gfx_texture_binding_t binding = {
-        .name = nt_hash32_str("u_color"),
+    nt_gfx_texture_binding_t binding = {
+        .name = nt_hash32_str("u_tex"),
         .texture = nt_gfx_render_target_color(rt),
         .sampler = NT_SAMPLER_DEFAULT,
     };
@@ -98,26 +98,7 @@ static void test_active_color_attachment_cannot_be_sampled(void) {
     nt_gfx_bind_pipeline(pipeline);
 
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-}
-
-static void test_active_depth_attachment_cannot_be_sampled(void) {
-    const nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_TEXTURE);
-    const nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-    const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_depth"}, 1);
-    const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
-    const nt_gfx_texture_binding_t binding = {
-        .name = nt_hash32_str("u_depth"),
-        .texture = nt_gfx_render_target_depth(rt),
-        .sampler = NT_SAMPLER_DEFAULT,
-    };
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pipeline);
-
+    binding.texture = nt_gfx_render_target_depth(rt);
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -872,8 +853,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_create_returns_target_and_color_attachment);
     RUN_TEST(test_destroy_render_target_invalidates_applied_color_attachment);
-    RUN_TEST(test_active_color_attachment_cannot_be_sampled);
-    RUN_TEST(test_active_depth_attachment_cannot_be_sampled);
+    RUN_TEST(test_active_attachments_cannot_be_sampled);
     RUN_TEST(test_depth_accessor_matches_depth_mode);
     RUN_TEST(test_pass_target_routes_to_backend);
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer);

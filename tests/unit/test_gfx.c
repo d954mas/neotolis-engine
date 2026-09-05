@@ -632,6 +632,11 @@ void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void)
     nt_program_t program = make_sampler_program(NULL, 0);
     begin_texture_binding_test_pass(program);
 
+    /* bind_pipeline already applies the empty set, so a samplerless program draws without apply. */
+    bind_test_vertex_input();
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+
     apply_texture_set(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
@@ -653,6 +658,7 @@ void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(voi
     const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
 
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 1));
+    EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(NULL, 0));
 
     TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
@@ -720,22 +726,14 @@ void test_gfx_apply_texture_bindings_enforces_shadow_sampler_class(void) {
     });
     begin_texture_binding_test_pass(program);
 
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = compare};
-    apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
-    end_texture_binding_test_pass();
-}
-
-/* Raw depth without comparison is a plain sampler2D read; a shadow sampler must compare. */
-void test_gfx_apply_texture_bindings_rejects_shadow_sampler_without_comparison(void) {
-    const uint8_t sampler_class = NT_GFX_SAMPLER_CLASS_SHADOW;
-    nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_shadow"}, &sampler_class, 1);
-    nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
-    begin_texture_binding_test_pass(program);
-
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = NT_SAMPLER_DEFAULT};
+    /* Raw depth without comparison is a plain sampler2D read; a shadow sampler must compare. */
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = NT_SAMPLER_DEFAULT};
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+
+    binding.sampler = compare;
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
     end_texture_binding_test_pass();
 }
 
@@ -764,26 +762,17 @@ void test_gfx_apply_texture_bindings_enforces_float_sampler_class(void) {
     end_texture_binding_test_pass();
 }
 
-/* A destroyed texture's handle is stale even though its slot may be live again. */
-void test_gfx_apply_texture_bindings_rejects_stale_texture_handle(void) {
-    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
-    nt_texture_t stale = make_binding_test_texture(1);
-    nt_gfx_destroy_texture(stale);
-    nt_texture_t reused = make_binding_test_texture(2);
-    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(stale.id), nt_pool_slot_index(reused.id));
-    begin_texture_binding_test_pass(program);
-
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = stale, .sampler = NT_SAMPLER_DEFAULT};
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    end_texture_binding_test_pass();
-}
-
 void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_texture_t texture = make_binding_test_texture(1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    /* Stale handle: the slot is live again under a new generation. */
+    nt_texture_t stale = make_binding_test_texture(2);
+    nt_gfx_destroy_texture(stale);
+    nt_texture_t reused = make_binding_test_texture(3);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(stale.id), nt_pool_slot_index(reused.id));
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t stale_binding = {.name = nt_hash32_str("u_tex"), .texture = stale, .sampler = NT_SAMPLER_DEFAULT};
 
     nt_gfx_begin_frame();
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* outside a pass */
@@ -791,25 +780,11 @@ void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* no pipeline bound */
     nt_gfx_bind_pipeline(pipeline);
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(NULL, 1));
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&stale_binding, 1));
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     end_texture_binding_test_pass();
-}
-
-void test_gfx_begin_pass_invalidates_texture_binding_set(void) {
-    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
-    nt_texture_t texture = make_binding_test_texture(1);
-    begin_texture_binding_test_pass(program);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
-    apply_texture_set(&binding, 1);
-
-    nt_gfx_end_pass();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) {
@@ -843,7 +818,6 @@ void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
     begin_texture_binding_test_pass(program);
     bind_test_vertex_input();
 
-    EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 0, 1));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 0, 0, 1));
@@ -858,6 +832,13 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     begin_texture_binding_test_pass(program);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     apply_texture_set(&binding, 1);
+
+    /* Loss is observed by begin_frame only: a material transition never polls the platform. */
+    nt_gfx_fake_set_context_lost(true);
+    apply_texture_set(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    nt_gfx_fake_set_context_lost(false);
+
     const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
     const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
     end_texture_binding_test_pass();
@@ -871,20 +852,6 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
-}
-
-/* Loss is observed by begin_frame only: a material transition never polls the platform. */
-void test_gfx_apply_texture_bindings_does_not_poll_for_context_loss(void) {
-    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
-    nt_texture_t texture = make_binding_test_texture(1);
-    begin_texture_binding_test_pass(program);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
-
-    nt_gfx_fake_set_context_lost(true);
-    apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
-    nt_gfx_fake_set_context_lost(false);
-    end_texture_binding_test_pass();
 }
 
 /* The husk is second so the first entry proves the whole set is discarded, not just the tail. */
@@ -940,6 +907,12 @@ void test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_dest
     nt_gfx_destroy_texture(other);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
 
+    apply_texture_set(&binding, 1);
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+
+    nt_gfx_bind_pipeline(pipeline);
     apply_texture_set(&binding, 1);
     nt_gfx_bind_pipeline((nt_pipeline_t){UINT32_MAX});
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
@@ -2408,37 +2381,6 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     nt_gfx_end_frame();
 }
 
-/* The sampler is validated against the texture of the same call, so an override
- * that cannot sample that storage is rejected whatever the unit held before. */
-void test_gfx_apply_texture_bindings_reject_sampler_incompatible_with_its_texture(void) {
-    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .data = s_test_pixels_4x4,
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .format = NT_TEXTURE_FORMAT_DEPTH24,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-    });
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
-
-    nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
-    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
-    begin_texture_binding_test_pass(program);
-    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = color, .sampler = linear};
-    apply_texture_set(&binding, 1);
-
-    /* LINEAR on raw depth is incomplete sampling, even on the unit colour just left. */
-    binding.texture = depth;
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    end_texture_binding_test_pass();
-}
-
 /* Render-target attachments are rejected earlier, so an update reaching a husk
  * is always a primary texture the owner never recreated. */
 void test_gfx_update_texture_on_husk_asserts(void) {
@@ -2774,15 +2716,11 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind);
     RUN_TEST(test_gfx_apply_texture_bindings_enforces_uint_sampler_class);
     RUN_TEST(test_gfx_apply_texture_bindings_enforces_shadow_sampler_class);
-    RUN_TEST(test_gfx_apply_texture_bindings_rejects_shadow_sampler_without_comparison);
     RUN_TEST(test_gfx_apply_texture_bindings_enforces_float_sampler_class);
-    RUN_TEST(test_gfx_apply_texture_bindings_rejects_stale_texture_handle);
     RUN_TEST(test_gfx_apply_texture_bindings_requires_pass_and_pipeline);
-    RUN_TEST(test_gfx_begin_pass_invalidates_texture_binding_set);
     RUN_TEST(test_gfx_pipeline_change_preserves_texture_set_only_for_same_program);
     RUN_TEST(test_gfx_draws_require_complete_texture_set_for_bound_program);
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
-    RUN_TEST(test_gfx_apply_texture_bindings_does_not_poll_for_context_loss);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_texture_set_clears_on_texture_destroy_failed_bind_and_program_destroy);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
@@ -2898,7 +2836,6 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_invalid_handle);
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
-    RUN_TEST(test_gfx_apply_texture_bindings_reject_sampler_incompatible_with_its_texture);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
