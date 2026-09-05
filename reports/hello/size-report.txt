@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 6f3354b
+# Commit: 965b159
 
 ## WASM Section Sizes
 
@@ -79,7 +79,7 @@ libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                84912 B
+libnt_gfx.a                85060 B
 libnt_gfx_stub.a            5180 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5923850 B
+TOTAL (archives)         5923998 B
 
 ## Data Segments Summary
 

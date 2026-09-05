@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 6f3354b
+# Commit: 965b159
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  22 B
-Code               74015 B
+Code               74147 B
 Data                8272 B
 Custom              4214 B
 ---------------- ----------
-TOTAL              87515 B
+TOTAL              87647 B
 
 ## Top 30 Functions by Size
 
@@ -29,10 +29,10 @@ TOTAL              87515 B
  3002 B   fmt_fp
  2613 B   printf_core
  2399 B   emit_capsule_wire
- 1957 B   nt_shape_renderer_flush
+ 2057 B   nt_shape_renderer_flush
  1950 B   emit_cylinder_wire
  1843 B   __rem_pio2f
- 1688 B   nt_gfx_make_program
+ 1725 B   nt_gfx_make_program
  1378 B   render_target_recreate_attachment
  1254 B   nt_gfx_make_vertex_input
  1142 B   nt_gfx_bind_pipeline
@@ -55,7 +55,7 @@ TOTAL              87515 B
   385 B   sinf
 
 Total functions: 99
-Total code size: 73851 B
+Total code size: 73983 B
 
 ## Built Engine Archives
 
@@ -79,7 +79,7 @@ libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                84912 B
+libnt_gfx.a                85060 B
 libnt_gfx_stub.a            5180 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5923850 B
+TOTAL (archives)         5923998 B
 
 ## Data Segments Summary
 
