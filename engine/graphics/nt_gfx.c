@@ -146,12 +146,10 @@ static struct {
     bool context_restore_retry;
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
-    uint32_t bound_program;      /* full handle borrowed by bound_pipeline */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
-    uint8_t required_texture_mask;
-    uint8_t texture_set_state; /* nt_gfx_texture_set_state_t for the bound program */
-    bool scissor_enabled;      /* mirrors GL_SCISSOR_TEST */
+    uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
+    bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -593,9 +591,7 @@ void nt_gfx_begin_frame(void) {
          * call deactivate_mesh() which returns slots to mesh pool.
          * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
         s_gfx.bound_pipeline = 0;
-        s_gfx.bound_program = 0;
         s_gfx.active_render_target = 0;
-        s_gfx.required_texture_mask = 0;
         discard_texture_set();
         s_gfx.bound_vertex_input = 0;
         s_gfx.bound_index_type = NT_INDEX_NONE;
@@ -768,8 +764,6 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.active_render_target = desc->target.id;
     /* Bound state is pass-scoped: the pass clear touches draw state. */
     s_gfx.bound_pipeline = 0;
-    s_gfx.bound_program = 0;
-    s_gfx.required_texture_mask = 0;
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
@@ -1299,8 +1293,6 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     uint32_t slot = nt_pool_slot_index(pip.id);
     if (s_gfx.bound_pipeline == pip.id) {
         s_gfx.bound_pipeline = 0;
-        s_gfx.bound_program = 0;
-        s_gfx.required_texture_mask = 0;
         discard_texture_set();
     }
     nt_gfx_backend_destroy_pipeline(slot);
@@ -1495,22 +1487,20 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         /* Clearing the mirror is the whole unbind: later draws and uniform
          * writes trap on it. The bound vertex input is orthogonal state. */
         s_gfx.bound_pipeline = 0;
-        s_gfx.bound_program = 0;
-        s_gfx.required_texture_mask = 0;
         discard_texture_set();
         NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
     uint32_t program = s_gfx.pipeline_programs[slot];
-    /* The set is program state: another pipeline on the same program keeps it. */
-    if (s_gfx.bound_program != program) {
-        discard_texture_set();
+    /* The set is program state: another pipeline on the same program keeps it,
+     * and a program without samplers needs none. */
+    if (s_gfx.bound_pipeline == 0 || s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)] != program) {
+        const bool samples = nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(program)]) != 0;
+        s_gfx.texture_set_state = samples ? NT_GFX_TEXTURE_SET_NONE : NT_GFX_TEXTURE_SET_APPLIED;
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
-    s_gfx.bound_program = program;
-    s_gfx.required_texture_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(program)]);
     nt_gfx_backend_bind_pipeline(slot);
 }
 
@@ -1631,7 +1621,10 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0) || count > NT_GFX_MAX_TEXTURE_SLOTS) {
         return;
     }
-    if (s_gfx.required_texture_mask == 0) {
+    const uint32_t program = s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)];
+    const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
+    const uint8_t required_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(program_backend);
+    if (required_mask == 0) {
         s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
         return;
     }
@@ -1640,7 +1633,6 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     uint32_t texture_backends[NT_GFX_MAX_TEXTURE_SLOTS];
     uint32_t sampler_backends[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t applied_mask = 0;
-    const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(s_gfx.bound_program)];
     for (uint8_t i = 0; i < count; i++) {
         nt_gfx_sampler_info_t info = {0};
         if (!nt_gfx_backend_program_sampler_info(program_backend, bindings[i].name.value, &info)) {
@@ -1650,7 +1642,7 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         NT_ASSERT((applied_mask & bit) == 0 && "apply_texture_bindings: active sampler appears more than once");
         /* TRAP omits assert text; the log names the sampler that has no texture. */
         if (!nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id)) {
-            NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler=%08x has no texture; register an explicit placeholder for async resources", s_gfx.bound_program, bindings[i].name.value);
+            NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler=%08x has no texture; register an explicit placeholder for async resources", program, bindings[i].name.value);
         }
         NT_ASSERT(nt_pool_valid(&s_gfx.texture_pool, bindings[i].texture.id) && "apply_texture_bindings: invalid texture handle");
         NT_ASSERT(!texture_is_active_attachment(bindings[i].texture) && "apply_texture_bindings: cannot sample the active render target's attachment");
@@ -1673,11 +1665,11 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         applied_mask |= bit;
     }
 
-    if (applied_mask != s_gfx.required_texture_mask) {
-        NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler coverage missing=%02x", s_gfx.bound_program, (uint8_t)(s_gfx.required_texture_mask & (uint8_t)~applied_mask));
+    if (applied_mask != required_mask) {
+        NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler coverage missing=%02x", program, (uint8_t)(required_mask & (uint8_t)~applied_mask));
     }
-    NT_ASSERT(applied_mask == s_gfx.required_texture_mask && "apply_texture_bindings: active sampler coverage is incomplete");
-    if (applied_mask != s_gfx.required_texture_mask) {
+    NT_ASSERT(applied_mask == required_mask && "apply_texture_bindings: active sampler coverage is incomplete");
+    if (applied_mask != required_mask) {
         s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
         return;
     }
@@ -1923,8 +1915,8 @@ static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input
 
 /* FAILED was already reported by apply; NONE means the caller never applied a set. */
 static bool texture_set_ready(void) {
-    NT_ASSERT((s_gfx.required_texture_mask == 0 || s_gfx.texture_set_state != NT_GFX_TEXTURE_SET_NONE) && "draw: bound program requires a texture set -- call nt_gfx_apply_texture_bindings");
-    return s_gfx.required_texture_mask == 0 || s_gfx.texture_set_state == NT_GFX_TEXTURE_SET_APPLIED;
+    NT_ASSERT(s_gfx.texture_set_state != NT_GFX_TEXTURE_SET_NONE && "draw: bound program requires a texture set -- call nt_gfx_apply_texture_bindings");
+    return s_gfx.texture_set_state == NT_GFX_TEXTURE_SET_APPLIED;
 }
 
 /* Enabled-but-unpointed instance attribs are invalid GL that fails silently. */
