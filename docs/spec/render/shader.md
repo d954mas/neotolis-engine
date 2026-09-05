@@ -86,11 +86,12 @@ reflection order. A program may not use more than `NT_GFX_MAX_TEXTURE_SLOTS`
 sampler units (asserted at link). The backend writes the units once with
 `glUniform1i` immediately after reflection, restoring the program that was
 current, because linking may happen while a pipeline is bound.
-The unit table is backend-private. `nt_gfx_program_sampler_count` exposes only
-the interface cardinality. `nt_gfx_apply_texture_bindings` consumes the table to
-map a complete name-keyed set to units; callers never observe or choose unit
+The unit table is backend-private: `nt_gfx_apply_texture_bindings` consumes it to
+map a complete name-keyed set to units, and callers never observe or choose unit
 numbers. A name absent after driver optimization is inactive and ignored before
-its texture or sampler handle is inspected.
+its texture or sampler handle is inspected. Two active uniform names whose
+`nt_hash32_str` values collide assert at link, because a hash is all a caller
+names them by.
 
 A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location

@@ -113,9 +113,9 @@ loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
-explicitly. Applying a texture set containing a husk reports once and returns
-`false` before issuing any texture or sampler bind; binding a husk buffer, or
-writing into any husk, asserts.
+explicitly. Applying a texture set containing a husk reports once and issues no
+texture or sampler bind, and the draws of that set are skipped; binding a husk
+buffer, or writing into any husk, asserts.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -139,8 +139,9 @@ name-keyed set for the bound program, resolves it into those units with fixed
 stack storage, then publishes the logical set and issues backend binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before backend binds; inactive names are ignored before their handles
-are inspected. Context loss, a texture husk, or failed sampler recreation returns
-`false` with no published set and no backend binds. A vec4 param a material
+are inspected. Context loss, a texture husk, or failed sampler recreation
+publishes no set and issues no backend bind: gfx reports the failure and skips
+the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program; the
 planned fix is per-material param UBOs bound at material transitions (#133).
 Until that lands, two materials sharing one program must declare the same
@@ -251,8 +252,8 @@ Pass color and depth clears are pass-owned operations. In particular,
 state; pipeline write masks affect draws, not the next pass initialization. Bound
 pipeline, vertex input, and the logical complete texture set are pass-scoped:
 `begin_pass` discards them. The texture set is additionally tied to the bound
-program and is discarded when that program changes or one of its textures is
-destroyed. Pipeline and vertex-input binds, texture-set application,
+program and is discarded when that program changes, when the bound pipeline is
+destroyed, or when any texture is destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state and the backend deduplicates them across passes. The clear forces the depth

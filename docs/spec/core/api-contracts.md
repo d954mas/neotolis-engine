@@ -206,16 +206,16 @@ declaring no textures never receives the page and is for shaders that compute
 coverage analytically. Every declared slot the program samples must resolve to a
 texture, in every material-driven renderer. The renderer submits one complete
 name-keyed set per material transition; gfx resolves backend units, validates
-coverage, and publishes only the full valid set. A rejected set invalidates the
+coverage, and publishes only the full valid set. A rejected set discards the
 logical binding state, so a draw cannot reuse the previous material's textures.
 Register a placeholder with `nt_resource_set_placeholder_texture` to survive
 async load races; a sampler override does not exempt a slot, since the override
 only picks filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
-and `u_band_texture`. The text renderer asserts that the material declares
-nothing, that the program links exactly two samplers when its pipeline is
-created, and gfx's coverage check confirms those two names at every flush.
+and `u_band_texture`. `nt_text_renderer_flush` asserts that the material declares
+nothing and submits its font set unconditionally, where gfx's coverage check
+confirms both names.
 
 Every other material declares a slot for every sampler its program uses. A
 renderer applies the complete name-keyed set at every material transition and at
@@ -247,9 +247,6 @@ then applies to comparison results rather than to raw depth. The texture keeps
 `NEAREST` either way, and the same descriptor field is rejected on non-depth
 storage.
 
-`nt_gfx_program_sampler_count` exposes only the cardinality of a ready program's
-semantic sampler interface; unit assignments remain backend-private.
-
 `nt_gfx_apply_texture_bindings` borrows its array only for the call and requires
 an active pass and bound pipeline. The array describes the complete active
 sampler interface by name, not by texture unit. Names absent from the linked
@@ -258,10 +255,11 @@ to the immutable units recorded at link. Missing or duplicate active names,
 invalid handles, sampler/texture type mismatches, and sampling a color or depth
 attachment of the active render target are developer errors and assert. Resolution
 is atomic: context loss, a texture without live backend storage, or failed sampler
-recreation returns `false` before any backend bind and publishes no logical set.
-Context loss means loss already observed by
-`nt_gfx_begin_frame`; material transitions do not poll the platform. Resolution
-uses fixed stack storage and allocates no heap memory.
+recreation publishes no logical set and issues no backend bind. Those failures are
+recoverable, so gfx reports them and skips the following draws of that set instead
+of returning a status the caller would have to branch on. Context loss means loss
+already observed by `nt_gfx_begin_frame`; material transitions do not poll the
+platform. Resolution uses fixed stack storage and allocates no heap memory.
 
 The sampler class is part of the linked interface:
 
