@@ -1151,6 +1151,19 @@ static void test_program_with_an_unsupported_sampler_type_asserts(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
 }
 
+/* Desktop GL accepts sampler types GLES never has; they are rejected the same way. */
+static void test_program_with_a_desktop_only_sampler_type_asserts(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform sampler2DRect u_rect;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = texture(u_rect, vec2(0.0)); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
+}
+
 /* One sampler past the unit budget is a link failure, not a sampler on unit 0. */
 static void test_program_with_more_samplers_than_units_asserts(void) {
     _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS == 8, "shader below declares NT_GFX_MAX_TEXTURE_SLOTS + 1 samplers");
@@ -1454,6 +1467,7 @@ int main(void) {
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);
+    RUN_TEST(test_program_with_a_desktop_only_sampler_type_asserts);
     RUN_TEST(test_program_with_more_samplers_than_units_asserts);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);

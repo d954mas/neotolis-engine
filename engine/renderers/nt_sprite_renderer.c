@@ -1407,7 +1407,6 @@ void nt_sprite_renderer_flush(void) {
             .param_count = (mi != NULL) ? mi->param_count : 0,
             .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
             .params = (mi != NULL) ? mi->params : NULL,
-            .label = (mi != NULL) ? mi->label : NULL,
         };
         nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
         /* Per cmd, not per material: one material's page can change on a page split.

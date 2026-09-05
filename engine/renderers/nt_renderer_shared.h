@@ -66,7 +66,6 @@ typedef struct {
     uint8_t param_count;
     const uint32_t *param_name_hashes; /* [param_count] */
     const float (*params)[4];
-    const char *label; /* diagnostics only; NULL when the material is gone */
 } nt_renderer_material_view_t;
 
 /* Zero-init = nothing bound; lives for ONE draw_list or flush. Material uniforms replay on
@@ -118,11 +117,6 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
 static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v) {
     nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];
     for (uint8_t t = 0; t < v->tex_count; t++) {
-        /* gfx names the sampler by hash; only the material knows the material. */
-        if (v->resolved_tex[t] == 0) {
-            NT_LOG_ERROR_ONCE("material '%s': slot '%08x' has no texture -- register a placeholder via nt_resource_set_placeholder_texture", (v->label != NULL) ? v->label : "(unlabeled)",
-                              v->tex_name_hashes[t]);
-        }
         bindings[t] = (nt_gfx_texture_binding_t){
             .name = {.value = v->tex_name_hashes[t]},
             .texture = {.id = v->resolved_tex[t]},
@@ -141,7 +135,6 @@ static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_mat
         .param_count = mi->param_count,
         .param_name_hashes = mi->param_name_hashes,
         .params = mi->params,
-        .label = mi->label,
     };
 }
 // #endregion

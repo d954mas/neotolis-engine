@@ -214,8 +214,9 @@ only picks filtering for a texture that still has to exist. A text
 material declares no textures at all — the font's curve and band textures are
 the text renderer's own binds, on the units its program gave `u_curve_texture`
 and `u_band_texture`. `nt_text_renderer_flush` asserts that the material declares
-nothing and submits its font set unconditionally, where gfx's coverage check
-confirms both names.
+nothing and submits its font set unconditionally; gfx's coverage check confirms
+every sampler the program actually links, so a text program that samples only
+one of the two draws with that one.
 
 Every other material declares a slot for every sampler its program uses. A
 renderer applies the complete name-keyed set at every material transition and at

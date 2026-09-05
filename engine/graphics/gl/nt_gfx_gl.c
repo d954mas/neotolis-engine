@@ -1174,6 +1174,30 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     case GL_UNSIGNED_INT_SAMPLER_3D:
     case GL_UNSIGNED_INT_SAMPLER_CUBE:
     case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+#ifndef NT_PLATFORM_WEB
+    /* Desktop-only families; absent from the GLES3 headers. */
+    case GL_SAMPLER_1D:
+    case GL_SAMPLER_1D_SHADOW:
+    case GL_SAMPLER_1D_ARRAY:
+    case GL_SAMPLER_1D_ARRAY_SHADOW:
+    case GL_SAMPLER_2D_RECT:
+    case GL_SAMPLER_2D_RECT_SHADOW:
+    case GL_SAMPLER_2D_MULTISAMPLE:
+    case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_SAMPLER_BUFFER:
+    case GL_INT_SAMPLER_1D:
+    case GL_INT_SAMPLER_1D_ARRAY:
+    case GL_INT_SAMPLER_2D_RECT:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_INT_SAMPLER_BUFFER:
+    case GL_UNSIGNED_INT_SAMPLER_1D:
+    case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+#endif
         NT_ASSERT(false && "program declares an unsupported sampler type");
         return false;
     default:
