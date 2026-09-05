@@ -205,7 +205,8 @@ because the renderer substitutes the page texture there per command. A material
 declaring no textures never receives the page and is for shaders that compute
 coverage analytically. Every declared slot the program samples must resolve to a
 texture, in every material-driven renderer. The renderer submits one complete
-name-keyed set per material transition; gfx resolves backend units, validates
+name-keyed set per material transition, resolved from the material's declared
+`nt_resource_t` handles at that transition; gfx resolves backend units, validates
 coverage, and publishes only the full valid set. A rejected set discards the
 logical binding state, so a draw cannot reuse the previous material's textures.
 Register a placeholder with `nt_resource_set_placeholder_texture` to survive

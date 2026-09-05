@@ -115,6 +115,25 @@ Per-entity variation (e.g. per-character color, dissolve progress) goes through 
 
 Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
+## Texture resolve
+
+A material stores the declared `nt_resource_t` for each texture slot and never a
+resolved handle. Renderers call `nt_resource_get` where they already transition
+material state: the mesh renderer at each material change inside a `draw_list`,
+the sprite renderer when a command opens (a page split copies the open command's
+snapshot and substitutes only the page). A text material declares no textures,
+so the text renderer resolves nothing. There is no material step.
+
+The published view of a resource changes only inside `nt_resource_step`, so a
+frame that steps resources before it renders sees one set of handles across every
+renderer, and a material created mid-frame binds its textures on its first draw.
+
+Publication is not GPU lifetime. `nt_resource_invalidate` and
+`nt_resource_unmount` destroy GPU objects immediately, while the slot keeps
+publishing the dead handle until the next `nt_resource_step`. A game that
+invalidates textures — after a context restore, for instance — steps resources
+before it draws, or skips that frame.
+
 ## Render state and material
 
 Material stores render state (blend state, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state at render time; the mesh vertex layout is baked into a separately bound vertex-input object (see render/architecture.md).
