@@ -1175,6 +1175,10 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
 #ifndef NT_PLATFORM_WEB
     /* Desktop-only families; absent from the GLES3 headers. */
+    case GL_SAMPLER_CUBE_MAP_ARRAY_ARB:
+    case GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW_ARB:
+    case GL_INT_SAMPLER_CUBE_MAP_ARRAY_ARB:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY_ARB:
     case GL_SAMPLER_1D:
     case GL_SAMPLER_1D_SHADOW:
     case GL_SAMPLER_1D_ARRAY:

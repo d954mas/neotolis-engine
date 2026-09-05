@@ -1150,6 +1150,39 @@ static void test_program_with_a_desktop_only_sampler_type_asserts(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
 }
 
+static void test_cube_array_sampler_types_assert_at_link(void) {
+    if (GLAD_GL_ARB_texture_cube_map_array == 0) {
+        TEST_IGNORE_MESSAGE("GL_ARB_texture_cube_map_array is unavailable");
+    }
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_sources[] = {
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform samplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = texture(u_env, vec4(0.0, 0.0, 1.0, 0.0)); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform samplerCubeArrayShadow u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0), 0.5)); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform isamplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0))); }\n",
+        "#extension GL_ARB_texture_cube_map_array : require\n"
+        "uniform usamplerCubeArray u_env;\n"
+        "out vec4 frag_color;\n"
+        "void main() { frag_color = vec4(texture(u_env, vec4(0.0, 0.0, 1.0, 0.0))); }\n",
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    for (size_t i = 0; i < sizeof(fragment_sources) / sizeof(fragment_sources[0]); i++) {
+        nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_sources[i]});
+        NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
+        nt_gfx_destroy_shader(fs);
+    }
+    nt_gfx_destroy_shader(vs);
+}
+
 /* One sampler past the unit budget is a link failure, not a sampler on unit 0. */
 static void test_program_with_more_samplers_than_units_asserts(void) {
     _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS == 8, "shader below declares NT_GFX_MAX_TEXTURE_SLOTS + 1 samplers");
@@ -1453,6 +1486,7 @@ int main(void) {
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);
     RUN_TEST(test_program_with_an_unsupported_sampler_type_asserts);
     RUN_TEST(test_program_with_a_desktop_only_sampler_type_asserts);
+    RUN_TEST(test_cube_array_sampler_types_assert_at_link);
     RUN_TEST(test_program_with_more_samplers_than_units_asserts);
     RUN_TEST(test_samplers_read_their_link_time_units_without_uniform_writes);
     RUN_TEST(test_two_draws_on_one_program_bind_at_their_queried_units);
