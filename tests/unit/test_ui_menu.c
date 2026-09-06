@@ -292,10 +292,10 @@ static void test_menu_smoke_open_and_closed(void) {
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx)); /* balanced */
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* balanced */
     st.open = false;
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
 }
 
 /* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
@@ -1498,10 +1498,13 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
     TEST_ASSERT_TRUE_MESSAGE(root.x + root.width <= VIEW_W + 0.5F, "root menu near the right edge must clamp on-screen (no right clip)");
     TEST_ASSERT_TRUE_MESSAGE(root.x >= -0.5F, "clamped root must not push off the left edge");
 
-    /* (b) Submenu flipped LEFT and stays on-screen. */
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_POPUP_LEFT, nt_ui_popup_test_last_side(), "submenu near the right edge must flip LEFT");
+    /* (b) Submenu flipped LEFT and stays on-screen: a LEFT flip lands it wholly left of the root panel,
+     *      which is the visible consequence the side enum stands for. */
     const nt_ui_bbox_t sub = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U));
     TEST_ASSERT_TRUE(sub.found);
+    /* A RIGHT-side submenu starts at the parent panel's right edge, so its own right edge would land a
+     * full width past it. Staying within the parent's right edge is the LEFT flip. */
+    TEST_ASSERT_TRUE_MESSAGE(sub.x + sub.width <= root.x + root.width + 0.5F, "submenu near the right edge must flip LEFT, not hang off the panel's right side");
     TEST_ASSERT_TRUE_MESSAGE(sub.x + sub.width <= VIEW_W + 0.5F, "left-flipped submenu must stay on-screen (right edge within the viewport)");
     TEST_ASSERT_TRUE_MESSAGE(sub.x >= -0.5F, "left-flipped submenu must not clip off the left edge");
 }

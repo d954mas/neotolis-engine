@@ -112,10 +112,7 @@ void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id);
 bool nt_ui_modal_active(const nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
-uint8_t nt_ui_modal_test_stack_depth(const nt_ui_context_t *ctx);      /* live active_modal_depth */
-nt_ui_modal_close_reason_t nt_ui_modal_test_last_close_reason(void);   /* reason of the last begin */
-float nt_ui_modal_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
-void nt_ui_modal_test_last_panel_offset(float *ox, float *oy);         /* panel transform offset of the last begin */
+void nt_ui_modal_test_last_panel_offset(float *ox, float *oy); /* panel transform offset of the last begin */
 #endif
 
 #endif /* NT_UI_MODAL_H */

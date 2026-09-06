@@ -93,12 +93,9 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id);
 
 #ifdef NT_TEST_ACCESS
-uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx);      /* live active depth (shared modal counter) */
-uint8_t nt_ui_popup_test_last_side(void);                              /* nt_ui_popup_side_t chosen last begin */
-bool nt_ui_popup_test_last_catcher_present(void);                      /* did the last begin declare a catcher? */
-float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
-uint32_t nt_ui_popup_test_entrance_seed_count(void);                   /* cumulative entrance t=0 re-seeds (once per open-edge) */
-void nt_ui_popup_test_entrance_seed_reset(void);                       /* zero the entrance-seed counter */
+bool nt_ui_popup_test_last_catcher_present(void);    /* did the last begin declare a catcher? */
+uint32_t nt_ui_popup_test_entrance_seed_count(void); /* cumulative entrance t=0 re-seeds (once per open-edge) */
+void nt_ui_popup_test_entrance_seed_reset(void);     /* zero the entrance-seed counter */
 #endif
 
 #endif /* NT_UI_POPUP_H */

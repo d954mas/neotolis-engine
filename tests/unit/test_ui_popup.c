@@ -85,7 +85,7 @@ static void test_popup_floating_smoke(void) {
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(r.visible);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
 }
 
 /* ---- z-band: each popup declares ONE stride above its enclosing floating, catcher one below its own
@@ -102,11 +102,11 @@ static void test_popup_zband_and_nesting(void) {
     /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
     CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->active_modal_depth);
     CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
     nt_ui_end(s_fx.ctx);
 
     const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
@@ -211,16 +211,17 @@ static uint8_t edge_flip_side(uint32_t id, float ax, float ay, uint8_t prefer) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = ax, .y = ay, .w = 40.0F, .h = 24.0F, .prefer_side = prefer};
 
+    uint8_t side = (uint8_t)NT_UI_POPUP_CENTER;
     for (int f = 0; f < 2; ++f) {
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-        nt_ui_popup_begin(s_fx.ctx, id, &st, &anc, true);
+        side = nt_ui_popup_begin(s_fx.ctx, id, &st, &anc, true).side;
         {
             CLAY({.id = (Clay_ElementId){.id = id ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
         }
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    return nt_ui_popup_test_last_side();
+    return side;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

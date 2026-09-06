@@ -52,7 +52,6 @@ static bool popup_anim_slot_absent(const nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-static uint8_t s_last_side;
 static bool s_last_catcher_present;
 static uint32_t s_entrance_seed_count; /* # of entrance t=0 re-seeds; must fire once per open-edge, not per frame */
 #endif
@@ -315,7 +314,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
 
 #ifdef NT_TEST_ACCESS
-    s_last_side = (uint8_t)side;
     s_last_catcher_present = want_catcher;
 #endif
 
@@ -362,24 +360,7 @@ void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_popup_test_stack_depth: ctx must be non-NULL");
-    return ctx->active_modal_depth;
-}
-uint8_t nt_ui_popup_test_last_side(void) { return s_last_side; }
 bool nt_ui_popup_test_last_catcher_present(void) { return s_last_catcher_present; }
 uint32_t nt_ui_popup_test_entrance_seed_count(void) { return s_entrance_seed_count; }
 void nt_ui_popup_test_entrance_seed_reset(void) { s_entrance_seed_count = 0U; }
-float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_popup_test_tween: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_popup_test_tween: id must be non-zero");
-    const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
-    for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
-        const nt_ui_anim_interaction_t *cand = &ctx->anim[(base + k) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
-        if (cand->valid && cand->id == id) {
-            return cand->value_t;
-        }
-    }
-    return 0.0F;
-}
 #endif
