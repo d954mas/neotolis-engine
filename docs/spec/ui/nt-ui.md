@@ -32,6 +32,24 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Floating zIndex is relative
+
+Upstream Clay sorts every floating element globally by its own
+`zIndex`. The vendored copy diverges (NT patch 4 in `deps/clay/clay.h`):
+a floating declared inside another floating gets `parent_z + own_z`, so
+`zIndex` reads as a stacking context, like CSS. Without it a widget's
+own floating part (the slider thumb, the input caret and text, a
+scrollbar) sank to the global band 0 and drew UNDER the modal panel it
+was declared in, and sorting a child tree root ahead of its parent also
+made Clay position it from the parent's PREVIOUS-frame bbox (a frame of
+lag, and an empty clip rect on the first frame — which the walker's
+SCISSOR assert catches). Consequences: a widget composes anywhere
+without knowing its global stacking position; the engine's overlay
+bands (`modal_zband_stride`) are declared as deltas and accumulate with
+declaration nesting, NOT with attachment (`attachTo = ROOT` still stacks
+where it was declared); a game floating that wants to escape its
+enclosing panel must be declared outside it.
+
 ## Clay private symbols
 
 Even with `NT_UI_DEBUG_TOOLS=OFF`, nt_ui touches ~10 Clay **private**
@@ -329,7 +347,9 @@ attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
 read from the panel's previous-frame bbox; a `value_t` open/close tween; a shared
-modal-depth z-band (`modal_zband_stride*(depth+1)`, NT_ASSERT before the push so
+modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
+floating (Clay accumulates the nesting — see below — so a popup opened from
+inside another popup still lands on `stride*depth`; NT_ASSERT before the push so
 a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven

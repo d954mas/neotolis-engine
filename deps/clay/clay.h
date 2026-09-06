@@ -13,6 +13,12 @@
 //      unconditionally. Without it an offscreen clip (a field scrolled past the
 //      fold) leaves an unmatched END -> renderer scissor-stack underflow. One site
 //      in the CLIP render-command case ("shouldRender = true").
+//   4. Floating zIndex is RELATIVE to the enclosing floating element (CSS stacking
+//      context) instead of global: a floating declared inside another floating gets
+//      parent_z + own_z. Upstream sorts every root by its own zIndex, so a widget's
+//      floating part (slider thumb, input caret) sank under the modal panel it was
+//      declared in, and sorting a child root ahead of its parent also made Clay read
+//      the parent bbox one frame stale. openFloatingZStack + 3 sites, search "NT patch 4".
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -1298,6 +1304,7 @@ struct Clay_Context {
     Clay__MeasuredWordArray measuredWords;
     Clay__int32_tArray measuredWordsFreeList;
     Clay__int32_tArray openClipElementStack;
+    Clay__int32_tArray openFloatingZStack; // NT patch 4: effective zIndex of each open floating ancestor
     Clay_ElementIdArray pointerOverIds;
     Clay__ScrollContainerDataInternalArray scrollContainerDatas;
     Clay__boolArray treeNodeVisited;
@@ -1830,6 +1837,7 @@ void Clay__CloseElement(void) {
             break;
         } else if (config->type == CLAY__ELEMENT_CONFIG_TYPE_FLOATING) {
             context->openClipElementStack.length--;
+            context->openFloatingZStack.length--; // NT patch 4
         }
     }
 
@@ -2120,6 +2128,11 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
             if (declaration->floating.clipTo == CLAY_CLIP_TO_NONE) {
                 clipElementId = 0;
             }
+            // NT patch 4: zIndex is relative to the enclosing floating element, clamped to the int16 field.
+            int32_t enclosingZ = context->openFloatingZStack.length > 0 ? Clay__int32_tArray_GetValue(&context->openFloatingZStack, context->openFloatingZStack.length - 1) : 0;
+            int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, enclosingZ + (int32_t)floatingConfig.zIndex));
+            floatingConfig.zIndex = (int16_t)effectiveZ;
+            Clay__int32_tArray_Add(&context->openFloatingZStack, effectiveZ);
             int32_t currentElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);
             Clay__int32_tArray_Set(&context->layoutElementClipElementIds, currentElementIndex, clipElementId);
             Clay__int32_tArray_Add(&context->openClipElementStack, clipElementId);
@@ -2204,6 +2217,7 @@ void Clay__InitializeEphemeralMemory(Clay_Context* context) {
     context->treeNodeVisited = Clay__boolArray_Allocate_Arena(maxElementCount, arena);
     context->treeNodeVisited.length = context->treeNodeVisited.capacity; // This array is accessed directly rather than behaving as a list
     context->openClipElementStack = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+    context->openFloatingZStack = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena); // NT patch 4
     context->reusableElementIndexBuffer = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementClipElementIds = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->dynamicStringData = Clay__charArray_Allocate_Arena(maxElementCount, arena);

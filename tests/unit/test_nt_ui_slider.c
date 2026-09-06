@@ -19,6 +19,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
 #include "unity.h"
@@ -838,6 +839,61 @@ static void test_assert_orientation_invalid(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
+/* ---- A slider declared inside a modal (a floating z-band) draws its thumb ABOVE the panel and in the
+ *      right place on the FIRST frame. The thumb is a floating child: while Clay sorted every floating
+ *      root by its own zIndex, the thumb root (z 0) sorted UNDER the panel band AND was positioned from
+ *      the track's previous-frame bbox — invisible, one frame stale, and the clip parent's empty bbox
+ *      tripped the walker's SCISSOR assert. Panel .clip keeps that scissor path in the test. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_thumb_above_modal_band_first_frame(void) {
+    float value = 0.5F;
+    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
+    mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
+
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &idle, 1);
+    (void)nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, true);
+    CLAY({.id = CLAY_ID("modal_panel"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},
+          .backgroundColor = {10, 10, 10, 255},
+          .clip = {.horizontal = true, .vertical = true}}) {
+        (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("modal_sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+    }
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    /* Walks the SCISSOR the thumb's clipTo emits — an empty clip bbox aborts here. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int32_t thumb_at = -1;
+    const Clay_RenderCommand *thumb = find_thumb_image(&thumb_at);
+    TEST_ASSERT_NOT_NULL_MESSAGE(thumb, "slider inside a modal must emit its thumb");
+
+    /* The panel rect carries the modal's effective band; the thumb must paint after it. */
+    int32_t panel_at = -1;
+    const Clay_RenderCommand *track = NULL;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
+            panel_at = i;
+        }
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, SL_W, 0.5F)) {
+            track = c;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must paint in a lifted z band");
+    TEST_ASSERT_TRUE_MESSAGE(thumb_at > panel_at, "thumb must paint AFTER the modal panel, not under it");
+
+    /* Frame-1 placement is measured against the track in the SAME frame, so a stale parent bbox shows up
+     * as an offset instead of a coordinate the test has to predict. The value travel rides the walker
+     * transform, not the Clay box, so the attached box sits exactly on the track's left edge. */
+    TEST_ASSERT_NOT_NULL(track);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(thumb->boundingBox.x, track->boundingBox.x, 0.5F), "thumb box must attach to the track left edge, not a stale-bbox origin");
+    const float thumb_cy = thumb->boundingBox.y + (thumb->boundingBox.height * 0.5F);
+    const float track_cy = track->boundingBox.y + (track->boundingBox.height * 0.5F);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(thumb_cy, track_cy, 0.5F), "thumb must stay centered on the track cross axis");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_track_jump_value_map);
@@ -857,6 +913,7 @@ int main(void) {
     RUN_TEST(test_step_thumb_visual_snap);
     RUN_TEST(test_out_of_range_writeback);
     RUN_TEST(test_thumb_clipped_in_scroll);
+    RUN_TEST(test_thumb_above_modal_band_first_frame);
     RUN_TEST(test_vertical_track_jump_bottom_up);
     RUN_TEST(test_vertical_track_jump_top_down);
     RUN_TEST(test_vertical_thumb_grab_bottom_up);

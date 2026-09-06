@@ -242,7 +242,6 @@ static float s_last_bar_thumb_off[2] = {0.0F};     /* per-axis thumb offset alon
 static float s_last_bar_track_len[2] = {0.0F};     /* per-axis track length */
 static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacity */
 static uint8_t s_last_bar_layer[2] = {0U, 0U};     /* per-axis draw layer of the emitted bar */
-static int16_t s_last_bar_zindex[2] = {0, 0};      /* per-axis Clay floating zIndex of the emitted bar */
 static uint32_t s_wheel_recipients = 0U;           /* # of scroll_begin gathers that consumed a wheel since reset (broadcast pin) */
 #endif
 // #endregion
@@ -773,15 +772,6 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, bar_id, &tgt, 0.0F, style->bar_fade_speed);
         opacity = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     }
-    /* Clay sorts ALL floating roots by zIndex GLOBALLY: inside a popup/modal the panel floats at
-     * stride*active_modal_depth, so a zIndex-0 bar draws UNDER the (settled-opaque) panel and is only
-     * seen through the translucent open/close tween. Float the bar one band above ITS popup panel (still
-     * below any deeper-nested popup). Standalone scroll (depth 0) keeps zIndex 0 — nothing floats over it. */
-    int16_t bar_zindex = 0;
-    if (ctx->active_modal_depth > 0U) {
-        const int32_t z = ((int32_t)ctx->modal_zband_stride * (int32_t)ctx->active_modal_depth) + 1;
-        bar_zindex = (int16_t)((z > INT16_MAX) ? INT16_MAX : z); /* clamp — int16 ceiling for deep nests */
-    }
 #ifdef NT_TEST_ACCESS
     /* Single write site — geometry + opacity are final by here (incl. the faded case). */
     s_last_bar_thumb_len[axis] = thumb_len;
@@ -789,7 +779,6 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     s_last_bar_track_len[axis] = track_len;
     s_last_bar_opacity[axis] = opacity;
     s_last_bar_layer[axis] = bar_layer;
-    s_last_bar_zindex[axis] = bar_zindex;
 #endif
     if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
         return; /* fully faded — nothing to draw (the id stays registered for next-frame hover) */
@@ -810,16 +799,12 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     if (axis == 1) { /* vertical bar on the right edge */
         track_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(track_len)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                         .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                         .zIndex = bar_zindex,
-                         .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
         };
         thumb_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(thumb_len)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
                          .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                         .zIndex = bar_zindex,
                          .offset = {.x = 0.0F, .y = thumb_off},
                          .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
         };
@@ -828,14 +813,12 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
             .layout = {.sizing = {CLAY_SIZING_FIXED(track_len), CLAY_SIZING_FIXED(thickness)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
                          .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                         .zIndex = bar_zindex,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
         };
         thumb_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thumb_len), CLAY_SIZING_FIXED(thickness)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
                          .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                         .zIndex = bar_zindex,
                          .offset = {.x = thumb_off, .y = 0.0F},
                          .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
         };
@@ -1072,10 +1055,6 @@ uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis) { return scrollb
 uint8_t nt_ui_scroll_test_last_bar_layer(int axis) {
     NT_ASSERT(axis == 0 || axis == 1);
     return s_last_bar_layer[axis];
-}
-int16_t nt_ui_scroll_test_last_bar_zindex(int axis) {
-    NT_ASSERT(axis == 0 || axis == 1);
-    return s_last_bar_zindex[axis];
 }
 uint32_t nt_ui_scroll_test_wheel_recipients(void) { return s_wheel_recipients; }
 void nt_ui_scroll_test_wheel_recipients_reset(void) { s_wheel_recipients = 0U; }

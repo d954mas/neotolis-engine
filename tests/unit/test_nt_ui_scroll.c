@@ -402,16 +402,25 @@ static void test_scrollbar_always_shows(void) {
     TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
 }
 
-/* ---- A standalone scroll (NOT inside a popup) floats its bar at zIndex 0: nothing floats above it,
- *      so the popup-band lift must NOT kick in (active_modal_depth == 0). ---- */
-static void test_scrollbar_standalone_zindex_zero(void) {
+/* ---- A standalone scroll (no floating encloses it) must not lift anything: with zIndex inherited from
+ *      the enclosing floating, "no enclosing floating" means every command stays in band 0. ---- */
+static void test_scrollbar_standalone_no_z_lift(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     nt_pointer_t p = {0};
     p.active = true;
     scrollbar_frame(&p, &style, 1000.0F); /* overflow */
     scrollbar_frame(&p, &style, 1000.0F);
     TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_scroll_test_last_bar_zindex(1), "standalone scroll bar must float at zIndex 0");
+    const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    bool bar_emitted = false;
+    int32_t max_z = 0;
+    const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
+    for (int32_t i = 0; i < arr->length; ++i) {
+        bar_emitted = bar_emitted || (arr->internalArray[i].id == bar_id);
+        max_z = (arr->internalArray[i].zIndex > max_z) ? arr->internalArray[i].zIndex : max_z;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(bar_emitted, "standalone scrollbar must reach the render commands");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(0, max_z, "standalone scroll must stay in z band 0");
 }
 
 /* ---- Test 12: thumb length is proportional to container/content (clamped to min). ---- */
@@ -2058,7 +2067,7 @@ int main(void) {
     RUN_TEST(test_scroll_capture_tap_no_steal);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);
-    RUN_TEST(test_scrollbar_standalone_zindex_zero);
+    RUN_TEST(test_scrollbar_standalone_no_z_lift);
     RUN_TEST(test_scrollbar_thumb_size_ratio);
     RUN_TEST(test_scrollbar_thumb_pos_clay_sign);
     RUN_TEST(test_scrollbar_track_click_scroll_to);

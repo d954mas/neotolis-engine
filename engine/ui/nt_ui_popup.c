@@ -175,9 +175,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band (shared depth counter with modal)
-    const uint8_t depth = ctx->active_modal_depth;
     ++ctx->active_modal_depth;
-    const int16_t panel_z = (int16_t)(ctx->modal_zband_stride * (depth + 1));
+    /* One band ABOVE whatever floating encloses this call — Clay accumulates the nesting for us, so a
+     * popup opened from inside another popup lands on stride*depth without the depth arithmetic. */
+    const int16_t panel_z = ctx->modal_zband_stride;
     const int16_t catcher_z = (int16_t)(panel_z - 1);
     const uint32_t catcher_id = popup_catcher_id(id);
     // #endregion
@@ -311,8 +312,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
 
 #ifdef NT_TEST_ACCESS
-    s_last_panel_zband = (uint16_t)panel_z;
-    s_last_catcher_zband = (uint16_t)catcher_z;
+    /* Effective band, not the declared delta: Clay adds the enclosing floating's z, and every popup
+     * level contributes exactly one stride. */
+    s_last_panel_zband = (uint16_t)(ctx->modal_zband_stride * ctx->active_modal_depth);
+    s_last_catcher_zband = (uint16_t)(s_last_panel_zband - 1U);
     s_last_side = (uint8_t)side;
     s_last_catcher_present = want_catcher;
 #endif

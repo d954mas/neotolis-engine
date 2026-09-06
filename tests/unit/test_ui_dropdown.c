@@ -341,8 +341,11 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
 static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
-    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
-    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+    /* Real fixture art, not the placeholder refs the other cases use: an unresolvable ref draws nothing,
+     * and this case reads the zIndex Clay stamped on the bar's own render command. */
+    const nt_atlas_region_ref_t bar_art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    st.list_scroll.track_ref = bar_art;
+    st.list_scroll.thumb_ref = bar_art;
 
     int selected = 0;
     bool open = true;
@@ -351,11 +354,28 @@ static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
     TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "popup-nested long list must emit a vertical scrollbar");
-    /* The single combo popup floats at depth 1: panel_z == stride*1. The bar must sit strictly above it. */
-    const int16_t stride = s_fx.ctx->modal_zband_stride;
-    const int16_t bar_z = nt_ui_scroll_test_last_bar_zindex(1);
-    TEST_ASSERT_GREATER_THAN_INT16_MESSAGE(0, bar_z, "popup-nested bar zIndex must be > 0");
-    TEST_ASSERT_GREATER_THAN_INT16_MESSAGE(stride, bar_z, "popup-nested bar zIndex must sit ABOVE the popup panel band (stride*depth)");
+    /* The combo popup panel floats one band up (stride*1 here). The bar is declared INSIDE that panel, so
+     * it must inherit the panel's band instead of sinking to the base 0 and drawing under the panel. */
+    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    const uint32_t bar_id = nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1);
+    const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    int32_t bar_at = -1;
+    int32_t last_panel_at = -1;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (c->id == bar_id && bar_at < 0) {
+            bar_at = i;
+        }
+        /* Panel-band CONTENT only: RECTANGLE/TEXT carry their floating root's effective band, while the
+         * bar's own clipTo SCISSOR markers also carry it (they clip to the panel-side parent). */
+        const bool content = (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE || c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT);
+        if (content && c->zIndex == stride) {
+            last_panel_at = i;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(bar_at >= 0, "popup-nested bar must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(last_panel_at >= 0, "the popup panel band must be present in the frame");
+    TEST_ASSERT_TRUE_MESSAGE(bar_at > last_panel_at, "popup-nested bar must paint AFTER the popup panel, not sink under it");
 }
 
 /* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with NO
