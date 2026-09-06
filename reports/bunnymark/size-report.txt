@@ -1,37 +1,37 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 780bb58
+# Commit: 469394f
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 609 B
+Type                 574 B
 Import               675 B
-Function             407 B
+Function             396 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                 190 B
-Code              566312 B
-Data              234948 B
-Custom             37902 B
+Elem                 178 B
+Code              561491 B
+Data              234524 B
+Custom             37698 B
 ---------------- ----------
-TOTAL             841147 B
+TOTAL             835640 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-34762 B   frame
-31699 B   nt_gfx_activate_texture
-31472 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-28664 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-20748 B   nt_basisu_transcode_level
-18325 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
+33610 B   frame
+31678 B   nt_gfx_activate_texture
+31467 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
+28662 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
+20731 B   nt_basisu_transcode_level
+18319 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
 15828 B   basist::bc7f::pack_mode0_or_2_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 15228 B   nt_font_lookup_glyph_offset
-11097 B   basist::encode_pvrtc1(basist::block_format, void*, basisu::vector2D<basist::color32> const&, unsigned int, unsigned int, bool)
+11096 B   basist::encode_pvrtc1(basist::block_format, void*, basisu::vector2D<basist::color32> const&, unsigned int, unsigned int, bool)
 10408 B   basist::bc7f::pack_mode1_or_3_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 10249 B   basist::basisu_lowlevel_xuastc_ldr_transcoder::transcode_slice(basist::basis_tex_format, bool, void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)::$_5::__invoke(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*)
 10183 B   basist::astc_hdr_transcode_to_bc6h(astc_helpers::log_astc_block const&, basist::bc6h_block&)
@@ -39,7 +39,7 @@ TOTAL             841147 B
  9043 B   basist::bc7f::pack_mode7_rgba(unsigned char*, basist::color_rgba const*, float, float, float, float, int, int, int, int, float, unsigned int, float*, unsigned int*)
  8646 B   basist::basisu_lowlevel_xuastc_ldr_transcoder::transcode_slice(basist::basis_tex_format, bool, void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)::$_3::__invoke(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*)
  8518 B   astc_helpers::decode_block(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode)
- 8195 B   main
+ 8138 B   main
  7951 B   basist::astc_ldr_t::grid_weight_dct::decode_block_weights(float, unsigned int, astc_helpers::log_astc_block&, basist::bitwise_decoder*, basist::astc_ldr_t::astc_block_grid_data const*, basist::astc_ldr_t::grid_weight_dct::block_stats*, basisu::vector<float>&, basist::astc_ldr_t::dct_syms const*) const
  7933 B   basist::basisu_lowlevel_xuastc_ldr_transcoder::transcode_slice(basist::basis_tex_format, bool, void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
  6917 B   basist::etc1f::pack_etc1(unsigned char*, basist::color_rgba const*, basist::etc1f::pack_etc1_state&)
@@ -54,8 +54,8 @@ TOTAL             841147 B
  4537 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4156 B   basist::etc1f::pack_etc1_grayscale(unsigned char*, unsigned char const*, basist::etc1f::pack_etc1_state&)
 
-Total functions: 405
-Total code size: 565615 B
+Total functions: 394
+Total code size: 560814 B
 
 ## Built Engine Archives
 
@@ -74,7 +74,7 @@ libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_core.a                2628 B
 libnt_debug_overlay.a       2212 B
-libnt_drawable_comp.a       5530 B
+libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              415394 B
 libnt_fs.a                  2706 B
@@ -86,40 +86,40 @@ libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
 libnt_input.a              19520 B
 libnt_input_stub.a         23432 B
-libnt_introspect.a          5080 B
+libnt_introspect.a           908 B
 libnt_log.a                11954 B
-libnt_log_ring.a          595390 B
+libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
 libnt_material.a            4460 B
-libnt_material_comp.a       2302 B
+libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
-libnt_mesh_comp.a           2164 B
+libnt_mesh_comp.a           2028 B
 libnt_mesh_renderer.a      11376 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
-libnt_metrics.a            56720 B
+libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
 libnt_postfx_blur.a         8610 B
 libnt_render.a              7674 B
-libnt_resource.a          188970 B
+libnt_resource.a          188756 B
 libnt_shape_renderer.a   1144652 B
 libnt_sort.a                 470 B
-libnt_sprite_comp.a        10010 B
+libnt_sprite_comp.a         8874 B
 libnt_sprite_renderer.a    54674 B
 libnt_text_renderer.a    1243542 B
 libnt_time.a                 900 B
-libnt_transform_comp.a      6872 B
-libnt_ui.a                614044 B
+libnt_transform_comp.a      5336 B
+libnt_ui.a                506230 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5924048 B
+TOTAL (archives)         5157600 B
 
 ## Data Segments Summary
 
 Segments: 235
-Total data size: 233209 B
+Total data size: 232785 B
