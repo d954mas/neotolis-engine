@@ -36,7 +36,7 @@ source emsdk/emsdk_env.sh
 
 Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release` (the full list, including the `*-test` variants, is `CMakePresets.json`).
 
-One rule: `*-debug` presets build the dev tooling (`NT_UI_DEBUG_TOOLS=ON` and the log ring / metrics / introspection options it defaults on), `*-release` presets build exactly what ships (all of them OFF). Anything else is an explicit `-D`, e.g. `-DNT_METRICS_ENABLED=ON` on a release preset to profile with the overlay. Option defaults apply to a fresh cache only: after a preset policy change, delete the build dir and reconfigure. These presets exist for developing the engine; a game writes its own presets (or inherits the policy-free hidden `base-wasm` / `base-native`) and sets the engine options explicitly.
+One rule: `*-debug` presets pin the dev tooling ON (`NT_UI_DEBUG_TOOLS`, `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED`, `NT_INTROSPECT_WRITE_ENABLED`), `*-release` presets pin all of them OFF — that is the shipping composition the size chart measures (the demo site adds only `-DNT_METRICS_ENABLED=ON` for its HUDs). Anything else is an explicit `-D` on the command line, which overrides the preset, e.g. `-DNT_METRICS_ENABLED=ON` on a release preset to profile with the overlay. These presets exist for developing the engine; a game writes its own presets and sets the engine options explicitly.
 
 ### WASM (requires emsdk activated)
 

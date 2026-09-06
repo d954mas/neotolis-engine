@@ -710,7 +710,9 @@ static void draw_hud(float fb_w, float fb_h) {
         "1 / 2 / 3     shape  (cube / sphere / capsule)",
         "4 / 5 / 6 / 7 speed  (stop / slow / medium / fast)",
         "F1            debug overlay (pos / fps)",
+#if NT_UI_DEBUG_TOOLS
         "F2            UI inspector (sidebar; WIP in 3D)",
+#endif
         "Esc           quit",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {

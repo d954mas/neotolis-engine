@@ -263,8 +263,9 @@ jobs:
       - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
         run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
 
-      # Effective cache values, not preset text: release dirs (what the size chart and
-      # deploy measure) must carry no dev tooling; debug dirs must carry all of it.
+      # Effective cache values, not preset text: release dirs (what the size chart
+      # measures) must carry no dev tooling; debug dirs must carry all of it. devapi is
+      # not asserted on debug dirs — other jobs configure them with devapi ON.
       - name: Verify preset cache policy (wasm)
         run: |
           off="NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=OFF NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF"
@@ -786,19 +787,23 @@ jobs:
       # Metrics ON is the one deliberate deviation from the release preset: the deployed
       # bunnymark / ui_showcase HUDs read nt_metrics, and the stubs would show zeros.
       # UI debug tools stay OFF, so the size chart (wasm job) differs only by nt_metrics.
-      - name: Build paired WASM release for deploy
+      - name: Configure paired WASM release for deploy
         run: |
           emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
           emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
-          cmake --build --preset wasm-release-paired
-          cmake --build --preset wasm-release-simd
-          ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
+      # Checked before the two multi-minute builds so a wrong -D fails fast.
       - name: Verify preset cache policy (deploy)
         run: |
           for p in wasm-release-paired wasm-release-simd; do
             bash scripts/check_preset_cache.sh "build/_cmake/$p" NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF
           done
+
+      - name: Build paired WASM release for deploy
+        run: |
+          cmake --build --preset wasm-release-paired
+          cmake --build --preset wasm-release-simd
+          ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4

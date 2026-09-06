@@ -9,7 +9,7 @@
         {
             "name": "base",
             "hidden": true,
-            "description": "Neutral toolchain-independent settings only. No build type, no dev tooling: those belong to the concrete *-debug / *-release presets.",
+            "description": "Neutral toolchain-independent settings only. No build type, no dev tooling: the concrete *-debug / *-release presets pin every tooling option explicitly so a reconfigure heals a stale cache.",
             "generator": "Ninja",
             "cacheVariables": {
                 "CMAKE_C_STANDARD": "17",
@@ -40,7 +40,11 @@
             "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {
@@ -50,7 +54,11 @@
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "NT_UI_DEBUG_TOOLS": "OFF"
+                "NT_UI_DEBUG_TOOLS": "OFF",
+                "NT_LOG_RING_ENABLED": "OFF",
+                "NT_METRICS_ENABLED": "OFF",
+                "NT_INTROSPECT_ENABLED": "OFF",
+                "NT_INTROSPECT_WRITE_ENABLED": "OFF"
             }
         },
         {
@@ -96,7 +104,11 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {
@@ -106,7 +118,11 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "NT_UI_DEBUG_TOOLS": "OFF"
+                "NT_UI_DEBUG_TOOLS": "OFF",
+                "NT_LOG_RING_ENABLED": "OFF",
+                "NT_METRICS_ENABLED": "OFF",
+                "NT_INTROSPECT_ENABLED": "OFF",
+                "NT_INTROSPECT_WRITE_ENABLED": "OFF"
             }
         },
         {
@@ -126,7 +142,11 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
                 "NT_ASSERT_MODE": "2",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {
