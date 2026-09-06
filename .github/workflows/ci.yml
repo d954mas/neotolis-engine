@@ -263,6 +263,15 @@ jobs:
       - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
         run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
 
+      # The size chart measures these dirs: the effective cache, not the preset text, must carry no dev tooling.
+      - name: Verify release dirs carry no dev tooling
+        run: |
+          for p in wasm-release wasm-release-paired wasm-release-simd wasm-analysis-paired wasm-analysis-simd; do
+            for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
+              grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
+            done
+          done
+
       - name: Measure sizes (all examples)
         run: |
           source scripts/wasm_examples.sh
@@ -420,9 +429,8 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
-      # NT_UI_DEBUG_TOOLS=OFF coverage: inspector + debug overlay TUs excluded,
-      # core tests (60/62) still pass. Verifies the production-default path
-      # compiles + links + tests cleanly.
+      # NT_UI_DEBUG_TOOLS=OFF under Debug + FULL asserts + sanitizers: the release
+      # presets build the stub bodies too, but only this mirror runs ctest over them.
       - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
         run: cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -G Ninja
 
@@ -760,10 +768,11 @@ jobs:
             done
           done
 
+      # Metrics ON: the deployed bunnymark / ui_showcase HUDs read nt_metrics (stubs would show zeros).
       - name: Build paired WASM release for deploy
         run: |
-          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
-          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
+          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
           cmake --build --preset wasm-release-paired
           cmake --build --preset wasm-release-simd
           ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd

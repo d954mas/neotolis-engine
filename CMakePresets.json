@@ -7,25 +7,52 @@
     },
     "configurePresets": [
         {
-            "name": "wasm-debug",
-            "displayName": "WASM Debug",
+            "name": "base-wasm",
+            "hidden": true,
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
             "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_STANDARD": "17",
+                "CMAKE_C_STANDARD_REQUIRED": "ON"
+            }
+        },
+        {
+            "name": "base-native",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
                 "CMAKE_C_STANDARD": "17",
                 "CMAKE_C_STANDARD_REQUIRED": "ON",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "wasm-debug",
+            "displayName": "WASM Debug",
+            "inherits": "base-wasm",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {
             "name": "wasm-release",
             "displayName": "WASM Release",
-            "inherits": "wasm-debug",
+            "inherits": "base-wasm",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "NT_UI_DEBUG_TOOLS": "OFF",
+                "NT_LOG_RING_ENABLED": "OFF",
+                "NT_METRICS_ENABLED": "OFF",
+                "NT_INTROSPECT_ENABLED": "OFF",
+                "NT_INTROSPECT_WRITE_ENABLED": "OFF"
             }
         },
         {
@@ -67,24 +94,29 @@
         {
             "name": "native-debug",
             "displayName": "Native Debug",
-            "generator": "Ninja",
+            "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_C_STANDARD": "17",
-                "CMAKE_C_STANDARD_REQUIRED": "ON",
-                "CMAKE_C_COMPILER": "clang",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {
             "name": "native-release",
             "displayName": "Native Release",
-            "inherits": "native-debug",
+            "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "NT_UI_DEBUG_TOOLS": "OFF",
+                "NT_LOG_RING_ENABLED": "OFF",
+                "NT_METRICS_ENABLED": "OFF",
+                "NT_INTROSPECT_ENABLED": "OFF",
+                "NT_INTROSPECT_WRITE_ENABLED": "OFF"
             }
         },
         {
@@ -98,11 +130,16 @@
         },
         {
             "name": "native-release-test",
-            "displayName": "Native Release Test (FULL asserts)",
+            "displayName": "Native Release Test (FULL asserts, dev tools ON)",
             "inherits": "native-release",
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
-                "NT_ASSERT_MODE": "2"
+                "NT_ASSERT_MODE": "2",
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_LOG_RING_ENABLED": "ON",
+                "NT_METRICS_ENABLED": "ON",
+                "NT_INTROSPECT_ENABLED": "ON",
+                "NT_INTROSPECT_WRITE_ENABLED": "ON"
             }
         },
         {

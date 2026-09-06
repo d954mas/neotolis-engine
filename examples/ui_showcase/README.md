@@ -87,7 +87,7 @@ lighten and writes the index on click).
 |-------|--------|
 | Left tab list | select the active tab (state per tab is retained) |
 | **T** key / header **Theme** button | dark <-> light hot-swap |
-| **D** key | toggle the inspector overlay |
+| **D** key | toggle the inspector overlay (debug presets only) |
 | **Esc** (native) | unfocus the focused field; else quit |
 | **Esc** (modal up) | close the TOP modal only |
 | backdrop click (modal up) | close-on-backdrop (the backdrop blocks click-through) |
