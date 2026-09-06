@@ -3,7 +3,7 @@
 # opts into running the formatter under the same lock first. Modes:
 #   scripts/check.sh                    gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full             default + whole-tree format + full tidy
-#   scripts/check.sh --push             default + wasm-debug + wasm-release + submodule test
+#   scripts/check.sh --push             default + native-release + wasm-debug + wasm-release + submodule test
 #   scripts/check.sh --format [--full|--push]  format changed files under the same run lock first
 # The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
@@ -248,6 +248,16 @@ fi
 collect_ctest
 
 if [ "$MODE" = "push" ]; then
+    # Release compiles the same TUs with NDEBUG (asserts -> TRAP, so NT_ASSERT_FULL-only code drops out)
+    # and -O2: a test registered behind an assert-mode guard, or a variable only an assert reads, is
+    # -Wunused under -Werror here and nowhere in the debug builds. Mirrors ci.yml's native-release job.
+    step "build (native-release)"
+    if [ ! -f "build/_cmake/native-release/CMakeCache.txt" ]; then
+        cmake --preset native-release
+    fi
+    cmake --build build/_cmake/native-release
+    ok
+
     step "build (wasm-debug)"
     if ! command -v emcc > /dev/null 2>&1; then
         echo "ERROR: emcc not found in PATH — the wasm-debug build is required before push."

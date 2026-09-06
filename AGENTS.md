@@ -132,7 +132,7 @@ direct modes never mutate files; `format_and_check.sh` opts into the formatter b
 
 It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage, CRT-pin centralization), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`, `deps/curl`, `deps/zlib`) follow upstream style and are excluded; review patches to them separately.
 
-- Before `git push`: `bash scripts/check.sh --push` — additionally builds wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test.
+- Before `git push`: `bash scripts/check.sh --push` — additionally builds native-release (NDEBUG drops NT_ASSERT_FULL-only code, so `-Wunused` under `-Werror` fires where no debug build sees it), wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test.
 - Full sweep (CI lint equivalent): `bash scripts/check.sh --full` — whole-tree format + full tidy.
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.
