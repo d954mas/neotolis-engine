@@ -129,10 +129,10 @@ snapshot), so the declared slot-0 resource is never resolved. A text material
 declares no textures, so the text renderer resolves no material textures; it
 binds the font's own textures. There is no material step.
 
-For a handle the game holds, the published view changes only inside
-`nt_resource_step`; `nt_resource_shutdown` unpublishes every slot, so a material
-that outlives the resource module resolves to 0 and trips the gfx coverage
-assert. A frame that steps resources before it emits or draws sees one set of
+Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
+handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes
+every slot: a material that outlives the resource module resolves to 0 and trips
+the gfx coverage assert. A frame that steps resources before it emits or draws sees one set of
 handles across every renderer, and a material created mid-frame binds its
 textures on its first draw. Stepping resources between submissions within one
 frame is unsupported: commands already open keep the handles they resolved.

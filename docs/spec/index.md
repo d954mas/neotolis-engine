@@ -50,7 +50,7 @@ no source-format parsers. The full picture is in
 | [render/architecture.md](render/architecture.md) | Engine/game render split, backend API shape, renderer classes |
 | [render/items-sorting-batching.md](render/items-sorting-batching.md) | Render tags, 16-byte render items, sorting policy, batching/instancing |
 | [render/shader.md](render/shader.md) | ShaderAsset interface and the four levels of shader data |
-| [render/material.md](render/material.md) | Material model, vec4 params, render state ownership |
+| [render/material.md](render/material.md) | Material model, vec4 params, render state ownership, draw-time texture resolve |
 | [assets/resource.md](assets/resource.md) | Resource registry, handles, resolve/publication, blob pinning, asset types |
 | [assets/async-loading.md](assets/async-loading.md) | Pack/asset state machines, async loading flow, retry policy |
 | [assets/ntpack.md](assets/ntpack.md) | NTPACK flat binary pack format and parsing |
