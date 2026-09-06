@@ -230,6 +230,9 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
+    /* Highest effective floating band claimed this frame — the same key Clay sorts roots by, so the
+     * overlay that eats Esc is the one actually painted on top. INT32_MIN until the first claim. */
+    int32_t modal_top_z_cur;
     /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
      * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
      * field declared this frame. Survives across frames (not reset by begin). */
@@ -250,7 +253,6 @@ struct nt_ui_context {
     int16_t modal_zband_stride;
     uint16_t wheel_depth;
     uint8_t active_modal_depth;
-    uint8_t modal_max_depth_cur; /* deepest active_modal_depth reached this frame (drives modal_top_id_cur) */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */

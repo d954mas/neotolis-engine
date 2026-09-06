@@ -364,7 +364,11 @@ read from the panel's previous-frame bbox; a `value_t` open/close tween; a share
 modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
 floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
-catcher at `panel_z-1` (outside-click raises a close signal). A fully-closed
+catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
+outside-click scan run on ONE overlay per frame: the one with the highest
+effective band, ties to the last declared — Clay's own root-sort key, so the
+overlay that consumes the event is always the one painted on top, even when a
+game floating shifts the band of a popup declared inside it. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The

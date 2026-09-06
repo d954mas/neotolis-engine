@@ -248,8 +248,11 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * top-id dismiss slot from a coexisting dropdown. */
     if (want_catcher) {
         ctx->modal_present_cur = true;
-        if (ctx->active_modal_depth >= ctx->modal_max_depth_cur) {
-            ctx->modal_max_depth_cur = ctx->active_modal_depth;
+        /* Topmost = highest effective band, ties to the last declared — Clay's own root-sort key, so the
+         * popup that eats Esc is the one painted on top even when a game floating shifts the band. */
+        const int32_t panel_z_eff = nt_ui_clay_priv_enclosing_floating_z(ctx->clay) + (int32_t)panel_z;
+        if (panel_z_eff >= ctx->modal_top_z_cur) {
+            ctx->modal_top_z_cur = panel_z_eff;
             ctx->modal_top_id_cur = id;
         }
     }

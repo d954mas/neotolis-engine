@@ -469,7 +469,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->modal_top_id_prev = ctx->modal_top_id_cur;
     ctx->modal_top_id_cur = 0U;
-    ctx->modal_max_depth_cur = 0U;
+    ctx->modal_top_z_cur = INT32_MIN;
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
     ctx->modal_present_cur = false;

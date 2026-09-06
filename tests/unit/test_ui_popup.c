@@ -415,12 +415,60 @@ static void test_popup_tween_clamp(void) {
     TEST_ASSERT_TRUE(saw_closed);
 }
 
+/* ---- The overlay that eats Esc / runs the close-scan is the one PAINTED on top, not the one deepest in
+ *      the begin/end counter. A game floating with its own zIndex shifts the band of the popup declared
+ *      inside it, so the two answers can disagree; the arbitration key must be the band Clay sorts by. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_popup_top_id_follows_paint_order(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_pointer_t p = {.active = true};
+    /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
+            nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+            CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        /* Same nesting depth as A, but no enclosing band -> lands lower even though it is declared later. */
+        nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+
+    int32_t z_a = INT32_MIN;
+    int32_t z_b = INT32_MIN;
+    int32_t at_a = -1;
+    int32_t at_b = -1;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (c->id == CLAY_ID("body_a").id) {
+            z_a = c->zIndex;
+            at_a = i;
+        } else if (c->id == CLAY_ID("body_b").id) {
+            z_b = c->zIndex;
+            at_b = i;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b >= 0, "both popups must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(z_a > z_b, "the popup inside the lifted game floating must land in a higher band");
+    TEST_ASSERT_TRUE_MESSAGE(at_a > at_b, "and must therefore paint after the root-level popup");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->modal_top_id_prev, "the painted-on-top popup must own Esc and the close-scan");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_abi_sizes);
     RUN_TEST(test_popup_defaults_valid);
     RUN_TEST(test_popup_floating_smoke);
     RUN_TEST(test_popup_zband_and_nesting);
+    RUN_TEST(test_popup_top_id_follows_paint_order);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);
