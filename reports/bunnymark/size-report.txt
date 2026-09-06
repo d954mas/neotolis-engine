@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 469394f
+# Commit: 001912f
 
 ## WASM Section Sizes
 
@@ -111,13 +111,13 @@ libnt_sprite_renderer.a    54674 B
 libnt_text_renderer.a    1243542 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                506230 B
+libnt_ui.a                507116 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         5157600 B
+TOTAL (archives)         5158486 B
 
 ## Data Segments Summary
 
