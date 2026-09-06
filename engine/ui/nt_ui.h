@@ -63,7 +63,11 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default per-depth modal z-band stride; each nested modal sits panel_z = stride*(depth+1).
+/* Default modal z-band stride. A floating element's zIndex is RELATIVE to the floating element it is
+ * declared inside (see docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so an overlay sits one
+ * stride above whatever encloses it: nested overlays reach stride*(depth+1), and an overlay declared
+ * inside a game floating is lifted by that floating's own zIndex too. A game floating that must stay
+ * under all UI belongs at the root level; there is no way to escape an enclosing stacking context.
  * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
  * nt_ui_create_desc_defaults; must be > 0). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000

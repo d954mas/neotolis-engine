@@ -14,15 +14,15 @@
 //      fold) leaves an unmatched END -> renderer scissor-stack underflow. One site
 //      in the CLIP render-command case ("shouldRender = true").
 //   4. Floating zIndex is RELATIVE to the enclosing floating element (CSS stacking
-//      context) instead of global: a floating declared inside another floating gets
-//      parent_z + own_z. Upstream sorts every root by its own zIndex, so a widget's
-//      floating part (slider thumb, input caret) sank under the modal panel it was
-//      declared in, and sorting a child root ahead of its parent also made Clay read
-//      the parent bbox one frame stale. openFloatingZStack + 4 sites (context field,
-//      ephemeral alloc, push in ConfigureOpenElementPtr, pop in CloseElement), search
-//      "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps on strict
-//      `<`): a child declared with delta 0 paints above its floating parent only
-//      because equal-z roots keep registration order.
+//      context) instead of global: a floating declared inside another gets
+//      parent_z + own_z, so a widget's floating part composes anywhere without
+//      knowing its global band. openFloatingZStack + 4 sites (context field,
+//      ephemeral alloc, push in ConfigureOpenElementPtr, pop in CloseElement),
+//      search "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps
+//      on strict `<`): a delta-0 child paints above its floating parent only because
+//      equal-z roots keep registration order — re-run tests/unit/test_nt_ui_slider.c
+//      after a Clay bump. Clay's own debug view nests 32766 inside 32765 and would
+//      saturate; unreachable because nt_ui_begin disables it every frame.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.

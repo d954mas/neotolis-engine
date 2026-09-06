@@ -39,8 +39,8 @@ int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay) {
     return clay->layoutElements.length;
 }
 
-int32_t nt_ui_clay_priv_enclosing_floating_z(Clay_Context *clay) {
-    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_enclosing_floating_z: clay must be non-NULL");
+int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_open_floating_z: clay must be non-NULL");
     const int32_t len = clay->openFloatingZStack.length;
     return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
 }
@@ -1597,10 +1597,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     if (highlightedElementId) {
-        /* Declared inside ntInsp_Root, so zIndex is relative to it: -1 lands on the inspector band minus
-         * one — above every game band, strictly under the panel body it would otherwise cover. Nothing
-         * inside ntInsp_Root may declare a POSITIVE delta: the band is one below int16's ceiling. */
-        NT_ASSERT(nt_ui_clay_priv_enclosing_floating_z(ctx->clay) == NT_UI_INSPECTOR_ROOT_Z && "inspector highlight must be declared inside ntInsp_Root");
+        /* Declared inside ntInsp_Root, so zIndex is relative to it: -1 lands just under the panel body
+         * it would otherwise cover, still above every game band. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),

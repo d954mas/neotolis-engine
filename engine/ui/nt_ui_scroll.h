@@ -110,7 +110,10 @@ uint32_t nt_ui_scroll_test_last_scroll_id(void);
 uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void);
 void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity);
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
-/* The draw layer the last-emitted bar used (per axis); must match the container's content layer so the
+/* The bar floats at its container's own band (delta 0) and is declared last, so it paints over the
+ * container's content — but a floating declared after it in the same band paints over the bar.
+ *
+ * The draw layer the last-emitted bar used (per axis); must match the container's content layer so the
  * bar isn't buried under higher-layer content. */
 uint8_t nt_ui_scroll_test_last_bar_layer(int axis);
 /* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container

@@ -37,41 +37,36 @@ game-side changes.
 Upstream Clay sorts every floating element globally by its own
 `zIndex`. The vendored copy diverges (NT patch 4 in `deps/clay/clay.h`):
 a floating declared inside another floating gets `parent_z + own_z`, so
-`zIndex` reads as a stacking context, like CSS. Without it a widget's
-own floating part (the slider thumb, the input caret and text) sank to
-the global band 0 and drew UNDER the modal panel it was declared in;
-the scrollbar escaped that only by hand-computing the popup band from
-`active_modal_depth`, which is the workaround the patch deletes. A child
-root sorted ahead of its parent was also positioned from the parent's
-PREVIOUS-frame bbox — a frame of lag, and an empty clip rect on the
-first frame, which the walker's SCISSOR assert catches. A delta of 0
-now ties with the parent and, since the root sort is stable, paints
-after it with a same-frame bbox; a NEGATIVE delta still sorts ahead of
-its parent and still reads the parent's previous-frame bbox (two such
-cases: the tooltip drop-shadow, which guards for it, and the inspector
-highlight, which attaches to a base-band element and so reads a
-same-frame bbox).
+`zIndex` reads as a stacking context, like CSS. A widget's floating part
+therefore composes anywhere without knowing its global band, which is
+what lets the slider thumb, the input caret and the scrollbar declare a
+bare delta instead of reading the modal subsystem's depth counter.
 
-Consequences: a widget composes anywhere without knowing its global
-stacking position; the engine's overlay bands (`modal_zband_stride`) are
-declared as deltas and accumulate with declaration nesting, NOT with
-attachment (`attachTo = ROOT` still stacks where it was declared), so a
-popup opened from inside another popup reaches `stride*depth` as long as
-every enclosing floating is an engine overlay; a widget's own floating
-parts (scrollbar, thumb, caret) declare delta 0 and rely on being
-declared last to paint above their container's content; a game floating
-that wants to escape its enclosing panel must be declared outside it;
-the value Clay stores and reports for a floating is the accumulated
-band, not the declared delta — but among RENDER COMMANDS only
-RECTANGLE, TEXT and the clip SCISSOR carry it, since Clay leaves
-`zIndex` at 0 on IMAGE, BORDER and CUSTOM; and an accumulated band that
-would saturate `int16` raises a Clay error (which `nt_ui` asserts on)
-rather than silently merging two bands, which puts a ceiling on what a
-game floating may declare: its own `zIndex` plus `modal_zband_stride`
-per overlay level nested inside it must still fit `int16`. That ceiling
-has no test — the engine's own bands cannot reach it (overlays are
-bounded by `modal_zband_stride * NT_UI_MODAL_MAX_DEPTH`, and the
-inspector root nests nothing with a positive delta).
+A delta of 0 ties with the parent and, since the root sort is stable,
+paints after it with a same-frame bbox. A NEGATIVE delta sorts ahead of
+its parent and reads the parent's PREVIOUS-frame bbox; two parts use
+one — the tooltip drop-shadow, which guards for the first frame, and the
+inspector highlight, which attaches to a base-band element and so is
+unaffected.
+
+Bands accumulate with declaration nesting, NOT with attachment:
+`attachTo = ROOT` still stacks where it was declared. Overlay bands are
+declared as one `modal_zband_stride` each, so nested overlays reach
+`stride*depth` when every enclosing floating is an engine overlay. A
+widget's own floating parts declare delta 0 and paint above their
+container's content because they are declared last. There is no way out
+of an enclosing stacking context: a game floating that must stay under
+all UI belongs at the root level.
+
+The value Clay stores and reports for a floating is the accumulated
+band, not the declared delta. Among render commands only RECTANGLE, TEXT
+and the clip SCISSOR carry it — Clay leaves `zIndex` at 0 on IMAGE,
+BORDER and CUSTOM. An accumulated band that would saturate `int16`
+raises a Clay error, which `nt_ui` asserts on rather than silently
+merging two bands. That caps what a game floating may declare: its own
+`zIndex` plus one stride per overlay level nested inside it must still
+fit `int16`.
+
 
 ## Clay private symbols
 

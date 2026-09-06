@@ -30,9 +30,10 @@ void nt_ui_clay_priv_close_element(void);
 
 // #region clay_context primitive accessors
 int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay);
-/* Effective zIndex of the floating element currently open around the caller (0 at the root level) —
- * the base Clay adds to the next floating's declared delta (NT patch 4). Valid only mid-layout. */
-int32_t nt_ui_clay_priv_enclosing_floating_z(Clay_Context *clay);
+/* Effective zIndex of the innermost floating element open right now (0 at the root level): the base
+ * Clay adds to the next floating's declared delta, and — once that floating is configured — its own
+ * accumulated band (NT patch 4). Valid only mid-layout. */
+int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay);
 float nt_ui_clay_priv_pointer_x(Clay_Context *clay);
 float nt_ui_clay_priv_pointer_y(Clay_Context *clay);
 /* 1 if state == PRESSED or PRESSED_THIS_FRAME. */
