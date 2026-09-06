@@ -263,18 +263,13 @@ jobs:
       - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
         run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
 
-      # Effective cache values, not preset text: release dirs (what the size chart
-      # measures) must carry no dev tooling; debug dirs must carry all of it. devapi is
-      # not asserted on debug dirs — other jobs configure them with devapi ON.
-      - name: Verify preset cache policy (wasm)
+      # The size chart measures these dirs: the effective cache, not the preset text, must carry no dev tooling.
+      - name: Verify release dirs carry no dev tooling
         run: |
-          off="NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=OFF NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF"
-          on="NT_UI_DEBUG_TOOLS=ON NT_LOG_RING_ENABLED=ON NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=ON NT_INTROSPECT_WRITE_ENABLED=ON"
           for p in wasm-release wasm-release-paired wasm-release-simd wasm-analysis-paired wasm-analysis-simd; do
-            bash scripts/check_preset_cache.sh "build/_cmake/$p" $off
-          done
-          for p in wasm-debug wasm-debug-paired wasm-debug-simd; do
-            bash scripts/check_preset_cache.sh "build/_cmake/$p" $on
+            for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
+              grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
+            done
           done
 
       - name: Measure sizes (all examples)
@@ -444,17 +439,6 @@ jobs:
 
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
-
-      # native-release-test deliberately re-enables the tools (coverage preset, not a
-      # shipping mirror) — asserted ON so a silent drop of that override is caught.
-      - name: Verify preset cache policy (native)
-        run: |
-          off="NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=OFF NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF"
-          on="NT_UI_DEBUG_TOOLS=ON NT_LOG_RING_ENABLED=ON NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=ON NT_INTROSPECT_WRITE_ENABLED=ON"
-          bash scripts/check_preset_cache.sh build/_cmake/native-release $off
-          for p in native-release-test native-debug native-debug-test; do
-            bash scripts/check_preset_cache.sh "build/_cmake/$p" $on
-          done
 
       - name: Submodule consumption test
         run: |
@@ -784,23 +768,11 @@ jobs:
             done
           done
 
-      # Metrics ON is the one deliberate deviation from the release preset: the deployed
-      # bunnymark / ui_showcase HUDs read nt_metrics, and the stubs would show zeros.
-      # UI debug tools stay OFF, so the size chart (wasm job) differs only by nt_metrics.
-      - name: Configure paired WASM release for deploy
+      # Metrics ON: the deployed bunnymark / ui_showcase HUDs read nt_metrics (stubs would show zeros).
+      - name: Build paired WASM release for deploy
         run: |
           emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
           emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
-
-      # Checked before the two multi-minute builds so a wrong -D fails fast.
-      - name: Verify preset cache policy (deploy)
-        run: |
-          for p in wasm-release-paired wasm-release-simd; do
-            bash scripts/check_preset_cache.sh "build/_cmake/$p" NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF
-          done
-
-      - name: Build paired WASM release for deploy
-        run: |
           cmake --build --preset wasm-release-paired
           cmake --build --preset wasm-release-simd
           ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd

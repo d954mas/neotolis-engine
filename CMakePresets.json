@@ -7,35 +7,29 @@
     },
     "configurePresets": [
         {
-            "name": "base",
+            "name": "base-wasm",
             "hidden": true,
-            "description": "Neutral toolchain-independent settings only. No build type, no dev tooling: the concrete *-debug / *-release presets pin every tooling option explicitly so a reconfigure heals a stale cache.",
             "generator": "Ninja",
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
             "cacheVariables": {
                 "CMAKE_C_STANDARD": "17",
                 "CMAKE_C_STANDARD_REQUIRED": "ON"
             }
         },
         {
-            "name": "base-wasm",
-            "hidden": true,
-            "description": "Emscripten toolchain on top of base. Games may inherit this for a policy-free starting point.",
-            "inherits": "base",
-            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
-        },
-        {
             "name": "base-native",
             "hidden": true,
-            "description": "clang + compile_commands.json on top of base. Games may inherit this for a policy-free starting point.",
-            "inherits": "base",
+            "generator": "Ninja",
             "cacheVariables": {
+                "CMAKE_C_STANDARD": "17",
+                "CMAKE_C_STANDARD_REQUIRED": "ON",
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },
         {
             "name": "wasm-debug",
-            "displayName": "WASM Debug (dev tools ON)",
+            "displayName": "WASM Debug",
             "inherits": "base-wasm",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
             "cacheVariables": {
@@ -49,7 +43,7 @@
         },
         {
             "name": "wasm-release",
-            "displayName": "WASM Release (dev tools OFF)",
+            "displayName": "WASM Release",
             "inherits": "base-wasm",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
             "cacheVariables": {
@@ -99,7 +93,7 @@
         },
         {
             "name": "native-debug",
-            "displayName": "Native Debug (dev tools ON)",
+            "displayName": "Native Debug",
             "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-debug",
             "cacheVariables": {
@@ -113,7 +107,7 @@
         },
         {
             "name": "native-release",
-            "displayName": "Native Release (dev tools OFF)",
+            "displayName": "Native Release",
             "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-release",
             "cacheVariables": {
@@ -137,7 +131,6 @@
         {
             "name": "native-release-test",
             "displayName": "Native Release Test (FULL asserts, dev tools ON)",
-            "description": "Coverage preset, not a shipping mirror: dev tools are re-enabled so their tests run under release optimizations.",
             "inherits": "native-release",
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
