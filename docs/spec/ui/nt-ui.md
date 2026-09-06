@@ -53,9 +53,8 @@ Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. Overlay bands are
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
-is an engine overlay. A
-widget's own floating parts declare delta 0 and paint above their
-container's content because they are declared last. There is no way out
+is an engine overlay. A widget's own floating parts declare delta 0 and
+paint above their container's content because they are declared last. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
@@ -375,12 +374,13 @@ modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
 floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
-outside-click scan run on ONE CATCHER-BEARING popup per frame: the one with the
-highest effective band, ties to the last declared at the higher draw layer —
-the walker's own paint key, so the popup that consumes the event is the one
-painted on top even when a game floating shifts the band of a popup declared
-inside it. A catcher-less overlay (menu, tooltip) never claims that slot and
-runs its own dismiss; the text field's Esc-unfocus is independent of both. A fully-closed
+outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
+effective band, ties to the last declared. That is the POINTER arbiter's key,
+not the paint key, and deliberately so — the winner performs the dismissal
+through its own catcher's interaction, so a slot ranked by draw layer would
+hand the scan to a popup whose catcher never wins the click. A catcher-less
+overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
+text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The

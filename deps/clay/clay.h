@@ -15,14 +15,12 @@
 //      in the CLIP render-command case ("shouldRender = true").
 //   4. Floating zIndex is RELATIVE to the enclosing floating element (CSS stacking
 //      context) instead of global: a floating declared inside another gets
-//      parent_z + own_z, so a widget's floating part composes anywhere without
-//      knowing its global band. openFloatingZStack + 5 sites (context field,
-//      ephemeral alloc, push+saturation report in ConfigureOpenElementPtr, pop in
-//      CloseElement, and the zIndex field's own doc comment), search "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps
-//      on strict `<`): a delta-0 child paints above its floating parent only because
-//      equal-z roots keep registration order — re-run tests/unit/test_nt_ui_slider.c
-//      after a Clay bump. Clay's own debug view nests 32766 inside 32765 and would
-//      saturate; unreachable because nt_ui_begin disables it every frame.
+//      parent_z + own_z. openFloatingZStack + 5 sites (context field, ephemeral
+//      alloc, push + saturation report in ConfigureOpenElementPtr, pop in
+//      CloseElement, the zIndex field's doc comment), search "NT patch 4".
+//      DEPENDS ON the tree-root sort staying STABLE (swaps on strict `<`): a
+//      delta-0 child paints above its floating parent only because equal-z roots
+//      keep registration order — re-run tests/unit/test_nt_ui_slider.c on a bump.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.

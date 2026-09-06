@@ -63,13 +63,11 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default modal z-band stride. A floating element's zIndex is RELATIVE to the floating element it is
- * declared inside (see docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so an overlay sits one
- * stride above whatever encloses it — one stride per enclosing overlay level, itself included, and an
- * overlay declared inside a game floating is lifted by that floating's own zIndex too. A game floating
- * that must stay under all UI belongs at the root level; there is no way out of an enclosing stacking
- * context. Budget: a game floating's zIndex plus one stride per overlay level opened inside it must fit
- * int16 — overflowing raises a fatal Clay error.
+/* Default modal z-band stride. A floating's zIndex is RELATIVE to the floating it is declared inside
+ * (docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so an overlay sits one stride above whatever
+ * encloses it — including a game floating's own zIndex, and there is no way out of that context: a
+ * game floating that must stay under all UI belongs at the root level. Budget: that game zIndex plus
+ * one stride per overlay level opened inside it must fit int16, or Clay raises a fatal error.
  * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
  * nt_ui_create_desc_defaults; must be > 0). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000

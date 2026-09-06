@@ -173,8 +173,8 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
 
     // #region stack push + z-band (shared depth counter with modal)
     ++ctx->active_modal_depth;
-    /* One band ABOVE whatever floating encloses this call — Clay accumulates the nesting for us, so a
-     * popup opened from inside another popup lands on stride*depth without the depth arithmetic. */
+    /* One band ABOVE whatever floating encloses this call; Clay accumulates the nesting, so a popup
+     * opened inside another needs no depth arithmetic here. */
     const int16_t panel_z = ctx->modal_zband_stride;
     const int16_t catcher_z = (int16_t)(panel_z - 1);
     const uint32_t catcher_id = popup_catcher_id(id);
@@ -298,11 +298,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
-    /* The panel is now the innermost open floating, so this IS the band Clay stamped on it — read it
-     * back rather than re-deriving the sum and Clay's clamp. The key must MATCH the pointer arbiter
-     * (nt_ui.c resolve_hot: band, ties to the last registered), because the winner runs the close-scan
-     * through its catcher's interaction — ranking Esc by draw layer instead would hand the scan to a
-     * popup whose catcher never wins the click, and neither overlay would dismiss. */
+    /* The panel is the innermost open floating here, so this IS the band Clay stamped. The claim below
+     * must use the pointer arbiter's key (band, ties to the last declared): the winner runs the
+     * close-scan through its own catcher, so a differently-ranked slot dismisses nothing. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
     /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
      * arbitration and silently stops gating while nt_ui_modal_active() still reports the overlay up. */

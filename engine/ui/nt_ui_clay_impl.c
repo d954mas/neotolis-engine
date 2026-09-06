@@ -1597,9 +1597,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     if (highlightedElementId) {
-        /* Declared inside ntInsp_Root (band 32765), so zIndex is relative to it: -1 lands just under the
-         * panel body it would otherwise cover, still above every game band. Nothing here may declare a
-         * delta above +2 — the band is that close to int16's ceiling. */
+        /* Relative to ntInsp_Root: -1 lands just under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
