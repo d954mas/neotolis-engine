@@ -444,7 +444,6 @@ static void frame(void) {
     nt_mem_scratch_reset();
 
     nt_resource_step();
-    nt_material_step();
     link_programs();
 
     s_state.time += g_nt_app.dt;

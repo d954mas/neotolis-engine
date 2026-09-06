@@ -301,7 +301,6 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     desc.label = "test_sprite_material";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -324,7 +323,6 @@ static nt_material_t create_test_material_with_param(void) {
     desc.label = "test_sprite_material_param";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -340,7 +338,6 @@ static nt_material_t create_test_material_textureless(void) {
     desc.label = "test_sprite_material_textureless";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -377,7 +374,6 @@ static nt_material_t create_radial_test_material(const char *stream_name, uint8_
     }
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -631,7 +627,6 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
     desc.program = p1;
     desc.depth_write = false;
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_a);
     nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_b);
@@ -994,7 +989,6 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_page_on_unit_1";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_gfx_fake_reset();
@@ -1007,6 +1001,101 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
+}
+
+/* A cmd resolves its non-page slots when it opens, so a resource republished between
+ * two batches reaches the second one -- and the cmd that already opened keeps its
+ * snapshot even after its material dies. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xEBULL);
+
+    nt_material_create_desc_t mdesc;
+    memset(&mdesc, 0, sizeof(mdesc));
+    mdesc.program = nt_gfx_fake_make_program((const char *const[]){"u_other", "u_texture"}, 2);
+    mdesc.cull_mode = NT_CULL_NONE;
+    mdesc.textures[0].name = "u_texture";
+    mdesc.textures[0].resource = NT_RESOURCE_INVALID; /* the page substitutes into slot 0 */
+    mdesc.textures[1].name = "u_other";
+    mdesc.textures[1].resource = nt_atlas_get_page_resource(s_atlas_res, 1);
+    mdesc.texture_count = 2;
+    mdesc.label = "test_sprite_material_republished_slot";
+    nt_material_t mat = nt_material_create(&mdesc);
+
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    /* Batch 1: slot 1 ("u_other" -> unit 0) binds the page-1 texture from setUp. */
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    const uint32_t before = nt_gfx_fake_bound_texture_at(0);
+
+    /* Republish that resource under a different texture. */
+    nt_texture_t replacement = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page1_v2"});
+    TEST_ASSERT_TRUE(replacement.id != 0);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, replacement.id));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
+
+    /* Batch 2: the flush cleared cmd_count, so set_material opens a fresh cmd. */
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(replacement), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_NOT_EQUAL_UINT32(before, nt_gfx_fake_bound_texture_at(0));
+
+    /* Batch 3: the cmd resolved when it opened, so neither a later publication nor
+     * the material's death changes what it binds -- the resolve cannot be deferred
+     * to flush. */
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+
+    nt_texture_t third = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page1_v3"});
+    TEST_ASSERT_TRUE(third.id != 0);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, third.id));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(third.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
+
+    nt_material_destroy(mat);
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(replacement), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
+
+    /* Batch 4: a page split re-opens the cmd from a snapshot, so BOTH halves keep the
+     * slot-1 texture the live material resolved at open while unit 1 follows the page. */
+    nt_material_t mat2 = nt_material_create(&mdesc);
+    TEST_ASSERT_TRUE(mat2.id != 0);
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_set_material(mat2);
+    /* Region 0 lives on page 0, region 1 on page 1. */
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
+    /* "u_other" is unit 0: the current publication, identical across the split. */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(2));
+    /* "u_texture" is unit 1: page 0 then page 1. */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(3));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(3));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1069,7 +1158,6 @@ void test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override(void) {
     mdesc.texture_count = 2;
     mdesc.label = "test_sprite_material_two_slots";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_sprite_renderer_set_material(mat);
@@ -1093,7 +1181,6 @@ void test_sprite_renderer_material_missing_a_program_sampler_asserts(void) {
     mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_missing_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_sprite_renderer_set_material(mat);
@@ -1117,7 +1204,6 @@ void test_sprite_renderer_unknown_sampler_name_is_ignored(void) {
     mdesc.texture_count = 1;
     mdesc.label = "test_sprite_material_unknown_sampler";
     nt_material_t mat = nt_material_create(&mdesc);
-    nt_material_step();
 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     nt_gfx_fake_reset();
@@ -1498,7 +1584,6 @@ static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
     desc.textures[0].sampler = override;
     desc.label = "test_mat_override";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -1727,6 +1812,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_binds_on_program_unit);
     RUN_TEST(test_sprite_renderer_page_lands_on_its_program_unit);
+    RUN_TEST(test_sprite_renderer_non_page_slot_resolves_at_cmd_open);
     RUN_TEST(test_sprite_renderer_program_replace_between_immediate_and_draw_list);
     RUN_TEST(test_sprite_renderer_flush_asserts_on_unresolved_slot_with_override);
     RUN_TEST(test_sprite_renderer_material_missing_a_program_sampler_asserts);

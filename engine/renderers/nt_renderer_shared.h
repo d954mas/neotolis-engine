@@ -5,6 +5,7 @@
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "resource/nt_resource.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -56,13 +57,14 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
 }
 
 // #region bound state
-/* Borrowed from nt_material_info_t, or from a sprite cmd whose slot 0 is the atlas page.
+/* Owns its resolved texture ids by value; hashes, samplers and params are borrowed from
+ * nt_material_info_t, or from a sprite cmd whose slot 0 is the atlas page.
  * Hashes are captured so a cmd whose material died still replays its sampler units. */
 typedef struct {
     uint8_t tex_count;
-    const uint32_t *tex_name_hashes;      /* [tex_count] */
-    const uint32_t *resolved_tex;         /* [tex_count]; 0 = unresolved */
-    const nt_sampler_t *resolved_sampler; /* [tex_count]; .id == 0 = texture default */
+    const uint32_t *tex_name_hashes;                 /* [tex_count] */
+    uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES]; /* [tex_count]; 0 = unresolved */
+    const nt_sampler_t *tex_samplers;                /* [tex_count]; .id == 0 = texture default */
     uint8_t param_count;
     const uint32_t *param_name_hashes; /* [param_count] */
     const float (*params)[4];
@@ -120,22 +122,25 @@ static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_vi
         bindings[t] = (nt_gfx_texture_binding_t){
             .name = {.value = v->tex_name_hashes[t]},
             .texture = {.id = v->resolved_tex[t]},
-            .sampler = v->resolved_sampler[t],
+            .sampler = v->tex_samplers[t],
         };
     }
     nt_gfx_apply_texture_bindings(bindings, v->tex_count);
 }
 
 static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {
-    return (nt_renderer_material_view_t){
+    nt_renderer_material_view_t view = {
         .tex_count = mi->tex_count,
         .tex_name_hashes = mi->tex_name_hashes,
-        .resolved_tex = mi->resolved_tex,
-        .resolved_sampler = mi->resolved_sampler,
+        .tex_samplers = mi->tex_samplers,
         .param_count = mi->param_count,
         .param_name_hashes = mi->param_name_hashes,
         .params = mi->params,
     };
+    for (uint8_t t = 0; t < mi->tex_count; t++) {
+        view.resolved_tex[t] = nt_resource_get(mi->tex_resources[t]);
+    }
+    return view;
 }
 // #endregion
 

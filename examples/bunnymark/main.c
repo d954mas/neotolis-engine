@@ -284,7 +284,6 @@ static void frame(void) {
 #endif
 
     nt_resource_step();
-    nt_material_step();
     link_programs();
     nt_sprite_comp_sync_resources();
 
@@ -403,9 +402,10 @@ static void frame(void) {
     nt_gfx_begin_segment("frame");
 
     if (g_nt_gfx.context_restored) {
-        /* WebGL context loss recovery. mat_info / s_overlay_font handles
-         * captured above are stale (nt_material_step / nt_font_step ran
-         * before begin_frame detected the restore). Invalidate resources
+        /* WebGL context loss recovery. The program in mat_info and the
+         * s_overlay_font handles captured above are stale (this frame's
+         * nt_resource_step / nt_font_step ran before begin_frame detected
+         * the restore). Invalidate resources
          * so the next frame's *_step calls re-resolve, recreate game-owned
          * GPU buffers, and restore both renderers. Skip rendering this
          * frame — it's safer than driving pipelines with stale handles. */
@@ -465,8 +465,9 @@ static void frame(void) {
     /* Top-left corner anchor in world coords (y-up, bottom-left origin).
      * Text renders below the model translation point by line; size is the
      * em-height in world units, which == pixels here since ortho is 1:1.
-     * Skipped on context_restored frames — text material's resolved shader
-     * handles are stale until next frame's nt_material_step / nt_font_step. */
+     * Skipped on context_restored frames — the text program was dropped above and
+     * relinks only after a later nt_resource_step republishes the shader code; the
+     * font handles refresh in nt_font_step. */
     /* Publish demo counters into nt_metrics before the HUD reads them back via format_lines. */
     nt_metrics_count("bunnies", (uint64_t)s_bunny_count);
     nt_metrics_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);

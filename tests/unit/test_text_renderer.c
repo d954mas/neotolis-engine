@@ -141,7 +141,6 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
     });
-    nt_material_step();
     return material;
 }
 
@@ -430,7 +429,6 @@ void test_text_material_with_textures_asserts_at_flush(void) {
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
         .texture_count = 1,
     });
-    nt_material_step();
 
     nt_text_renderer_set_material(textured);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -551,7 +549,6 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
-    nt_material_step();
 
     nt_gfx_fake_reset();
     nt_text_renderer_set_material(a);
@@ -570,7 +567,6 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_program_t shared = nt_gfx_make_program(vs, fs);
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
-    nt_material_step();
 
     nt_gfx_fake_reset();
     nt_text_renderer_set_material(opaque_mat);
@@ -594,7 +590,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
-    nt_material_step();
 
     nt_gfx_fake_reset();
     nt_gfx_test_draw_trace_reset(true);

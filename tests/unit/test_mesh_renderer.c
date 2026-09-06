@@ -169,7 +169,6 @@ static nt_material_t create_test_material_with_attr(nt_program_t program, nt_col
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -227,7 +226,6 @@ static nt_material_t create_test_material_on_texture(nt_program_t program, nt_bl
     desc.cull_mode = NT_CULL_BACK;
     desc.label = "test_material_textured";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -660,7 +658,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     desc.program = p1;
     desc.cull_mode = NT_CULL_NONE;
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
@@ -693,16 +690,73 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     desc.attr_map_count = 1;
     desc.label = "unresolved_tex_material";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
 
     const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_EQUAL_UINT32(0, info->resolved_tex[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(info->tex_resources[0]));
 
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(items, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "texture_pool"));
+}
+
+/* Textures resolve at the material transition, so a slot published after the material
+ * was created binds on its first draw, and a republished id replaces it on the next. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_texture_published_after_material_create_binds_at_next_draw(void) {
+    nt_mesh_t mesh = create_test_mesh();
+
+    /* Own pack: test_texture() latches "mesh_renderer_tex_pack" for its own slots. */
+    const nt_hash32_t pid = nt_hash32_str("mesh_renderer_late_pack");
+    const nt_hash64_t rid = nt_hash64_str("mesh_renderer_late_tex");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+
+    /* Requested before anything registers it: the slot publishes 0. */
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(res));
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.program = create_test_tex_program();
+    desc.textures[0].name = "u_tex";
+    desc.textures[0].resource = res;
+    desc.texture_count = 1;
+    desc.attr_map[0].stream_name = "position";
+    desc.attr_map[0].location = 0;
+    desc.attr_map_count = 1;
+    desc.depth_test = true;
+    desc.depth_write = true;
+    desc.blend = nt_blend_opaque();
+    desc.cull_mode = NT_CULL_BACK;
+    desc.label = "late_tex_material";
+    nt_material_t mat = nt_material_create(&desc);
+
+    static const uint8_t white[4] = {255, 255, 255, 255};
+    nt_texture_t tex1 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = white, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "late_tex1"});
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, tex1.id));
+    nt_resource_step();
+
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
+
+    nt_gfx_fake_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(tex1), nt_gfx_fake_bound_texture_at(0));
+
+    /* Re-registering the same (pack, rid) republishes; the next transition follows it. */
+    nt_texture_t tex2 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = white, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "late_tex2"});
+    TEST_ASSERT_NOT_EQUAL_UINT32(tex1.id, tex2.id);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, tex2.id));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(tex2.id, nt_resource_get(res));
+
+    nt_gfx_fake_reset();
+    nt_mesh_renderer_draw_list(items, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(tex2), nt_gfx_fake_bound_texture_at(0));
 }
 
 /* The declared name is what selects the unit, so a material whose program has no such
@@ -749,7 +803,6 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     desc.attr_map_count = 1;
     desc.label = "swapped_slot_material";
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
@@ -1182,7 +1235,6 @@ void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelin
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_BACK;
     mats[3] = nt_material_create(&desc);
-    nt_material_step();
 
     nt_render_item_t items[4];
     for (uint32_t i = 0; i < 4; i++) {
@@ -1271,7 +1323,6 @@ void test_vertex_input_shared_for_same_derived_layout(void) {
     desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "extra_attr_material";
     nt_material_t mat_b = nt_material_create(&desc);
-    nt_material_step();
 
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
@@ -1718,6 +1769,7 @@ int main(void) {
     RUN_TEST(test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs);
     RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
+    RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
     RUN_TEST(test_material_missing_a_program_sampler_asserts);
     RUN_TEST(test_texture_lands_on_the_program_sampler_unit);

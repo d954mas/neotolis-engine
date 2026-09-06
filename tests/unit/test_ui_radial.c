@@ -59,7 +59,6 @@ static nt_material_t make_radial_material(void) {
     desc.label = "radial_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
@@ -453,7 +452,6 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     desc.attr_map_count = 2;
     desc.label = "perm_test_material";
     const nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
 
     /* Block in attr_map order: a_layout placeholders @0..3, a_radial data @4..7. */
     const float block[8] = {0.0F, 0.0F, 0.0F, 0.0F, 7.0F, 8.0F, 9.0F, 0.0F};
@@ -555,7 +553,6 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.label = "radial_image_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 

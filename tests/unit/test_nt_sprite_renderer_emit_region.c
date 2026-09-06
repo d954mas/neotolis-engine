@@ -244,7 +244,6 @@ static nt_material_t create_test_material(void) {
     desc.label = "test_emit_region_material";
 
     nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
     return mat;
 }
 
