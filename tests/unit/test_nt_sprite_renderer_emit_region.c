@@ -577,17 +577,20 @@ static void test_slice9_flip_x(void) {
     nt_sprite_renderer_test_last_emit_position(2, pos);
     TEST_ASSERT_TRUE(pos[0] == 96.0F); /* NOLINT */
 
-    /* UV flip: us reversed => us[0] > us[3] for flipped axis.
-     * u_min=1000, u_max=5000, u_range=4000, source_w=64
-     * After swap borders: us computed with fl=8,fr=4 = [1000, 1500, 4750, 5000]
-     * After UV flip: us = [5000, 4750, 1500, 1000]
-     * Grid (0,0) uses us[0]=5000, Grid (0,1) uses us[1]=4750 */
+    /* u_min=1000, u_max=5000, u_range=4000, source_w=64 -> 62.5 u per source px.
+     * The 8-wide left band shows the source's RIGHT border, so it must span 8
+     * source px: 5000 -> 4500. (An extra src-border swap would make it 4750,
+     * i.e. 4 source px stretched over 8 units.) */
     uint16_t uv[2];
     nt_sprite_renderer_test_last_emit_texcoord(0, uv);
-    TEST_ASSERT_EQUAL_UINT16(5000, uv[0]); /* us[0] flipped */
+    TEST_ASSERT_EQUAL_UINT16(5000, uv[0]);
 
     nt_sprite_renderer_test_last_emit_texcoord(1, uv);
-    TEST_ASSERT_EQUAL_UINT16(4750, uv[0]); /* us[1] flipped */
+    TEST_ASSERT_EQUAL_UINT16(4500, uv[0]);
+
+    /* The 4-wide right band shows the source's LEFT border: 4 px from u_min. */
+    nt_sprite_renderer_test_last_emit_texcoord(2, uv);
+    TEST_ASSERT_EQUAL_UINT16(1250, uv[0]);
 
     nt_sprite_renderer_flush();
 }
@@ -618,12 +621,18 @@ static void test_slice9_flip_y(void) {
     TEST_ASSERT_TRUE(pos[1] == 76.0F); /* NOLINT */
 
     /* Unflipped, row 0 (the rect's top) samples v_min; FLIP_Y reverses the V
-     * order, so the top row now samples the source's bottom. */
+     * order, so the top row now samples the source's bottom.
+     * v_min=2000, v_max=6000, v_range=4000, source_h=64 -> 62.5 v per source px.
+     * The 8-wide top band shows the source's BOTTOM border: 6000 -> 5500.
+     * Row 2 is 4 source px in from v_min (the top border): 2250. */
     uint16_t uv_top[2];
     uint16_t uv_lower[2];
     nt_sprite_renderer_test_last_emit_texcoord(0, uv_top);   /* row 0 */
+    nt_sprite_renderer_test_last_emit_texcoord(4, uv_lower); /* row 1 */
+    TEST_ASSERT_EQUAL_UINT16(6000, uv_top[1]);
+    TEST_ASSERT_EQUAL_UINT16(5500, uv_lower[1]);
     nt_sprite_renderer_test_last_emit_texcoord(8, uv_lower); /* row 2 */
-    TEST_ASSERT_TRUE(uv_top[1] > uv_lower[1]);
+    TEST_ASSERT_EQUAL_UINT16(2250, uv_lower[1]);
 
     nt_sprite_renderer_flush();
 }

@@ -759,19 +759,12 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             open_cmd_from_snapshot(&snapshot);
         }
 
-        /* Flip border swap */
-        uint16_t fl = sl;
-        uint16_t fr = sr;
-        uint16_t ft = st;
-        uint16_t fb = sb;
-        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
-            fl = sr;
-            fr = sl;
-        }
-        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
-            ft = sb;
-            fb = st;
-        }
+        /* No flip swap here: this path mirrors by negating the grid positions
+         * below, which carries the bands and their UVs along with it. */
+        const uint16_t fl = sl;
+        const uint16_t fr = sr;
+        const uint16_t ft = st;
+        const uint16_t fb = sb;
 
         /* DST corner size = src × per-entity slice9_scale; last-line tripwire. */
         NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
@@ -868,22 +861,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             (uint16_t)(v_min + (((uint32_t)ft * v_range) / r->source_h)),
             v_min,
         };
-        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
-            uint16_t t0 = us[0];
-            us[0] = us[3];
-            us[3] = t0;
-            uint16_t t1 = us[1];
-            us[1] = us[2];
-            us[2] = t1;
-        }
-        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
-            uint16_t t0 = vs[0];
-            vs[0] = vs[3];
-            vs[3] = t0;
-            uint16_t t1 = vs[1];
-            vs[1] = vs[2];
-            vs[2] = t1;
-        }
 
         /* Unpack color. */
         const uint32_t s9_color = dv->colors_packed[d_idx];
@@ -1107,31 +1084,24 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         return;
     }
 
-    /* Symmetric swap keeps UV and position consistent under flip. */
-    uint16_t fsrc_l = src_sl;
-    uint16_t fsrc_r = src_sr;
-    uint16_t fsrc_t = src_st;
-    uint16_t fsrc_b = src_sb;
+    /* Only the dst bands swap: the mirror itself is the us/vs reversal below, so
+     * the UV cuts keep reading their own source side. */
     uint16_t fdst_l = dst_sl;
     uint16_t fdst_r = dst_sr;
     uint16_t fdst_t = dst_st;
     uint16_t fdst_b = dst_sb;
     if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
-        fsrc_l = src_sr;
-        fsrc_r = src_sl;
         fdst_l = dst_sr;
         fdst_r = dst_sl;
     }
     if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
-        fsrc_t = src_sb;
-        fsrc_b = src_st;
         fdst_t = dst_sb;
         fdst_b = dst_st;
     }
-    const uint16_t fl = fsrc_l;
-    const uint16_t fr = fsrc_r;
-    const uint16_t ft = fsrc_t;
-    const uint16_t fb = fsrc_b;
+    const uint16_t fl = src_sl;
+    const uint16_t fr = src_sr;
+    const uint16_t ft = src_st;
+    const uint16_t fb = src_sb;
 
     /* Extract bbox UVs from region vertices (u16 space). */
     uint16_t u_min = UINT16_MAX;

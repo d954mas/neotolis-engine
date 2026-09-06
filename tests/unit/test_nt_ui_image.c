@@ -9,6 +9,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "sprite_comp/nt_sprite_comp.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -301,6 +302,15 @@ static void test_image_slice9_orientation_matches_single_quad(void) {
     nt_sprite_renderer_test_last_emit_texcoord(4U, seam_uv);
     TEST_ASSERT_EQUAL_INT32(2, (int32_t)(top_pos[1] - seam_pos[1]));
     TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V0_RAW + ((MINIMAL_UI_ATLAS_PACKED_V1_RAW - MINIMAL_UI_ATLAS_PACKED_V0_RAW) / 4U), seam_uv[1]);
+
+    /* Under FLIP_Y the two paths mirror by different means -- the single quad
+     * negates its scale, slice9 reverses V -- so they have to agree there too. */
+    plain.flip_bits = NT_SPRITE_FLAG_FLIP_Y;
+    sliced.flip_bits = NT_SPRITE_FLAG_FLIP_Y;
+    const uint16_t plain_flipped_v = walk_image_top_edge_v(&plain);
+    const uint16_t sliced_flipped_v = walk_image_top_edge_v(&sliced);
+    TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V1_RAW, plain_flipped_v);
+    TEST_ASSERT_EQUAL_UINT16(plain_flipped_v, sliced_flipped_v);
 }
 
 int main(void) {
