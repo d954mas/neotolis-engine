@@ -3642,9 +3642,9 @@ static void frame(void) {
             nt_log_info("ui_showcase: palette -> %s", g_current->name);
         }
         if (nt_input_key_is_pressed(NT_KEY_D)) {
-            /* Read back after set: the NT_UI_DEBUG_TOOLS=OFF stub ignores the toggle. */
-            nt_ui_inspector_set_active(s_ctx, !nt_ui_inspector_is_active(s_ctx));
-            nt_log_info("ui_showcase: inspector %s", nt_ui_inspector_is_active(s_ctx) ? "ON" : "OFF");
+            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+            nt_ui_inspector_set_active(s_ctx, now_on);
+            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
         }
     }
 
