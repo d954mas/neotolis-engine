@@ -17,6 +17,9 @@ extern "C" {
 #define MINIMAL_UI_ATLAS_PACKED_V0 (0x8000 / 65535.0F)
 #define MINIMAL_UI_ATLAS_PACKED_U1 (0x8000 / 65535.0F)
 #define MINIMAL_UI_ATLAS_PACKED_V1 (0xC000 / 65535.0F)
+/* Same bounds in raw u16, for tests asserting emitted texcoords directly. */
+#define MINIMAL_UI_ATLAS_PACKED_V0_RAW 0x8000U
+#define MINIMAL_UI_ATLAS_PACKED_V1_RAW 0xC000U
 
 /* Mounts a virtual pack with a synthetic atlas blob and parses it
  * through the full atlas activator, yielding a real READY resource

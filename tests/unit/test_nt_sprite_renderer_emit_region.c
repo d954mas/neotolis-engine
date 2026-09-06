@@ -607,23 +607,23 @@ static void test_slice9_flip_y(void) {
     const uint16_t b_flipy[4] = {4, 4, 4, 8};
     nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, NT_MATH_MAT4_IDENTITY);
 
-    /* FLIP_Y: ft=8, fb=4 -> y splits = [0, 4, 72, 80] */
+    /* FLIP_Y swaps the borders: ft=8, fb=4 -> y splits = [0, 8, 76, 80] */
     float pos[3];
-    /* Grid (1,0) = vertex 4 = (xs[0], ys[1]) = (0, 4) */
+    /* Grid (1,0) = vertex 4 = (xs[0], ys[1]) = (0, 8) */
     nt_sprite_renderer_test_last_emit_position(4, pos);
-    TEST_ASSERT_TRUE(pos[1] == 4.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 8.0F); /* NOLINT */
 
-    /* Grid (2,0) = vertex 8 = (xs[0], ys[2]) = (0, 72) */
+    /* Grid (2,0) = vertex 8 = (xs[0], ys[2]) = (0, 76) */
     nt_sprite_renderer_test_last_emit_position(8, pos);
-    TEST_ASSERT_TRUE(pos[1] == 72.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 76.0F); /* NOLINT */
 
-    /* After V inversion + FLIP_Y: vs[0]<->vs[3] swap. Row-0 V < Row-2 V
-     * (bottom row flipped = original top = smaller V in PNG space). */
-    uint16_t uv_bot[2];
+    /* Unflipped, row 0 (the rect's top) samples v_min; FLIP_Y reverses the V
+     * order, so the top row now samples the source's bottom. */
     uint16_t uv_top[2];
-    nt_sprite_renderer_test_last_emit_texcoord(0, uv_bot); /* row 0 */
-    nt_sprite_renderer_test_last_emit_texcoord(8, uv_top); /* row 2 */
-    TEST_ASSERT_TRUE(uv_bot[1] < uv_top[1]);
+    uint16_t uv_lower[2];
+    nt_sprite_renderer_test_last_emit_texcoord(0, uv_top);   /* row 0 */
+    nt_sprite_renderer_test_last_emit_texcoord(8, uv_lower); /* row 2 */
+    TEST_ASSERT_TRUE(uv_top[1] > uv_lower[1]);
 
     nt_sprite_renderer_flush();
 }

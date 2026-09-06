@@ -151,22 +151,24 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
     /* ---- Vertices: 4 white + 6 polygon-hull + 4 packed ---- */
     NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {
         /* white quad (trim-local 0..1, atlas UV 0..0xFFFF) */
-        {0, 0, 0, 0},
-        {1, 0, 0xFFFF, 0},
-        {1, 1, 0xFFFF, 0xFFFF},
-        {0, 1, 0, 0xFFFF},
+        {0, 0, 0, 0xFFFF},
+        {1, 0, 0xFFFF, 0xFFFF},
+        {1, 1, 0xFFFF, 0},
+        {0, 1, 0, 0},
         /* polygon hull (hexagon-ish, 6 unique verts) */
         {0, 8, 0, 0x8000},
-        {8, 0, 0x8000, 0},
+        {8, 0, 0x8000, 0xFFFF},
         {16, 8, 0xFFFF, 0x8000},
-        {16, 16, 0xFFFF, 0xFFFF},
-        {8, 16, 0x8000, 0xFFFF},
+        {16, 16, 0xFFFF, 0},
+        {8, 16, 0x8000, 0},
         {0, 8, 0, 0x8000},
-        /* packed sub-region quad: atlas UV in [0.25,0.5]x[0.5,0.75] (non-[0,1]) */
-        {0, 0, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V0},
-        {8, 0, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V0},
-        {8, 8, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V1},
-        {0, 8, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V1},
+        /* packed sub-region quad: atlas UV in [0.25,0.5]x[0.5,0.75] (non-[0,1]).
+         * local_y is Y-up and V is PNG Y-down, so they pair inverted — same as
+         * the builder emits (nt_builder_atlas.c pipeline_serialize). */
+        {0, 0, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V1},
+        {8, 0, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V1},
+        {8, 8, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V0},
+        {0, 8, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V0},
     };
     memcpy(out_blob + UI_ATLAS_VERTEX_OFFSET, verts, sizeof verts);
 

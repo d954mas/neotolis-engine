@@ -142,7 +142,10 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 /* Emit a 9-quad slice9 image. Same vertex format and pipeline as emit_region.
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in caller's coordinate space.
+ *   x, y, w, h          - target rect in caller's coordinate space; y is its
+ *                         TOP edge (Y grows down, as in Clay layout space),
+ *                         so the source's top row lands at y and the `t`
+ *                         border sits along it.
  *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
  *                         atlas-baked borders for this region.
  *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F

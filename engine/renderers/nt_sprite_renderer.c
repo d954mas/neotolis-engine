@@ -1173,7 +1173,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         fb_w *= ratio;
     }
     float xs[4] = {x, x + fl_w, x + w - fr_w, x + w};
-    float ys[4] = {y, y + fb_w, y + h - ft_w, y + h};
+    float ys[4] = {y, y + ft_w, y + h - fb_w, y + h};
 
     /* UV splits (4 u-values, 4 v-values in u16). Integer math avoids precision loss. */
     uint16_t u_range = (uint16_t)(u_max - u_min);
@@ -1184,13 +1184,13 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         (uint16_t)(u_max - (((uint32_t)fr * u_range) / rh.region->source_w)),
         u_max,
     };
-    /* V splits inverted: geometry Y-up but texture V is PNG Y-down.
-     * vs[0] (geometry bottom) → v_max (texture bottom). */
+    /* Row 0 is the rect's TOP (y grows down, like every emit_* geometry param)
+     * and texture V is PNG Y-down, so rows and V ascend together. */
     uint16_t vs[4] = {
-        v_max,
-        (uint16_t)(v_max - (((uint32_t)fb * v_range) / rh.region->source_h)),
-        (uint16_t)(v_min + (((uint32_t)ft * v_range) / rh.region->source_h)),
         v_min,
+        (uint16_t)(v_min + (((uint32_t)ft * v_range) / rh.region->source_h)),
+        (uint16_t)(v_max - (((uint32_t)fb * v_range) / rh.region->source_h)),
+        v_max,
     };
 
     /* UV flip after split computation. */
