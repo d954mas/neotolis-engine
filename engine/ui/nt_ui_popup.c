@@ -312,8 +312,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
 
 #ifdef NT_TEST_ACCESS
-    /* Effective band, not the declared delta: Clay adds the enclosing floating's z, and every popup
-     * level contributes exactly one stride. */
+    /* Effective band ASSUMING every enclosing floating is an engine overlay (each contributes one
+     * stride). A game floating with its own zIndex shifts the real band — tests that need the shipped
+     * value read Clay_RenderCommand::zIndex instead. */
     s_last_panel_zband = (uint16_t)(ctx->modal_zband_stride * ctx->active_modal_depth);
     s_last_catcher_zband = (uint16_t)(s_last_panel_zband - 1U);
     s_last_side = (uint8_t)side;

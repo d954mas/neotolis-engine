@@ -68,7 +68,8 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
 /* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * catcher (light-dismiss) + panel floating elements (z-band stride*(depth+1)) eased toward open?1:0,
+ * catcher (light-dismiss) + panel floating elements (declared one stride above the enclosing floating;
+ * Clay accumulates the nesting) eased toward open?1:0,
  * placed at the anchor with edge-flip (or centered for a CENTER anchor). Panel stays OPEN until
  * nt_ui_popup_end. id non-zero, style non-NULL, anchor non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH
  * BEFORE push (overflow, no fallback). Prefer the scoped nt_ui_popup_visible unless you need the side. */

@@ -1452,12 +1452,12 @@ static void test_field_text_above_modal_band(void) {
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT && text_at < 0) {
             text_at = i;
         }
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
-            panel_at = i; /* backdrop and panel both carry the modal band */
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == CLAY_ID("modal_panel").id) {
+            panel_at = i; /* by id: the field's caret is a floating RECTANGLE in the same band */
         }
     }
     TEST_ASSERT_TRUE_MESSAGE(text_at >= 0, "the field must emit its text");
-    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must paint in a lifted z band");
+    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
     TEST_ASSERT_TRUE_MESSAGE(text_at > panel_at, "field text must paint AFTER the modal panel, not under it");
 }
 
@@ -1514,9 +1514,9 @@ int main(void) {
     RUN_TEST(test_edit_step_insert_caret_on_codepoint_boundary);
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
+    RUN_TEST(test_field_text_above_modal_band);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
-    RUN_TEST(test_field_text_above_modal_band);
     RUN_TEST(test_assert_zero_cap);
     RUN_TEST(test_assert_null_props);
     RUN_TEST(test_assert_null_style);

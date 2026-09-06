@@ -421,7 +421,7 @@ static bool menu_cursor_over_any_panel(const nt_ui_context_t *ctx, uint32_t menu
  * level's panel + rows stay hittable above it. */
 static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t menu_id) {
     const uint32_t occ_id = menu_occluder_id(menu_id);
-    const int16_t occ_z = (int16_t)(ctx->modal_zband_stride - 1); /* just below the root panel band (stride*1) */
+    const int16_t occ_z = (int16_t)(ctx->modal_zband_stride - 1); /* one below the menu's own panel band, relative to whatever encloses the menu */
     const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
     const nt_ui_element_data_t *occ_data = nt_ui_make_element_data_xform(fill_layer, NULL, &id_xf, 1.0F);
     CLAY({.id = (Clay_ElementId){.id = occ_id},

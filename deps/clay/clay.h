@@ -18,7 +18,11 @@
 //      parent_z + own_z. Upstream sorts every root by its own zIndex, so a widget's
 //      floating part (slider thumb, input caret) sank under the modal panel it was
 //      declared in, and sorting a child root ahead of its parent also made Clay read
-//      the parent bbox one frame stale. openFloatingZStack + 3 sites, search "NT patch 4".
+//      the parent bbox one frame stale. openFloatingZStack + 4 sites (context field,
+//      ephemeral alloc, push in ConfigureOpenElementPtr, pop in CloseElement), search
+//      "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps on strict
+//      `<`): a child declared with delta 0 paints above its floating parent only
+//      because equal-z roots keep registration order.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -1837,7 +1841,6 @@ void Clay__CloseElement(void) {
             break;
         } else if (config->type == CLAY__ELEMENT_CONFIG_TYPE_FLOATING) {
             context->openClipElementStack.length--;
-            context->openFloatingZStack.length--; // NT patch 4
         }
     }
 
@@ -1916,6 +1919,11 @@ void Clay__CloseElement(void) {
     Clay__UpdateAspectRatioBox(openLayoutElement);
 
     bool elementIsFloating = Clay__ElementHasConfig(openLayoutElement, CLAY__ELEMENT_CONFIG_TYPE_FLOATING);
+    // NT patch 4: pop here, not in the config loop above — that loop breaks on CLIP, so a config-order
+    // change upstream could silently skip the pop and leave every later floating on a stale band.
+    if (elementIsFloating) {
+        context->openFloatingZStack.length--;
+    }
 
     // Close the currently open element
     int32_t closingElementIndex = Clay__int32_tArray_RemoveSwapback(&context->openLayoutElementStack, (int)context->openLayoutElementStack.length - 1);
@@ -2128,9 +2136,17 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
             if (declaration->floating.clipTo == CLAY_CLIP_TO_NONE) {
                 clipElementId = 0;
             }
-            // NT patch 4: zIndex is relative to the enclosing floating element, clamped to the int16 field.
+            // NT patch 4: zIndex is relative to the enclosing floating element. Saturating the int16 field
+            // would silently merge two bands into one, so it is an error, not a fallback.
             int32_t enclosingZ = context->openFloatingZStack.length > 0 ? Clay__int32_tArray_GetValue(&context->openFloatingZStack, context->openFloatingZStack.length - 1) : 0;
-            int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, enclosingZ + (int32_t)floatingConfig.zIndex));
+            int32_t rawZ = enclosingZ + (int32_t)floatingConfig.zIndex;
+            int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, rawZ));
+            if (effectiveZ != rawZ) {
+                context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+                        .errorType = CLAY_ERROR_TYPE_INTERNAL_ERROR,
+                        .errorText = CLAY_STRING("Nested floating zIndex saturated int16 — stacking bands merged."),
+                        .userData = context->errorHandler.userData });
+            }
             floatingConfig.zIndex = (int16_t)effectiveZ;
             Clay__int32_tArray_Add(&context->openFloatingZStack, effectiveZ);
             int32_t currentElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);

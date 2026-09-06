@@ -562,8 +562,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
 
         nt_ui_baked_xform_t seed;
         /* The document root (Clay__RootContainer) is the only tree root with parentId 0. Identify it by
-         * that, NOT by array index 0: Clay sorts tree roots by zIndex, so a negative-zIndex floating child
-         * (e.g. a tooltip drop-shadow) sorts ahead of the document root and shifts it off index 0. */
+         * that, NOT by array index 0: Clay sorts tree roots by zIndex, so any floating whose effective z
+         * is negative sorts ahead of the document root and shifts it off index 0. */
         if (root->parentId == 0U) {
             seed = identity;
         } else {
@@ -1588,11 +1588,12 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     if (highlightedElementId) {
-        /* zIndex 32764 keeps it above game UI but strictly under the panel root. */
+        /* Declared inside ntInsp_Root, so zIndex is relative to it: -1 keeps the highlight above game UI
+         * (the panel band is far above it) but strictly under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
-              .floating = {.parentId = highlightedElementId, .zIndex = 32764, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
+              .floating = {.parentId = highlightedElementId, .zIndex = -1, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
             CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"),
                   .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
                   .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),

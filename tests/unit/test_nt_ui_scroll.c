@@ -411,16 +411,24 @@ static void test_scrollbar_standalone_no_z_lift(void) {
     scrollbar_frame(&p, &style, 1000.0F); /* overflow */
     scrollbar_frame(&p, &style, 1000.0F);
     TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+    /* The bar's own band: Clay stamps root->zIndex on the clipTo SCISSOR that opens the bar's floating
+     * root, which is the command immediately preceding the bar's art (image commands are stamped 0). */
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
-    bool bar_emitted = false;
-    int32_t max_z = 0;
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
+    int32_t last_scissor_z = INT32_MIN;
+    int32_t bar_band = INT32_MIN;
     for (int32_t i = 0; i < arr->length; ++i) {
-        bar_emitted = bar_emitted || (arr->internalArray[i].id == bar_id);
-        max_z = (arr->internalArray[i].zIndex > max_z) ? arr->internalArray[i].zIndex : max_z;
+        const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            last_scissor_z = c->zIndex;
+        }
+        if (c->id == bar_id) {
+            bar_band = last_scissor_z;
+            break;
+        }
     }
-    TEST_ASSERT_TRUE_MESSAGE(bar_emitted, "standalone scrollbar must reach the render commands");
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(0, max_z, "standalone scroll must stay in z band 0");
+    TEST_ASSERT_TRUE_MESSAGE(bar_band != INT32_MIN, "standalone scrollbar must reach the render commands");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(0, bar_band, "standalone scroll bar must stay in z band 0");
 }
 
 /* ---- Test 12: thumb length is proportional to container/content (clamped to min). ---- */

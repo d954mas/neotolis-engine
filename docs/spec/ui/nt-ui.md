@@ -38,17 +38,31 @@ Upstream Clay sorts every floating element globally by its own
 `zIndex`. The vendored copy diverges (NT patch 4 in `deps/clay/clay.h`):
 a floating declared inside another floating gets `parent_z + own_z`, so
 `zIndex` reads as a stacking context, like CSS. Without it a widget's
-own floating part (the slider thumb, the input caret and text, a
-scrollbar) sank to the global band 0 and drew UNDER the modal panel it
-was declared in, and sorting a child tree root ahead of its parent also
-made Clay position it from the parent's PREVIOUS-frame bbox (a frame of
-lag, and an empty clip rect on the first frame — which the walker's
-SCISSOR assert catches). Consequences: a widget composes anywhere
-without knowing its global stacking position; the engine's overlay
-bands (`modal_zband_stride`) are declared as deltas and accumulate with
-declaration nesting, NOT with attachment (`attachTo = ROOT` still stacks
-where it was declared); a game floating that wants to escape its
-enclosing panel must be declared outside it.
+own floating part (the slider thumb, the input caret and text) sank to
+the global band 0 and drew UNDER the modal panel it was declared in;
+the scrollbar escaped that only by hand-computing the popup band from
+`active_modal_depth`, which is the workaround the patch deletes. A child
+root sorted ahead of its parent was also positioned from the parent's
+PREVIOUS-frame bbox — a frame of lag, and an empty clip rect on the
+first frame, which the walker's SCISSOR assert catches. A delta of 0
+now ties with the parent and, since the root sort is stable, paints
+after it with a same-frame bbox; a NEGATIVE delta still sorts ahead of
+its parent and still reads the parent's previous-frame bbox (the
+tooltip drop-shadow is the one such case and guards for it).
+
+Consequences: a widget composes anywhere without knowing its global
+stacking position; the engine's overlay bands (`modal_zband_stride`) are
+declared as deltas and accumulate with declaration nesting, NOT with
+attachment (`attachTo = ROOT` still stacks where it was declared), so a
+popup opened from inside another popup reaches `stride*depth` as long as
+every enclosing floating is an engine overlay; a widget's own floating
+parts (scrollbar, thumb, caret) declare delta 0 and rely on being
+declared last to paint above their container's content; a game floating
+that wants to escape its enclosing panel must be declared outside it;
+the value Clay stores and reports for a floating is the accumulated
+band, not the declared delta; and an accumulated band that would
+saturate `int16` raises a Clay error (which `nt_ui` asserts on) rather
+than silently merging two bands.
 
 ## Clay private symbols
 
@@ -348,9 +362,8 @@ missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
 read from the panel's previous-frame bbox; a `value_t` open/close tween; a shared
 modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
-floating (Clay accumulates the nesting — see below — so a popup opened from
-inside another popup still lands on `stride*depth`; NT_ASSERT before the push so
-a runaway nesting fails early); and a present-only, transparent light-dismiss
+floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
+NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a

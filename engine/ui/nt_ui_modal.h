@@ -78,7 +78,8 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
 /* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * backdrop + panel floating elements (z-band ctx->modal_zband_stride*(depth+1)) and eases t toward
+ * backdrop + panel floating elements (declared one ctx->modal_zband_stride above the enclosing
+ * floating; Clay accumulates the nesting) and eases t toward
  * open?1:0; returns the full result (t / close reason / visible). Panel stays OPEN until nt_ui_modal_end.
  * id non-zero, style non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no fallback).
  * Prefer the scoped nt_ui_modal_visible() unless you need the close reason. */

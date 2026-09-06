@@ -88,7 +88,10 @@ static void test_popup_floating_smoke(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
 }
 
-/* ---- z-band: panel = stride*(depth+1), catcher = panel-1. Nested = 2000/1999, depth 2. ---- */
+/* ---- z-band: each popup declares ONE stride above its enclosing floating, catcher one below its own
+ *      panel. A popup nested inside another must therefore reach 2*stride — asserted on the band Clay
+ *      stamped on the bodies' render commands, not on the engine's own arithmetic. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
@@ -98,14 +101,34 @@ static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
     TEST_ASSERT_EQUAL_UINT16((uint16_t)1000U, nt_ui_popup_test_last_zband());
     TEST_ASSERT_EQUAL_UINT16((uint16_t)999U, nt_ui_popup_test_last_catcher_zband());
+    /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
+    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
     TEST_ASSERT_EQUAL_UINT16((uint16_t)2000U, nt_ui_popup_test_last_zband());
     TEST_ASSERT_EQUAL_UINT16((uint16_t)1999U, nt_ui_popup_test_last_catcher_zband());
     TEST_ASSERT_EQUAL_UINT8(2U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
+
+    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    int32_t z_a = INT32_MIN;
+    int32_t z_b = INT32_MIN;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (c->id == CLAY_ID("body_a").id) {
+            z_a = c->zIndex;
+        } else if (c->id == CLAY_ID("body_b").id) {
+            z_b = c->zIndex;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, z_a, "outer popup must land one stride above the base band");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(2 * stride, z_b, "a popup nested inside another must accumulate a second stride");
 }
 
 /* ---- Depth overflow fires NT_ASSERT before the push (no silent fallback). ---- */

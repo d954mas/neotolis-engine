@@ -874,14 +874,16 @@ static void test_thumb_above_modal_band_first_frame(void) {
     const Clay_RenderCommand *track = NULL;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == CLAY_ID("modal_panel").id) {
             panel_at = i;
         }
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, SL_W, 0.5F)) {
             track = c;
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must paint in a lifted z band");
+    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
+    /* Command index is paint order here because both carry layer 0 — the walker only reorders within a
+     * same-zIndex run, and then by layer. */
     TEST_ASSERT_TRUE_MESSAGE(thumb_at > panel_at, "thumb must paint AFTER the modal panel, not under it");
 
     /* Frame-1 placement is measured against the track in the SAME frame, so a stale parent bbox shows up
