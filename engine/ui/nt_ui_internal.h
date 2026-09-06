@@ -249,7 +249,7 @@ struct nt_ui_context {
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
+    /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
     int16_t modal_zband_stride;
     uint16_t wheel_depth;
     uint8_t active_modal_depth;

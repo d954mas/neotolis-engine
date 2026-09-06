@@ -648,6 +648,14 @@ static void test_modal_zero_stride_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
+/* ---- A stride of 1 leaves no band for the catcher (it sits at panel-1 = the base band, where it stops
+ *      gating base UI), so it is rejected at create rather than asserting later inside popup-core. ---- */
+static void test_modal_stride_one_asserts(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = 1;
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+}
+
 /* ---- An over-large stride (stride*MAX_DEPTH > INT16_MAX) trips the create-time NT_ASSERT
  *      (fail-early, no silent clamp). ---- */
 static void test_modal_oversize_stride_asserts(void) {
@@ -834,6 +842,7 @@ int main(void) {
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
+    RUN_TEST(test_modal_stride_one_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);
     return UNITY_END();
 }

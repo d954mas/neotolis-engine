@@ -3,7 +3,7 @@
 
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
- * per-depth z-band stack + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
+ * one-stride-per-level z-band + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
  * the core only RAISES close_requested (outside-click on the catcher) and never closes itself.
  * begin/end are balanced (mirror nt_ui_modal_begin/end). The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */

@@ -67,9 +67,10 @@
  * (docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so an overlay sits one stride above whatever
  * encloses it — including a game floating's own zIndex, and there is no way out of that context: a
  * game floating that must stay under all UI belongs at the root level. Budget: that game zIndex plus
- * one stride per overlay level opened inside it must fit int16, or Clay raises a fatal error.
+ * one stride per overlay level opened inside it must fit int16, or Clay clamps and reports it
+ * (nt_ui asserts; an NT_ASSERT_OFF build paints the merged band).
  * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
- * nt_ui_create_desc_defaults; must be > 0). */
+ * nt_ui_create_desc_defaults; must be > 1 — an overlay's catcher needs the band below its panel). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000
 
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
@@ -260,7 +261,7 @@ typedef struct {
     /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. */
     float element_depth_bias_ndc;
-    /* Per-depth modal z-band stride; 0 = default NT_UI_MODAL_ZBAND_STRIDE. */
+    /* Band each overlay level declares above the floating enclosing it; 0 = NT_UI_MODAL_ZBAND_STRIDE. */
     int16_t modal_zband_stride;
     /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
     uint32_t state_slots;

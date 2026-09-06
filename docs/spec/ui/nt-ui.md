@@ -54,7 +54,10 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last. There is no way out
+paint above their container's content because they are declared last —
+which also means a floating declared AFTER one of them in the same band
+paints over it, so a scrollbar yields to a tooltip opened later in the
+same panel. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
@@ -378,7 +381,17 @@ outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
 effective band, ties to the last declared. That is the POINTER arbiter's key,
 not the paint key, and deliberately so — the winner performs the dismissal
 through its own catcher's interaction, so a slot ranked by draw layer would
-hand the scan to a popup whose catcher never wins the click. A catcher-less
+hand the scan to a popup whose catcher never wins the click and NEITHER
+would dismiss. The cost is real and accepted: two catcher-bearing popups on
+one band with different draw layers paint by layer but dismiss by
+declaration, so an outside click can close the one underneath. Ranking the
+slot by paint order requires making the pointer arbiter layer-aware first
+(`resolve_hot_if_needed` is band-only today) — until then the two must use
+one key, and this is that key. The agreement is a 2D-context property: a 3D
+ctx arbitrates the pointer by ray distance and does not rank overlays by
+band at all. The agreement is a 2D-context property: a
+3D ctx arbitrates the pointer by ray distance and does not rank overlays
+by band at all. A catcher-less
 overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven

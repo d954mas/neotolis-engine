@@ -35,9 +35,6 @@ typedef struct {
     float hover; /* accumulated seconds the cursor has been over the target */
 } nt_ui_tooltip_cell_t;
 
-#ifdef NT_TEST_ACCESS
-#endif
-
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
     /* Polished flat baseline: no atlas art (panel_art / caret atlas.id stay 0), no border/shadow. Wire
      * panel_art + caret + border/shadow to opt into the sprite look (parity with dropdown/menu). */
@@ -113,7 +110,9 @@ static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, uint
     const Clay_FloatingAttachPoints ap = above ? (Clay_FloatingAttachPoints){.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM}
                                                : (Clay_FloatingAttachPoints){.element = CLAY_ATTACH_POINT_CENTER_BOTTOM, .parent = CLAY_ATTACH_POINT_CENTER_TOP};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
-          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = 1, .attachPoints = ap},
+          /* Delta 0 like every other widget part: declared after the panel body, so it paints over the
+           * panel without escaping the tooltip's own band (a +1 would top later overlays too). */
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = ap},
           .image = (Clay_ImageElementConfig){.imageData = p},
           .backgroundColor = nt_ui_unpack_tint(style->caret_tint),
           .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}

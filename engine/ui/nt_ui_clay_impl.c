@@ -1670,6 +1670,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     // #endregion
     // #region row-list
     /* RIGHT_CENTER overlay attach — engine root is full-width so side-by-side would land off-screen. */
+    /* The root band is absolute and two below int16's ceiling, so this must not be declared inside a
+     * floating: the accumulated band would saturate (public entry point, game-reachable). */
+    NT_ASSERT(nt_ui_clay_priv_open_floating_z(ctx->clay) == 0 && "nt_ui inspector must be declared at the root level");
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG),

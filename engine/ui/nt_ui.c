@@ -233,8 +233,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->modal_zband_stride = desc->modal_zband_stride;
-    NT_ASSERT((int)ctx->modal_zband_stride > 0 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
-              "nt_ui_create_context: modal_zband_stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
+    /* > 1, not just > 0: an overlay's catcher sits one band UNDER its panel, so a stride of 1 puts the
+     * catcher on the base band where it stops gating base UI. */
+    NT_ASSERT((int)ctx->modal_zband_stride > 1 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
+              "nt_ui_create_context: modal_zband_stride must be > 1 and stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
     /* memset zeroed these; restore the gesture defaults (0 is not a valid dbl window / radius). */
     ctx->gesture_dbl_window_secs = NT_UI_GESTURE_DBL_WINDOW_SECS;
     ctx->gesture_move_radius_px = NT_UI_GESTURE_MOVE_RADIUS_PX;
@@ -548,7 +550,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const float clay_pointer_y = primary->y;
 #endif
 
-    /* nt_ui_inspector replaces Clay's built-in debug view. */
+    /* nt_ui_inspector replaces Clay's built-in debug view. Keeping it off is also what makes NT patch 4
+     * safe there: that view nests zIndex 32766 inside 32765, which would saturate the accumulated band. */
     Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 

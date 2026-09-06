@@ -299,12 +299,13 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
     /* The panel is the innermost open floating here, so this IS the band Clay stamped. The claim below
-     * must use the pointer arbiter's key (band, ties to the last declared): the winner runs the
-     * close-scan through its own catcher, so a differently-ranked slot dismisses nothing. */
+     * must use the 2D pointer arbiter's key (band, ties to the last declared): the winner runs the
+     * close-scan through its own catcher, so a differently-ranked slot dismisses nothing. A 3D ctx
+     * arbitrates by ray distance and does not rank overlays by band at all. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
     /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
      * arbitration and silently stops gating while nt_ui_modal_active() still reports the overlay up. */
-    NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: a gating overlay needs a band above base content");
+    NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: the catcher must sit above the base band (0)");
     if (want_catcher && panel_band >= ctx->modal_top_z_cur) {
         ctx->modal_top_z_cur = panel_band;
         ctx->modal_top_id_cur = id;
