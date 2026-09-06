@@ -75,9 +75,6 @@ static inline void combo_dup_key_check(nt_ui_context_t *ctx, uint32_t row_id) {
 #endif
 }
 
-#ifdef NT_TEST_ACCESS
-#endif
-
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void) {
     /* Flat-color baseline: no atlas art (every bg.atlas.id stays 0), eased states, polished out of box.
      * The trigger reads as a button; rows highlight on hover; the selected row carries a distinct fill. */

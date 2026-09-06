@@ -252,9 +252,16 @@ if [ "$MODE" = "push" ]; then
     # and -O2: a test registered behind an assert-mode guard, or a variable only an assert reads, is
     # -Wunused under -Werror here and nowhere in the debug builds. Mirrors ci.yml's native-release job.
     step "build (native-release)"
-    if [ ! -d "build/_cmake/native-release" ]; then
-        echo "ERROR: build/_cmake/native-release missing — configure the preset first:"
-        echo "  cmake --preset native-release"
+    NR_CACHE="build/_cmake/native-release/CMakeCache.txt"
+    if [ ! -f "$NR_CACHE" ]; then
+        echo "ERROR: build/_cmake/native-release not configured — run it yourself, so your own"
+        echo "       -DNT_SKIP_EXAMPLE_PACKS carries over:  cmake --preset native-release"
+        exit 1
+    fi
+    # A hand-passed -DNT_ASSERT_MODE=2 here makes this step green and empty: NT_ASSERT_FULL-only code
+    # compiles again and the -Wunused class the step exists for disappears.
+    if ! grep -q '^NT_ASSERT_MODE:STRING=$' "$NR_CACHE"; then
+        echo "ERROR: native-release cache overrides NT_ASSERT_MODE — it must stay empty (auto -> TRAP)."
         exit 1
     fi
     cmake --build build/_cmake/native-release

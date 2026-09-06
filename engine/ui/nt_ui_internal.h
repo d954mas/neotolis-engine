@@ -253,7 +253,6 @@ struct nt_ui_context {
     int16_t modal_zband_stride;
     uint16_t wheel_depth;
     uint8_t active_modal_depth;
-    uint8_t modal_top_layer_cur; /* layer of the current top claim; ties on band are broken by it */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */

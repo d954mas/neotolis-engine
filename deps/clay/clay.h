@@ -16,9 +16,9 @@
 //   4. Floating zIndex is RELATIVE to the enclosing floating element (CSS stacking
 //      context) instead of global: a floating declared inside another gets
 //      parent_z + own_z, so a widget's floating part composes anywhere without
-//      knowing its global band. openFloatingZStack + 4 sites (context field,
-//      ephemeral alloc, push in ConfigureOpenElementPtr, pop in CloseElement),
-//      search "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps
+//      knowing its global band. openFloatingZStack + 5 sites (context field,
+//      ephemeral alloc, push+saturation report in ConfigureOpenElementPtr, pop in
+//      CloseElement, and the zIndex field's own doc comment), search "NT patch 4". DEPENDS ON the tree-root sort staying STABLE (it swaps
 //      on strict `<`): a delta-0 child paints above its floating parent only because
 //      equal-z roots keep registration order — re-run tests/unit/test_nt_ui_slider.c
 //      after a Clay bump. Clay's own debug view nests 32766 inside 32765 and would
@@ -508,6 +508,7 @@ typedef struct Clay_FloatingElementConfig {
     uint32_t parentId;
     // Controls the z index of this floating element and all its children. Floating elements are sorted in ascending z order before output.
     // zIndex is also passed to the renderer for all elements contained within this floating element.
+    // NT patch 4: RELATIVE to the enclosing floating element — the stored value is parent_z + own_z.
     int16_t zIndex;
     // Controls how mouse pointer events like hover and click are captured or passed through to elements underneath / behind a floating element.
     // Enum is of the form CLAY_ATTACH_POINT_foo_bar. See Clay_FloatingAttachPoints for more details.

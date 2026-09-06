@@ -25,7 +25,10 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
+static nt_ui_modal_close_reason_t s_frame_close_reason; /* reason from the last modal_button_frame; reset in setUp */
+
 void setUp(void) {
+    s_frame_close_reason = NT_UI_MODAL_CLOSE_NONE;
     nt_test_assert_install();
     nt_input_clear_all_keys();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -70,11 +73,13 @@ static int32_t band_of_rect(const nt_ui_context_t *ctx, uint32_t id) {
     return INT32_MIN;
 }
 
-/* The backdrop's id is engine-derived and deliberately unpublished, so assert its band by presence. */
-static bool band_has_rect(const nt_ui_context_t *ctx, int32_t band) {
+/* The backdrop's id is engine-derived and deliberately unpublished, so identify it by shape: the only
+ * full-viewport rectangle in the frame. Band alone would also match a game rect that happens to land
+ * there. */
+static bool band_has_backdrop(const nt_ui_context_t *ctx, int32_t band) {
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex == band) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex == band && c->boundingBox.width >= 800.0F && c->boundingBox.height >= 600.0F) {
             return true;
         }
     }
@@ -119,8 +124,8 @@ static void test_modal_zband_and_nesting(void) {
 
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
     TEST_ASSERT_EQUAL_INT32((int32_t)2000, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id));
-    TEST_ASSERT_TRUE_MESSAGE(band_has_rect(s_fx.ctx, 999), "the outer backdrop must paint one band under its panel");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_rect(s_fx.ctx, 1999), "the nested backdrop must paint one band under its panel");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 999), "the outer backdrop must paint one band under its panel");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1999), "the nested backdrop must paint one band under its panel");
 }
 
 /* ---- Stack depth is zero at frame start and after balanced begin/end. ---- */
@@ -417,7 +422,6 @@ static void test_modal_no_backdrop_close_still_gates(void) {
 
 /* One modal frame with a stepped button child. The button id is stepped INSIDE the body — mirrors the
  * showcase's action-button pattern. */
-static nt_ui_modal_close_reason_t s_frame_close_reason; /* reason from the last modal_button_frame */
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
@@ -630,8 +634,8 @@ static void test_modal_custom_zband_stride(void) {
 
     TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 1), band_of_rect(ctx, CLAY_ID("cs_a").id));
     TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 2), band_of_rect(ctx, CLAY_ID("cs_b").id));
-    TEST_ASSERT_TRUE(band_has_rect(ctx, (custom_stride * 1) - 1));
-    TEST_ASSERT_TRUE(band_has_rect(ctx, (custom_stride * 2) - 1));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 1) - 1));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 2) - 1));
 
     nt_ui_destroy_context(ctx);
 }
@@ -785,7 +789,8 @@ static void test_modal_zband_matches_popup_core(void) {
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     const int32_t modal_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
-    const bool modal_backdrop = band_has_rect(s_fx.ctx, modal_z - 1);
+    TEST_ASSERT_TRUE_MESSAGE(modal_z != INT32_MIN, "the modal body must emit a rectangle to measure");
+    const bool modal_backdrop = band_has_backdrop(s_fx.ctx, modal_z - 1);
 
     /* Popup at depth 0 -> the same panel band (one shared depth counter + stride). */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
@@ -794,6 +799,7 @@ static void test_modal_zband_matches_popup_core(void) {
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     const int32_t popup_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
+    TEST_ASSERT_TRUE_MESSAGE(popup_z != INT32_MIN, "the popup body must emit a rectangle to measure");
 
     TEST_ASSERT_EQUAL_INT32(popup_z, modal_z);
     TEST_ASSERT_TRUE_MESSAGE(modal_backdrop, "the modal backdrop paints one band under its panel");

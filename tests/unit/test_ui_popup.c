@@ -488,26 +488,33 @@ static void test_popup_top_id_follows_paint_order(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->modal_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
 }
 
-/* ---- Same band, different draw layers: the walker sorts a same-band run by layer, so the HIGHER layer
- *      is the one on screen even when it was declared first. The Esc/close-scan slot must follow it. ---- */
-static void test_popup_top_id_breaks_band_ties_by_layer(void) {
+/* ---- Two catcher-bearing popups on ONE band: whoever owns the close-scan slot must also be the one
+ *      the pointer hands the click to. The slot is picked by band with ties to the last declared, which
+ *      is the pointer arbiter's own key — ranking the slot by draw layer instead left the scan with a
+ *      popup whose catcher never won the click, and NEITHER overlay dismissed. ---- */
+static void test_popup_dismiss_survives_a_band_tie(void) {
     nt_ui_popup_style_t hi = nt_ui_popup_style_defaults();
     hi.ease_speed = 0.0F;
-    hi.layer = 2U;
+    hi.layer = 2U; /* a draw layer that does NOT move the close-scan slot */
     nt_ui_popup_style_t lo = nt_ui_popup_style_defaults();
     lo.ease_speed = 0.0F;
-    lo.layer = 0U;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    for (int frame = 0; frame < 2; ++frame) {
-        nt_pointer_t p = pointer_at(700.0F, 500.0F, false, false, false);
+
+    nt_ui_popup_result_t ra = {0};
+    nt_ui_popup_result_t rb = {0};
+    for (int frame = 0; frame < 3; ++frame) {
+        const bool pressing = (frame == 1);
+        const bool releasing = (frame == 2);
+        nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_popup_begin(s_fx.ctx, POP_A, &hi, &anc, true); /* higher layer, declared FIRST */
+        ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &hi, &anc, true);
         nt_ui_popup_end(s_fx.ctx);
-        nt_ui_popup_begin(s_fx.ctx, POP_B, &lo, &anc, true); /* same band, lower layer, declared last */
+        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &lo, &anc, true); /* same band, declared last -> owns the slot */
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->modal_top_id_prev, "a band tie must go to the higher draw layer, not the later declaration");
+    TEST_ASSERT_TRUE_MESSAGE(rb.close_requested, "the popup holding the close-scan slot must receive the outside click");
+    TEST_ASSERT_FALSE_MESSAGE(ra.close_requested, "the other popup stays an inert gate");
 }
 
 int main(void) {
@@ -517,7 +524,7 @@ int main(void) {
     RUN_TEST(test_popup_floating_smoke);
     RUN_TEST(test_popup_zband_and_nesting);
     RUN_TEST(test_popup_top_id_follows_paint_order);
-    RUN_TEST(test_popup_top_id_breaks_band_ties_by_layer);
+    RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);

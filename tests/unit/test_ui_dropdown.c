@@ -499,12 +499,15 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
-    /* The flip's visible consequence: the list sits wholly above the trigger it belongs to. */
+    /* The flip's visible consequence: the list is ADJACENT above the trigger. Bare "somewhere higher"
+     * would also accept a CENTER-placed list or a list collapsed to y=0. */
     const nt_ui_bbox_t trigger = nt_ui_get_bbox(s_fx.ctx, DD_A);
-    const nt_ui_bbox_t row0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0)));
+    const nt_ui_bbox_t last_row = nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2)));
     TEST_ASSERT_TRUE(trigger.found);
-    TEST_ASSERT_TRUE(row0.found);
-    TEST_ASSERT_TRUE_MESSAGE(row0.y + row0.height <= trigger.y + 0.5F, "a trigger near the bottom must open its list ABOVE itself");
+    TEST_ASSERT_TRUE(last_row.found);
+    TEST_ASSERT_TRUE_MESSAGE(last_row.height > 0.0F, "the list must have measured a size");
+    TEST_ASSERT_TRUE_MESSAGE(last_row.y + last_row.height <= trigger.y + 0.5F, "a trigger near the bottom must open its list ABOVE itself");
+    TEST_ASSERT_TRUE_MESSAGE(trigger.y - (last_row.y + last_row.height) <= (float)st.pad + 8.0F, "the list must sit ADJACENT above the trigger, not float off elsewhere");
 }
 
 /* The row's label x after two warm frames (1-frame IM lag bakes the bbox). The same `icons` array is fed

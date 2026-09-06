@@ -206,7 +206,8 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
         nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
         thumb_style.color_packed = cell->thumb_tint;
         /* Floating so the thumb offset overlays the track without consuming layout. clipTo the
-         * attached parent so a slider inside a scroll container can't leak its thumb past the clip. */
+         * attached parent so a slider inside a scroll container can't leak its thumb past the clip.
+         * No zIndex: delta 0 keeps the thumb in the track's own band, painted after it (NT patch 4). */
         const Clay_ElementDeclaration thumb_decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(style->thumb_w), CLAY_SIZING_FIXED(style->thumb_h)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = attach, .parent = attach}},

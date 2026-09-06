@@ -51,8 +51,9 @@ unaffected.
 
 Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. Overlay bands are
-declared as one `modal_zband_stride` each, so nested overlays reach
-`stride*depth` when every enclosing floating is an engine overlay. A
+declared as one `modal_zband_stride` each, so nested overlays accumulate
+one stride per level, themselves included, when every enclosing floating
+is an engine overlay. A
 widget's own floating parts declare delta 0 and paint above their
 container's content because they are declared last. There is no way out
 of an enclosing stacking context: a game floating that must stay under
@@ -66,7 +67,6 @@ raises a Clay error, which `nt_ui` asserts on rather than silently
 merging two bands. That caps what a game floating may declare: its own
 `zIndex` plus one stride per overlay level nested inside it must still
 fit `int16`.
-
 
 ## Clay private symbols
 
@@ -83,7 +83,7 @@ and can't be split across function boundaries. The wrappers are the
 smallest possible escape hatch.
 
 One of those wrappers reads state that exists only because of NT patch 4:
-`nt_ui_clay_priv_enclosing_floating_z` returns the top of Clay's
+`nt_ui_clay_priv_open_floating_z` returns the top of Clay's
 `openFloatingZStack`, and `nt_ui_popup` uses it to rank overlays. Re-applying
 patch 4 is therefore a precondition for overlay arbitration, not only for
 painting.

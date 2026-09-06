@@ -1498,13 +1498,15 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
     TEST_ASSERT_TRUE_MESSAGE(root.x + root.width <= VIEW_W + 0.5F, "root menu near the right edge must clamp on-screen (no right clip)");
     TEST_ASSERT_TRUE_MESSAGE(root.x >= -0.5F, "clamped root must not push off the left edge");
 
-    /* (b) Submenu flipped LEFT and stays on-screen: a LEFT flip lands it wholly left of the root panel,
-     *      which is the visible consequence the side enum stands for. */
+    /* (b) Submenu flipped LEFT: popup-core attaches a LEFT-side panel's RIGHT edge to the anchor's left
+     *      edge, and the anchor is the parent row — so the flip is an exact geometric identity, not a
+     *      "somewhere to the left" (CENTER or a vertical side would also land left of the panel). */
     const nt_ui_bbox_t sub = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U));
     TEST_ASSERT_TRUE(sub.found);
-    /* A RIGHT-side submenu starts at the parent panel's right edge, so its own right edge would land a
-     * full width past it. Staying within the parent's right edge is the LEFT flip. */
-    TEST_ASSERT_TRUE_MESSAGE(sub.x + sub.width <= root.x + root.width + 0.5F, "submenu near the right edge must flip LEFT, not hang off the panel's right side");
+    const nt_ui_bbox_t file_row = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_item_id(MENU_A, KEY_FILE));
+    TEST_ASSERT_TRUE(file_row.found);
+    TEST_ASSERT_TRUE_MESSAGE(sub.width > 0.0F, "the submenu panel must have measured a size");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf((sub.x + sub.width) - file_row.x) <= 0.5F, "a LEFT flip puts the submenu's right edge exactly on its anchor row's left edge");
     TEST_ASSERT_TRUE_MESSAGE(sub.x + sub.width <= VIEW_W + 0.5F, "left-flipped submenu must stay on-screen (right edge within the viewport)");
     TEST_ASSERT_TRUE_MESSAGE(sub.x >= -0.5F, "left-flipped submenu must not clip off the left edge");
 }
