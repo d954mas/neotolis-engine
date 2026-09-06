@@ -36,11 +36,6 @@ typedef struct {
 } nt_ui_tooltip_cell_t;
 
 #ifdef NT_TEST_ACCESS
-static uint8_t s_last_side;              /* popup side chosen this frame (edge-flip + caret-flip probe) */
-static bool s_last_caret_present;        /* did the last shown tooltip declare a caret? */
-static uint8_t s_last_caret_flip;        /* caret flip_bits the last shown tooltip used */
-static bool s_last_panel_art;            /* did the last shown panel use slice9 art? */
-static float s_last_panel_corner_radius; /* the cornerRadius the last shown panel applied (0 under art) */
 #endif
 
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
@@ -122,10 +117,6 @@ static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, uint
           .image = (Clay_ImageElementConfig){.imageData = p},
           .backgroundColor = nt_ui_unpack_tint(style->caret_tint),
           .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
-#ifdef NT_TEST_ACCESS
-    s_last_caret_present = true;
-    s_last_caret_flip = flip;
-#endif
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — complexity is the validation assert chain, not control flow
@@ -135,13 +126,6 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     NT_ASSERT(isfinite(style->delay_secs) && style->delay_secs >= 0.0F && "nt_ui_tooltip: delay_secs finite && >= 0");
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_tooltip: font_size > 0");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_tooltip: slice9_scale must be finite > 0");
-
-#ifdef NT_TEST_ACCESS
-    s_last_caret_present = false;
-    s_last_caret_flip = 0U;
-    s_last_panel_art = false;
-    s_last_panel_corner_radius = 0.0F;
-#endif
 
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel fill on data->layer, label on label_layer */
 
@@ -184,9 +168,6 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,
      * not a game bool, and there is no close_requested path to harvest. */
     const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open);
-#ifdef NT_TEST_ACCESS
-    s_last_side = r.side; /* the side popup-core chose this frame (drives the caret flip) */
-#endif
     if (r.visible) {
         const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->text_color)};
@@ -207,10 +188,6 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
             panel.backgroundColor = nt_ui_unpack_abgr(style->panel_bg);
             panel.cornerRadius = CLAY_CORNER_RADIUS((float)style->corner_radius);
         }
-#ifdef NT_TEST_ACCESS
-        s_last_panel_art = panel_art;
-        s_last_panel_corner_radius = panel.cornerRadius.topLeft; /* 0 under art (cornerRadius never set) */
-#endif
         if (style->border_px > 0U && style->border_color != 0U) {
             const uint16_t bw = style->border_px;
             panel.border = (Clay_BorderElementConfig){.color = nt_ui_unpack_abgr(style->border_color), .width = {.left = bw, .right = bw, .top = bw, .bottom = bw}};
@@ -234,9 +211,4 @@ float nt_ui_tooltip_test_hover_secs(nt_ui_context_t *ctx, uint32_t target_id) {
     const nt_ui_tooltip_cell_t *c = (const nt_ui_tooltip_cell_t *)nt_ui_state_find(ctx, tooltip_timer_id(target_id));
     return (c != NULL) ? c->hover : 0.0F;
 }
-uint8_t nt_ui_tooltip_test_last_side(void) { return s_last_side; }
-bool nt_ui_tooltip_test_last_caret_present(void) { return s_last_caret_present; }
-uint8_t nt_ui_tooltip_test_last_caret_flip(void) { return s_last_caret_flip; }
-bool nt_ui_tooltip_test_last_panel_art(void) { return s_last_panel_art; }
-float nt_ui_tooltip_test_last_panel_corner_radius(void) { return s_last_panel_corner_radius; }
 #endif

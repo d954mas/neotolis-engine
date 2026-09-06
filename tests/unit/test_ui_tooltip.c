@@ -244,6 +244,36 @@ static void reveal_at(nt_pointer_t *over, nt_ui_tooltip_style_t *st, bool at_bot
     }
 }
 
+/* The tooltip panel is the frame's only lifted-band RECTANGLE — the target and its label live in the
+ * base band, and the tooltip is the only overlay these tests declare. Returns false under panel art,
+ * where the panel emits an IMAGE and no rectangle exists to carry a cornerRadius. */
+static bool tooltip_panel_rect(Clay_BoundingBox *out_box, float *out_radius) {
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
+            *out_box = c->boundingBox;
+            *out_radius = c->renderData.rectangle.cornerRadius.topLeft;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The caret is the only square image of caret_size in these frames; its flip bits ride the payload. */
+static bool tooltip_caret(float caret_size, Clay_BoundingBox *out_box, uint8_t *out_flip) {
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || !float_near(c->boundingBox.width, caret_size, 0.5F) || !float_near(c->boundingBox.height, caret_size, 0.5F)) {
+            continue;
+        }
+        const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+        *out_box = c->boundingBox;
+        *out_flip = (p != NULL) ? p->flip_bits : 0U;
+        return true;
+    }
+    return false;
+}
+
 /* ---- Caret flips with the popup side: a top-placed target -> popup BELOW -> caret on the panel TOP edge
  *      pointing UP (no flip); a bottom-pinned target -> edge-flip ABOVE -> caret on the panel BOTTOM edge
  *      pointing DOWN (FLIP_Y). The side that drives the flip is read from the popup result probe. ---- */
@@ -252,18 +282,30 @@ static void test_tooltip_caret_flips_with_side(void) {
     nt_ui_tooltip_style_t below = caret_style();
     nt_pointer_t over_top = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
     reveal_at(&over_top, &below, false);
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_BELOW, nt_ui_tooltip_test_last_side());
-    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_caret_present());
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_tooltip_test_last_caret_flip()); /* up: art's native direction */
+    Clay_BoundingBox panel = {0};
+    Clay_BoundingBox caret = {0};
+    uint8_t flip = 0U;
+    float radius = 0.0F;
+    const nt_ui_bbox_t target_top = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
+    TEST_ASSERT_TRUE(target_top.found);
+    TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
+    TEST_ASSERT_TRUE_MESSAGE(panel.y >= target_top.y + target_top.height - 0.5F, "room beneath: the panel must sit BELOW the target");
+    TEST_ASSERT_TRUE_MESSAGE(tooltip_caret((float)below.caret_size, &caret, &flip), "a resolvable caret ref must emit the caret");
+    TEST_ASSERT_TRUE_MESSAGE(caret.y + caret.height <= panel.y + 0.5F, "a BELOW panel wears its caret on the TOP edge");
+    TEST_ASSERT_EQUAL_UINT8(0U, flip); /* up: art's native direction */
 
     /* ABOVE: target pinned to the bottom border -> edge-flip ABOVE -> caret points down (FLIP_Y). The
      * pointer must land on the bottom-pinned target rect (its top is near the bottom of the viewport). */
     nt_ui_tooltip_style_t above = caret_style();
     nt_pointer_t over_bottom = pointer_at(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F));
     reveal_at(&over_bottom, &above, true);
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_ABOVE, nt_ui_tooltip_test_last_side());
-    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_caret_present());
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_SPRITE_FLAG_FLIP_Y, nt_ui_tooltip_test_last_caret_flip());
+    const nt_ui_bbox_t target_bottom = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
+    TEST_ASSERT_TRUE(target_bottom.found);
+    TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
+    TEST_ASSERT_TRUE_MESSAGE(panel.y + panel.height <= target_bottom.y + 0.5F, "pinned to the bottom border: the panel must flip ABOVE the target");
+    TEST_ASSERT_TRUE(tooltip_caret((float)above.caret_size, &caret, &flip));
+    TEST_ASSERT_TRUE_MESSAGE(caret.y >= panel.y + panel.height - 0.5F, "an ABOVE panel wears its caret on the BOTTOM edge");
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_SPRITE_FLAG_FLIP_Y, flip);
 }
 
 /* ---- Panel art path drops cornerRadius (IMAGE bg can't round, same rule as dropdown/menu/tabbar): with
@@ -276,16 +318,17 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     art.corner_radius = 8U; /* set but MUST be ignored under art */
     nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
     reveal_at(&over, &art, false);
-    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_panel_art());
-    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_last_panel_corner_radius(), 0.0F, 0.0001F));
+    Clay_BoundingBox panel = {0};
+    float radius = 0.0F;
+    TEST_ASSERT_FALSE_MESSAGE(tooltip_panel_rect(&panel, &radius), "an art panel emits an IMAGE, so there is no rectangle to round");
 
     /* Flat fallback (no art): the rounded rect is kept. */
     nt_ui_tooltip_style_t flat = test_style();
     flat.corner_radius = 8U;
     nt_pointer_t over2 = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
     reveal_at(&over2, &flat, false);
-    TEST_ASSERT_FALSE(nt_ui_tooltip_test_last_panel_art());
-    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_last_panel_corner_radius(), 8.0F, 0.0001F));
+    TEST_ASSERT_TRUE_MESSAGE(tooltip_panel_rect(&panel, &radius), "the flat panel must emit its rounded rectangle");
+    TEST_ASSERT_TRUE(float_near(radius, 8.0F, 0.0001F));
 }
 
 /* ---- The timer cell uses a SALTED id distinct from the target id (no aliasing of the target's own
