@@ -460,6 +460,35 @@ static void test_popup_top_id_follows_paint_order(void) {
     TEST_ASSERT_TRUE_MESSAGE(z_a > z_b, "the popup inside the lifted game floating must land in a higher band");
     TEST_ASSERT_TRUE_MESSAGE(at_a > at_b, "and must therefore paint after the root-level popup");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->modal_top_id_prev, "the painted-on-top popup must own Esc and the close-scan");
+
+    /* And the consequence, not just the gate: an outside click must dismiss the painted-on-top popup and
+     * leave the one under it alone (a non-top catcher is an inert pointer gate). */
+    nt_ui_popup_result_t ra = {0};
+    nt_ui_popup_result_t rb = {0};
+    for (int frame = 0; frame < 2; ++frame) {
+        const bool pressing = (frame == 0);
+        nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &click, 1);
+        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
+            ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(ra.close_requested, "the outside click must dismiss the popup painted on top");
+    TEST_ASSERT_FALSE_MESSAGE(rb.close_requested, "the popup underneath must stay an inert gate");
+
+    /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_pointer_t idle = pointer_at(700.0F, 500.0F, false, false, false);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &idle, 1);
+        nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->modal_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
 }
 
 int main(void) {

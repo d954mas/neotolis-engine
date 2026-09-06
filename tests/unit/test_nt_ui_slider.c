@@ -877,13 +877,13 @@ static void test_thumb_above_modal_band_first_frame(void) {
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == CLAY_ID("modal_panel").id) {
             panel_at = i;
         }
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, SL_W, 0.5F)) {
-            track = c;
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && c->id == nt_ui_id("modal_sl")) {
+            track = c; /* by id: at value 1 the fill image is SL_W wide too */
         }
     }
     TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
-    /* Command index is paint order here because both carry layer 0 — the walker only reorders within a
-     * same-zIndex run, and then by layer. */
+    /* Command index is paint order here because the two commands sit in different zIndex runs (the panel
+     * rect carries the modal band, the thumb image carries 0), and the walker never reorders across runs. */
     TEST_ASSERT_TRUE_MESSAGE(thumb_at > panel_at, "thumb must paint AFTER the modal panel, not under it");
 
     /* Frame-1 placement is measured against the track in the SAME frame, so a stale parent bbox shows up

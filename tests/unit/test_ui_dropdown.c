@@ -335,10 +335,10 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
 }
 
-/* ---- The combo list is a popup-nested scroll, so its bar must float at a Clay zIndex ABOVE the popup
- *      panel band (stride*depth). ---- */
+/* ---- The combo list is a popup-nested scroll: its bar INHERITS the popup panel's band (it no longer
+ *      lifts itself one band above) and paints after the panel because its root is declared later. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
+static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
     /* Real fixture art, not the placeholder refs the other cases use: an unresolvable ref draws nothing,
@@ -360,11 +360,17 @@ static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1);
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     int32_t bar_at = -1;
+    int32_t bar_band = INT32_MIN;
+    int32_t last_scissor_z = INT32_MIN;
     int32_t last_panel_at = -1;
     for (int32_t i = 0; i < arr->length; ++i) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            last_scissor_z = c->zIndex; /* the bar root's clipTo marker carries its band */
+        }
         if (c->id == bar_id && bar_at < 0) {
             bar_at = i;
+            bar_band = last_scissor_z;
         }
         /* Panel-band CONTENT only: RECTANGLE/TEXT carry their floating root's effective band, while the
          * bar's own clipTo SCISSOR markers also carry it (they clip to the panel-side parent). */
@@ -376,6 +382,7 @@ static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
     TEST_ASSERT_TRUE_MESSAGE(bar_at >= 0, "popup-nested bar must reach the render commands");
     TEST_ASSERT_TRUE_MESSAGE(last_panel_at >= 0, "the popup panel band must be present in the frame");
     TEST_ASSERT_TRUE_MESSAGE(bar_at > last_panel_at, "popup-nested bar must paint AFTER the popup panel, not sink under it");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, bar_band, "popup-nested bar must sit IN the panel band, neither sunk to 0 nor lifted above it");
 }
 
 /* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with NO
@@ -761,7 +768,7 @@ int main(void) {
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_long_list_shows_scrollbar);
     RUN_TEST(test_dropdown_long_list_scrollbar_showcase_fidelity);
-    RUN_TEST(test_dropdown_long_list_scrollbar_above_popup_band);
+    RUN_TEST(test_dropdown_long_list_scrollbar_inherits_popup_band);
     RUN_TEST(test_dropdown_eased_open_no_flicker);
     RUN_TEST(test_dropdown_eased_open_no_reseed_under_churn);
     RUN_TEST(test_dropdown_eased_reclick_closes_once);

@@ -36,7 +36,8 @@ which is not the supported environment for `scripts/*.sh`.
 git lfs pull                          # example assets are LFS pointers without this
 bash scripts/setup.sh                 # install + activate the pinned emsdk (.emsdk-version)
                                       # later sessions: source emsdk/emsdk_env.sh
-cmake --preset native-debug           # the three presets check.sh expects:
+cmake --preset native-debug           # the four presets check.sh expects:
+cmake --preset native-release
 emcmake cmake --preset wasm-debug
 emcmake cmake --preset wasm-release
 bash scripts/check.sh                 # sanity check that the environment is alive

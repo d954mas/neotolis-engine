@@ -248,11 +248,19 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * top-id dismiss slot from a coexisting dropdown. */
     if (want_catcher) {
         ctx->modal_present_cur = true;
-        /* Topmost = highest effective band, ties to the last declared — Clay's own root-sort key, so the
-         * popup that eats Esc is the one painted on top even when a game floating shifts the band. */
-        const int32_t panel_z_eff = nt_ui_clay_priv_enclosing_floating_z(ctx->clay) + (int32_t)panel_z;
-        if (panel_z_eff >= ctx->modal_top_z_cur) {
+        /* Topmost = the walker's own paint key (nt_ui_walk: zIndex asc, then layer asc, then
+         * declaration), so the popup that eats Esc is the one painted on top even when a game floating
+         * shifts the band. Clamped exactly like Clay clamps the stored band, or the key would drift from
+         * the shipped one in OFF builds, where the saturation error no longer aborts. */
+        int32_t panel_z_eff = nt_ui_clay_priv_enclosing_floating_z(ctx->clay) + (int32_t)panel_z;
+        panel_z_eff = (panel_z_eff < INT16_MIN) ? INT16_MIN : panel_z_eff;
+        panel_z_eff = (panel_z_eff > INT16_MAX) ? INT16_MAX : panel_z_eff;
+        /* A modal gates base UI with a catcher one band below its panel; at or under the base band it
+         * loses that arbitration and silently stops gating while nt_ui_modal_active() still reports it. */
+        NT_ASSERT((!force_catcher || panel_z_eff > 1) && "nt_ui_popup: a modal needs a band above base content to gate it");
+        if ((panel_z_eff > ctx->modal_top_z_cur) || (panel_z_eff == ctx->modal_top_z_cur && style->layer >= ctx->modal_top_layer_cur)) {
             ctx->modal_top_z_cur = panel_z_eff;
+            ctx->modal_top_layer_cur = style->layer;
             ctx->modal_top_id_cur = id;
         }
     }

@@ -230,9 +230,10 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
-    /* Highest effective floating band claimed this frame — the same key Clay sorts roots by, so the
-     * overlay that eats Esc is the one actually painted on top. INT32_MIN until the first claim. */
+    /* Highest (band, layer) claimed this frame — the walker's own paint key, so the overlay that eats
+     * Esc is the one actually painted on top. Band is INT32_MIN until the first claim. */
     int32_t modal_top_z_cur;
+    uint8_t modal_top_layer_cur;
     /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
      * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
      * field declared this frame. Survives across frames (not reset by begin). */

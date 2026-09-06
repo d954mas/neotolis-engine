@@ -42,7 +42,7 @@ int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay) {
 int32_t nt_ui_clay_priv_enclosing_floating_z(Clay_Context *clay) {
     NT_ASSERT(clay != NULL && "nt_ui_clay_priv_enclosing_floating_z: clay must be non-NULL");
     const int32_t len = clay->openFloatingZStack.length;
-    return (len > 0) ? clay->openFloatingZStack.internalArray[len - 1] : 0;
+    return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
 }
 
 float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
@@ -679,6 +679,9 @@ static const Clay_Color CDV_COLOR_3 = {141, 133, 135, 255};
 static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
 static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
 static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100};
+/* Absolute band of the inspector root — two below int16's ceiling, above every game band. Floating
+ * zIndex is relative (NT patch 4), so anything declared inside it must use a NEGATIVE delta. */
+#define NT_UI_INSPECTOR_ROOT_Z 32765
 
 /* Filtered out of the viewport-hover scan to prevent self-feedback on the highlight rect. */
 enum { CDV_OWNED_ID_COUNT = 7 };
@@ -1594,8 +1597,10 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     if (highlightedElementId) {
-        /* Declared inside ntInsp_Root, so zIndex is relative to it: -1 keeps the highlight above game UI
-         * (the panel band is far above it) but strictly under the panel body it would otherwise cover. */
+        /* Declared inside ntInsp_Root, so zIndex is relative to it: -1 lands on the inspector band minus
+         * one — above every game band, strictly under the panel body it would otherwise cover. Nothing
+         * inside ntInsp_Root may declare a POSITIVE delta: the band is one below int16's ceiling. */
+        NT_ASSERT(nt_ui_clay_priv_enclosing_floating_z(ctx->clay) == NT_UI_INSPECTOR_ROOT_Z && "inspector highlight must be declared inside ntInsp_Root");
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
@@ -1671,7 +1676,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG),
-          .floating = {.zIndex = 32765,
+          .floating = {.zIndex = NT_UI_INSPECTOR_ROOT_Z,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},

@@ -417,17 +417,20 @@ static void test_scrollbar_standalone_no_z_lift(void) {
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
     int32_t last_scissor_z = INT32_MIN;
     int32_t bar_band = INT32_MIN;
+    bool bar_found = false;
     for (int32_t i = 0; i < arr->length; ++i) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
             last_scissor_z = c->zIndex;
         }
         if (c->id == bar_id) {
+            bar_found = true;
             bar_band = last_scissor_z;
             break;
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(bar_band != INT32_MIN, "standalone scrollbar must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(bar_found, "standalone scrollbar must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(bar_band != INT32_MIN, "the bar's clipTo SCISSOR must precede its art");
     TEST_ASSERT_EQUAL_INT32_MESSAGE(0, bar_band, "standalone scroll bar must stay in z band 0");
 }
 

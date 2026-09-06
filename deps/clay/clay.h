@@ -2137,14 +2137,15 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
                 clipElementId = 0;
             }
             // NT patch 4: zIndex is relative to the enclosing floating element. Saturating the int16 field
-            // would silently merge two bands into one, so it is an error, not a fallback.
+            // merges two stacking bands, so it is reported (nt_ui asserts on it); an NT_ASSERT_OFF build
+            // returns from the handler and paints the merged band.
             int32_t enclosingZ = context->openFloatingZStack.length > 0 ? Clay__int32_tArray_GetValue(&context->openFloatingZStack, context->openFloatingZStack.length - 1) : 0;
             int32_t rawZ = enclosingZ + (int32_t)floatingConfig.zIndex;
             int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, rawZ));
             if (effectiveZ != rawZ) {
                 context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
                         .errorType = CLAY_ERROR_TYPE_INTERNAL_ERROR,
-                        .errorText = CLAY_STRING("Nested floating zIndex saturated int16 — stacking bands merged."),
+                        .errorText = CLAY_STRING("A floating zIndex plus its enclosing band saturated int16 — declare a smaller zIndex."),
                         .userData = context->errorHandler.userData });
             }
             floatingConfig.zIndex = (int16_t)effectiveZ;

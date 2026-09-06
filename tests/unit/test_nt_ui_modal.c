@@ -539,7 +539,8 @@ static void test_modal_active_prev_frame(void) {
 }
 
 /* ---- Sequential SAME-DEPTH modals in one frame: a FULLY-CLOSED first must not steal top from an
- *      OPEN second at the same level. The latest PRESENT modal at the max depth wins top, so next
+ *      OPEN second at the same level. Top goes to the highest effective band, ties to the last PRESENT
+ *      declaration, so next
  *      frame the second (open) modal's Esc fires and the first (closed) stays silent. ---- */
 static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();

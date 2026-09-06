@@ -133,7 +133,9 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const nt_ui_modal_close_reason_t reason = modal_reason_from_src(src);
 
 #ifdef NT_TEST_ACCESS
-    s_last_panel_zband = (uint16_t)(ctx->modal_zband_stride * ctx->active_modal_depth); /* depth already pushed */
+    /* Effective band ASSUMING every enclosing floating is an engine overlay (see nt_ui_popup.c); depth
+     * is already pushed here. */
+    s_last_panel_zband = (uint16_t)(ctx->modal_zband_stride * ctx->active_modal_depth);
     s_last_backdrop_zband = (uint16_t)(s_last_panel_zband - 1U);
     s_last_close_reason = reason;
     /* Panel offset = start offset eased by (1-t); matches popup-core's panel transform exactly. */

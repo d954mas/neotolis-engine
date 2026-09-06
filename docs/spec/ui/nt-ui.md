@@ -47,8 +47,10 @@ PREVIOUS-frame bbox — a frame of lag, and an empty clip rect on the
 first frame, which the walker's SCISSOR assert catches. A delta of 0
 now ties with the parent and, since the root sort is stable, paints
 after it with a same-frame bbox; a NEGATIVE delta still sorts ahead of
-its parent and still reads the parent's previous-frame bbox (the
-tooltip drop-shadow is the one such case and guards for it).
+its parent and still reads the parent's previous-frame bbox (two such
+cases: the tooltip drop-shadow, which guards for it, and the inspector
+highlight, which attaches to a base-band element and so reads a
+same-frame bbox).
 
 Consequences: a widget composes anywhere without knowing its global
 stacking position; the engine's overlay bands (`modal_zband_stride`) are
@@ -60,9 +62,16 @@ parts (scrollbar, thumb, caret) declare delta 0 and rely on being
 declared last to paint above their container's content; a game floating
 that wants to escape its enclosing panel must be declared outside it;
 the value Clay stores and reports for a floating is the accumulated
-band, not the declared delta; and an accumulated band that would
-saturate `int16` raises a Clay error (which `nt_ui` asserts on) rather
-than silently merging two bands.
+band, not the declared delta — but among RENDER COMMANDS only
+RECTANGLE, TEXT and the clip SCISSOR carry it, since Clay leaves
+`zIndex` at 0 on IMAGE, BORDER and CUSTOM; and an accumulated band that
+would saturate `int16` raises a Clay error (which `nt_ui` asserts on)
+rather than silently merging two bands, which puts a ceiling on what a
+game floating may declare: its own `zIndex` plus `modal_zband_stride`
+per overlay level nested inside it must still fit `int16`. That ceiling
+has no test — the engine's own bands cannot reach it (overlays are
+bounded by `modal_zband_stride * NT_UI_MODAL_MAX_DEPTH`, and the
+inspector root nests nothing with a positive delta).
 
 ## Clay private symbols
 
@@ -77,6 +86,12 @@ calls so widget code can run between them — Clay's public macro
 bundles `Open` + `Configure` + scoped body into a single statement
 and can't be split across function boundaries. The wrappers are the
 smallest possible escape hatch.
+
+One of those wrappers reads state that exists only because of NT patch 4:
+`nt_ui_clay_priv_enclosing_floating_z` returns the top of Clay's
+`openFloatingZStack`, and `nt_ui_popup` uses it to rank overlays. Re-applying
+patch 4 is therefore a precondition for overlay arbitration, not only for
+painting.
 
 With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
 symbols for the verbatim Clay debug-view port (the inspector body
@@ -365,10 +380,12 @@ modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
 floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
-outside-click scan run on ONE overlay per frame: the one with the highest
-effective band, ties to the last declared — Clay's own root-sort key, so the
-overlay that consumes the event is always the one painted on top, even when a
-game floating shifts the band of a popup declared inside it. A fully-closed
+outside-click scan run on ONE CATCHER-BEARING popup per frame: the one with the
+highest effective band, ties to the last declared at the higher draw layer —
+the walker's own paint key, so the popup that consumes the event is the one
+painted on top even when a game floating shifts the band of a popup declared
+inside it. A catcher-less overlay (menu, tooltip) never claims that slot and
+runs its own dismiss; the text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The
