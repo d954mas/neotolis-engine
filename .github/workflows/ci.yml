@@ -263,6 +263,19 @@ jobs:
       - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
         run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
 
+      # Effective cache values, not preset text: release dirs (what the size chart and
+      # deploy measure) must carry no dev tooling; debug dirs must carry all of it.
+      - name: Verify preset cache policy (wasm)
+        run: |
+          off="NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=OFF NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF"
+          on="NT_UI_DEBUG_TOOLS=ON NT_LOG_RING_ENABLED=ON NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=ON NT_INTROSPECT_WRITE_ENABLED=ON"
+          for p in wasm-release wasm-release-paired wasm-release-simd wasm-analysis-paired wasm-analysis-simd; do
+            bash scripts/check_preset_cache.sh "build/_cmake/$p" $off
+          done
+          for p in wasm-debug wasm-debug-paired wasm-debug-simd; do
+            bash scripts/check_preset_cache.sh "build/_cmake/$p" $on
+          done
+
       - name: Measure sizes (all examples)
         run: |
           source scripts/wasm_examples.sh
@@ -420,9 +433,8 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
-      # NT_UI_DEBUG_TOOLS=OFF coverage: inspector + debug overlay TUs excluded,
-      # core tests (60/62) still pass. Verifies the production-default path
-      # compiles + links + tests cleanly.
+      # NT_UI_DEBUG_TOOLS=OFF under Debug + FULL asserts + sanitizers: the release
+      # presets build the stub bodies too, but only this mirror runs ctest over them.
       - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
         run: cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -G Ninja
 
@@ -431,6 +443,17 @@ jobs:
 
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
+
+      # native-release-test deliberately re-enables the tools (coverage preset, not a
+      # shipping mirror) — asserted ON so a silent drop of that override is caught.
+      - name: Verify preset cache policy (native)
+        run: |
+          off="NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=OFF NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF"
+          on="NT_UI_DEBUG_TOOLS=ON NT_LOG_RING_ENABLED=ON NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=ON NT_INTROSPECT_WRITE_ENABLED=ON"
+          bash scripts/check_preset_cache.sh build/_cmake/native-release $off
+          for p in native-release-test native-debug native-debug-test; do
+            bash scripts/check_preset_cache.sh "build/_cmake/$p" $on
+          done
 
       - name: Submodule consumption test
         run: |
@@ -760,13 +783,22 @@ jobs:
             done
           done
 
+      # Metrics ON is the one deliberate deviation from the release preset: the deployed
+      # bunnymark / ui_showcase HUDs read nt_metrics, and the stubs would show zeros.
+      # UI debug tools stay OFF, so the size chart (wasm job) differs only by nt_metrics.
       - name: Build paired WASM release for deploy
         run: |
-          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
-          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
+          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
           cmake --build --preset wasm-release-paired
           cmake --build --preset wasm-release-simd
           ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
+
+      - name: Verify preset cache policy (deploy)
+        run: |
+          for p in wasm-release-paired wasm-release-simd; do
+            bash scripts/check_preset_cache.sh "build/_cmake/$p" NT_UI_DEBUG_TOOLS=OFF NT_LOG_RING_ENABLED=OFF NT_METRICS_ENABLED=ON NT_INTROSPECT_ENABLED=OFF NT_INTROSPECT_WRITE_ENABLED=OFF NT_DEVAPI_ENABLED=OFF
+          done
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4

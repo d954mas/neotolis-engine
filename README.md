@@ -36,6 +36,8 @@ source emsdk/emsdk_env.sh
 
 Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release` (the full list, including the `*-test` variants, is `CMakePresets.json`).
 
+One rule: `*-debug` presets build the dev tooling (`NT_UI_DEBUG_TOOLS=ON` and the log ring / metrics / introspection options it defaults on), `*-release` presets build exactly what ships (all of them OFF). Anything else is an explicit `-D`, e.g. `-DNT_METRICS_ENABLED=ON` on a release preset to profile with the overlay. Option defaults apply to a fresh cache only: after a preset policy change, delete the build dir and reconfigure. These presets exist for developing the engine; a game writes its own presets (or inherits the policy-free hidden `base-wasm` / `base-native`) and sets the engine options explicitly.
+
 ### WASM (requires emsdk activated)
 
 There are three explicit WASM modes for each build tier:

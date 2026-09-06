@@ -7,25 +7,50 @@
     },
     "configurePresets": [
         {
-            "name": "wasm-debug",
-            "displayName": "WASM Debug",
+            "name": "base",
+            "hidden": true,
+            "description": "Neutral toolchain-independent settings only. No build type, no dev tooling: those belong to the concrete *-debug / *-release presets.",
             "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_C_STANDARD": "17",
+                "CMAKE_C_STANDARD_REQUIRED": "ON"
+            }
+        },
+        {
+            "name": "base-wasm",
+            "hidden": true,
+            "description": "Emscripten toolchain on top of base. Games may inherit this for a policy-free starting point.",
+            "inherits": "base",
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+        },
+        {
+            "name": "base-native",
+            "hidden": true,
+            "description": "clang + compile_commands.json on top of base. Games may inherit this for a policy-free starting point.",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "wasm-debug",
+            "displayName": "WASM Debug (dev tools ON)",
+            "inherits": "base-wasm",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
-            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_C_STANDARD": "17",
-                "CMAKE_C_STANDARD_REQUIRED": "ON",
                 "NT_UI_DEBUG_TOOLS": "ON"
             }
         },
         {
             "name": "wasm-release",
-            "displayName": "WASM Release",
-            "inherits": "wasm-debug",
+            "displayName": "WASM Release (dev tools OFF)",
+            "inherits": "base-wasm",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "NT_UI_DEBUG_TOOLS": "OFF"
             }
         },
         {
@@ -66,25 +91,22 @@
         },
         {
             "name": "native-debug",
-            "displayName": "Native Debug",
-            "generator": "Ninja",
+            "displayName": "Native Debug (dev tools ON)",
+            "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_C_STANDARD": "17",
-                "CMAKE_C_STANDARD_REQUIRED": "ON",
-                "CMAKE_C_COMPILER": "clang",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "NT_UI_DEBUG_TOOLS": "ON"
             }
         },
         {
             "name": "native-release",
-            "displayName": "Native Release",
-            "inherits": "native-debug",
+            "displayName": "Native Release (dev tools OFF)",
+            "inherits": "base-native",
             "binaryDir": "${sourceDir}/build/_cmake/native-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "NT_UI_DEBUG_TOOLS": "OFF"
             }
         },
         {
@@ -98,11 +120,13 @@
         },
         {
             "name": "native-release-test",
-            "displayName": "Native Release Test (FULL asserts)",
+            "displayName": "Native Release Test (FULL asserts, dev tools ON)",
+            "description": "Coverage preset, not a shipping mirror: dev tools are re-enabled so their tests run under release optimizations.",
             "inherits": "native-release",
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
-                "NT_ASSERT_MODE": "2"
+                "NT_ASSERT_MODE": "2",
+                "NT_UI_DEBUG_TOOLS": "ON"
             }
         },
         {
