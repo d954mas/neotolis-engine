@@ -28,6 +28,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 #include "utf8/nt_utf8.h"
@@ -1428,6 +1429,38 @@ static void test_assert_null_style(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
+/* ---- A field declared inside a modal paints its text ABOVE the panel. Caret, selection and the text
+ *      wrapper are floating children; while floating zIndex was global they sorted into band 0 and the
+ *      whole line drew under the modal backdrop. ---- */
+static void test_field_text_above_modal_band(void) {
+    char buf[32] = "abc";
+    nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
+    mst.ease_speed = 0.0F;
+
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    (void)nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, true);
+    CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("modal_field"), buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
+    }
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+
+    int32_t text_at = -1;
+    int32_t panel_at = -1;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT && text_at < 0) {
+            text_at = i;
+        }
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == CLAY_ID("modal_panel").id) {
+            panel_at = i; /* by id: the field's caret is a floating RECTANGLE in the same band */
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(text_at >= 0, "the field must emit its text");
+    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
+    TEST_ASSERT_TRUE_MESSAGE(text_at > panel_at, "field text must paint AFTER the modal panel, not under it");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_insert_cyrillic_codepoints);
@@ -1481,6 +1514,7 @@ int main(void) {
     RUN_TEST(test_edit_step_insert_caret_on_codepoint_boundary);
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
+    RUN_TEST(test_field_text_above_modal_band);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

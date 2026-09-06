@@ -75,10 +75,6 @@ static inline void combo_dup_key_check(nt_ui_context_t *ctx, uint32_t row_id) {
 #endif
 }
 
-#ifdef NT_TEST_ACCESS
-static uint8_t s_last_side; /* edge-flip probe (NT_TEST_ACCESS) */
-#endif
-
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void) {
     /* Flat-color baseline: no atlas art (every bg.atlas.id stays 0), eased states, polished out of box.
      * The trigger reads as a button; rows highlight on hover; the selected row carries a distinct fill. */
@@ -395,10 +391,6 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     if (!nt_ui_popup_visible(ctx, dropdown_popup_id(id), &pst, &anc, open)) {
         return false; /* popup self-balances when fully closed (no end needed) */
     }
-#ifdef NT_TEST_ACCESS
-    s_last_side = nt_ui_popup_test_last_side();
-#endif
-
     const bool scrolls = (style->max_visible_rows > 0U);
     combo_open_body(ctx, fill_layer, id, style, scrolls, panel_art);
 
@@ -562,7 +554,6 @@ void nt_ui_combo_end(nt_ui_context_t *ctx) {
 }
 
 #ifdef NT_TEST_ACCESS
-uint8_t nt_ui_dropdown_test_last_side(void) { return s_last_side; }
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id) { return dropdown_scroll_id(dropdown_id); }
 /* Combo rows key the label cell by (combo_id, row_idx); row_idx == idx for the in-order selectable feed. */
 nt_ui_bbox_t nt_ui_dropdown_test_row_label_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id, int idx) { return nt_ui_get_bbox(ctx, combo_row_label_id(dropdown_id, (uint32_t)idx)); }

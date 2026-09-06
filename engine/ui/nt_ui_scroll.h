@@ -90,6 +90,9 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
  * padding only. Scroll state rides the nt_ui_state pool keyed by id. Must be balanced
  * with nt_ui_scroll_end. */
 void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_scroll_style_t *style, const Clay_ElementDeclaration *decl);
+/* Emits the scrollbars (both axes) as floating children at the container's own band (delta 0), declared
+ * last so they paint over the container's content — a floating declared after them in the same band
+ * paints over the bar. */
 void nt_ui_scroll_end(nt_ui_context_t *ctx);
 
 /* Set the target offset (Clay sign: negative = down/right) and ease there.
@@ -113,9 +116,6 @@ uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
 /* The draw layer the last-emitted bar used (per axis); must match the container's content layer so the
  * bar isn't buried under higher-layer content. */
 uint8_t nt_ui_scroll_test_last_bar_layer(int axis);
-/* The Clay floating zIndex the last-emitted bar used (per axis). Inside a popup/modal it must sit ABOVE
- * the popup panel band (stride*depth) so the bar isn't occluded by the panel; 0 for standalone scroll. */
-int16_t nt_ui_scroll_test_last_bar_zindex(int axis);
 /* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container
  * test detect a wheel reaching more than one container in a single frame (the broadcast bug). */
 uint32_t nt_ui_scroll_test_wheel_recipients(void);

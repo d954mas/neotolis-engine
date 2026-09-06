@@ -67,14 +67,6 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 uint32_t nt_ui_tooltip_test_timer_id(uint32_t target_id);
 /* The accumulated hover seconds in the timer cell for target_id (0 if no cell). */
 float nt_ui_tooltip_test_hover_secs(nt_ui_context_t *ctx, uint32_t target_id);
-/* The popup side chosen on the last nt_ui_tooltip call (nt_ui_popup_side_t; edge-flip + caret-flip probe). */
-uint8_t nt_ui_tooltip_test_last_side(void);
-/* Whether the last shown tooltip declared a caret (ref + caret_size both present) and its flip_bits. */
-bool nt_ui_tooltip_test_last_caret_present(void);
-uint8_t nt_ui_tooltip_test_last_caret_flip(void);
-/* Whether the last shown panel used slice9 art, and the cornerRadius it applied (0 under art). */
-bool nt_ui_tooltip_test_last_panel_art(void);
-float nt_ui_tooltip_test_last_panel_corner_radius(void);
 #endif
 
 #endif /* NT_UI_TOOLTIP_H */

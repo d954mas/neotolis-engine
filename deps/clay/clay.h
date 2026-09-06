@@ -13,6 +13,14 @@
 //      unconditionally. Without it an offscreen clip (a field scrolled past the
 //      fold) leaves an unmatched END -> renderer scissor-stack underflow. One site
 //      in the CLIP render-command case ("shouldRender = true").
+//   4. Floating zIndex is RELATIVE to the enclosing floating element (CSS stacking
+//      context) instead of global: a floating declared inside another gets
+//      parent_z + own_z. openFloatingZStack + 5 sites (context field, ephemeral
+//      alloc, push + saturation report in ConfigureOpenElementPtr, pop in
+//      CloseElement, the zIndex field's doc comment), search "NT patch 4".
+//      DEPENDS ON the tree-root sort staying STABLE (swaps on strict `<`): a
+//      delta-0 child paints above its floating parent only because equal-z roots
+//      keep registration order — re-run tests/unit/test_nt_ui_slider.c on a bump.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -498,6 +506,7 @@ typedef struct Clay_FloatingElementConfig {
     uint32_t parentId;
     // Controls the z index of this floating element and all its children. Floating elements are sorted in ascending z order before output.
     // zIndex is also passed to the renderer for all elements contained within this floating element.
+    // NT patch 4: RELATIVE to the enclosing floating element — the stored value is parent_z + own_z.
     int16_t zIndex;
     // Controls how mouse pointer events like hover and click are captured or passed through to elements underneath / behind a floating element.
     // Enum is of the form CLAY_ATTACH_POINT_foo_bar. See Clay_FloatingAttachPoints for more details.
@@ -1298,6 +1307,7 @@ struct Clay_Context {
     Clay__MeasuredWordArray measuredWords;
     Clay__int32_tArray measuredWordsFreeList;
     Clay__int32_tArray openClipElementStack;
+    Clay__int32_tArray openFloatingZStack; // NT patch 4: effective zIndex of each open floating ancestor
     Clay_ElementIdArray pointerOverIds;
     Clay__ScrollContainerDataInternalArray scrollContainerDatas;
     Clay__boolArray treeNodeVisited;
@@ -1908,6 +1918,11 @@ void Clay__CloseElement(void) {
     Clay__UpdateAspectRatioBox(openLayoutElement);
 
     bool elementIsFloating = Clay__ElementHasConfig(openLayoutElement, CLAY__ELEMENT_CONFIG_TYPE_FLOATING);
+    // NT patch 4: pop here, not in the config loop above — that loop breaks on CLIP, so a config-order
+    // change upstream could silently skip the pop and leave every later floating on a stale band.
+    if (elementIsFloating) {
+        context->openFloatingZStack.length--;
+    }
 
     // Close the currently open element
     int32_t closingElementIndex = Clay__int32_tArray_RemoveSwapback(&context->openLayoutElementStack, (int)context->openLayoutElementStack.length - 1);
@@ -2120,6 +2135,20 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
             if (declaration->floating.clipTo == CLAY_CLIP_TO_NONE) {
                 clipElementId = 0;
             }
+            // NT patch 4: zIndex is relative to the enclosing floating element. Saturating the int16 field
+            // merges two stacking bands, so it is reported (nt_ui asserts on it); an NT_ASSERT_OFF build
+            // returns from the handler and paints the merged band.
+            int32_t enclosingZ = context->openFloatingZStack.length > 0 ? Clay__int32_tArray_GetValue(&context->openFloatingZStack, context->openFloatingZStack.length - 1) : 0;
+            int32_t rawZ = enclosingZ + (int32_t)floatingConfig.zIndex;
+            int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, rawZ));
+            if (effectiveZ != rawZ) {
+                context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+                        .errorType = CLAY_ERROR_TYPE_INTERNAL_ERROR,
+                        .errorText = CLAY_STRING("A floating zIndex plus its enclosing band saturated int16 — declare a smaller zIndex."),
+                        .userData = context->errorHandler.userData });
+            }
+            floatingConfig.zIndex = (int16_t)effectiveZ;
+            Clay__int32_tArray_Add(&context->openFloatingZStack, effectiveZ);
             int32_t currentElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);
             Clay__int32_tArray_Set(&context->layoutElementClipElementIds, currentElementIndex, clipElementId);
             Clay__int32_tArray_Add(&context->openClipElementStack, clipElementId);
@@ -2204,6 +2233,7 @@ void Clay__InitializeEphemeralMemory(Clay_Context* context) {
     context->treeNodeVisited = Clay__boolArray_Allocate_Arena(maxElementCount, arena);
     context->treeNodeVisited.length = context->treeNodeVisited.capacity; // This array is accessed directly rather than behaving as a list
     context->openClipElementStack = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+    context->openFloatingZStack = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena); // NT patch 4
     context->reusableElementIndexBuffer = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementClipElementIds = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->dynamicStringData = Clay__charArray_Allocate_Arena(maxElementCount, arena);

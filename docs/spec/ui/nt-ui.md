@@ -32,6 +32,44 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Floating zIndex is relative
+
+Upstream Clay sorts every floating element globally by its own
+`zIndex`. The vendored copy diverges (NT patch 4 in `deps/clay/clay.h`):
+a floating declared inside another floating gets `parent_z + own_z`, so
+`zIndex` reads as a stacking context, like CSS. A widget's floating part
+therefore composes anywhere without knowing its global band, which is
+what lets the slider thumb, the input caret and the scrollbar declare a
+bare delta instead of reading the modal subsystem's depth counter.
+
+A delta of 0 ties with the parent and, since the root sort is stable,
+paints after it with a same-frame bbox. A NEGATIVE delta sorts ahead of
+its parent and reads the parent's PREVIOUS-frame bbox; two parts use
+one — the tooltip drop-shadow, which guards for the first frame, and the
+inspector highlight, which attaches to a base-band element and so is
+unaffected.
+
+Bands accumulate with declaration nesting, NOT with attachment:
+`attachTo = ROOT` still stacks where it was declared. Overlay bands are
+declared as one `modal_zband_stride` each, so nested overlays accumulate
+one stride per level, themselves included, when every enclosing floating
+is an engine overlay. A widget's own floating parts declare delta 0 and
+paint above their container's content because they are declared last —
+which also means a floating declared AFTER one of them in the same band
+paints over it, so a scrollbar yields to a tooltip opened later in the
+same panel. There is no way out
+of an enclosing stacking context: a game floating that must stay under
+all UI belongs at the root level.
+
+The value Clay stores and reports for a floating is the accumulated
+band, not the declared delta. Among render commands only RECTANGLE, TEXT
+and the clip SCISSOR carry it — Clay leaves `zIndex` at 0 on IMAGE,
+BORDER and CUSTOM. An accumulated band that would saturate `int16`
+raises a Clay error, which `nt_ui` asserts on rather than silently
+merging two bands. That caps what a game floating may declare: its own
+`zIndex` plus one stride per overlay level nested inside it must still
+fit `int16`.
+
 ## Clay private symbols
 
 Even with `NT_UI_DEBUG_TOOLS=OFF`, nt_ui touches ~10 Clay **private**
@@ -45,6 +83,12 @@ calls so widget code can run between them — Clay's public macro
 bundles `Open` + `Configure` + scoped body into a single statement
 and can't be split across function boundaries. The wrappers are the
 smallest possible escape hatch.
+
+One of those wrappers reads state that exists only because of NT patch 4:
+`nt_ui_clay_priv_open_floating_z` returns the top of Clay's
+`openFloatingZStack`, and `nt_ui_popup` uses it to rank overlays. Re-applying
+patch 4 is therefore a precondition for overlay arbitration, not only for
+painting.
 
 With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
 symbols for the verbatim Clay debug-view port (the inspector body
@@ -329,9 +373,27 @@ attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
 read from the panel's previous-frame bbox; a `value_t` open/close tween; a shared
-modal-depth z-band (`modal_zband_stride*(depth+1)`, NT_ASSERT before the push so
-a runaway nesting fails early); and a present-only, transparent light-dismiss
-catcher at `panel_z-1` (outside-click raises a close signal). A fully-closed
+modal-depth z-band declared as ONE `modal_zband_stride` above the enclosing
+floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
+NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
+catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
+outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
+effective band, ties to the last declared. That is the POINTER arbiter's key,
+not the paint key, and deliberately so — the winner performs the dismissal
+through its own catcher's interaction, so a slot ranked by draw layer would
+hand the scan to a popup whose catcher never wins the click and NEITHER
+would dismiss. The cost is real and accepted: two catcher-bearing popups on
+one band with different draw layers paint by layer but dismiss by
+declaration, so an outside click can close the one underneath. Ranking the
+slot by paint order requires making the pointer arbiter layer-aware first
+(`resolve_hot_if_needed` is band-only today) — until then the two must use
+one key, and this is that key. The agreement is a 2D-context property: a 3D
+ctx arbitrates the pointer by ray distance and does not rank overlays by
+band at all. The agreement is a 2D-context property: a
+3D ctx arbitrates the pointer by ray distance and does not rank overlays
+by band at all. A catcher-less
+overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
+text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The

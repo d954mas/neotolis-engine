@@ -524,7 +524,8 @@ static uint32_t caret_from_x(const nt_ui_input_style_t *style, bool password, nt
 // #region render
 
 /* A filled rect floated at (x,y) inside the field; used for both the caret and the selection
- * highlight (the highlight sits BEHIND the text by emitting before the label). */
+ * highlight (the highlight sits BEHIND the text by emitting before the label). Every floating part of
+ * the field omits zIndex on purpose: delta 0 keeps it in the field's own band (NT patch 4). */
 static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;

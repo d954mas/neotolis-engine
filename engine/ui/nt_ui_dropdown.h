@@ -135,7 +135,6 @@ void nt_ui_combo_end(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
 /* The popup side chosen for the combo list on its last open (edge-flip probe). */
-uint8_t nt_ui_dropdown_test_last_side(void);
 /* The scroll id the list used for its long-list wrapper (0 if the list did not scroll). */
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id);
 /* The prev-frame bbox of a row's text label cell (icon-gutter alignment probe). */

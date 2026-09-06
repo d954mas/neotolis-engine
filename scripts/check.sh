@@ -3,7 +3,7 @@
 # opts into running the formatter under the same lock first. Modes:
 #   scripts/check.sh                    gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full             default + whole-tree format + full tidy
-#   scripts/check.sh --push             default + wasm-debug + wasm-release + submodule test
+#   scripts/check.sh --push             default + native-release + wasm-debug + wasm-release + submodule test
 #   scripts/check.sh --format [--full|--push]  format changed files under the same run lock first
 # The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
@@ -248,6 +248,25 @@ fi
 collect_ctest
 
 if [ "$MODE" = "push" ]; then
+    # Release compiles the same TUs with NDEBUG (asserts -> TRAP, so NT_ASSERT_FULL-only code drops out)
+    # and -O2: a test registered behind an assert-mode guard, or a variable only an assert reads, is
+    # -Wunused under -Werror here and nowhere in the debug builds. Mirrors ci.yml's native-release job.
+    step "build (native-release)"
+    NR_CACHE="build/_cmake/native-release/CMakeCache.txt"
+    if [ ! -f "$NR_CACHE" ]; then
+        echo "ERROR: build/_cmake/native-release not configured — run it yourself, so your own"
+        echo "       -DNT_SKIP_EXAMPLE_PACKS carries over:  cmake --preset native-release"
+        exit 1
+    fi
+    # A hand-passed -DNT_ASSERT_MODE=2 here makes this step green and empty: NT_ASSERT_FULL-only code
+    # compiles again and the -Wunused class the step exists for disappears.
+    if ! grep -q '^NT_ASSERT_MODE:STRING=$' "$NR_CACHE"; then
+        echo "ERROR: native-release cache overrides NT_ASSERT_MODE — it must stay empty (auto -> TRAP)."
+        exit 1
+    fi
+    cmake --build build/_cmake/native-release
+    ok
+
     step "build (wasm-debug)"
     if ! command -v emcc > /dev/null 2>&1; then
         echo "ERROR: emcc not found in PATH — the wasm-debug build is required before push."

@@ -85,10 +85,13 @@ static void test_popup_floating_smoke(void) {
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(r.visible);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
 }
 
-/* ---- z-band: panel = stride*(depth+1), catcher = panel-1. Nested = 2000/1999, depth 2. ---- */
+/* ---- z-band: each popup declares ONE stride above its enclosing floating, catcher one below its own
+ *      panel. A popup nested inside another must therefore reach 2*stride — asserted on the band Clay
+ *      stamped on the bodies' render commands, not on the engine's own arithmetic. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
@@ -96,16 +99,32 @@ static void test_popup_zband_and_nesting(void) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)1000U, nt_ui_popup_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)999U, nt_ui_popup_test_last_catcher_zband());
+    /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
+    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)2000U, nt_ui_popup_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)1999U, nt_ui_popup_test_last_catcher_zband());
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->active_modal_depth);
+    CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_popup_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
     nt_ui_end(s_fx.ctx);
+
+    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    int32_t z_a = INT32_MIN;
+    int32_t z_b = INT32_MIN;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (c->id == CLAY_ID("body_a").id) {
+            z_a = c->zIndex;
+        } else if (c->id == CLAY_ID("body_b").id) {
+            z_b = c->zIndex;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, z_a, "outer popup must land one stride above the base band");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(2 * stride, z_b, "a popup nested inside another must accumulate a second stride");
 }
 
 /* ---- Depth overflow fires NT_ASSERT before the push (no silent fallback). ---- */
@@ -192,16 +211,17 @@ static uint8_t edge_flip_side(uint32_t id, float ax, float ay, uint8_t prefer) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = ax, .y = ay, .w = 40.0F, .h = 24.0F, .prefer_side = prefer};
 
+    uint8_t side = (uint8_t)NT_UI_POPUP_CENTER;
     for (int f = 0; f < 2; ++f) {
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-        nt_ui_popup_begin(s_fx.ctx, id, &st, &anc, true);
+        side = nt_ui_popup_begin(s_fx.ctx, id, &st, &anc, true).side;
         {
             CLAY({.id = (Clay_ElementId){.id = id ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
         }
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    return nt_ui_popup_test_last_side();
+    return side;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -392,12 +412,123 @@ static void test_popup_tween_clamp(void) {
     TEST_ASSERT_TRUE(saw_closed);
 }
 
+/* ---- The overlay that eats Esc / runs the close-scan is the one PAINTED on top, not the one deepest in
+ *      the begin/end counter. A game floating with its own zIndex shifts the band of the popup declared
+ *      inside it, so the two answers can disagree; the arbitration key must be the band Clay sorts by. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_popup_top_id_follows_band(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_pointer_t p = {.active = true};
+    /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
+            nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+            CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        /* Same nesting depth as A, but no enclosing band -> lands lower even though it is declared later. */
+        nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+
+    int32_t z_a = INT32_MIN;
+    int32_t z_b = INT32_MIN;
+    int32_t at_a = -1;
+    int32_t at_b = -1;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (c->id == CLAY_ID("body_a").id) {
+            z_a = c->zIndex;
+            at_a = i;
+        } else if (c->id == CLAY_ID("body_b").id) {
+            z_b = c->zIndex;
+            at_b = i;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b >= 0, "both popups must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(z_a > z_b, "the popup inside the lifted game floating must land in a higher band");
+    TEST_ASSERT_TRUE_MESSAGE(at_a > at_b, "and must therefore paint after the root-level popup");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->modal_top_id_prev, "the higher-band popup must own Esc and the close-scan");
+
+    /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
+     * and leave the other alone (a non-top catcher is an inert pointer gate). */
+    nt_ui_popup_result_t ra = {0};
+    nt_ui_popup_result_t rb = {0};
+    for (int frame = 0; frame < 2; ++frame) {
+        const bool pressing = (frame == 0);
+        nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &click, 1);
+        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
+            ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(ra.close_requested, "the outside click must dismiss the popup painted on top");
+    TEST_ASSERT_FALSE_MESSAGE(rb.close_requested, "the popup underneath must stay an inert gate");
+
+    /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_pointer_t idle = pointer_at(700.0F, 500.0F, false, false, false);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &idle, 1);
+        nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->modal_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
+}
+
+/* ---- Two catcher-bearing popups on ONE band: whoever owns the close-scan slot must also be the one
+ *      the pointer hands the click to. The slot is picked by band with ties to the last declared, which
+ *      is the pointer arbiter's own key — ranking the slot by draw layer instead left the scan with a
+ *      popup whose catcher never won the click, and NEITHER overlay dismissed. ---- */
+static void test_popup_dismiss_survives_a_band_tie(void) {
+    nt_ui_popup_style_t hi = nt_ui_popup_style_defaults();
+    hi.ease_speed = 0.0F;
+    hi.layer = 2U; /* a draw layer that does NOT move the close-scan slot */
+    nt_ui_popup_style_t lo = nt_ui_popup_style_defaults();
+    lo.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
+
+    nt_ui_popup_result_t ra = {0};
+    nt_ui_popup_result_t rb = {0};
+    for (int frame = 0; frame < 3; ++frame) {
+        const bool pressing = (frame == 1);
+        const bool releasing = (frame == 2);
+        nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &hi, &anc, true);
+        /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
+         * vanished, and the test could not tell the two apart. */
+        CLAY({.id = CLAY_ID("tie_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &lo, &anc, true); /* same band, declared last -> owns the slot */
+        CLAY({.id = CLAY_ID("tie_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(rb.close_requested, "the popup holding the close-scan slot must receive the outside click");
+    TEST_ASSERT_FALSE_MESSAGE(ra.close_requested, "the other popup stays an inert gate");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_abi_sizes);
     RUN_TEST(test_popup_defaults_valid);
     RUN_TEST(test_popup_floating_smoke);
     RUN_TEST(test_popup_zband_and_nesting);
+    RUN_TEST(test_popup_top_id_follows_band);
+    RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);

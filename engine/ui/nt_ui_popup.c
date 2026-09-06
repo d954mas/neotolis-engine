@@ -52,9 +52,6 @@ static bool popup_anim_slot_absent(const nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-static uint16_t s_last_panel_zband;
-static uint16_t s_last_catcher_zband;
-static uint8_t s_last_side;
 static bool s_last_catcher_present;
 static uint32_t s_entrance_seed_count; /* # of entrance t=0 re-seeds; must fire once per open-edge, not per frame */
 #endif
@@ -175,9 +172,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band (shared depth counter with modal)
-    const uint8_t depth = ctx->active_modal_depth;
     ++ctx->active_modal_depth;
-    const int16_t panel_z = (int16_t)(ctx->modal_zband_stride * (depth + 1));
+    /* One band ABOVE whatever floating encloses this call; Clay accumulates the nesting, so a popup
+     * opened inside another needs no depth arithmetic here. */
+    const int16_t panel_z = ctx->modal_zband_stride;
     const int16_t catcher_z = (int16_t)(panel_z - 1);
     const uint32_t catcher_id = popup_catcher_id(id);
     // #endregion
@@ -247,10 +245,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * top-id dismiss slot from a coexisting dropdown. */
     if (want_catcher) {
         ctx->modal_present_cur = true;
-        if (ctx->active_modal_depth >= ctx->modal_max_depth_cur) {
-            ctx->modal_max_depth_cur = ctx->active_modal_depth;
-            ctx->modal_top_id_cur = id;
-        }
     }
     if (want_catcher) {
         /* Full-viewport catcher at catcher_z. Transparent for a plain popup; a visible dim rect when a
@@ -304,6 +298,18 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
+    /* The panel is the innermost open floating here, so this IS the band Clay stamped. The claim below
+     * must use the 2D pointer arbiter's key (band, ties to the last declared): the winner runs the
+     * close-scan through its own catcher, so a differently-ranked slot dismisses nothing. A 3D ctx
+     * arbitrates by ray distance and does not rank overlays by band at all. */
+    const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
+    /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
+     * arbitration and silently stops gating while nt_ui_modal_active() still reports the overlay up. */
+    NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: the catcher must sit above the base band (0)");
+    if (want_catcher && panel_band >= ctx->modal_top_z_cur) {
+        ctx->modal_top_z_cur = panel_band;
+        ctx->modal_top_id_cur = id;
+    }
     // #endregion
 
     if (out_src != NULL) {
@@ -311,9 +317,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
 
 #ifdef NT_TEST_ACCESS
-    s_last_panel_zband = (uint16_t)panel_z;
-    s_last_catcher_zband = (uint16_t)catcher_z;
-    s_last_side = (uint8_t)side;
     s_last_catcher_present = want_catcher;
 #endif
 
@@ -360,26 +363,7 @@ void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_popup_test_last_zband(void) { return s_last_panel_zband; }
-uint16_t nt_ui_popup_test_last_catcher_zband(void) { return s_last_catcher_zband; }
-uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_popup_test_stack_depth: ctx must be non-NULL");
-    return ctx->active_modal_depth;
-}
-uint8_t nt_ui_popup_test_last_side(void) { return s_last_side; }
 bool nt_ui_popup_test_last_catcher_present(void) { return s_last_catcher_present; }
 uint32_t nt_ui_popup_test_entrance_seed_count(void) { return s_entrance_seed_count; }
 void nt_ui_popup_test_entrance_seed_reset(void) { s_entrance_seed_count = 0U; }
-float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_popup_test_tween: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_popup_test_tween: id must be non-zero");
-    const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
-    for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
-        const nt_ui_anim_interaction_t *cand = &ctx->anim[(base + k) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
-        if (cand->valid && cand->id == id) {
-            return cand->value_t;
-        }
-    }
-    return 0.0F;
-}
 #endif

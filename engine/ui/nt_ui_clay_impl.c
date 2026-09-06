@@ -39,6 +39,12 @@ int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay) {
     return clay->layoutElements.length;
 }
 
+int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_open_floating_z: clay must be non-NULL");
+    const int32_t len = clay->openFloatingZStack.length;
+    return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
+}
+
 float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
     NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_width: clay must be non-NULL");
     return clay->layoutDimensions.width;
@@ -562,8 +568,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
 
         nt_ui_baked_xform_t seed;
         /* The document root (Clay__RootContainer) is the only tree root with parentId 0. Identify it by
-         * that, NOT by array index 0: Clay sorts tree roots by zIndex, so a negative-zIndex floating child
-         * (e.g. a tooltip drop-shadow) sorts ahead of the document root and shifts it off index 0. */
+         * that, NOT by array index 0: Clay sorts tree roots by zIndex, so any floating whose effective z
+         * is negative sorts ahead of the document root and shifts it off index 0. */
         if (root->parentId == 0U) {
             seed = identity;
         } else {
@@ -673,6 +679,9 @@ static const Clay_Color CDV_COLOR_3 = {141, 133, 135, 255};
 static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
 static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
 static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100};
+/* Absolute band of the inspector root — two below int16's ceiling, above every game band. Floating
+ * zIndex is relative (NT patch 4), so anything declared inside it must use a NEGATIVE delta. */
+#define NT_UI_INSPECTOR_ROOT_Z 32765
 
 /* Filtered out of the viewport-hover scan to prevent self-feedback on the highlight rect. */
 enum { CDV_OWNED_ID_COUNT = 7 };
@@ -1588,11 +1597,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region highlight-emit
     if (highlightedElementId) {
-        /* zIndex 32764 keeps it above game UI but strictly under the panel root. */
+        /* Relative to ntInsp_Root: -1 lands just under the panel body it would otherwise cover. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
-              .floating = {.parentId = highlightedElementId, .zIndex = 32764, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
+              .floating = {.parentId = highlightedElementId, .zIndex = -1, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
             CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"),
                   .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
                   .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
@@ -1661,10 +1670,13 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     // #endregion
     // #region row-list
     /* RIGHT_CENTER overlay attach — engine root is full-width so side-by-side would land off-screen. */
+    /* The root band is absolute and two below int16's ceiling, so this must not be declared inside a
+     * floating: the accumulated band would saturate (public entry point, game-reachable). */
+    NT_ASSERT(nt_ui_clay_priv_open_floating_z(ctx->clay) == 0 && "nt_ui inspector must be declared at the root level");
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG),
-          .floating = {.zIndex = 32765,
+          .floating = {.zIndex = NT_UI_INSPECTOR_ROOT_Z,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},

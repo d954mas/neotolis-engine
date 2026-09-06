@@ -78,7 +78,8 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
 /* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * backdrop + panel floating elements (z-band ctx->modal_zband_stride*(depth+1)) and eases t toward
+ * backdrop + panel floating elements (declared one ctx->modal_zband_stride above the enclosing
+ * floating; Clay accumulates the nesting) and eases t toward
  * open?1:0; returns the full result (t / close reason / visible). Panel stays OPEN until nt_ui_modal_end.
  * id non-zero, style non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no fallback).
  * Prefer the scoped nt_ui_modal_visible() unless you need the close reason. */
@@ -111,12 +112,7 @@ void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id);
 bool nt_ui_modal_active(const nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_modal_test_last_zband(void);                            /* panel z of the last begin */
-uint16_t nt_ui_modal_test_last_backdrop_zband(void);                   /* backdrop z of the last begin */
-uint8_t nt_ui_modal_test_stack_depth(const nt_ui_context_t *ctx);      /* live active_modal_depth */
-nt_ui_modal_close_reason_t nt_ui_modal_test_last_close_reason(void);   /* reason of the last begin */
-float nt_ui_modal_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
-void nt_ui_modal_test_last_panel_offset(float *ox, float *oy);         /* panel transform offset of the last begin */
+void nt_ui_modal_test_last_panel_offset(float *ox, float *oy); /* panel transform offset of the last begin */
 #endif
 
 #endif /* NT_UI_MODAL_H */

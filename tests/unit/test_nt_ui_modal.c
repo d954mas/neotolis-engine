@@ -25,7 +25,10 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
+static nt_ui_modal_close_reason_t s_frame_close_reason; /* reason from the last modal_button_frame; reset in setUp */
+
 void setUp(void) {
+    s_frame_close_reason = NT_UI_MODAL_CLOSE_NONE;
     nt_test_assert_install();
     nt_input_clear_all_keys();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -58,6 +61,31 @@ static void test_modal_defaults_valid(void) {
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U);
 }
 
+/* Bands are read off what the frame actually ships: Clay stamps the owning floating root's zIndex on
+ * RECTANGLE and TEXT commands. INT32_MIN = the id emitted no rectangle this frame. */
+static int32_t band_of_rect(const nt_ui_context_t *ctx, uint32_t id) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->id == id && c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            return c->zIndex;
+        }
+    }
+    return INT32_MIN;
+}
+
+/* The backdrop's id is engine-derived and deliberately unpublished, so identify it by shape: the only
+ * full-viewport rectangle in the frame. Band alone would also match a game rect that happens to land
+ * there. */
+static bool band_has_backdrop(const nt_ui_context_t *ctx, int32_t band) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex == band && c->boundingBox.width >= 800.0F && c->boundingBox.height >= 600.0F) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ---- Floating-modal smoke: a floating modal (z=1000, transform + opacity) declared over base content;
  *      the walker exits with a balanced scissor stack and composes the panel transform. ---- */
 static void test_modal_floating_smoke(void) {
@@ -68,13 +96,13 @@ static void test_modal_floating_smoke(void) {
     CLAY({.id = CLAY_ID("base"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {}
     nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
     {
-        CLAY({.id = CLAY_ID("modal_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}}) {}
+        CLAY({.id = CLAY_ID("modal_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     }
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx); /* walks: balanced scissor assert + transform compose must not trip */
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)1000U, nt_ui_modal_test_last_zband());
+    TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("modal_body").id));
     TEST_ASSERT_TRUE(r.visible);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx)); /* balanced */
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* balanced */
 }
 
 /* ---- z-band: panel = 1000*(depth+1), backdrop = panel-1. Nested = 2000/1999, depth 2. ---- */
@@ -84,27 +112,31 @@ static void test_modal_zband_and_nesting(void) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)1000U, nt_ui_modal_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)999U, nt_ui_modal_test_last_backdrop_zband());
+    /* Opaque bodies so each panel subtree emits a rectangle carrying its root's band. */
+    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* modal-over-modal */
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)2000U, nt_ui_modal_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)1999U, nt_ui_modal_test_last_backdrop_zband());
-    TEST_ASSERT_EQUAL_UINT8(2U, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->active_modal_depth);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
     nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
+    TEST_ASSERT_EQUAL_INT32((int32_t)2000, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id));
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 999), "the outer backdrop must paint one band under its panel");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1999), "the nested backdrop must paint one band under its panel");
 }
 
 /* ---- Stack depth is zero at frame start and after balanced begin/end. ---- */
 static void test_modal_stack_depth_zero_balanced(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
-    TEST_ASSERT_EQUAL_UINT8(1U, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(1U, s_fx.ctx->active_modal_depth);
     nt_ui_modal_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -116,7 +148,7 @@ static void test_modal_depth_overflow_asserts(void) {
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_modal_begin(s_fx.ctx, 0x4D1000U + i, &st, true);
     }
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_MODAL_MAX_DEPTH, nt_ui_modal_test_stack_depth(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_MODAL_MAX_DEPTH, s_fx.ctx->active_modal_depth);
     NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, 0x4D1FFFU, &st, true));
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_modal_end(s_fx.ctx);
@@ -390,9 +422,10 @@ static void test_modal_no_backdrop_close_still_gates(void) {
 
 /* One modal frame with a stepped button child. The button id is stepped INSIDE the body — mirrors the
  * showcase's action-button pattern. */
+
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, true);
+    s_frame_close_reason = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, true).reason;
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
         in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("modal_btn"));
@@ -433,7 +466,7 @@ static nt_ui_modal_close_reason_t modal_backdrop_click_reason(const nt_ui_modal_
     nt_pointer_t f2 = modal_pointer_at(cx, cy, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
     modal_button_frame(st, &f2);
-    return nt_ui_modal_test_last_close_reason();
+    return s_frame_close_reason;
 }
 
 static void test_modal_backdrop_close_pad(void) {
@@ -518,8 +551,8 @@ static void test_modal_active_prev_frame(void) {
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx)); /* live depth IS 0 ... */
-    TEST_ASSERT_TRUE(nt_ui_modal_active(s_fx.ctx));                      /* ... yet prev-frame presence is true */
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* live depth IS 0 ... */
+    TEST_ASSERT_TRUE(nt_ui_modal_active(s_fx.ctx));            /* ... yet prev-frame presence is true */
 
     /* Frame 2: no modal declared at all -> presence falls back to inactive. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
@@ -539,7 +572,8 @@ static void test_modal_active_prev_frame(void) {
 }
 
 /* ---- Sequential SAME-DEPTH modals in one frame: a FULLY-CLOSED first must not steal top from an
- *      OPEN second at the same level. The latest PRESENT modal at the max depth wins top, so next
+ *      OPEN second at the same level. Top goes to the highest effective band, ties to the last PRESENT
+ *      declaration, so next
  *      frame the second (open) modal's Esc fires and the first (closed) stays silent. ---- */
 static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -591,14 +625,17 @@ static void test_modal_custom_zband_stride(void) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* depth 0 -> stride*1 */
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)(custom_stride * 1), nt_ui_modal_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)((custom_stride * 1) - 1), nt_ui_modal_test_last_backdrop_zband());
+    CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* depth 1 -> stride*2 */
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)(custom_stride * 2), nt_ui_modal_test_last_zband());
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)((custom_stride * 2) - 1), nt_ui_modal_test_last_backdrop_zband());
+    CLAY({.id = CLAY_ID("cs_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
+
+    TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 1), band_of_rect(ctx, CLAY_ID("cs_a").id));
+    TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 2), band_of_rect(ctx, CLAY_ID("cs_b").id));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 1) - 1));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 2) - 1));
 
     nt_ui_destroy_context(ctx);
 }
@@ -608,6 +645,14 @@ static void test_modal_custom_zband_stride(void) {
 static void test_modal_zero_stride_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
     desc.modal_zband_stride = 0;
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+}
+
+/* ---- A stride of 1 leaves no band for the catcher (it sits at panel-1 = the base band, where it stops
+ *      gating base UI), so it is rejected at create rather than asserting later inside popup-core. ---- */
+static void test_modal_stride_one_asserts(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = 1;
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
@@ -734,8 +779,9 @@ static void test_modal_close_uses_close_recipe(void) {
     TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
 }
 
-/* ---- Delegation proof: the modal's z-band equals what popup-core computes for the same depth, i.e.
- *      the modal is re-expressed ON popup-core, not a divergent parallel copy of the z-band math. ---- */
+/* ---- Delegation proof: the modal's shipped band equals the popup's for the same depth, i.e. the modal
+ *      is re-expressed ON popup-core, not a divergent parallel copy of the z-band math. The catcher half
+ *      is unmeasurable here on purpose: a plain popup's catcher is transparent and emits no command. ---- */
 static void test_modal_zband_matches_popup_core(void) {
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = 0.0F;
@@ -747,21 +793,24 @@ static void test_modal_zband_matches_popup_core(void) {
     /* Modal at depth 0 -> panel z. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &mst, true);
-    const uint16_t modal_z = nt_ui_modal_test_last_zband();
-    const uint16_t modal_bz = nt_ui_modal_test_last_backdrop_zband();
+    CLAY({.id = CLAY_ID("dele_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
+    const int32_t modal_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
+    TEST_ASSERT_TRUE_MESSAGE(modal_z != INT32_MIN, "the modal body must emit a rectangle to measure");
+    const bool modal_backdrop = band_has_backdrop(s_fx.ctx, modal_z - 1);
 
-    /* Popup at depth 0 -> same panel/backdrop z (same shared depth counter + stride). */
+    /* Popup at depth 0 -> the same panel band (one shared depth counter + stride). */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     nt_ui_popup_begin(s_fx.ctx, MODAL_A, &pst, &panc, true);
-    const uint16_t popup_z = nt_ui_popup_test_last_zband();
-    const uint16_t popup_cz = nt_ui_popup_test_last_catcher_zband();
+    CLAY({.id = CLAY_ID("dele_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
+    const int32_t popup_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
+    TEST_ASSERT_TRUE_MESSAGE(popup_z != INT32_MIN, "the popup body must emit a rectangle to measure");
 
-    TEST_ASSERT_EQUAL_UINT16(popup_z, modal_z);
-    TEST_ASSERT_EQUAL_UINT16(popup_cz, modal_bz); /* modal backdrop == popup catcher z-band */
+    TEST_ASSERT_EQUAL_INT32(popup_z, modal_z);
+    TEST_ASSERT_TRUE_MESSAGE(modal_backdrop, "the modal backdrop paints one band under its panel");
 }
 
 int main(void) {
@@ -793,6 +842,7 @@ int main(void) {
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
+    RUN_TEST(test_modal_stride_one_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);
     return UNITY_END();
 }

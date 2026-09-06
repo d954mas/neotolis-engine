@@ -3,7 +3,7 @@
 
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
- * per-depth z-band stack + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
+ * one-stride-per-level z-band + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
  * the core only RAISES close_requested (outside-click on the catcher) and never closes itself.
  * begin/end are balanced (mirror nt_ui_modal_begin/end). The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */
@@ -68,7 +68,8 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
 /* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * catcher (light-dismiss) + panel floating elements (z-band stride*(depth+1)) eased toward open?1:0,
+ * catcher (light-dismiss) + panel floating elements (declared one stride above the enclosing floating;
+ * Clay accumulates the nesting) eased toward open?1:0,
  * placed at the anchor with edge-flip (or centered for a CENTER anchor). Panel stays OPEN until
  * nt_ui_popup_end. id non-zero, style non-NULL, anchor non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH
  * BEFORE push (overflow, no fallback). Prefer the scoped nt_ui_popup_visible unless you need the side. */
@@ -92,14 +93,9 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id);
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_popup_test_last_zband(void);                            /* panel z of the last begin */
-uint16_t nt_ui_popup_test_last_catcher_zband(void);                    /* catcher z of the last begin */
-uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx);      /* live active depth (shared modal counter) */
-uint8_t nt_ui_popup_test_last_side(void);                              /* nt_ui_popup_side_t chosen last begin */
-bool nt_ui_popup_test_last_catcher_present(void);                      /* did the last begin declare a catcher? */
-float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
-uint32_t nt_ui_popup_test_entrance_seed_count(void);                   /* cumulative entrance t=0 re-seeds (once per open-edge) */
-void nt_ui_popup_test_entrance_seed_reset(void);                       /* zero the entrance-seed counter */
+bool nt_ui_popup_test_last_catcher_present(void);    /* did the last begin declare a catcher? */
+uint32_t nt_ui_popup_test_entrance_seed_count(void); /* cumulative entrance t=0 re-seeds (once per open-edge) */
+void nt_ui_popup_test_entrance_seed_reset(void);     /* zero the entrance-seed counter */
 #endif
 
 #endif /* NT_UI_POPUP_H */
