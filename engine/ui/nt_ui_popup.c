@@ -52,8 +52,6 @@ static bool popup_anim_slot_absent(const nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-static uint16_t s_last_panel_zband;
-static uint16_t s_last_catcher_zband;
 static uint8_t s_last_side;
 static bool s_last_catcher_present;
 static uint32_t s_entrance_seed_count; /* # of entrance t=0 re-seeds; must fire once per open-edge, not per frame */
@@ -317,8 +315,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
 
 #ifdef NT_TEST_ACCESS
-    s_last_panel_zband = (uint16_t)panel_band; /* the band Clay stamped, not a recomputation */
-    s_last_catcher_zband = (uint16_t)(s_last_panel_zband - 1U);
     s_last_side = (uint8_t)side;
     s_last_catcher_present = want_catcher;
 #endif
@@ -366,8 +362,6 @@ void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {
 }
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_popup_test_last_zband(void) { return s_last_panel_zband; }
-uint16_t nt_ui_popup_test_last_catcher_zband(void) { return s_last_catcher_zband; }
 uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_test_stack_depth: ctx must be non-NULL");
     return ctx->active_modal_depth;

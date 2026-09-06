@@ -28,8 +28,6 @@ const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
 _Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "modal z-band exceeds int16 zIndex");
 
 #ifdef NT_TEST_ACCESS
-static uint16_t s_last_panel_zband;
-static uint16_t s_last_backdrop_zband;
 static nt_ui_modal_close_reason_t s_last_close_reason;
 static float s_last_panel_off_x;
 static float s_last_panel_off_y;
@@ -133,8 +131,6 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const nt_ui_modal_close_reason_t reason = modal_reason_from_src(src);
 
 #ifdef NT_TEST_ACCESS
-    s_last_panel_zband = nt_ui_popup_test_last_zband(); /* whatever popup-core just declared */
-    s_last_backdrop_zband = (uint16_t)(s_last_panel_zband - 1U);
     s_last_close_reason = reason;
     /* Panel offset = start offset eased by (1-t); matches popup-core's panel transform exactly. */
     s_last_panel_off_x = start.offset_x * (1.0F - pr.t);
@@ -175,8 +171,6 @@ bool nt_ui_modal_active(const nt_ui_context_t *ctx) {
 void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id) { nt_ui_popup_clear_state(ctx, id); }
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_modal_test_last_zband(void) { return s_last_panel_zband; }
-uint16_t nt_ui_modal_test_last_backdrop_zband(void) { return s_last_backdrop_zband; }
 uint8_t nt_ui_modal_test_stack_depth(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_modal_test_stack_depth: ctx must be non-NULL");
     return ctx->active_modal_depth;

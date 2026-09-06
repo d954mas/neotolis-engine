@@ -93,8 +93,6 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id);
 
 #ifdef NT_TEST_ACCESS
-uint16_t nt_ui_popup_test_last_zband(void);                            /* panel z of the last begin */
-uint16_t nt_ui_popup_test_last_catcher_zband(void);                    /* catcher z of the last begin */
 uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx);      /* live active depth (shared modal counter) */
 uint8_t nt_ui_popup_test_last_side(void);                              /* nt_ui_popup_side_t chosen last begin */
 bool nt_ui_popup_test_last_catcher_present(void);                      /* did the last begin declare a catcher? */
