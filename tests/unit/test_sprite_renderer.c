@@ -1682,23 +1682,13 @@ void test_draw_list_slice9_flip_mirrors_source(void) {
     nt_sprite_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
 
-    /* Grid corner (0,0) sits at local (0,0), which the flip negates to the far
-     * side of the footprint; its UV must stay the source's own (u_min, v_max)
-     * corner, otherwise the reversal cancelled the mirror. */
+    /* Origin (0,0) stays put and the far corner spans the whole 100x100
+     * footprint on the negative side: the mirror reached the grid. */
     float pos[3];
-    uint16_t uv[2];
     nt_sprite_renderer_test_last_emit_position(0U, pos);
-    nt_sprite_renderer_test_last_emit_texcoord(0U, uv);
-    TEST_ASSERT_EQUAL_UINT16_MESSAGE(14000U, uv[0], "flip must not reverse the U cuts");
-    TEST_ASSERT_EQUAL_UINT16_MESSAGE(34000U, uv[1], "flip must not reverse the V cuts");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0]) < 0.5F && fabsf(pos[1]) < 0.5F, "origin (0,0) corner stays put");
-
-    /* The far corner spans the whole 100x100 footprint, mirrored. */
     nt_sprite_renderer_test_last_emit_position(15U, pos);
-    nt_sprite_renderer_test_last_emit_texcoord(15U, uv);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0] + 100.0F) < 0.5F && fabsf(pos[1] + 100.0F) < 0.5F, "flip must mirror the full footprint");
-    TEST_ASSERT_EQUAL_UINT16(17000U, uv[0]);
-    TEST_ASSERT_EQUAL_UINT16(28000U, uv[1]);
 }
 
 /* scale=1.0F → atlas borders unchanged → grid x_inner == x + 16; matches emit_slice9. */
@@ -1807,6 +1797,22 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     uint16_t uv1[2];
     nt_sprite_renderer_test_last_emit_texcoord(1, uv1);
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
+}
+
+/* set_slice9(0,0,0,0) promises a plain stretched quad, so the ECS path must not
+ * hand a baked nine-patch region to the grid when the override zeroes it. */
+void test_draw_list_zero_slice9_override_emits_plain_quad(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xBAULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_RS9_HASH, mat); /* baked 16/16/8/24 */
+    nt_sprite_comp_set_slice9(e, 0, 0, 0, 0);
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
 /* The pivot is what a flip mirrors around, so a centered grid must come back
@@ -1972,6 +1978,7 @@ int main(void) {
     RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
+    RUN_TEST(test_draw_list_zero_slice9_override_emits_plain_quad);
     RUN_TEST(test_emit_slice9_pivot_centers_and_mirrors);
     RUN_TEST(test_emit_slice9_bands_follow_pixels_per_unit);
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);

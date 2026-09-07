@@ -689,25 +689,15 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
 // #endregion
 
 // #region slice9_grid
-/* One 4x4 slice9 grid, shared by the ECS path and the public emit.
- *
- * Local space matches emit_region's: Y-up, pivot-relative, mirrored by negating
- * positions. Row 0 is the local bottom and samples v_max, because blob vertices
- * are Y-up while atlas_v stays PNG Y-down. Whoever wants the grid Y-down says so
- * in world_matrix, exactly as they do for a plain region. */
+/* Local space matches emit_region's: Y-up, pivot-relative, mirrored by negating positions.
+ * Row 0 is the local bottom and samples v_max: blob vertices are Y-up, atlas_v is PNG Y-down. */
 typedef struct {
     const nt_texture_region_t *region;
     const nt_atlas_vertex_t *raw_vertices;
-    float w; /* local grid size, emit units */
+    const uint16_t *src_lrtb; /* source px: the UV cuts */
+    float band_per_px;        /* slice9_scale / pixels_per_unit: source px -> w/h units */
+    float w;                  /* local grid size */
     float h;
-    float band_l; /* dst band widths, same units as w/h */
-    float band_r;
-    float band_t;
-    float band_b;
-    uint16_t src_l; /* src borders in source pixels — the UV cuts */
-    uint16_t src_r;
-    uint16_t src_t;
-    uint16_t src_b;
     float origin_x; /* pivot, normalized over w/h */
     float origin_y;
     uint32_t color_packed;
@@ -734,10 +724,10 @@ static void region_uv_bounds(const nt_atlas_vertex_t *verts, uint8_t count, uint
 /* Grid splits for one slice9: dst bands become local coordinates, src borders
  * become UV cuts. Rows are Y-up, so V descends with them. */
 static void slice9_build_splits(const slice9_grid_t *g, float lxs[4], float lys[4], uint16_t us[4], uint16_t vs[4]) {
-    float bl = g->band_l;
-    float br = g->band_r;
-    float bt = g->band_t;
-    float bb = g->band_b;
+    float bl = (float)g->src_lrtb[0] * g->band_per_px;
+    float br = (float)g->src_lrtb[1] * g->band_per_px;
+    float bt = (float)g->src_lrtb[2] * g->band_per_px;
+    float bb = (float)g->src_lrtb[3] * g->band_per_px;
     /* Proportionally shrink dst bands when the target is smaller than their sum. */
     if (bl + br > g->w) {
         const float ratio = g->w / (bl + br);
@@ -764,12 +754,12 @@ static void slice9_build_splits(const slice9_grid_t *g, float lxs[4], float lys[
     const uint16_t v_range = (uint16_t)(uv_bounds[3] - uv_bounds[2]);
     /* Integer math avoids precision loss. */
     us[0] = uv_bounds[0];
-    us[1] = (uint16_t)(uv_bounds[0] + (((uint32_t)g->src_l * u_range) / g->region->source_w));
-    us[2] = (uint16_t)(uv_bounds[1] - (((uint32_t)g->src_r * u_range) / g->region->source_w));
+    us[1] = (uint16_t)(uv_bounds[0] + (((uint32_t)g->src_lrtb[0] * u_range) / g->region->source_w));
+    us[2] = (uint16_t)(uv_bounds[1] - (((uint32_t)g->src_lrtb[1] * u_range) / g->region->source_w));
     us[3] = uv_bounds[1];
     vs[0] = uv_bounds[3];
-    vs[1] = (uint16_t)(uv_bounds[3] - (((uint32_t)g->src_b * v_range) / g->region->source_h));
-    vs[2] = (uint16_t)(uv_bounds[2] + (((uint32_t)g->src_t * v_range) / g->region->source_h));
+    vs[1] = (uint16_t)(uv_bounds[3] - (((uint32_t)g->src_lrtb[3] * v_range) / g->region->source_h));
+    vs[2] = (uint16_t)(uv_bounds[2] + (((uint32_t)g->src_lrtb[2] * v_range) / g->region->source_h));
     vs[3] = uv_bounds[2];
 }
 
@@ -808,14 +798,12 @@ static void write_slice9_vertices(const slice9_grid_t *g, const float lxs[4], co
     }
 }
 
-/* What the grid math takes for granted about the region, in one place for both
- * entry points. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four asserts, no control flow of its own
 static void slice9_assert_region(const slice9_grid_t *g) {
     NT_ASSERT(g->region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
     NT_ASSERT(g->region->trim_offset_x == 0 && g->region->trim_offset_y == 0 && "slice9 region must be untrimmed");
     NT_ASSERT(g->region->source_w > 0 && g->region->source_h > 0 && "slice9 region source dimensions must be non-zero");
-    NT_ASSERT(g->src_l + g->src_r < g->region->source_w && g->src_t + g->src_b < g->region->source_h && "slice9 src borders exceed source dimensions");
+    NT_ASSERT(g->src_lrtb[0] + g->src_lrtb[1] < g->region->source_w && g->src_lrtb[2] + g->src_lrtb[3] < g->region->source_h && "slice9 src borders exceed source dimensions");
 }
 
 static void emit_slice9_grid(const slice9_grid_t *g) {
@@ -835,7 +823,6 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
     uint16_t vs[4];
     slice9_build_splits(g, lxs, lys, us, vs);
 
-    // #region emit_slice9_grid_vertices
     const uint32_t base = s_sprite.vertex_count;
     write_slice9_vertices(g, lxs, lys, us, vs, base);
 
@@ -848,12 +835,13 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
             const uint16_t i_br = (uint16_t)(i_bl + 1U);
             const uint16_t i_tl = (uint16_t)(i_bl + 4U);
             const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+            /* CCW in local Y-up, like the blob's triangles, so CULL_BACK draws it. */
             out_idx[ii++] = i_tl;
-            out_idx[ii++] = i_tr;
-            out_idx[ii++] = i_bl;
             out_idx[ii++] = i_bl;
             out_idx[ii++] = i_tr;
+            out_idx[ii++] = i_bl;
             out_idx[ii++] = i_br;
+            out_idx[ii++] = i_tr;
         }
     }
 
@@ -866,7 +854,6 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
     s_sprite.last_emit_index_count = 54U;
     s_sprite.last_emit_first_vertex = base;
 #endif
-    // #endregion
 }
 // #endregion
 
@@ -902,44 +889,20 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
     // #region emit_one_slice9_branch
-    bool has_s9_ov = (flags & NT_SPRITE_FLAG_SLICE9_OV) != 0;
-    bool has_s9_region = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
-    if (has_s9_ov || has_s9_region) {
-        uint16_t sl;
-        uint16_t sr;
-        uint16_t st;
-        uint16_t sb;
-        if (has_s9_ov) {
-            sl = sv->slice9_lrtb[s_idx][0];
-            sr = sv->slice9_lrtb[s_idx][1];
-            st = sv->slice9_lrtb[s_idx][2];
-            sb = sv->slice9_lrtb[s_idx][3];
-        } else {
-            sl = r->slice9_lrtb[0];
-            sr = r->slice9_lrtb[1];
-            st = r->slice9_lrtb[2];
-            sb = r->slice9_lrtb[3];
-        }
+    /* A zero override is the documented way to turn a baked nine-patch back into a plain quad. */
+    const uint16_t *s9 = (flags & NT_SPRITE_FLAG_SLICE9_OV) ? sv->slice9_lrtb[s_idx] : r->slice9_lrtb;
+    if ((s9[0] | s9[1] | s9[2] | s9[3]) != 0) {
         if (!ensure_current_cmd_page_texture(page_tex)) {
             return;
         }
-
-        /* DST corner size = src x per-entity slice9_scale; last-line tripwire. */
         NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
-        const float s9_scale = sv->slice9_scale[s_idx];
         const slice9_grid_t grid = {
             .region = r,
             .raw_vertices = resolved->raw_vertices,
+            .src_lrtb = s9,
+            .band_per_px = sv->slice9_scale[s_idx] * ipu,
             .w = (float)r->source_w * ipu,
             .h = (float)r->source_h * ipu,
-            .band_l = (float)sl * ipu * s9_scale,
-            .band_r = (float)sr * ipu * s9_scale,
-            .band_t = (float)st * ipu * s9_scale,
-            .band_b = (float)sb * ipu * s9_scale,
-            .src_l = sl,
-            .src_r = sr,
-            .src_t = st,
-            .src_b = sb,
             .origin_x = origin_x,
             .origin_y = origin_y,
             .color_packed = dv->colors_packed[d_idx],
@@ -949,7 +912,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         emit_slice9_grid(&grid);
         return;
     }
-
     // #endregion
     emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
 }
@@ -1089,14 +1051,6 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
-    /* NULL src_lrtb → atlas-baked borders for this region. */
-    const uint16_t src_sl = (src_lrtb != NULL) ? src_lrtb[0] : rh.region->slice9_lrtb[0];
-    const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
-    const uint16_t src_st = (src_lrtb != NULL) ? src_lrtb[2] : rh.region->slice9_lrtb[2];
-    const uint16_t src_sb = (src_lrtb != NULL) ? src_lrtb[3] : rh.region->slice9_lrtb[3];
-
-    NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
-
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
         return;
@@ -1105,16 +1059,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     const slice9_grid_t grid = {
         .region = rh.region,
         .raw_vertices = rh.raw_vertices,
+        .src_lrtb = (src_lrtb != NULL) ? src_lrtb : rh.region->slice9_lrtb,
+        .band_per_px = slice9_scale * ipu,
         .w = w,
         .h = h,
-        .band_l = (float)src_sl * slice9_scale * ipu,
-        .band_r = (float)src_sr * slice9_scale * ipu,
-        .band_t = (float)src_st * slice9_scale * ipu,
-        .band_b = (float)src_sb * slice9_scale * ipu,
-        .src_l = src_sl,
-        .src_r = src_sr,
-        .src_t = src_st,
-        .src_b = src_sb,
         .origin_x = origin_x,
         .origin_y = origin_y,
         .color_packed = color_packed,

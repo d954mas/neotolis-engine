@@ -107,24 +107,15 @@ layout-space bbox center via cglm. The walker reads the composed mat4
 from `tree_baked[layout_idx]` (hot path, no hashmap lookup) and ships
 `world_mat4[16]` to every emit_*.
 
-The two textured emits — `emit_region` and `emit_slice9` — speak one
-geometry language: local space is Y-up and pivot-relative, `flip_bits`
-mirror it by negating positions (which reverses winding, so their
-materials stay `CULL_NONE`), and which way is up on screen is whatever
-`world_mat4` says. A slice9 grid starts at the local bottom, where `v_max`
-is, because blob vertices are Y-up while `atlas_v` stays PNG Y-down (see
-[resource.md](../assets/resource.md)). The walker hands it a matrix with
-the Y inversion and the bbox center in it, and a centered pivot, so a
-nine-patch fills its bbox unless `NT_UI_IMAGE_ORIGIN_OVERRIDE` moves the
-pivot. `emit_geometry` is not part of this: it takes caller-space corners
-and has neither pivot nor flip.
-
-Slice9 corner bands are where the atlas's `pixels_per_unit` reaches the
-layout: a border is authored in source pixels and divided by it, so a
-denser HD atlas — whose borders are proportionally bigger in pixels —
-still renders the same corner. A stretched region divides the same factor
-straight back out (`bb.width / (source_w * ipu)`), so only the nine-patch
-lets it affect the result.
+`emit_region` and `emit_slice9` share one local space: Y-up, pivot-relative,
+`flip_bits` negate positions (which reverses winding). The walker's mat4
+carries the Y inversion and the bbox center; a nine-patch gets a centered
+pivot so it fills its bbox unless `NT_UI_IMAGE_ORIGIN_OVERRIDE` moves it, and
+a `NT_UI_IMAGE_SLICE9_OVERRIDE` of all zeros turns a baked nine-patch back
+into a plain quad. `emit_geometry` takes caller-space corners, no pivot or
+flip. Slice9 corner bands are the one place `pixels_per_unit` reaches the
+layout: borders are source px ÷ ppu, so a denser HD atlas renders the same
+corner; a stretched region divides ppu straight back out.
 
 Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
 

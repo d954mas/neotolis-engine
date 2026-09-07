@@ -146,9 +146,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *   atlas, region_index - must be READY; tombstones no-op.
  *   world_matrix        - 16-float column-major mat4, same convention as
  *                         emit_region. Pass NT_MATH_MAT4_IDENTITY for none.
- *   w, h                - rendered size in the matrix's units. Unlike
- *                         emit_region the size is explicit, because the corner
- *                         bands must not scale with it.
+ *   w, h                - rendered size in the matrix's units.
  *   origin_x, _y        - pivot, normalized over w/h (e.g. {0.5, 0.5}).
  *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
  *                         atlas-baked borders for this region.
@@ -159,8 +157,8 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *                         SD atlas for a denser HD one keeps the corner size.
  *                         Bands stay exact — no pixel snapping.
  *   color_packed        - 0xAABBGGRR.
- *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y. Mirroring reverses
- *                         winding, as in emit_region: keep the material CULL_NONE.
+ *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y. The grid is CCW like
+ *                         blob triangles; mirroring reverses that, as in emit_region.
  *
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */

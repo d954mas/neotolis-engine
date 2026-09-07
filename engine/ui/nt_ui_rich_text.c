@@ -2134,14 +2134,8 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
         const float sy_f = scaled_h / src_h;
         const float cx = bx + (scaled_w * 0.5F);
         const float cy = by + (scaled_h * 0.5F);
-        const float *world = frame->world_mat4;
         float m[16];
-        for (int rr = 0; rr < 4; ++rr) {
-            m[rr] = sx_f * world[rr];
-            m[4 + rr] = -sy_f * world[4 + rr];
-            m[8 + rr] = world[8 + rr];
-            m[12 + rr] = (cx * world[rr]) + (cy * world[4 + rr]) + world[12 + rr];
-        }
+        nt_ui_sprite_mat4(frame->world_mat4, cx, cy, sx_f, sy_f, m);
         if (!bound) {
             nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
             bound = true;

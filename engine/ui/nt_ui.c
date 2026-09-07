@@ -777,20 +777,8 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 // #endregion
 
 // #region helper_emit_screen_rect
-/* sprite_mat4 = world · T(x, y+h) · S(w, -h, 1) maps unit (0,0..1,1) → world. The (x, y+h) origin
- * and -h scale match the sprite renderer's unit-square convention (GL bottom-left at unit (0,0));
- * with Y-flip baked into world, this lands the Clay bbox at the correct GL pixels.
- * Math: out.col0 = w · world.col0; out.col1 = -h · world.col1; col2 unchanged; col3 = world · (x, y+h, 0, 1). */
-static inline void build_quad_mat4(const float world[16], float x, float y, float w, float h, float out_m[16]) {
-    const float ox = x;
-    const float oy = y + h;
-    for (int r = 0; r < 4; ++r) {
-        out_m[r] = w * world[r];
-        out_m[4 + r] = -h * world[4 + r];
-        out_m[8 + r] = world[8 + r];
-        out_m[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
-    }
-}
+/* Unit square (0,0..1,1) onto the Clay bbox: origin at the bbox's bottom-left in layout, scaled by its size. */
+static inline void build_quad_mat4(const float world[16], float x, float y, float w, float h, float out_m[16]) { nt_ui_sprite_mat4(world, x, y + h, w, h, out_m); }
 
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
@@ -1162,22 +1150,19 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         return;
     }
 
-    /* Flag bit OR non-zero lrtb selects override; the flag with zeros DISABLES slice9,
-     * which is how nt_ui_fill's CROP reveal asks for a plain quad. */
-    const bool override_borders = (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
-    const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || override_borders;
-    const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
-    const bool emit_slice9 = has_s9_override ? override_borders : region_slice9;
+    /* The flag or a non-zero lrtb selects the override; the flag with zeros turns a baked
+     * nine-patch back into a plain quad (nt_ui_fill's CROP reveal relies on that). */
+    const bool has_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
+    const uint16_t *s9 = has_override ? p->slice9_override : r->slice9_lrtb;
+    const bool sliced = (s9[0] | s9[1] | s9[2] | s9[3]) != 0;
     NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
 
-    /* Both emits share one matrix shape: sprite_mat4 = world × T(cx, cy) × S(sx, -sy, 1). Source is Y-up
-     * (texels flow up), so col1 negates world.col1 before world maps to layout. A plain quad scales its
-     * source onto the bbox; a nine-patch carries its own pixel sizes, so its scale is 1. */
-    const float cx = bb.x + (bb.width * 0.5F);
-    const float cy = bb.y + (bb.height * 0.5F);
+    /* Source's (origin, origin) point anchors at bbox center. A plain quad scales its source onto the
+     * bbox; a nine-patch carries its own pixel sizes, so its scale is 1 and it fills the bbox from a
+     * centered pivot unless the game moves the pivot explicitly. */
     float sx_f = 1.0F;
     float sy_f = 1.0F;
-    if (!emit_slice9) {
+    if (!sliced) {
         const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
         const float src_w = (float)r->source_w * ipu;
         const float src_h = (float)r->source_h * ipu;
@@ -1186,23 +1171,14 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         sy_f = bb.height / src_h;
     }
     float m[16];
-    for (int rr = 0; rr < 4; ++rr) {
-        m[rr] = sx_f * world_mat4[rr];
-        m[4 + rr] = -sy_f * world_mat4[4 + rr];
-        m[8 + rr] = world_mat4[8 + rr];
-        m[12 + rr] = (cx * world_mat4[rr]) + (cy * world_mat4[4 + rr]) + world_mat4[12 + rr];
-    }
-
-    if (emit_slice9) {
-        /* A nine-patch fills its bbox unless the game moves the pivot explicitly. */
-        const float origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F;
-        const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F;
-        const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, src, p->slice9_scale, col, p->flip_bits);
+    nt_ui_sprite_mat4(world_mat4, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), sx_f, sy_f, m);
+    const bool origin_ov = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) != 0;
+    const float origin_x = origin_ov ? p->origin_x : (sliced ? 0.5F : r->origin_x);
+    const float origin_y = origin_ov ? p->origin_y : (sliced ? 0.5F : r->origin_y);
+    if (sliced) {
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
         return;
     }
-    const float origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : r->origin_x;
-    const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 

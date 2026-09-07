@@ -119,8 +119,9 @@ restores the authored value on the next sync.
 Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
 They are pure state — no resolve, no atlas interaction. The renderer mirrors
 by negating the sprite's local positions around its origin, so a nine-patch
-sprite mirrors exactly like a plain one: the corner bands and their UVs ride
-along, and the footprint stays where the pivot puts it.
+sprite mirrors exactly like a plain one. An ECS nine-patch renders at its
+source size; the transform's scale scales its corner bands too, and
+`slice9_scale` is the only knob against that.
 
 ### Lifecycle
 
