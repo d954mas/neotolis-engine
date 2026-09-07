@@ -54,10 +54,11 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last;
-they clipTo the container, which opens a SCISSOR barrier, so `layer`
-never reorders them against it — and a floating declared AFTER one of
-them in the same band paints over it. There is no way out
+paint above their container's content because they are declared last.
+Under a clip ancestor their clipTo opens a SCISSOR barrier, so `layer`
+never reorders them against that content; without one they order by
+`layer` like the rest of the band. A floating declared AFTER one of them
+in the same band paints over it. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
