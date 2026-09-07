@@ -35,7 +35,7 @@ engine/
         nt_clipboard.h
         native/  web/  stub/
         CMakeLists.txt
-    fs/                     # swappable: nt_fs.h + native/ web/ stub/
+    fs/                     # swappable: nt_fs.h + native/ stub/ (no web impl)
     http/                   # swappable: nt_http.h + native/ web/ stub/
     window/                 # swappable: nt_window.h + native/ web/ stub/
     app/                    # swappable: nt_app.h + native/ web/ stub/
@@ -90,6 +90,13 @@ Two gates enforce this:
 Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
 `nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs`,
 `nt_clipboard`.
+
+`nt_fs` is native-only: neither `nt_fs` nor `nt_fs_stub` is declared under
+`EMSCRIPTEN`. The browser has no filesystem, so an always-failing web backend
+would only disguise a platform mistake as a load failure; a wasm link that asks
+for either target hits the unresolved-symbol rule above instead. `nt_resource`
+compiles its `NT_IO_FS` path out on web, where `nt_resource_load_file` does not
+exist and `nt_resource_load_auto` routes to `nt_http`.
 
 `nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
 Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a

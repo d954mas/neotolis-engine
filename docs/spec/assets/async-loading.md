@@ -91,7 +91,7 @@ typedef struct {
     uint32_t bytes_received; /* async progress */
     uint32_t bytes_total;
     uint32_t io_request_id;
-    uint8_t io_type;        /* NT_IO_NONE / NT_IO_FS / NT_IO_HTTP */
+    uint8_t io_type;        /* NT_IO_NONE / NT_IO_FS (native only) / NT_IO_HTTP */
     uint16_t attempt_count; /* retry state */
     uint32_t retry_delay_ms;
     uint32_t retry_time_ms;
