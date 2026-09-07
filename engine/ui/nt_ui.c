@@ -1548,6 +1548,14 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region walk
 /* SCISSOR/CUSTOM/NONE = hard barriers; never reordered. */
+/* Clay stamps zIndex on RECT/TEXT/SCISSOR only; the baked band covers every command. */
+static int16_t cmd_band(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, int32_t n_elements) {
+    if (c->nt_layout_index < 0 || c->nt_layout_index >= n_elements) {
+        return 0;
+    }
+    return ctx->tree_baked[c->nt_layout_index].zindex;
+}
+
 static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     switch (cmd_type) {
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
@@ -1984,11 +1992,11 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             ++i;
             continue;
         }
-        const int16_t seg_z = c->zIndex;
+        const int16_t seg_z = cmd_band(ctx, c, N_elements);
         int32_t seg_end = i + 1;
         while (seg_end < arr->length) {
             const Clay_RenderCommand *next = &arr->internalArray[seg_end];
-            if (next->zIndex != seg_z || !is_segmentable(next->commandType)) {
+            if (!is_segmentable(next->commandType) || cmd_band(ctx, next, N_elements) != seg_z) {
                 break;
             }
             ++seg_end;

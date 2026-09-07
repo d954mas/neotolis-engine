@@ -54,17 +54,20 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last —
-which also means a floating declared AFTER one of them in the same band
-paints over it, so a scrollbar yields to a tooltip opened later in the
-same panel. There is no way out
+paint above their container's content of the same layer because they are
+declared last — which also means a floating declared AFTER one of them in
+the same band and layer paints over it, so a scrollbar yields to a tooltip
+opened later in the same panel. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
 The value Clay stores and reports for a floating is the accumulated
-band, not the declared delta. Among render commands only RECTANGLE, TEXT
-and the clip SCISSOR carry it — Clay leaves `zIndex` at 0 on IMAGE,
-BORDER and CUSTOM. An accumulated band that would saturate `int16`
+band, not the declared delta. `nt_ui` bakes that band per element in
+`build_tree` and the walker segments paint order on it — the `zIndex`
+field of individual render commands is never read (Clay fills it only for
+RECTANGLE, TEXT and the clip SCISSOR). Paint order is band asc, then
+`layer` asc, then declaration; SCISSOR/CUSTOM are hard barriers. An
+accumulated band that would saturate `int16`
 raises a Clay error, which `nt_ui` asserts on rather than silently
 merging two bands. That caps what a game floating may declare: its own
 `zIndex` plus one stride per overlay level nested inside it must still

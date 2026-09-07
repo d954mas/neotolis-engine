@@ -67,7 +67,7 @@
 // #endregion
 
 // #region layers + reference resolution
-/* Walker batches RECTs/IMAGEs first, then TEXT within each Clay zIndex. */
+/* Walker batches RECTs/IMAGEs first, then TEXT within each band. */
 #define LAYER_BG 0
 #define LAYER_RADIAL 1     /* flat SDF radials — own layer so they batch as one run */
 #define LAYER_RADIAL_IMG 2 /* textured radial-image — own layer, grouped by reveal material */
