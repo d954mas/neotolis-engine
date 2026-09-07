@@ -4,7 +4,8 @@
 nt_declare_interface(nt_fs)
 
 # No web impl: the browser has no filesystem, and nt_resource routes pack loads
-# through nt_http there. A wasm link asking for nt_fs fails loudly, by design.
+# through nt_http there. A wasm link naming nt_fs fails with "unable to find
+# library -lnt_fs"; including nt_fs.h there is a #error.
 if(NOT EMSCRIPTEN)
     nt_add_module(nt_fs LOG_DOMAIN "fs" nt_fs.c native/nt_fs_native.c nt_fs.h)
     target_link_libraries(nt_fs PUBLIC nt_core nt_fs_interface)

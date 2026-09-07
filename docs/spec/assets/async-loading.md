@@ -70,6 +70,11 @@ Resolve/publication:
   → if the highest-priority target winner needs aux data but its blob is missing, the slot keeps the best usable fallback published or reports LOADING and schedules a reload
 ```
 
+`nt_resource_load_url` takes a URL, `nt_resource_load_file` a filesystem path,
+and `nt_resource_load_auto` picks per platform — it is the portable entry point.
+There is no filesystem on web: `nt_resource_load_file` is not declared there and
+the `NT_IO_FS` path is compiled out, so `load_auto` resolves to `nt_http`.
+
 ## Loading progress
 
 Current `NtPackMeta`:

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "core/nt_platform.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -533,7 +534,7 @@ void nt_resource_step(void) {
                 }
             }
 #ifndef NT_PLATFORM_WEB
-            else if (pack->io_type == NT_IO_FS) {
+            if (pack->io_type == NT_IO_FS) {
                 nt_fs_request_t req = {.id = pack->io_request_id};
                 nt_fs_state_t st = nt_fs_state(req);
                 if (st == NT_FS_STATE_DONE) {
@@ -849,7 +850,7 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
             nt_http_free((nt_http_request_t){.id = pack->io_request_id});
         }
 #ifndef NT_PLATFORM_WEB
-        else if (pack->io_type == NT_IO_FS) {
+        if (pack->io_type == NT_IO_FS) {
             nt_fs_free((nt_fs_request_t){.id = pack->io_request_id});
         }
 #endif

@@ -3,6 +3,10 @@
 
 #include "core/nt_types.h"
 
+#ifdef __EMSCRIPTEN__
+#error "nt_fs is native-only: the browser has no filesystem -- load packs with nt_http / nt_resource_load_auto"
+#endif
+
 #ifndef NT_FS_MAX_REQUESTS
 #define NT_FS_MAX_REQUESTS 8
 #endif
