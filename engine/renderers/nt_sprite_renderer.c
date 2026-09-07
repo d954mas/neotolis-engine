@@ -105,9 +105,6 @@ static struct {
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
-    /* Captured at end of emit_slice9. */
-    uint32_t last_slice9_vertex_count;
-    uint32_t last_slice9_index_count;
     /* Flushes that ACTUALLY replayed cmds (past the empty early-return). Empty no-op flushes don't count. */
     uint32_t test_nonempty_flush_calls;
 #endif
@@ -811,7 +808,18 @@ static void write_slice9_vertices(const slice9_grid_t *g, const float lxs[4], co
     }
 }
 
+/* What the grid math takes for granted about the region, in one place for both
+ * entry points. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — four asserts, no control flow of its own
+static void slice9_assert_region(const slice9_grid_t *g) {
+    NT_ASSERT(g->region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
+    NT_ASSERT(g->region->trim_offset_x == 0 && g->region->trim_offset_y == 0 && "slice9 region must be untrimmed");
+    NT_ASSERT(g->region->source_w > 0 && g->region->source_h > 0 && "slice9 region source dimensions must be non-zero");
+    NT_ASSERT(g->src_l + g->src_r < g->region->source_w && g->src_t + g->src_b < g->region->source_h && "slice9 src borders exceed source dimensions");
+}
+
 static void emit_slice9_grid(const slice9_grid_t *g) {
+    slice9_assert_region(g);
     const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9_grid called with no open cmd");
@@ -819,6 +827,7 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
     }
+    NT_ASSERT(16U <= vcap && 54U <= s_sprite.max_indices && "slice9: staging cap below one grid (raise max_vertices / max_indices)");
 
     float lxs[4];
     float lys[4];
@@ -853,8 +862,6 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
     s_sprite.index_count += 54U;
 
 #ifdef NT_TEST_ACCESS
-    s_sprite.last_slice9_vertex_count = 16U;
-    s_sprite.last_slice9_index_count = 54U;
     s_sprite.last_emit_vertex_count = 16U;
     s_sprite.last_emit_index_count = 54U;
     s_sprite.last_emit_first_vertex = base;
@@ -913,11 +920,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             st = r->slice9_lrtb[2];
             sb = r->slice9_lrtb[3];
         }
-        NT_ASSERT(r->transform == 0 && "slice9 region must have transform == 0");
-        NT_ASSERT(r->trim_offset_x == 0 && r->trim_offset_y == 0 && "slice9 region must be untrimmed");
-        NT_ASSERT(r->source_w > 0 && r->source_h > 0);
-        NT_ASSERT(sl + sr < r->source_w && st + sb < r->source_h);
-
         if (!ensure_current_cmd_page_texture(page_tex)) {
             return;
         }
@@ -1066,13 +1068,6 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #endregion
 
 // #region emit_slice9
-/* Production scales 0.1..10; overflow asserts at scale > ~4096 for a 16 px border. */
-static inline uint16_t scale_slice9_border(uint16_t base, float scale) {
-    const float f = ((float)base * scale) + 0.5F;
-    NT_ASSERT(f >= 0.0F && f <= 65535.0F && "slice9 border × scale overflows uint16_t");
-    return (uint16_t)f;
-}
-
 /* src borders pick UV cut; dst borders set rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
@@ -1099,15 +1094,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
     const uint16_t src_st = (src_lrtb != NULL) ? src_lrtb[2] : rh.region->slice9_lrtb[2];
     const uint16_t src_sb = (src_lrtb != NULL) ? src_lrtb[3] : rh.region->slice9_lrtb[3];
-    const uint16_t dst_sl = scale_slice9_border(src_sl, slice9_scale);
-    const uint16_t dst_sr = scale_slice9_border(src_sr, slice9_scale);
-    const uint16_t dst_st = scale_slice9_border(src_st, slice9_scale);
-    const uint16_t dst_sb = scale_slice9_border(src_sb, slice9_scale);
 
-    NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
-    NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed");
-    NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
-    NT_ASSERT(src_sl + src_sr < rh.region->source_w && src_st + src_sb < rh.region->source_h && "slice9 src borders exceed source dimensions");
     NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
@@ -1120,10 +1107,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         .raw_vertices = rh.raw_vertices,
         .w = w,
         .h = h,
-        .band_l = (float)dst_sl * ipu,
-        .band_r = (float)dst_sr * ipu,
-        .band_t = (float)dst_st * ipu,
-        .band_b = (float)dst_sb * ipu,
+        .band_l = (float)src_sl * slice9_scale * ipu,
+        .band_r = (float)src_sr * slice9_scale * ipu,
+        .band_t = (float)src_st * slice9_scale * ipu,
+        .band_b = (float)src_sb * slice9_scale * ipu,
         .src_l = src_sl,
         .src_r = src_sr,
         .src_t = src_st,
@@ -1335,8 +1322,6 @@ void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]) {
 }
 
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
-uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void) { return s_sprite.last_slice9_vertex_count; }
-uint32_t nt_sprite_renderer_test_last_slice9_index_count(void) { return s_sprite.last_slice9_index_count; }
 uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void) { return s_sprite.test_nonempty_flush_calls; }
 void nt_sprite_renderer_test_reset_nonempty_flush_calls(void) { s_sprite.test_nonempty_flush_calls = 0; }
 #endif

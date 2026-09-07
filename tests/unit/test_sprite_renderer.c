@@ -1691,11 +1691,12 @@ void test_draw_list_slice9_flip_mirrors_source(void) {
     nt_sprite_renderer_test_last_emit_texcoord(0U, uv);
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14000U, uv[0], "flip must not reverse the U cuts");
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(34000U, uv[1], "flip must not reverse the V cuts");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0]) < 0.5F && fabsf(pos[1]) < 0.5F, "origin (0,0) corner stays put");
 
-    /* The opposite corner moved to negative local space with the far UV. */
+    /* The far corner spans the whole 100x100 footprint, mirrored. */
     nt_sprite_renderer_test_last_emit_position(15U, pos);
     nt_sprite_renderer_test_last_emit_texcoord(15U, uv);
-    TEST_ASSERT_TRUE_MESSAGE(pos[0] < 0.0F && pos[1] < 0.0F, "flip must mirror the grid positions");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0] + 100.0F) < 0.5F && fabsf(pos[1] + 100.0F) < 0.5F, "flip must mirror the full footprint");
     TEST_ASSERT_EQUAL_UINT16(17000U, uv[0]);
     TEST_ASSERT_EQUAL_UINT16(28000U, uv[1]);
 }
@@ -1714,7 +1715,7 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     const float h = 100.0F;
     nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, w, h, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
 
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     /* Inner column 1 = x + (16 * 1.0F) = 16. */
     float v1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
@@ -1754,7 +1755,7 @@ void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
     nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 2.0F, 0xFFFFFFFFU, 0);
 
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     /* Positions reflect DST (= src*scale = 32). */
     float v1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
@@ -1808,6 +1809,34 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
 }
 
+/* The pivot is what a flip mirrors around, so a centered grid must come back
+ * symmetric about the matrix anchor instead of sliding to one side. */
+void test_emit_slice9_pivot_centers_and_mirrors(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xB9ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    float pos0[3];
+    float pos15[3];
+
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.5F, 0.5F, NULL, 1.0F, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_test_last_emit_position(0, pos0);
+    nt_sprite_renderer_test_last_emit_position(15, pos15);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos0[0] + 50.0F) < 0.5F && fabsf(pos0[1] + 50.0F) < 0.5F, "pivot 0.5 centers the grid");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos15[0] - 50.0F) < 0.5F && fabsf(pos15[1] - 50.0F) < 0.5F, "pivot 0.5 centers the grid");
+
+    /* Mirrored about the same pivot: the footprint stays where it was. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.5F, 0.5F, NULL, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
+    nt_sprite_renderer_test_last_emit_position(0, pos0);
+    nt_sprite_renderer_test_last_emit_position(15, pos15);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos0[0] - 50.0F) < 0.5F && fabsf(pos0[1] - 50.0F) < 0.5F, "flip mirrors around the pivot, not away from it");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos15[0] + 50.0F) < 0.5F && fabsf(pos15[1] + 50.0F) < 0.5F, "flip mirrors around the pivot, not away from it");
+}
+
 /* pixels_per_unit is what makes an SD -> HD atlas swap invisible: the denser
  * art has proportionally bigger borders in pixels, and the corner must still
  * come out the same size in the caller's units. */
@@ -1829,6 +1858,10 @@ void test_emit_slice9_bands_follow_pixels_per_unit(void) {
     nt_sprite_renderer_test_last_emit_position(4, r1);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 4.0F) < 0.5F, "L band must convert 16 px to 4 units at ppu=4");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 6.0F) < 0.5F, "B band must convert 24 px to 6 units at ppu=4");
+    /* Only the bands convert: w/h are the caller's units and must not shrink. */
+    float v3[3];
+    nt_sprite_renderer_test_last_emit_position(3, v3);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v3[0] - 100.0F) < 0.5F, "w stays in caller units at ppu=4");
 }
 
 /* Graceful degradation: when dst < border sum the corners must not overflow the
@@ -1837,7 +1870,7 @@ void test_emit_slice9_bands_follow_pixels_per_unit(void) {
  * Defold behavior — geometry never exceeds the requested rect. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void assert_slice9_within_rect(float x, float y, float w, float h, const char *msg) {
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     const float eps = 0.5F;
     for (uint32_t v = 0; v < 16U; ++v) {
         float p[3];
@@ -1881,6 +1914,11 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
     nt_sprite_renderer_test_last_emit_position(4, vb);
     nt_sprite_renderer_test_last_emit_position(8, vt);
     TEST_ASSERT_TRUE_MESSAGE(vb[1] <= vt[1] + 0.5F, "short-h inner-bottom must not cross inner-top");
+
+    /* Flipped squeeze: the footprint mirrors to [x-w, x], and the shrink must
+     * still keep every vertex inside it. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 20.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X);
+    assert_slice9_within_rect(x - 20.0F, y, 20.0F, 100.0F, "flipped narrow-w slice9 corners must stay within rect");
 
     /* Both axes squeezed: 12 x 8, both < 32. */
     nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 12.0F, 8.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
@@ -1934,6 +1972,7 @@ int main(void) {
     RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
+    RUN_TEST(test_emit_slice9_pivot_centers_and_mirrors);
     RUN_TEST(test_emit_slice9_bands_follow_pixels_per_unit);
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);

@@ -495,8 +495,8 @@ static void test_slice9_basic(void) {
     const uint16_t b4[4] = {4, 4, 4, 4};
     nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U);
 
-    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_slice9_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_slice9_index_count());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_emit_index_count());
 
     nt_sprite_renderer_flush();
 }

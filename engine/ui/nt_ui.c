@@ -1162,9 +1162,12 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         return;
     }
 
-    /* Flag bit OR non-zero lrtb selects override; flag allows override with zeros (disable slice9). */
+    /* Flag bit OR non-zero lrtb selects override; the flag with zeros DISABLES slice9,
+     * which is how nt_ui_fill's CROP reveal asks for a plain quad. */
     const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
+    const bool override_borders = (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
+    const bool emit_slice9 = has_s9_override ? override_borders : region_slice9;
     NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
     const float s9_scale = p->slice9_scale;
 
@@ -1173,9 +1176,10 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
 
-    if (has_s9_override || region_slice9) {
+    if (emit_slice9) {
         /* The grid carries its own pixel sizes, so the matrix only anchors and
-         * inverts it; the bbox center pairs with the {0.5, 0.5} pivot. */
+         * inverts it; the bbox center pairs with a centered pivot. A nine-patch
+         * fills its bbox unless the game moves the pivot explicitly. */
         float sm[16];
         for (int rr = 0; rr < 4; ++rr) {
             sm[rr] = world_mat4[rr];
@@ -1183,8 +1187,10 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
             sm[8 + rr] = world_mat4[8 + rr];
             sm[12 + rr] = (cx * world_mat4[rr]) + (cy * world_mat4[4 + rr]) + world_mat4[12 + rr];
         }
+        const float s9_origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F;
+        const float s9_origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F;
         const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, sm, bb.width, bb.height, 0.5F, 0.5F, src, s9_scale, col, p->flip_bits);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, sm, bb.width, bb.height, s9_origin_x, s9_origin_y, src, s9_scale, col, p->flip_bits);
         return;
     }
 

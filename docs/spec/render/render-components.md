@@ -117,7 +117,10 @@ subsequent atlas republishes. `reset_origin()` clears the override and
 restores the authored value on the next sync.
 
 Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
-They are pure state — no resolve, no atlas interaction.
+They are pure state — no resolve, no atlas interaction. The renderer mirrors
+by negating the sprite's local positions around its origin, so a nine-patch
+sprite mirrors exactly like a plain one: the corner bands and their UVs ride
+along, and the footprint stays where the pivot puts it.
 
 ### Lifecycle
 

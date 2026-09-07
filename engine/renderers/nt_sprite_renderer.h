@@ -157,8 +157,10 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *                         total > w/h. Border pixels convert to w/h units
  *                         through the atlas's pixels_per_unit, so swapping an
  *                         SD atlas for a denser HD one keeps the corner size.
+ *                         Bands stay exact — no pixel snapping.
  *   color_packed        - 0xAABBGGRR.
- *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y. Mirroring reverses
+ *                         winding, as in emit_region: keep the material CULL_NONE.
  *
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */
@@ -225,9 +227,6 @@ void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2])
 /* RGBA color of the i-th vertex of the last emit, as raw uint8 [R,G,B,A]. */
 void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]);
 bool nt_sprite_renderer_test_initialized(void);
-/* Captured vertex/index count from last slice9 emit. */
-uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);
-uint32_t nt_sprite_renderer_test_last_slice9_index_count(void);
 /* Flushes that replayed cmds (empty no-op flushes excluded). Lets rich z-layer tests pin per-band drains. */
 uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void);
 void nt_sprite_renderer_test_reset_nonempty_flush_calls(void);

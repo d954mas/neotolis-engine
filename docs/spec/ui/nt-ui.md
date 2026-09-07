@@ -107,20 +107,24 @@ layout-space bbox center via cglm. The walker reads the composed mat4
 from `tree_baked[layout_idx]` (hot path, no hashmap lookup) and ships
 `world_mat4[16]` to every emit_*.
 
-Every `emit_*` speaks one geometry language: local space is Y-up and
-pivot-relative, `flip_bits` mirror it by negating positions, and which way
-is up on screen is whatever `world_mat4` says. Slice9 obeys the same rule —
-its 4×4 grid starts at the local bottom, where `v_max` is, because blob
-vertices are Y-up while `atlas_v` stays PNG Y-down (see
-[resource.md](../assets/resource.md)). The walker therefore hands slice9 a
-matrix with the Y inversion and the bbox center in it, and a `{0.5, 0.5}`
-pivot, the same way it does for a plain region.
+The two textured emits — `emit_region` and `emit_slice9` — speak one
+geometry language: local space is Y-up and pivot-relative, `flip_bits`
+mirror it by negating positions (which reverses winding, so their
+materials stay `CULL_NONE`), and which way is up on screen is whatever
+`world_mat4` says. A slice9 grid starts at the local bottom, where `v_max`
+is, because blob vertices are Y-up while `atlas_v` stays PNG Y-down (see
+[resource.md](../assets/resource.md)). The walker hands it a matrix with
+the Y inversion and the bbox center in it, and a centered pivot, so a
+nine-patch fills its bbox unless `NT_UI_IMAGE_ORIGIN_OVERRIDE` moves the
+pivot. `emit_geometry` is not part of this: it takes caller-space corners
+and has neither pivot nor flip.
 
-Slice9 corner bands are the one place where the atlas's `pixels_per_unit`
-reaches the layout: a border is authored in source pixels and divided by
-it, so a denser HD atlas — whose borders are proportionally bigger in
-pixels — still renders the same corner. A stretched region needs no such
-conversion, which is why only the nine-patch path reads it.
+Slice9 corner bands are where the atlas's `pixels_per_unit` reaches the
+layout: a border is authored in source pixels and divided by it, so a
+denser HD atlas — whose borders are proportionally bigger in pixels —
+still renders the same corner. A stretched region divides the same factor
+straight back out (`bb.width / (source_w * ipu)`), so only the nine-patch
+lets it affect the result.
 
 Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
 
