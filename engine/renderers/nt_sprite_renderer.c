@@ -1092,8 +1092,6 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         return; /* tombstone */
     }
 
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-
     /* NULL src_lrtb → atlas-baked borders for this region. */
     const uint16_t src_sl = (src_lrtb != NULL) ? src_lrtb[0] : rh.region->slice9_lrtb[0];
     const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
@@ -1108,7 +1106,6 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed");
     NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
     NT_ASSERT(src_sl + src_sr < rh.region->source_w && src_st + src_sb < rh.region->source_h && "slice9 src borders exceed source dimensions");
-    NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
@@ -1120,10 +1117,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         .raw_vertices = rh.raw_vertices,
         .w = w,
         .h = h,
-        .band_l = (float)dst_sl * ipu,
-        .band_r = (float)dst_sr * ipu,
-        .band_t = (float)dst_st * ipu,
-        .band_b = (float)dst_sb * ipu,
+        .band_l = (float)dst_sl,
+        .band_r = (float)dst_sr,
+        .band_t = (float)dst_st,
+        .band_b = (float)dst_sb,
         .src_l = src_sl,
         .src_r = src_sr,
         .src_t = src_st,

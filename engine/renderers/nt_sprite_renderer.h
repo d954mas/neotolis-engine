@@ -154,7 +154,9 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *                         atlas-baked borders for this region.
  *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F
  *                         for src verbatim. Corners proportionally shrunk if
- *                         total > w/h.
+ *                         total > w/h. One source pixel of border renders as
+ *                         one unit of w/h: the atlas's pixels_per_unit does
+ *                         NOT enter here, since w/h are the caller's units.
  *   color_packed        - 0xAABBGGRR.
  *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
  *

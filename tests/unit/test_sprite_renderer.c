@@ -214,12 +214,17 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }
 
-static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size, uint32_t *out_total) {
+/* ppu <= 0 leaves the pack without pixels_per_unit metadata (atlas ipu stays 1). */
+static uint8_t *build_pack_blob_for_atlas_ppu(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size, float ppu, uint32_t *out_total) {
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
     const uint32_t atlas_offset = header_size;
     const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
-    const uint32_t total_size = atlas_offset + aligned_atlas;
+    const uint32_t meta_offset = atlas_offset + aligned_atlas;
+    const uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + (uint32_t)sizeof(float);
+    const uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const bool with_meta = ppu > 0.0F;
+    const uint32_t total_size = with_meta ? (meta_offset + aligned_meta) : (atlas_offset + aligned_atlas);
 
     uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
     TEST_ASSERT_NOT_NULL(pack_blob);
@@ -230,8 +235,8 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     ph->asset_count = 1;
     ph->header_size = header_size;
     ph->total_size = total_size;
-    ph->meta_offset = 0;
-    ph->meta_count = 0;
+    ph->meta_offset = with_meta ? meta_offset : 0;
+    ph->meta_count = with_meta ? 1 : 0;
 
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
@@ -239,10 +244,17 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     entry[0].format_version = NT_ATLAS_VERSION;
     entry[0].offset = atlas_offset;
     entry[0].size = atlas_blob_size;
-    entry[0].meta_offset = 0;
+    entry[0].meta_offset = with_meta ? meta_offset : 0;
     entry[0]._pad = 0;
 
     memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
+    if (with_meta) {
+        NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(pack_blob + meta_offset);
+        mh->resource_id = atlas_rid;
+        mh->kind = nt_hash64_str("pixels_per_unit").value;
+        mh->size = (uint32_t)sizeof(float);
+        memcpy(pack_blob + meta_offset + sizeof(NtMetaEntryHeader), &ppu, sizeof(ppu));
+    }
     ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
 
     *out_total = total_size;
@@ -260,12 +272,12 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
 /* ---- Helper: register an atlas resource via the full pipeline ---- */
 
-static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
+static nt_resource_t register_test_atlas_ppu(uint64_t atlas_rid, float ppu) {
     uint8_t atlas_blob[1024];
     uint32_t atlas_blob_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob));
 
     uint32_t pack_total = 0;
-    uint8_t *pack_blob = build_pack_blob_for_atlas(atlas_rid, atlas_blob, atlas_blob_size, &pack_total);
+    uint8_t *pack_blob = build_pack_blob_for_atlas_ppu(atlas_rid, atlas_blob, atlas_blob_size, ppu, &pack_total);
     TEST_ASSERT_TRUE_MESSAGE(s_pack_blob_count < MAX_PACK_BLOBS, "pack blob fixture overflow");
     s_pack_blobs[s_pack_blob_count++] = pack_blob;
 
@@ -285,6 +297,8 @@ static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
     TEST_ASSERT_TRUE(nt_resource_is_ready(atlas));
     return atlas;
 }
+
+static nt_resource_t register_test_atlas(uint64_t atlas_rid) { return register_test_atlas_ppu(atlas_rid, 0.0F); }
 
 /* ---- Helper: create a minimal real material backed by test backend shader handles ---- */
 
@@ -1794,6 +1808,28 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
 }
 
+/* The rect is in the caller's units, so the atlas's pixels_per_unit must not
+ * shrink the corner bands with it — a UI panel laid out in layout px keeps its
+ * 16 px corners whatever scale the atlas was packed at. */
+void test_emit_slice9_bands_ignore_pixels_per_unit(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas_ppu(0xB8ULL, 4.0F);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
+
+    float v1[3];
+    float r1[3];
+    nt_sprite_renderer_test_last_emit_position(1, v1);
+    nt_sprite_renderer_test_last_emit_position(4, r1);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 16.0F) < 0.5F, "L band must stay 16 units at ppu=4");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 24.0F) < 0.5F, "B band must stay 24 units at ppu=4");
+}
+
 /* Graceful degradation: when dst < border sum the corners must not overflow the
  * requested rect. Emit into a rect smaller than the borders on one then both axes
  * and assert all 16 grid vertices stay inside [x, x+w] x [y, y+h]. Mirrors Unity/
@@ -1897,6 +1933,7 @@ int main(void) {
     RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
+    RUN_TEST(test_emit_slice9_bands_ignore_pixels_per_unit);
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();
