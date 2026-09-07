@@ -1808,10 +1808,10 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
 }
 
-/* The rect is in the caller's units, so the atlas's pixels_per_unit must not
- * shrink the corner bands with it — a UI panel laid out in layout px keeps its
- * 16 px corners whatever scale the atlas was packed at. */
-void test_emit_slice9_bands_ignore_pixels_per_unit(void) {
+/* pixels_per_unit is what makes an SD -> HD atlas swap invisible: the denser
+ * art has proportionally bigger borders in pixels, and the corner must still
+ * come out the same size in the caller's units. */
+void test_emit_slice9_bands_follow_pixels_per_unit(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
@@ -1819,15 +1819,16 @@ void test_emit_slice9_bands_ignore_pixels_per_unit(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* baked 16/16/8/24 */
     nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
 
+    /* At ppu=4 the 16 px L border is 4 units, the 24 px B border is 6. */
     float v1[3];
     float r1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
     nt_sprite_renderer_test_last_emit_position(4, r1);
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 16.0F) < 0.5F, "L band must stay 16 units at ppu=4");
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 24.0F) < 0.5F, "B band must stay 24 units at ppu=4");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 4.0F) < 0.5F, "L band must convert 16 px to 4 units at ppu=4");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 6.0F) < 0.5F, "B band must convert 24 px to 6 units at ppu=4");
 }
 
 /* Graceful degradation: when dst < border sum the corners must not overflow the
@@ -1933,7 +1934,7 @@ int main(void) {
     RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
-    RUN_TEST(test_emit_slice9_bands_ignore_pixels_per_unit);
+    RUN_TEST(test_emit_slice9_bands_follow_pixels_per_unit);
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();

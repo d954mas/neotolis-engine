@@ -116,6 +116,12 @@ vertices are Y-up while `atlas_v` stays PNG Y-down (see
 matrix with the Y inversion and the bbox center in it, and a `{0.5, 0.5}`
 pivot, the same way it does for a plain region.
 
+Slice9 corner bands are the one place where the atlas's `pixels_per_unit`
+reaches the layout: a border is authored in source pixels and divided by
+it, so a denser HD atlas — whose borders are proportionally bigger in
+pixels — still renders the same corner. A stretched region needs no such
+conversion, which is why only the nine-patch path reads it.
+
 Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
 
 - **2D ctx** (default): screen Y-flip (Clay layout Y-down → GL Y-up) is
