@@ -84,8 +84,9 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
  * layout through nt_color (the canonical home) then scales [0,1]->0..255; the
  * byte/255*255 round-trip is exact for all 256 byte values, so output is
  * byte-identical to a direct byte extract. */
-/* sprite_mat4 = world × T(ox, oy) × S(sx, -sy, 1). The sprite renderer's local space is Y-up while
- * layout is Y-down, so col1 is negated; this is the one place that inversion lives for images. */
+/* model = world × T(ox, oy) × S(sx, -sy, 1). Sprite and text renderers are Y-up locally while layout
+ * is Y-down, so col1 is negated — here and nowhere else. Glyphs read upright under any world_mat4
+ * (2D ortho, 3D billboard via negative scale_y, inspector screen-space) for the same reason. */
 static inline void nt_ui_sprite_mat4(const float world[16], float ox, float oy, float sx, float sy, float out[16]) {
     for (int r = 0; r < 4; ++r) {
         out[r] = sx * world[r];

@@ -778,11 +778,9 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 
 // #region helper_emit_screen_rect
 /* Unit square (0,0..1,1) onto the Clay bbox: origin at the bbox's bottom-left in layout, scaled by its size. */
-static inline void build_quad_mat4(const float world[16], float x, float y, float w, float h, float out_m[16]) { nt_ui_sprite_mat4(world, x, y + h, w, h, out_m); }
-
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
-    build_quad_mat4(world_mat4, x, y, w, h, m);
+    nt_ui_sprite_mat4(world_mat4, x, y + h, w, h, m);
     nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
 }
 // #endregion
@@ -1298,22 +1296,11 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     /* Y-down: baseline = bbox.y(top) + center_offset + ascent*scale. */
     const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * layout_scale);
 
-    /* Text-renderer local is Y-up; Clay positions are Y-down. Negating col1 always opposes the two
-     * so glyphs read upright — independent of how world_mat4 maps Clay→world (2D ortho, 3D billboard
-     * via negative scale_y, or inspector screen-space). */
-    const float ox = c->boundingBox.x;
-    const float oy = baseline_y;
-    const float sign_y = -1.0F;
     /* size already folds in text_scale (world X-magnitude), so the model handed to the renderer must
      * be scale-free like every other call site — else the X scale lands twice and glyphs shrink ~text_scale. */
     const float inv_ts = (text_scale > 0.0F) ? (1.0F / text_scale) : 0.0F;
     float m[16];
-    for (int rr = 0; rr < 4; ++rr) {
-        m[rr] = world_mat4[rr] * inv_ts;
-        m[4 + rr] = sign_y * world_mat4[4 + rr] * inv_ts;
-        m[8 + rr] = world_mat4[8 + rr] * inv_ts;
-        m[12 + rr] = (ox * world_mat4[rr]) + (oy * world_mat4[4 + rr]) + world_mat4[12 + rr];
-    }
+    nt_ui_sprite_mat4(world_mat4, c->boundingBox.x, baseline_y, inv_ts, inv_ts, m);
     const float color[4] = {
         t->textColor.r / 255.0F,
         t->textColor.g / 255.0F,
