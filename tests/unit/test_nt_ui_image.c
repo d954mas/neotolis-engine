@@ -292,14 +292,15 @@ static void test_image_slice9_orientation_matches_single_quad(void) {
     TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V0_RAW, plain_top_v);
     TEST_ASSERT_EQUAL_UINT16(plain_top_v, sliced_top_v);
 
-    /* Grid row 1 is the T border seam: 2 px down the screen (world Y-up), and
-     * 2 of the 8 source rows into the region's V span. */
+    /* Grid row 3 is the local top, which the walker's matrix lands at the top of
+     * the bbox; row 2 is the T seam, 2 px down the screen and 2 of the 8 source
+     * rows into the region's V span. */
     float top_pos[3];
     float seam_pos[3];
     uint16_t seam_uv[2];
-    nt_sprite_renderer_test_last_emit_position(0U, top_pos);
-    nt_sprite_renderer_test_last_emit_position(4U, seam_pos);
-    nt_sprite_renderer_test_last_emit_texcoord(4U, seam_uv);
+    nt_sprite_renderer_test_last_emit_position(12U, top_pos);
+    nt_sprite_renderer_test_last_emit_position(8U, seam_pos);
+    nt_sprite_renderer_test_last_emit_texcoord(8U, seam_uv);
     TEST_ASSERT_EQUAL_INT32(2, (int32_t)(top_pos[1] - seam_pos[1]));
     TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V0_RAW + ((MINIMAL_UI_ATLAS_PACKED_V1_RAW - MINIMAL_UI_ATLAS_PACKED_V0_RAW) / 4U), seam_uv[1]);
 

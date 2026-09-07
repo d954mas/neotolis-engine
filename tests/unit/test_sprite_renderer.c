@@ -1696,11 +1696,9 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
-    const float x = 0.0F;
-    const float y = 0.0F;
     const float w = 100.0F;
     const float h = 100.0F;
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, w, h, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, w, h, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
 
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
     /* Inner column 1 = x + (16 * 1.0F) = 16. */
@@ -1712,17 +1710,20 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     nt_sprite_renderer_test_last_emit_position(2, v2);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 84.0F) < 0.5F, "scale=1.0 inner-right should be 84 px");
 
-    /* Rows take the baked T=8 along the top and B=24 along the bottom, and the
-     * V cuts follow: v_min=28000, v_range=6000, source_h=100 -> 60 per px. */
+    /* Local space is Y-up: row 1 carries the baked B=24, row 2 sits T=8 below the
+     * top. V follows: v_min=28000, v_max=34000, source_h=100 -> 60 per px. */
     float r1[3];
     float r2[3];
     uint16_t uv_r1[2];
+    uint16_t uv_r2[2];
     nt_sprite_renderer_test_last_emit_position(4, r1);
     nt_sprite_renderer_test_last_emit_position(8, r2);
     nt_sprite_renderer_test_last_emit_texcoord(4, uv_r1);
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 8.0F) < 0.5F, "atlas T border belongs to the top row");
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 76.0F) < 0.5F, "atlas B border belongs to the bottom row");
-    TEST_ASSERT_EQUAL_UINT16_MESSAGE(28480U, uv_r1[1], "row-1 V must be 8 source rows in from v_min");
+    nt_sprite_renderer_test_last_emit_texcoord(8, uv_r2);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 24.0F) < 0.5F, "atlas B border belongs to the local-bottom row");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 92.0F) < 0.5F, "atlas T border belongs to the local-top row");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(32560U, uv_r1[1], "row-1 V must be 24 source rows in from v_max");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(28480U, uv_r2[1], "row-2 V must be 8 source rows in from v_min");
 }
 
 /* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
@@ -1737,7 +1738,7 @@ void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, NULL, 2.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 2.0F, 0xFFFFFFFFU, 0);
 
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
     /* Positions reflect DST (= src*scale = 32). */
@@ -1757,13 +1758,13 @@ void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_test_last_emit_texcoord(2, uv2);
     /* uv_col2 = u_max - 16*u_range/100 = 17000 - 480 = 16520. */
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(16520U, uv2[0], "scale=2.0 UV column-2 must use SRC=atlas borders");
-    /* Both row borders scale too: T 8 -> 16, B 24 -> 48. */
+    /* Both row borders scale too: B 24 -> 48, T 8 -> 16 (so row 2 = 100 - 16). */
     float r1[3];
     float r2[3];
     nt_sprite_renderer_test_last_emit_position(4, r1);
     nt_sprite_renderer_test_last_emit_position(8, r2);
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 16.0F) < 0.5F, "scale=2.0 inner-top should be 16 px");
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 52.0F) < 0.5F, "scale=2.0 inner-bottom should be 52 px");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 48.0F) < 0.5F, "scale=2.0 inner-bottom should be 48 px");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 84.0F) < 0.5F, "scale=2.0 inner-top should be 84 px");
 }
 
 /* ECS path: set_slice9_scale on sprite_comp must scale destination corner size
@@ -1817,12 +1818,16 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* 16/16/16/16 borders */
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* 16/16/8/24 borders */
     const float x = 100.0F;
     const float y = 200.0F;
+    float at_xy[16];
+    memcpy(at_xy, NT_MATH_MAT4_IDENTITY, sizeof at_xy);
+    at_xy[12] = x;
+    at_xy[13] = y;
 
     /* Horizontal squeeze: w=20 < (16+16)=32; inner columns must not cross. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 20.0F, 100.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 20.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 20.0F, 100.0F, "narrow-w slice9 corners must stay within rect");
     /* Inner-left <= inner-right (no crossing). */
     float vl[3];
@@ -1832,11 +1837,16 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
     TEST_ASSERT_TRUE_MESSAGE(vl[0] <= vr[0] + 0.5F, "narrow-w inner-left must not cross inner-right");
 
     /* Vertical squeeze: h=10 < 32. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 100.0F, 10.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 100.0F, 10.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 100.0F, 10.0F, "short-h slice9 corners must stay within rect");
+    float vb[3];
+    float vt[3];
+    nt_sprite_renderer_test_last_emit_position(4, vb);
+    nt_sprite_renderer_test_last_emit_position(8, vt);
+    TEST_ASSERT_TRUE_MESSAGE(vb[1] <= vt[1] + 0.5F, "short-h inner-bottom must not cross inner-top");
 
     /* Both axes squeezed: 12 x 8, both < 32. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 12.0F, 8.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 12.0F, 8.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 12.0F, 8.0F, "tiny slice9 corners must stay within rect");
 }
 

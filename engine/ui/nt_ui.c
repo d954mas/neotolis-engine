@@ -1168,9 +1168,23 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
     const float s9_scale = p->slice9_scale;
 
+    /* Source's (origin, origin) point anchors at bbox center. Build sprite_mat4 = world × T(cx, cy) × S(sx, -sy, 1):
+     * source Y-up (image texels flow up) inverts before world maps to layout — col1 negates world.col1. */
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
+
     if (has_s9_override || region_slice9) {
+        /* The grid carries its own pixel sizes, so the matrix only anchors and
+         * inverts it; the bbox center pairs with the {0.5, 0.5} pivot. */
+        float sm[16];
+        for (int rr = 0; rr < 4; ++rr) {
+            sm[rr] = world_mat4[rr];
+            sm[4 + rr] = -world_mat4[4 + rr];
+            sm[8 + rr] = world_mat4[8 + rr];
+            sm[12 + rr] = (cx * world_mat4[rr]) + (cy * world_mat4[4 + rr]) + world_mat4[12 + rr];
+        }
         const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src, s9_scale, col, p->flip_bits, world_mat4);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, sm, bb.width, bb.height, 0.5F, 0.5F, src, s9_scale, col, p->flip_bits);
         return;
     }
 
@@ -1180,11 +1194,6 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     NT_ASSERT(src_w > 0.0F && src_h > 0.0F && "nt_ui IMAGE: atlas region has zero source dimensions (broken atlas data)");
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
-
-    /* Source's (origin, origin) point anchors at bbox center. Build sprite_mat4 = world × T(cx, cy) × S(sx, -sy, 1):
-     * source Y-up (image texels flow up) inverts before world maps to layout — col1 negates world.col1. */
-    const float cx = bb.x + (bb.width * 0.5F);
-    const float cy = bb.y + (bb.height * 0.5F);
     float m[16];
     for (int rr = 0; rr < 4; ++rr) {
         m[rr] = sx_f * world_mat4[rr];

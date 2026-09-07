@@ -139,15 +139,17 @@ void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
-/* Emit a 9-quad slice9 image. Same vertex format and pipeline as emit_region.
+/* Emit a 9-quad slice9 image. Same vertex format, local space and pipeline as
+ * emit_region: the grid is built Y-up around the pivot and flip_bits mirror it
+ * by negating positions, so the caller's world_matrix decides which way is up.
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in caller's coordinate space; y is its
- *                         TOP edge (Y grows down, as in Clay layout space),
- *                         so the source's top row lands at y and the `t`
- *                         border sits along it. (The ECS sprite_comp slice9
- *                         path builds its grid in Y-up source-local space
- *                         instead, and mirrors by negating positions.)
+ *   world_matrix        - 16-float column-major mat4, same convention as
+ *                         emit_region. Pass NT_MATH_MAT4_IDENTITY for none.
+ *   w, h                - rendered size in the matrix's units. Unlike
+ *                         emit_region the size is explicit, because the corner
+ *                         bands must not scale with it.
+ *   origin_x, _y        - pivot, normalized over w/h (e.g. {0.5, 0.5}).
  *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
  *                         atlas-baked borders for this region.
  *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F
@@ -155,13 +157,11 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *                         total > w/h.
  *   color_packed        - 0xAABBGGRR.
  *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
- *   world_matrix        - 16-float column-major mat4 (same convention as
- *                         emit_region). Pass NT_MATH_MAT4_IDENTITY for none.
  *
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
-                                    uint8_t flip_bits, const float *world_matrix);
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
+                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a

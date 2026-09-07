@@ -107,14 +107,14 @@ layout-space bbox center via cglm. The walker reads the composed mat4
 from `tree_baked[layout_idx]` (hot path, no hashmap lookup) and ships
 `world_mat4[16]` to every emit_*.
 
-Every geometry argument that travels beside that matrix is in Clay layout
-space, Y down. `nt_sprite_renderer_emit_slice9` therefore takes the rect
-top-anchored: row 0 of its 4×4 grid is the rect's top edge, carries the
-`t` border, and samples `v_min` — the source's top row, since blob
+Every `emit_*` speaks one geometry language: local space is Y-up and
+pivot-relative, `flip_bits` mirror it by negating positions, and which way
+is up on screen is whatever `world_mat4` says. Slice9 obeys the same rule —
+its 4×4 grid starts at the local bottom, where `v_max` is, because blob
 vertices are Y-up while `atlas_v` stays PNG Y-down (see
-[resource.md](../assets/resource.md)). The ECS sprite path builds the same
-grid in Y-up source-local space and mirrors by negating positions, so the
-two differ by construction, not by accident.
+[resource.md](../assets/resource.md)). The walker therefore hands slice9 a
+matrix with the Y inversion and the bbox center in it, and a `{0.5, 0.5}`
+pivot, the same way it does for a plain region.
 
 Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
 
