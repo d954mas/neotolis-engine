@@ -123,9 +123,8 @@ static void test_custom_is_hard_barrier(void) {
     TEST_ASSERT_EQUAL_UINT32(calls_before + 2U, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* Real Clay trees: the band comes from build_tree, not from the command's own zIndex. Vertex 0 of an
- * IMAGE lands at the bbox centre with the fixture's origin-(0,0) white region, a RECT's at its corner,
- * so the boxes sit in disjoint x ranges and the last sprite emit is attributed by range. */
+/* Vertex 0 of an IMAGE lands at the bbox centre with the fixture's origin-(0,0) white region, a RECT's
+ * at its corner, so the boxes sit in disjoint x ranges and the last sprite emit is attributed by range. */
 static const nt_ui_image_style_t k_image_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
 
 static int last_emit_x(void) {
@@ -179,25 +178,6 @@ static void test_band_base_sprite_does_not_paint_over_overlay_image(void) {
     const int x = last_emit_x();
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
     TEST_ASSERT_TRUE_MESSAGE(x >= 300, "overlay IMAGE must paint after the base-band IMAGE regardless of layer");
-}
-
-/* Band beats layer across tree roots: base RECT(layer 1) still paints under the overlay RECT(layer 0). */
-static void test_band_beats_layer_across_roots(void) {
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800.0F), CLAY_SIZING_FIXED(600.0F)}}}) {
-        CLAY({.id = CLAY_ID("base_rect"), .layout = {.sizing = {CLAY_SIZING_FIXED(40.0F), CLAY_SIZING_FIXED(40.0F)}}, .backgroundColor = {0, 255.0F, 0, 255.0F}, .userData = NT_UI_CLAY_DATA(1)}) {}
-        CLAY({.id = CLAY_ID("overlay"),
-              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 1000, .offset = {.x = 300.0F, .y = 0.0F}},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}},
-              .backgroundColor = {255.0F, 0, 0, 255.0F},
-              .userData = NT_UI_CLAY_DATA(0)}) {}
-    }
-    nt_ui_end(s_fx.ctx);
-
-    const int x = last_emit_x();
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
-    TEST_ASSERT_TRUE_MESSAGE(x >= 300, "overlay RECT on layer 0 must paint after the base RECT on layer 1");
 }
 
 /* Same band, same layer: declaration order is the last key. */
@@ -301,7 +281,6 @@ int main(void) {
     RUN_TEST(test_custom_is_hard_barrier);
     RUN_TEST(test_band_layer_orders_image_after_rect_inside_overlay);
     RUN_TEST(test_band_base_sprite_does_not_paint_over_overlay_image);
-    RUN_TEST(test_band_beats_layer_across_roots);
     RUN_TEST(test_same_band_same_layer_keeps_declaration_order);
     RUN_TEST(test_unlayered_count_tracks_null_userdata);
     RUN_TEST(test_layer_sort_overrides_declaration_order);

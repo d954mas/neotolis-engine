@@ -563,7 +563,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             continue;
         }
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
-        /* Band lives here because Clay stamps zIndex on RECT/TEXT/SCISSOR commands only; the walker segments on it. */
+        /* Band is uniform per tree root; the walker segments on this baked copy, not on command zIndex. */
         const int16_t root_zindex = root->zIndex;
 
         nt_ui_baked_xform_t seed;
