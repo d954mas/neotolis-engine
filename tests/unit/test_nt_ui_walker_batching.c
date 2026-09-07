@@ -26,14 +26,7 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static void inject_frozen_cmds(int32_t count) {
-    for (int32_t k = 0; k < count; ++k) {
-        s_test_cmds[k].nt_layout_index = -1; /* synthetic: no layout element, band 0 */
-    }
-    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_fx.ctx->frozen_cmds.length = count;
-    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
-}
+static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
 /* File-scope so layer data outlives walk (compound literal would scope out). */
 static const nt_ui_element_data_t k_layer_sprite = {.layer = 0U};

@@ -63,11 +63,7 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 /* Inject a synthetic frozen_cmds array into the ctx so the walker iterates
  * a known-shape command list. Bypasses Clay declaration machinery. */
-static void inject_frozen_cmds(int32_t count) {
-    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_fx.ctx->frozen_cmds.length = count;
-    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
-}
+static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
 /* ---- Tests ---- */
 

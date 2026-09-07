@@ -41,6 +41,9 @@ typedef struct {
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
+/* Installs a hand-built command stream as the frozen frame. Runs an empty frame first so the stream's
+ * nt_layout_index 0 (zeroed) resolves to the baked root: identity transform, band 0. */
+void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity);
 
 #ifdef __cplusplus
 }

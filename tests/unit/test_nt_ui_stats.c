@@ -38,11 +38,7 @@ void tearDown(void) {
     ui_walker_fixture_shutdown(&s_fx);
 }
 
-static void inject_frozen_cmds(int32_t count) {
-    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_fx.ctx->frozen_cmds.length = count;
-    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
-}
+static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
 /* The metrics-bridge sub-test needs real nt_metrics + overlay bodies; both compile to no-op stubs
  * on the OFF mirror (NT_UI_DEBUG_TOOLS=OFF, which forces NT_METRICS_ENABLED=OFF). The remaining
