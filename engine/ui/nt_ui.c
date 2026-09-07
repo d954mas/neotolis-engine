@@ -1172,9 +1172,12 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     }
     float m[16];
     nt_ui_sprite_mat4(world_mat4, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), sx_f, sy_f, m);
-    const bool origin_ov = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) != 0;
-    const float origin_x = origin_ov ? p->origin_x : (sliced ? 0.5F : r->origin_x);
-    const float origin_y = origin_ov ? p->origin_y : (sliced ? 0.5F : r->origin_y);
+    float origin_x = sliced ? 0.5F : r->origin_x;
+    float origin_y = sliced ? 0.5F : r->origin_y;
+    if (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
+        origin_x = p->origin_x;
+        origin_y = p->origin_y;
+    }
     if (sliced) {
         nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
         return;
