@@ -88,7 +88,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 #define FIXTURE_R0_HASH 0x100ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_R1_HASH 0x200ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_RPOLY_HASH 0x300ULL /* polygon, 6 verts, 12 indices (4 triangles fan) */
-#define FIXTURE_RS9_HASH 0x400ULL   /* rect with baked slice9 borders 16/16/16/16 */
+#define FIXTURE_RS9_HASH 0x400ULL   /* rect with baked slice9 borders 16/16/8/24 */
 #define FIXTURE_PAGE0_RID 0x7000ULL
 #define FIXTURE_PAGE1_RID 0x7001ULL
 
@@ -179,9 +179,10 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[2].page_index = 0;
     regions[2].transform = 0;
 
-    /* rs9: 100x100 rect with baked slice9 borders {16,16,16,16}. Source big
-     * enough that scale=2.0F (→ 32) still satisfies emit_slice9's sl+sr<source_w
-     * contract; lets the from_region helper pass borders verbatim. */
+    /* rs9: 100x100 rect with baked slice9 borders {16,16,8,24} — T and B differ so
+     * a swapped top/bottom read cannot pass. Source big enough that scale=2.0F
+     * still satisfies emit_slice9's sl+sr<source_w contract; lets the
+     * from_region helper pass borders verbatim. */
     regions[3].name_hash = FIXTURE_RS9_HASH;
     regions[3].source_w = 100;
     regions[3].source_h = 100;
@@ -196,8 +197,8 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[3].flags = NT_ATLAS_REGION_FLAG_QUAD_012023;
     regions[3].slice9_lrtb[0] = 16;
     regions[3].slice9_lrtb[1] = 16;
-    regions[3].slice9_lrtb[2] = 16;
-    regions[3].slice9_lrtb[3] = 16;
+    regions[3].slice9_lrtb[2] = 8;
+    regions[3].slice9_lrtb[3] = 24;
 
     uint64_t page_ids[2] = {FIXTURE_PAGE0_RID, FIXTURE_PAGE1_RID};
     mock_atlas_spec_t spec = {
@@ -213,12 +214,17 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }
 
-static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size, uint32_t *out_total) {
+/* ppu <= 0 leaves the pack without pixels_per_unit metadata (atlas ipu stays 1). */
+static uint8_t *build_pack_blob_for_atlas_ppu(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size, float ppu, uint32_t *out_total) {
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
     const uint32_t atlas_offset = header_size;
     const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
-    const uint32_t total_size = atlas_offset + aligned_atlas;
+    const uint32_t meta_offset = atlas_offset + aligned_atlas;
+    const uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + (uint32_t)sizeof(float);
+    const uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const bool with_meta = ppu > 0.0F;
+    const uint32_t total_size = with_meta ? (meta_offset + aligned_meta) : (atlas_offset + aligned_atlas);
 
     uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
     TEST_ASSERT_NOT_NULL(pack_blob);
@@ -229,8 +235,8 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     ph->asset_count = 1;
     ph->header_size = header_size;
     ph->total_size = total_size;
-    ph->meta_offset = 0;
-    ph->meta_count = 0;
+    ph->meta_offset = with_meta ? meta_offset : 0;
+    ph->meta_count = with_meta ? 1 : 0;
 
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
@@ -238,10 +244,17 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     entry[0].format_version = NT_ATLAS_VERSION;
     entry[0].offset = atlas_offset;
     entry[0].size = atlas_blob_size;
-    entry[0].meta_offset = 0;
+    entry[0].meta_offset = with_meta ? meta_offset : 0;
     entry[0]._pad = 0;
 
     memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
+    if (with_meta) {
+        NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(pack_blob + meta_offset);
+        mh->resource_id = atlas_rid;
+        mh->kind = nt_hash64_str("pixels_per_unit").value;
+        mh->size = (uint32_t)sizeof(float);
+        memcpy(pack_blob + meta_offset + sizeof(NtMetaEntryHeader), &ppu, sizeof(ppu));
+    }
     ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
 
     *out_total = total_size;
@@ -259,12 +272,12 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
 /* ---- Helper: register an atlas resource via the full pipeline ---- */
 
-static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
+static nt_resource_t register_test_atlas_ppu(uint64_t atlas_rid, float ppu) {
     uint8_t atlas_blob[1024];
     uint32_t atlas_blob_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob));
 
     uint32_t pack_total = 0;
-    uint8_t *pack_blob = build_pack_blob_for_atlas(atlas_rid, atlas_blob, atlas_blob_size, &pack_total);
+    uint8_t *pack_blob = build_pack_blob_for_atlas_ppu(atlas_rid, atlas_blob, atlas_blob_size, ppu, &pack_total);
     TEST_ASSERT_TRUE_MESSAGE(s_pack_blob_count < MAX_PACK_BLOBS, "pack blob fixture overflow");
     s_pack_blobs[s_pack_blob_count++] = pack_blob;
 
@@ -284,6 +297,8 @@ static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
     TEST_ASSERT_TRUE(nt_resource_is_ready(atlas));
     return atlas;
 }
+
+static nt_resource_t register_test_atlas(uint64_t atlas_rid) { return register_test_atlas_ppu(atlas_rid, 0.0F); }
 
 /* ---- Helper: create a minimal real material backed by test backend shader handles ---- */
 
@@ -1643,12 +1658,37 @@ static uint32_t find_rs9_region_index(nt_resource_t atlas) {
     const uint32_t count = nt_atlas_region_count(atlas);
     for (uint32_t i = 0; i < count; i++) {
         const nt_texture_region_t *r = nt_atlas_get_region(atlas, i);
-        if (r->slice9_lrtb[0] == 16 && r->slice9_lrtb[1] == 16 && r->slice9_lrtb[2] == 16 && r->slice9_lrtb[3] == 16) {
+        if (r->slice9_lrtb[0] == 16 && r->slice9_lrtb[1] == 16 && r->slice9_lrtb[2] == 8 && r->slice9_lrtb[3] == 24) {
             return i;
         }
     }
-    TEST_FAIL_MESSAGE("rs9 region with slice9_lrtb=16/16/16/16 not found");
+    TEST_FAIL_MESSAGE("rs9 region with slice9_lrtb=16/16/8/24 not found");
     return 0;
+}
+
+/* ---- Test: ECS slice9 honors flip ---- */
+/* The component path mirrors by negating grid positions, so a flipped sprite must
+ * pair the same source edge with the opposite end of its footprint. */
+void test_draw_list_slice9_flip_mirrors_source(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xB7ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_RS9_HASH, mat);
+    nt_sprite_comp_set_flip(e, true, true);
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Origin (0,0) stays put and the far corner spans the whole 100x100
+     * footprint on the negative side: the mirror reached the grid. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0]) < 0.5F && fabsf(pos[1]) < 0.5F, "origin (0,0) corner stays put");
+    nt_sprite_renderer_test_last_emit_position(15U, pos);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos[0] + 100.0F) < 0.5F && fabsf(pos[1] + 100.0F) < 0.5F, "flip must mirror the full footprint");
 }
 
 /* scale=1.0F → atlas borders unchanged → grid x_inner == x + 16; matches emit_slice9. */
@@ -1661,13 +1701,11 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
-    const float x = 0.0F;
-    const float y = 0.0F;
     const float w = 100.0F;
     const float h = 100.0F;
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, w, h, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, w, h, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
 
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     /* Inner column 1 = x + (16 * 1.0F) = 16. */
     float v1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
@@ -1676,6 +1714,21 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     float v2[3];
     nt_sprite_renderer_test_last_emit_position(2, v2);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 84.0F) < 0.5F, "scale=1.0 inner-right should be 84 px");
+
+    /* Local space is Y-up: row 1 carries the baked B=24, row 2 sits T=8 below the
+     * top. V follows: v_min=28000, v_max=34000, source_h=100 -> 60 per px. */
+    float r1[3];
+    float r2[3];
+    uint16_t uv_r1[2];
+    uint16_t uv_r2[2];
+    nt_sprite_renderer_test_last_emit_position(4, r1);
+    nt_sprite_renderer_test_last_emit_position(8, r2);
+    nt_sprite_renderer_test_last_emit_texcoord(4, uv_r1);
+    nt_sprite_renderer_test_last_emit_texcoord(8, uv_r2);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 24.0F) < 0.5F, "atlas B border belongs to the local-bottom row");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 92.0F) < 0.5F, "atlas T border belongs to the local-top row");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(32560U, uv_r1[1], "row-1 V must be 24 source rows in from v_max");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(28480U, uv_r2[1], "row-2 V must be 8 source rows in from v_min");
 }
 
 /* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
@@ -1690,9 +1743,9 @@ void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, NULL, 2.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 2.0F, 0xFFFFFFFFU, 0);
 
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     /* Positions reflect DST (= src*scale = 32). */
     float v1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
@@ -1710,6 +1763,13 @@ void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_test_last_emit_texcoord(2, uv2);
     /* uv_col2 = u_max - 16*u_range/100 = 17000 - 480 = 16520. */
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(16520U, uv2[0], "scale=2.0 UV column-2 must use SRC=atlas borders");
+    /* Both row borders scale too: B 24 -> 48, T 8 -> 16 (so row 2 = 100 - 16). */
+    float r1[3];
+    float r2[3];
+    nt_sprite_renderer_test_last_emit_position(4, r1);
+    nt_sprite_renderer_test_last_emit_position(8, r2);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 48.0F) < 0.5F, "scale=2.0 inner-bottom should be 48 px");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r2[1] - 84.0F) < 0.5F, "scale=2.0 inner-top should be 84 px");
 }
 
 /* ECS path: set_slice9_scale on sprite_comp must scale destination corner size
@@ -1739,13 +1799,84 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
 }
 
+/* set_slice9(0,0,0,0) promises a plain stretched quad, so the ECS path must not
+ * hand a baked nine-patch region to the grid when the override zeroes it. */
+void test_draw_list_zero_slice9_override_emits_plain_quad(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xBAULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_RS9_HASH, mat); /* baked 16/16/8/24 */
+    nt_sprite_comp_set_slice9(e, 0, 0, 0, 0);
+    nt_render_item_t item = {.entity = e.id, .batch_key = sprite_batch_key(e, mat)};
+
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+}
+
+/* The pivot is what a flip mirrors around, so a centered grid must come back
+ * symmetric about the matrix anchor instead of sliding to one side. */
+void test_emit_slice9_pivot_centers_and_mirrors(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xB9ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    float pos0[3];
+    float pos15[3];
+
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.5F, 0.5F, NULL, 1.0F, 0xFFFFFFFFU, 0);
+    nt_sprite_renderer_test_last_emit_position(0, pos0);
+    nt_sprite_renderer_test_last_emit_position(15, pos15);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos0[0] + 50.0F) < 0.5F && fabsf(pos0[1] + 50.0F) < 0.5F, "pivot 0.5 centers the grid");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos15[0] - 50.0F) < 0.5F && fabsf(pos15[1] - 50.0F) < 0.5F, "pivot 0.5 centers the grid");
+
+    /* Mirrored about the same pivot: the footprint stays where it was. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.5F, 0.5F, NULL, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
+    nt_sprite_renderer_test_last_emit_position(0, pos0);
+    nt_sprite_renderer_test_last_emit_position(15, pos15);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos0[0] - 50.0F) < 0.5F && fabsf(pos0[1] - 50.0F) < 0.5F, "flip mirrors around the pivot, not away from it");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos15[0] + 50.0F) < 0.5F && fabsf(pos15[1] + 50.0F) < 0.5F, "flip mirrors around the pivot, not away from it");
+}
+
+/* pixels_per_unit is what makes an SD -> HD atlas swap invisible: the denser
+ * art has proportionally bigger borders in pixels, and the corner must still
+ * come out the same size in the caller's units. */
+void test_emit_slice9_bands_follow_pixels_per_unit(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas_ppu(0xB8ULL, 4.0F);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* baked 16/16/8/24 */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
+
+    /* At ppu=4 the 16 px L border is 4 units, the 24 px B border is 6. */
+    float v1[3];
+    float r1[3];
+    nt_sprite_renderer_test_last_emit_position(1, v1);
+    nt_sprite_renderer_test_last_emit_position(4, r1);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 4.0F) < 0.5F, "L band must convert 16 px to 4 units at ppu=4");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 6.0F) < 0.5F, "B band must convert 24 px to 6 units at ppu=4");
+    /* Only the bands convert: w/h are the caller's units and must not shrink. */
+    float v3[3];
+    nt_sprite_renderer_test_last_emit_position(3, v3);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v3[0] - 100.0F) < 0.5F, "w stays in caller units at ppu=4");
+}
+
 /* Graceful degradation: when dst < border sum the corners must not overflow the
  * requested rect. Emit into a rect smaller than the borders on one then both axes
  * and assert all 16 grid vertices stay inside [x, x+w] x [y, y+h]. Mirrors Unity/
  * Defold behavior — geometry never exceeds the requested rect. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void assert_slice9_within_rect(float x, float y, float w, float h, const char *msg) {
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_emit_vertex_count());
     const float eps = 0.5F;
     for (uint32_t v = 0; v < 16U; ++v) {
         float p[3];
@@ -1763,12 +1894,16 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* 16/16/16/16 borders */
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* 16/16/8/24 borders */
     const float x = 100.0F;
     const float y = 200.0F;
+    float at_xy[16];
+    memcpy(at_xy, NT_MATH_MAT4_IDENTITY, sizeof at_xy);
+    at_xy[12] = x;
+    at_xy[13] = y;
 
     /* Horizontal squeeze: w=20 < (16+16)=32; inner columns must not cross. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 20.0F, 100.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 20.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 20.0F, 100.0F, "narrow-w slice9 corners must stay within rect");
     /* Inner-left <= inner-right (no crossing). */
     float vl[3];
@@ -1778,11 +1913,21 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
     TEST_ASSERT_TRUE_MESSAGE(vl[0] <= vr[0] + 0.5F, "narrow-w inner-left must not cross inner-right");
 
     /* Vertical squeeze: h=10 < 32. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 100.0F, 10.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 100.0F, 10.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 100.0F, 10.0F, "short-h slice9 corners must stay within rect");
+    float vb[3];
+    float vt[3];
+    nt_sprite_renderer_test_last_emit_position(4, vb);
+    nt_sprite_renderer_test_last_emit_position(8, vt);
+    TEST_ASSERT_TRUE_MESSAGE(vb[1] <= vt[1] + 0.5F, "short-h inner-bottom must not cross inner-top");
+
+    /* Flipped squeeze: the footprint mirrors to [x-w, x], and the shrink must
+     * still keep every vertex inside it. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 20.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X);
+    assert_slice9_within_rect(x - 20.0F, y, 20.0F, 100.0F, "flipped narrow-w slice9 corners must stay within rect");
 
     /* Both axes squeezed: 12 x 8, both < 32. */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 12.0F, 8.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, at_xy, 12.0F, 8.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
     assert_slice9_within_rect(x, y, 12.0F, 8.0F, "tiny slice9 corners must stay within rect");
 }
 
@@ -1830,8 +1975,12 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_restore_cleans_up_after_index_buffer_failure);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
+    RUN_TEST(test_draw_list_slice9_flip_mirrors_source);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
+    RUN_TEST(test_draw_list_zero_slice9_override_emits_plain_quad);
+    RUN_TEST(test_emit_slice9_pivot_centers_and_mirrors);
+    RUN_TEST(test_emit_slice9_bands_follow_pixels_per_unit);
     RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();

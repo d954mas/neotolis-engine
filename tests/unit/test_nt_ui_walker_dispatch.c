@@ -300,7 +300,7 @@ static void test_dispatch_border_rounded_emits_strip(void) {
 
 /* emit_geometry samples the centroid (mean of 4 corner UVs) -- NOT vertex[0]'s
  * UV which would land at a texel boundary and bleed under linear filtering.
- * Fixture white_region UVs: (0,0)(FFFF,0)(FFFF,FFFF)(0,FFFF), mean = 0x7FFF. */
+ * Fixture white_region UVs: (0,FFFF)(FFFF,FFFF)(FFFF,0)(0,0), mean = 0x7FFF. */
 static void test_dispatch_rounded_rect_uv_is_centroid_not_corner(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;

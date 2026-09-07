@@ -493,10 +493,10 @@ static void test_slice9_basic(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U);
 
-    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_slice9_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_slice9_index_count());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_emit_index_count());
 
     nt_sprite_renderer_flush();
 }
@@ -514,7 +514,7 @@ static void test_slice9_positions(void) {
 
     /* Target: (0,0,100,80), borders: (4,4,4,4) */
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U);
 
     /* Expected x splits: [0, 4, 96, 100] */
     /* Expected y splits: [0, 4, 76, 80]  */
@@ -552,9 +552,8 @@ static void test_slice9_positions(void) {
     nt_sprite_renderer_flush();
 }
 
-/* Test: flip_x swaps left/right borders in positions and mirrors UVs.
+/* Test: flip mirrors the grid by negating positions; bands and UV cuts ride along.
  * Grid layout: vertex index = row*4 + col. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_slice9_flip_x(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
@@ -563,38 +562,36 @@ static void test_slice9_flip_x(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    /* Asymmetric borders: L=4, R=8 to detect swap */
+    /* Asymmetric borders: L=4, R=8. */
     const uint16_t b_flipx[4] = {4, 8, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b_flipx, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipx, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X);
 
-    /* With FLIP_X: fl=8, fr=4, so position splits become [0, 8, 96, 100] */
+    /* Pivot (0,0) with a mirror puts the footprint in [-100, 0]. Columns keep
+     * their own band and UV: the 4-wide L band still samples 4 source px
+     * (u_min=1000, u_max=5000, source_w=64 -> 62.5 u per px), it just lands at
+     * the other end of the sprite. */
     float pos[3];
-    /* Grid (0,1) = vertex 1 = xs[1] = 8 */
-    nt_sprite_renderer_test_last_emit_position(1, pos);
-    TEST_ASSERT_TRUE(pos[0] == 8.0F); /* NOLINT */
-
-    /* Grid (0,2) = vertex 2 = xs[2] = 96 */
-    nt_sprite_renderer_test_last_emit_position(2, pos);
-    TEST_ASSERT_TRUE(pos[0] == 96.0F); /* NOLINT */
-
-    /* UV flip: us reversed => us[0] > us[3] for flipped axis.
-     * u_min=1000, u_max=5000, u_range=4000, source_w=64
-     * After swap borders: us computed with fl=8,fr=4 = [1000, 1500, 4750, 5000]
-     * After UV flip: us = [5000, 4750, 1500, 1000]
-     * Grid (0,0) uses us[0]=5000, Grid (0,1) uses us[1]=4750 */
     uint16_t uv[2];
+    nt_sprite_renderer_test_last_emit_position(0, pos);
     nt_sprite_renderer_test_last_emit_texcoord(0, uv);
-    TEST_ASSERT_EQUAL_UINT16(5000, uv[0]); /* us[0] flipped */
+    TEST_ASSERT_TRUE(pos[0] == 0.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(1000, uv[0]);
 
+    nt_sprite_renderer_test_last_emit_position(1, pos);
     nt_sprite_renderer_test_last_emit_texcoord(1, uv);
-    TEST_ASSERT_EQUAL_UINT16(4750, uv[0]); /* us[1] flipped */
+    TEST_ASSERT_TRUE(pos[0] == -4.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(1250, uv[0]);
+
+    nt_sprite_renderer_test_last_emit_position(2, pos);
+    nt_sprite_renderer_test_last_emit_texcoord(2, uv);
+    TEST_ASSERT_TRUE(pos[0] == -92.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(4500, uv[0]);
 
     nt_sprite_renderer_flush();
 }
 
-/* Test: flip_y swaps top/bottom borders and mirrors V UVs.
+/* Test: FLIP_Y is the same mirror on the other axis.
  * Grid layout: vertex index = row*4 + col. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_slice9_flip_y(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
@@ -603,27 +600,28 @@ static void test_slice9_flip_y(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    /* Asymmetric: T=4, B=8 */
+    /* Asymmetric: T=4, B=8. */
     const uint16_t b_flipy[4] = {4, 4, 4, 8};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y);
 
-    /* FLIP_Y: ft=8, fb=4 -> y splits = [0, 4, 72, 80] */
+    /* Row 0 is the local bottom: B=8 wide, sampling 8 source rows down from
+     * v_max (v_min=2000, v_max=6000, source_h=64 -> 62.5 v per row). */
     float pos[3];
-    /* Grid (1,0) = vertex 4 = (xs[0], ys[1]) = (0, 4) */
+    uint16_t uv[2];
+    nt_sprite_renderer_test_last_emit_position(0, pos);
+    nt_sprite_renderer_test_last_emit_texcoord(0, uv);
+    TEST_ASSERT_TRUE(pos[1] == 0.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(6000, uv[1]);
+
     nt_sprite_renderer_test_last_emit_position(4, pos);
-    TEST_ASSERT_TRUE(pos[1] == 4.0F); /* NOLINT */
+    nt_sprite_renderer_test_last_emit_texcoord(4, uv);
+    TEST_ASSERT_TRUE(pos[1] == -8.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(5500, uv[1]);
 
-    /* Grid (2,0) = vertex 8 = (xs[0], ys[2]) = (0, 72) */
     nt_sprite_renderer_test_last_emit_position(8, pos);
-    TEST_ASSERT_TRUE(pos[1] == 72.0F); /* NOLINT */
-
-    /* After V inversion + FLIP_Y: vs[0]<->vs[3] swap. Row-0 V < Row-2 V
-     * (bottom row flipped = original top = smaller V in PNG space). */
-    uint16_t uv_bot[2];
-    uint16_t uv_top[2];
-    nt_sprite_renderer_test_last_emit_texcoord(0, uv_bot); /* row 0 */
-    nt_sprite_renderer_test_last_emit_texcoord(8, uv_top); /* row 2 */
-    TEST_ASSERT_TRUE(uv_bot[1] < uv_top[1]);
+    nt_sprite_renderer_test_last_emit_texcoord(8, uv);
+    TEST_ASSERT_TRUE(pos[1] == -76.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_UINT16(2250, uv[1]);
 
     nt_sprite_renderer_flush();
 }
@@ -645,7 +643,7 @@ static void test_slice9_tombstone_noop(void) {
     /* Emit a normal slice9 — should work and advance vertex_count by 16. */
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
     const uint16_t b2[4] = {2, 2, 2, 2};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 50.0F, 50.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U);
     TEST_ASSERT_EQUAL_UINT32(vc_before + 16U, nt_sprite_renderer_test_vertex_count());
 
     nt_sprite_renderer_flush();
@@ -667,7 +665,7 @@ static void test_slice9_mat4_translation(void) {
     m[13] = 30.0F;
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U);
 
     /* Vertex 0 (bbox top-left in layout) = (0, 0) → (50, 30). */
     float pos[3];
@@ -703,7 +701,7 @@ static void test_slice9_mat4_rotation_90(void) {
     m[5] = 0.0F;
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U);
 
     float pos[3];
     /* Vertex 0 = layout (0, 0) → (0, 0). */

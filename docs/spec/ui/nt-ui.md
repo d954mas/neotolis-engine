@@ -107,6 +107,16 @@ layout-space bbox center via cglm. The walker reads the composed mat4
 from `tree_baked[layout_idx]` (hot path, no hashmap lookup) and ships
 `world_mat4[16]` to every emit_*.
 
+`emit_region` and `emit_slice9` share one local space: Y-up, pivot-relative,
+`flip_bits` negate positions (which reverses winding). The walker's mat4
+carries the Y inversion and the bbox center; a nine-patch gets a centered
+pivot so it fills its bbox unless `NT_UI_IMAGE_ORIGIN_OVERRIDE` moves it, and
+a `NT_UI_IMAGE_SLICE9_OVERRIDE` of all zeros turns a baked nine-patch back
+into a plain quad. `emit_geometry` takes caller-space corners, no pivot or
+flip. Slice9 corner bands are the one place `pixels_per_unit` reaches the
+layout: borders are source px ÷ ppu, so a denser HD atlas renders the same
+corner; a stretched region divides ppu straight back out.
+
 Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
 
 - **2D ctx** (default): screen Y-flip (Clay layout Y-down → GL Y-up) is

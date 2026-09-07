@@ -139,24 +139,31 @@ void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
-/* Emit a 9-quad slice9 image. Same vertex format and pipeline as emit_region.
+/* Emit a 9-quad slice9 image. Same vertex format, local space and pipeline as
+ * emit_region: the grid is built Y-up around the pivot and flip_bits mirror it
+ * by negating positions, so the caller's world_matrix decides which way is up.
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in caller's coordinate space.
+ *   world_matrix        - 16-float column-major mat4, same convention as
+ *                         emit_region. Pass NT_MATH_MAT4_IDENTITY for none.
+ *   w, h                - rendered size in the matrix's units.
+ *   origin_x, _y        - pivot, normalized over w/h (e.g. {0.5, 0.5}).
  *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
  *                         atlas-baked borders for this region.
  *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F
  *                         for src verbatim. Corners proportionally shrunk if
- *                         total > w/h.
+ *                         total > w/h. Border pixels convert to w/h units
+ *                         through the atlas's pixels_per_unit, so swapping an
+ *                         SD atlas for a denser HD one keeps the corner size.
+ *                         Bands stay exact — no pixel snapping.
  *   color_packed        - 0xAABBGGRR.
- *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
- *   world_matrix        - 16-float column-major mat4 (same convention as
- *                         emit_region). Pass NT_MATH_MAT4_IDENTITY for none.
+ *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y. The grid is CCW like
+ *                         blob triangles; mirroring reverses that, as in emit_region.
  *
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
-                                    uint8_t flip_bits, const float *world_matrix);
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
+                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
@@ -218,9 +225,6 @@ void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2])
 /* RGBA color of the i-th vertex of the last emit, as raw uint8 [R,G,B,A]. */
 void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]);
 bool nt_sprite_renderer_test_initialized(void);
-/* Captured vertex/index count from last slice9 emit. */
-uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);
-uint32_t nt_sprite_renderer_test_last_slice9_index_count(void);
 /* Flushes that replayed cmds (empty no-op flushes excluded). Lets rich z-layer tests pin per-band drains. */
 uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void);
 void nt_sprite_renderer_test_reset_nonempty_flush_calls(void);

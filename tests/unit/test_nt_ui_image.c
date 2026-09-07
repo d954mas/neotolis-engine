@@ -8,6 +8,8 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "renderers/nt_sprite_renderer.h"
+#include "sprite_comp/nt_sprite_comp.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -241,6 +243,116 @@ static void test_image_invalid_atlas_asserts(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
+/* ---- Test 10: slice9 and single-quad paths orient the source alike ---- */
+/* Atlas V of the emitted vertex nearest the top of the screen (world is Y-up,
+ * so that is the largest position[1]). */
+static uint16_t top_edge_v(uint32_t vertex_count) {
+    float best_y = -1.0F;
+    uint16_t best_v = 0;
+    for (uint32_t i = 0; i < vertex_count; ++i) {
+        float pos[3];
+        uint16_t uv[2];
+        nt_sprite_renderer_test_last_emit_position(i, pos);
+        nt_sprite_renderer_test_last_emit_texcoord(i, uv);
+        if (pos[1] > best_y) {
+            best_y = pos[1];
+            best_v = uv[1];
+        }
+    }
+    return best_v;
+}
+
+static uint16_t walk_image_top_edge_v(const nt_ui_image_style_t *style) {
+    nt_pointer_t mouse = {0};
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, style, &decl); }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_walk(s_fx.ctx, &target);
+    return top_edge_v(nt_sprite_renderer_test_last_emit_vertex_count());
+}
+
+static void test_image_slice9_orientation_matches_single_quad(void) {
+    nt_ui_image_style_t plain = nt_ui_image_style_defaults();
+    const uint16_t plain_top_v = walk_image_top_edge_v(&plain);
+
+    /* Asymmetric T/B so a swapped border assignment cannot pass. */
+    nt_ui_image_style_t sliced = nt_ui_image_style_defaults();
+    sliced.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    sliced.slice9_lrtb[0] = 2;
+    sliced.slice9_lrtb[1] = 2;
+    sliced.slice9_lrtb[2] = 2;
+    sliced.slice9_lrtb[3] = 4;
+    const uint16_t sliced_top_v = walk_image_top_edge_v(&sliced);
+
+    /* The packed region spans V 0x8000..0xC000; its top source row is 0x8000.
+     * Both paths must put that row at the top of the rect. */
+    TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V0_RAW, plain_top_v);
+    TEST_ASSERT_EQUAL_UINT16(plain_top_v, sliced_top_v);
+
+    /* Grid row 3 is the local top, which the walker's matrix lands at the top of
+     * the bbox; row 2 is the T seam, 2 px down the screen and 2 of the 8 source
+     * rows into the region's V span. */
+    float top_pos[3];
+    float seam_pos[3];
+    uint16_t seam_uv[2];
+    nt_sprite_renderer_test_last_emit_position(12U, top_pos);
+    nt_sprite_renderer_test_last_emit_position(8U, seam_pos);
+    nt_sprite_renderer_test_last_emit_texcoord(8U, seam_uv);
+    TEST_ASSERT_EQUAL_INT32(2000, (int32_t)((top_pos[1] - seam_pos[1]) * 1000.0F));
+    TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V0_RAW + ((MINIMAL_UI_ATLAS_PACKED_V1_RAW - MINIMAL_UI_ATLAS_PACKED_V0_RAW) / 4U), seam_uv[1]);
+
+    /* Both paths mirror by negating local positions; the top-edge V must still agree. */
+    plain.flip_bits = NT_SPRITE_FLAG_FLIP_Y;
+    sliced.flip_bits = NT_SPRITE_FLAG_FLIP_Y;
+    const uint16_t plain_flipped_v = walk_image_top_edge_v(&plain);
+    const uint16_t sliced_flipped_v = walk_image_top_edge_v(&sliced);
+    TEST_ASSERT_EQUAL_UINT16(MINIMAL_UI_ATLAS_PACKED_V1_RAW, plain_flipped_v);
+    TEST_ASSERT_EQUAL_UINT16(plain_flipped_v, sliced_flipped_v);
+}
+
+/* ---- Test 11: a zero-border override disables slice9 (nt_ui_fill's CROP reveal) ---- */
+static void test_image_zero_border_override_emits_plain_quad(void) {
+    nt_ui_image_style_t st = nt_ui_image_style_defaults();
+    st.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    (void)walk_image_top_edge_v(&st);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+}
+
+/* ---- Test 12: the slice9 grid lands exactly on the bbox, and the origin moves it ---- */
+static void test_image_slice9_grid_covers_the_bbox(void) {
+    nt_ui_image_style_t sliced = nt_ui_image_style_defaults();
+    sliced.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    sliced.slice9_lrtb[0] = 2;
+    sliced.slice9_lrtb[1] = 2;
+    sliced.slice9_lrtb[2] = 2;
+    sliced.slice9_lrtb[3] = 2;
+    (void)walk_image_top_edge_v(&sliced);
+
+    /* The bbox is 80x60 at layout (0,0); world is Y-up over a 600 px viewport,
+     * so grid row 0 (local bottom) sits at world y = 600 - 60. */
+    float v0[3];
+    float v15[3];
+    nt_sprite_renderer_test_last_emit_position(0U, v0);
+    nt_sprite_renderer_test_last_emit_position(15U, v15);
+    TEST_ASSERT_EQUAL_INT32(0, (int32_t)v0[0]);
+    TEST_ASSERT_EQUAL_INT32(540, (int32_t)v0[1]);
+    TEST_ASSERT_EQUAL_INT32(80, (int32_t)v15[0]);
+    TEST_ASSERT_EQUAL_INT32(600, (int32_t)v15[1]);
+
+    /* An explicit origin moves the grid off the bbox the same way it moves a
+     * plain quad: pivot {0,0} anchors the grid's own corner at the bbox center. */
+    sliced.flags |= NT_UI_IMAGE_ORIGIN_OVERRIDE;
+    sliced.origin_x = 0.0F;
+    sliced.origin_y = 0.0F;
+    (void)walk_image_top_edge_v(&sliced);
+    nt_sprite_renderer_test_last_emit_position(0U, v0);
+    TEST_ASSERT_EQUAL_INT32(40, (int32_t)v0[0]);
+    TEST_ASSERT_EQUAL_INT32(570, (int32_t)v0[1]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_image_basic);
@@ -252,6 +364,9 @@ int main(void) {
     RUN_TEST(test_image_style_defaults);
     RUN_TEST(test_image_resolves_from_invalid_under_ready_atlas);
     RUN_TEST(test_image_unresolved_skips_emit_no_assert);
+    RUN_TEST(test_image_slice9_orientation_matches_single_quad);
+    RUN_TEST(test_image_zero_border_override_emits_plain_quad);
+    RUN_TEST(test_image_slice9_grid_covers_the_bbox);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_image_null_style_asserts);
     RUN_TEST(test_image_invalid_atlas_asserts);
