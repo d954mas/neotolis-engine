@@ -1746,15 +1746,20 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     uint8_t seg_layer[SEG_CAP];
     int seg_pipe[SEG_CAP];
     int32_t seg_len = 0;
-    int32_t prev_z = 0;
+    int16_t prev_z = 0;
     bool prev_z_valid = false;
     uint32_t sim_alternations = 0U;
     for (int32_t i = 0; i <= arr->length; ++i) {
         const Clay_RenderCommand *cc = (i < arr->length) ? &arr->internalArray[i] : NULL;
         const bool is_segmentable = (cc != NULL) && (cc->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_BORDER ||
                                                      cc->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT);
-        /* Segment boundary: end of array, non-segmentable cmd, or zIndex change. */
-        const bool boundary = (cc == NULL) || !is_segmentable || (prev_z_valid && cc->zIndex != prev_z);
+        /* Segment boundary: end of array, non-segmentable cmd, or band change (baked, as the walker reads it). */
+        const nt_ui_baked_xform_t *baked = (cc != NULL) ? nt_ui_internal_test_get_tree_baked(s_fx.ctx, cc->nt_layout_index) : NULL;
+        int16_t cc_z = 0;
+        if (baked != NULL) {
+            cc_z = baked->zindex;
+        }
+        const bool boundary = (cc == NULL) || !is_segmentable || (prev_z_valid && cc_z != prev_z);
         if (boundary) {
             if (seg_len > 0) {
                 /* Insertion sort segment indices by layer ascending. */
@@ -1805,7 +1810,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
             seg_pipe[seg_len] = pipe;
             ++seg_len;
         }
-        prev_z = cc->zIndex;
+        prev_z = cc_z;
         prev_z_valid = true;
     }
 

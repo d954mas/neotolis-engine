@@ -882,8 +882,8 @@ static void test_thumb_above_modal_band_first_frame(void) {
         }
     }
     TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
-    /* Command index is paint order here because the two commands sit in different zIndex runs (the panel
-     * rect carries the modal band, the thumb image carries 0), and the walker never reorders across runs. */
+    /* Command index is paint order here: panel rect and thumb image share the modal band and layer 0,
+     * so the walker keeps declaration order between them. */
     TEST_ASSERT_TRUE_MESSAGE(thumb_at > panel_at, "thumb must paint AFTER the modal panel, not under it");
 
     /* Frame-1 placement is measured against the track in the SAME frame, so a stale parent bbox shows up
