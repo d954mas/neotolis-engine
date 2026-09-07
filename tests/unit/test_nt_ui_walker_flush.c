@@ -27,11 +27,7 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static void inject_frozen_cmds(int32_t count) {
-    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_fx.ctx->frozen_cmds.length = count;
-    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
-}
+static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
 /* walker exit flushes both sprite and text renderers. After
  * emitting 1 RECT into the sprite renderer's staging, the staging vertex

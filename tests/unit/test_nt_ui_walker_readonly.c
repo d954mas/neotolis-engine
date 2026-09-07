@@ -35,11 +35,7 @@ void tearDown(void) {
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
 }
 
-static void inject_frozen_cmds(int32_t count) {
-    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_fx.ctx->frozen_cmds.length = count;
-    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
-}
+static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
 /* two walks against same ctx+target produce identical probe state. */
 static void test_second_walk_identical(void) {

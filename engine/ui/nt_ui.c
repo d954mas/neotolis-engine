@@ -1548,6 +1548,13 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region walk
 /* SCISSOR/CUSTOM/NONE = hard barriers; never reordered. */
+/* Clay stamps zIndex on RECT/TEXT/SCISSOR only; the baked band covers every command. Only synthetic
+ * scissors carry -1, and those are barriers, so a segmentable command always maps to a layout element. */
+static const nt_ui_baked_xform_t *cmd_baked(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, int32_t n_elements) {
+    NT_ASSERT(c->nt_layout_index >= 0 && c->nt_layout_index < n_elements && "segmentable command without layout element");
+    return &ctx->tree_baked[c->nt_layout_index];
+}
+
 static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     switch (cmd_type) {
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
@@ -1984,11 +1991,11 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             ++i;
             continue;
         }
-        const int16_t seg_z = c->zIndex;
+        const int16_t seg_z = cmd_baked(ctx, c, N_elements)->zindex;
         int32_t seg_end = i + 1;
         while (seg_end < arr->length) {
             const Clay_RenderCommand *next = &arr->internalArray[seg_end];
-            if (next->zIndex != seg_z || !is_segmentable(next->commandType)) {
+            if (!is_segmentable(next->commandType) || cmd_baked(ctx, next, N_elements)->zindex != seg_z) {
                 break;
             }
             ++seg_end;
@@ -2024,10 +2031,10 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
                     }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
-                        const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
-                        memcpy(ws.m, b.m, sizeof ws.m);
-                        ws.accum_opacity = b.opacity;
-                        ws.hierarchy_depth = b.hierarchy_depth;
+                        const nt_ui_baked_xform_t *b = cmd_baked(ctx, cc, N_elements);
+                        memcpy(ws.m, b->m, sizeof ws.m);
+                        ws.accum_opacity = b->opacity;
+                        ws.hierarchy_depth = b->hierarchy_depth;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                     }
                 }

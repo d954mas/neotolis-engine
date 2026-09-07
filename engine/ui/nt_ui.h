@@ -477,7 +477,7 @@ static inline const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_co
 #endif
 // #endregion
 
-/* Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are hard barriers. */
+/* Order: band (baked zIndex) asc, then layer asc within each barrier-delimited run, then declaration. SCISSOR/CUSTOM are hard barriers. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Window delta over the walk; includes CUSTOM-handler draws. */

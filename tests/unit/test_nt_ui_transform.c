@@ -123,9 +123,7 @@ static void test_walker_custom_game_handler_fires(void) {
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_game_custom_user);
 }
 
-/* ---- Test: OOB nt_layout_index falls back to identity baked (graceful walker
- *      on Clay's error-path synthetic commands). Empty container scale doesn't
- *      crash. ---- */
+/* ---- Test: an empty scaled container walks without crashing. ---- */
 static void test_walker_empty_container_no_crash(void) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     t.scale_x = 2.0F;
