@@ -1,6 +1,7 @@
 #ifndef NT_RESOURCE_H
 #define NT_RESOURCE_H
 
+#include "core/nt_platform.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 
@@ -175,7 +176,10 @@ void nt_resource_set_placeholder_texture(nt_hash64_t resource_id);
 
 /* ---- Pack loading ---- */
 
+/* No filesystem on web: load packs with nt_resource_load_url / nt_resource_load_auto. */
+#ifndef NT_PLATFORM_WEB
 nt_result_t nt_resource_load_file(nt_hash32_t pack_id, const char *path);
+#endif
 nt_result_t nt_resource_load_url(nt_hash32_t pack_id, const char *url);
 nt_result_t nt_resource_load_auto(nt_hash32_t pack_id, const char *path);
 nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id);
