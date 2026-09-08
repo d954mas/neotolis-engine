@@ -91,10 +91,6 @@ _Static_assert(sizeof(nt_ui_rich_fx_params_t) == 8, "nt_ui_rich_fx_params_t stab
 /* Faux-italic lean fed to nt_text_renderer_set_oblique for a SYNTH_ITALIC run (text-local x += k*y). */
 #define NT_UI_RICH_SYNTH_ITALIC_SHEAR 0.2F
 
-/* Synthetic-bold em weight fed to nt_text_renderer_set_weight for a SYNTH_BOLD run. Em units: the
- * renderer multiplies by units_per_em and quantizes into the (codepoint, weight) glyph-cache key. */
-#define NT_UI_RICH_SYNTH_BOLD_WEIGHT 0.04F
-
 /* Image vertical alignment against the line. */
 typedef enum {
     NT_RICH_VALIGN_BASELINE = 0,

@@ -2137,7 +2137,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
  * the push_* clamps, and a raw NaN/Inf would make the setter early-return and leak the prior run's axis. */
 static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *e, float opacity) {
     nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
-    nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_UI_RICH_SYNTH_BOLD_WEIGHT : 0.0F);
+    nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_TEXT_SYNTH_BOLD_WEIGHT : 0.0F);
 
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
     if (stl->outline_w > 0.0F && isfinite(stl->outline_w)) {
@@ -2249,7 +2249,7 @@ static void rich_resolve_materials(nt_ui_rich_state_t *st, const nt_ui_context_t
     }
 }
 
-void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
+static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
     NT_ASSERT(st != NULL && "rich emit: NULL state");
     if (!st->solved_ready) {
@@ -2306,7 +2306,7 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
 static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
-    *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_RICH_TEXT, .data = st};
+    *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_CALLBACK, .data = st, .emit = rich_emit_custom};
 
     Clay_ElementDeclaration decl = {0};
     decl.id = (Clay_ElementId){.id = id}; /* the block carries `id` so nt_ui_get_bbox resolves it (width fallback + link origin) */

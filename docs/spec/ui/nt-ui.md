@@ -18,6 +18,37 @@ building blocks per the engine's "set of modules" principle.
 
 ## Clay as a public dependency
 
+`nt_ui_rich` is an optional library in the UI family: link it alongside `nt_ui`
+for rich text and markup. It depends on `nt_ui_interface`, leaving the executable
+to select the UI implementation. It shares the UI private ABI and must be built with the
+same engine sources. The base `nt_ui` library does not link it. Ordinary labels
+and widgets need only `nt_ui`.
+
+### CUSTOM command callbacks
+
+`nt_ui_custom_data_t` carries a type, borrowed `data`, and `emit` callback.
+`NONE` is an inert layout anchor. `GAME` preserves the context handler installed
+by `nt_ui_set_custom_handler`, receiving that handler's user data; `emit` is unused.
+`CALLBACK` requires a non-NULL `emit` and invokes it with the frame snapshot and
+the command's `data`. Rich text creates one CALLBACK command per solved block;
+the walker has no direct reference to the rich renderer.
+
+The command and payload must outlive every consuming walk. Frame-scratch data
+is invalidated by `nt_mem_scratch_reset`; the engine never frees user data.
+Repeated walks may invoke the callback again. A callback must not re-enter walk,
+change the layout tree, or reset scratch. It preserves active clipping and owns
+the GPU state it touches; the walker retains its existing flush/material barriers.
+The supplied frame contains the composed world matrix, opacity, context and
+layout-space Clay command.
+
+Consumers must recompile after this public-struct change: the wrapper is 12 bytes
+on wasm32 and 24 bytes on native 64-bit. Existing GAME/NONE aggregate initializers
+zero the new trailing field. Replace direct `NT_UI_CUSTOM_TYPE_RICH_TEXT`
+construction with CALLBACK plus the desired function; rich API callers need no
+manual callback setup.
+
+### Public Clay surface
+
 Clay v0.14 is vendored as a **public** dependency of `nt_ui`: game
 code declares layout and widgets via `CLAY_*` macros directly,
 while `nt_ui` owns lifecycle (contexts, the walker that turns Clay's

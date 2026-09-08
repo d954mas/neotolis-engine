@@ -23,7 +23,7 @@ if(NOT EMSCRIPTEN)
     nt_set_warning_flags(nt_gfx_fake)
     nt_set_sanitizer_flags(nt_gfx_fake)
     set(NT_TEST_ACCESS_LIBS
-        nt_atlas nt_ui nt_gfx nt_gfx_fake nt_font nt_text_renderer
+        nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
@@ -1247,6 +1247,9 @@ if(NOT EMSCRIPTEN)
             ${_nt_ui_test_helper_sources}
         )
         target_include_directories(${_t} PRIVATE ${_nt_ui_test_helper_includes})
+        if(_t MATCHES "^test_nt_ui_rich_")
+            target_link_libraries(${_t} PRIVATE nt_ui_rich)
+        endif()
         target_link_libraries(${_t} PRIVATE ${_nt_ui_test_libs})
         target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         nt_setup_test_target(${_t})
@@ -1271,7 +1274,7 @@ if(NOT EMSCRIPTEN)
         ${_nt_ui_test_helper_sources}
     )
     target_include_directories(test_nt_ui_rich_parse PRIVATE ${_nt_ui_test_helper_includes})
-    target_link_libraries(test_nt_ui_rich_parse PRIVATE ${_nt_ui_rich_parse_libs})
+    target_link_libraries(test_nt_ui_rich_parse PRIVATE nt_ui_rich ${_nt_ui_rich_parse_libs})
     target_compile_definitions(test_nt_ui_rich_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_rich_parse)
 

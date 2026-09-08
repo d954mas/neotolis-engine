@@ -31,6 +31,9 @@ _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPH
  * harden AA edges without removing a real halo. */
 #define NT_TEXT_ALPHA_CUTOFF_DEFAULT (1.0F / 255.0F)
 
+/* Synthetic bold weight in em; labels and rich text use the same glyph variant. */
+#define NT_TEXT_SYNTH_BOLD_WEIGHT 0.04F
+
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 /* Drops staged quads and cached pipelines, then rebuilds GPU buffers; material,

@@ -358,12 +358,12 @@ static void frame_synth_bold(void) {
 }
 
 /* WIRING + LEAK-GUARD: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD,
- * which the emit pass feeds to nt_text_renderer_set_weight as NT_UI_RICH_SYNTH_BOLD_WEIGHT, then resets to
+ * which the emit pass feeds to nt_text_renderer_set_weight as NT_TEXT_SYNTH_BOLD_WEIGHT, then resets to
  * 0 after the pass. Mirrors the SYNTH_ITALIC wire-and-reset. */
 static void test_emit_synth_bold_wires_and_resets_weight(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_synth_bold();
-    TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_weight(), NT_UI_RICH_SYNTH_BOLD_WEIGHT), "SYNTH_BOLD run feeds NT_UI_RICH_SYNTH_BOLD_WEIGHT to the renderer during emit");
+    TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_weight(), NT_TEXT_SYNTH_BOLD_WEIGHT), "SYNTH_BOLD run feeds the shared weight to the renderer during emit");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "emit resets weight to 0 after the pass (no synth-bold leak onto the next caller)");
 }
 

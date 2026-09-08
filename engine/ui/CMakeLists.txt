@@ -56,12 +56,6 @@ set(NT_UI_SOURCES
     nt_ui_radial.h
     nt_ui_radial_image.c
     nt_ui_radial_image.h
-    nt_ui_rich_text.c
-    nt_ui_rich_text.h
-    nt_ui_rich_fx.c
-    nt_ui_rich_fx.h
-    nt_ui_rich_tagset.c
-    nt_ui_rich_tagset.h
     nt_ui_panel.c
     nt_ui_panel.h
     nt_ui_anim.c
@@ -178,3 +172,14 @@ target_link_libraries(nt_ui
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.
+
+# Optional UI companion; the base walker only knows the CUSTOM callback contract.
+nt_add_module(nt_ui_rich LOG_DOMAIN "ui.rich"
+    nt_ui_rich_text.c nt_ui_rich_text.h
+    nt_ui_rich_tagset.c nt_ui_rich_tagset.h
+    nt_ui_rich_fx.c nt_ui_rich_fx.h
+)
+target_include_directories(nt_ui_rich SYSTEM PRIVATE "${NT_ENGINE_ROOT}/deps/clay")
+target_link_libraries(nt_ui_rich
+    PUBLIC nt_ui_interface nt_atlas nt_font nt_material nt_mem_scratch
+    PRIVATE nt_sprite_renderer nt_text_renderer nt_gfx_interface nt_hash nt_utf8 nt_log_interface)
