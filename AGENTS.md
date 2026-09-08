@@ -23,6 +23,10 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
 - **Standard**: C17
 - **Why C17**: broader compiler, Emscripten toolchain, and build environment support
 - **NT_STATIC_CRT** (CMake option, default ON): pins the static release CRT on Windows. Consumers embedding builder + runtime in one exe set OFF to inherit their own `CMAKE_MSVC_RUNTIME_LIBRARY`. All pinning goes through `nt_set_static_crt(_cxx)` — never raw `-U_DLL` (gated by `scripts/check_crt_pins.sh`).
+- **NT_TEST_ACCESS** (CMake option, default ON): builds `tests/` and hands the module test-probe
+  surfaces (`// #region test_access`) to the engine libraries the tests link. `native-release` pins it
+  OFF, so perf measurement (`bunnymark`, `bench_shapes`, `atlas_bench`) and the release `builder` run
+  the same code wasm ships. Test TUs still compile under NDEBUG in `native-release-test`.
 - **NT_HYBRID_HPG** (CMake option, default ON): exe exports the NVIDIA/AMD hint symbols so hybrid-GPU Windows laptops run games on the discrete GPU. OFF for battery-friendly games/tools; the user's per-app Windows graphics preference always overrides the hint.
 
 If specific build, check, or run commands appear in the repo, keep them up to date in this file.
