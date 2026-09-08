@@ -47,24 +47,4 @@ if(NT_CDN_URL)
     target_compile_definitions(rtt_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-if(EMSCRIPTEN)
-    set_target_properties(rtt_showcase PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(rtt_showcase TITLE "RTT Showcase - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-
-    target_link_options(rtt_showcase PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_link_options(rtt_showcase PRIVATE
-            "SHELL:-sASSERTIONS=2"
-            "SHELL:-gsource-map"
-        )
-    endif()
-
-    if(NT_WASM_ANALYSIS)
-        target_link_options(rtt_showcase PRIVATE "SHELL:--profiling-funcs")
-    endif()
-endif()
+nt_configure_shell(rtt_showcase TITLE "RTT Showcase - Neotolis Engine")

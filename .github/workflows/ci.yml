@@ -281,6 +281,8 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
+          # tee would otherwise mask a size-report.sh failure behind its own exit status.
+          set -o pipefail
           source scripts/wasm_examples.sh
           for example in "${WASM_EXAMPLES[@]}"; do
             PRESET=wasm-analysis-paired bash scripts/size-report.sh "$example" | tee "/tmp/report_${example}.txt"

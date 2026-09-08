@@ -15,7 +15,9 @@
 #   FULLSCREEN_BUTTON (optional flag) When present, enables a fullscreen
 #                     toggle bar below the canvas. OFF by default.
 #   SIMD_WASM_PATH <path> (optional) Alternate wasm path selected when the
-#                     browser validates a minimal SIMD probe. When set, the
+#                     browser validates a minimal SIMD probe. Defaults to
+#                     ${NT_WASM_SIMD_WASM_PATH}, empty outside a paired build.
+#                     When set, the
 #                     shell dynamically loads the matching JS+WASM pair
 #                     (index_simd.js + index_simd.wasm) instead of the
 #                     baseline (index.js + index.wasm).
@@ -45,6 +47,12 @@ function(nt_configure_shell target)
     if(NOT SHELL_TITLE)
         set(SHELL_TITLE "${target}")
     endif()
+    if(NOT DEFINED SHELL_SIMD_WASM_PATH)
+        set(SHELL_SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
+    endif()
+
+    # The shell IS the page, so the target emits it: index.html beside index.js + index.wasm.
+    set_target_properties(${target} PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
 
     # Set template variables for configure_file
     set(NT_SHELL_TITLE "${SHELL_TITLE}")

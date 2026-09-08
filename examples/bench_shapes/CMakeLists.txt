@@ -15,25 +15,4 @@ set_target_properties(bench_shapes PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/examples/bench_shapes/${NT_PRESET_NAME}"
 )
 
-# WASM-specific settings
-if(EMSCRIPTEN)
-    set_target_properties(bench_shapes PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(bench_shapes TITLE "Shape Benchmark - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-
-    target_link_options(bench_shapes PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_link_options(bench_shapes PRIVATE
-            "SHELL:-sASSERTIONS=2"
-            "SHELL:-gsource-map"
-        )
-    endif()
-
-    if(NT_WASM_ANALYSIS)
-        target_link_options(bench_shapes PRIVATE "SHELL:--profiling-funcs")
-    endif()
-endif()
+nt_configure_shell(bench_shapes TITLE "Shape Benchmark - Neotolis Engine")

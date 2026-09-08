@@ -68,14 +68,10 @@ fi
 OUTPUT_DIR="$ROOT_DIR/build/examples/$TARGET/$PRESET"
 ENGINE_LIB_DIR="$ROOT_DIR/build/engine/$PRESET"
 
-# Find .wasm file (OUTPUT_NAME may differ from target name, e.g. "index")
-WASM_FILE=""
-if [ -d "$OUTPUT_DIR" ]; then
-    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | head -1)
-fi
+WASM_FILE="$OUTPUT_DIR/index.wasm"
 
-if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
-    echo "ERROR: No .wasm binary found in: $OUTPUT_DIR"
+if [ ! -f "$WASM_FILE" ]; then
+    echo "ERROR: WASM binary not found: $WASM_FILE"
     echo "Build the target first:"
     echo "  emcmake cmake --preset $PRESET && cmake --build --preset $PRESET"
     exit 1
@@ -124,28 +120,33 @@ echo ""
 printf "%8s  %s\n" "Size" "Name"
 printf "%8s  %s\n" "--------" "----"
 
+# One "size<TAB>name" row per function, sorted by size desc then name asc. A function the name
+# section does not cover prints as ` - func[402] size=38`, so fall back to its index; an unmatched
+# line would otherwise reach the arithmetic below as text.
+FUNC_ROWS=$(wasm-objdump -j Code -x "$WASM_FILE" 2>/dev/null \
+    | grep -E '^\s+-\s+func\[' \
+    | sed -E -e 's/^\s*-\s+func\[[0-9]+\] size=([0-9]+)\s+<(.*)>\s*$/\1\t\2/' \
+             -e 's/^\s*-\s+func\[([0-9]+)\] size=([0-9]+)\s*$/\2\tfunc[\1]/' \
+    | sort -t$'\t' -k1,1nr -k2,2) || {
+    echo "ERROR: no function entries in the Code section of: $WASM_FILE" >&2
+    exit 1
+}
+
 FUNC_COUNT=0
 FUNC_TOTAL=0
-# Parse function entries, sort by size desc then name asc
 while IFS=$'\t' read -r size name; do
+    case "$size" in
+        *[!0-9]*)
+            echo "ERROR: unparsed wasm-objdump function entry: $size" >&2
+            exit 1
+            ;;
+    esac
     FUNC_COUNT=$((FUNC_COUNT + 1))
     FUNC_TOTAL=$((FUNC_TOTAL + size))
-done < <(wasm-objdump -j Code -x "$WASM_FILE" 2>/dev/null \
-    | grep -E '^\s+-\s+func\[' \
-    | sed -E 's/.*size=([0-9]+)\s+<(.*)>/\1\t\2/' \
-    | sort -t$'\t' -k1,1nr -k2,2)
-
-# Re-run to display top N (already counted totals above)
-SHOWN=0
-while IFS=$'\t' read -r size name; do
-    SHOWN=$((SHOWN + 1))
-    if [ "$SHOWN" -le "$TOP_N" ]; then
+    if [ "$FUNC_COUNT" -le "$TOP_N" ]; then
         printf "%5d B   %s\n" "$size" "$name"
     fi
-done < <(wasm-objdump -j Code -x "$WASM_FILE" 2>/dev/null \
-    | grep -E '^\s+-\s+func\[' \
-    | sed -E 's/.*size=([0-9]+)\s+<(.*)>/\1\t\2/' \
-    | sort -t$'\t' -k1,1nr -k2,2)
+done <<< "$FUNC_ROWS"
 
 echo ""
 echo "Total functions: $FUNC_COUNT"

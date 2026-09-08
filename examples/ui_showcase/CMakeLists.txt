@@ -53,13 +53,4 @@ if(NT_CDN_URL)
     target_compile_definitions(ui_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-# WASM-specific settings
-if(EMSCRIPTEN)
-    set_target_properties(ui_showcase PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(ui_showcase TITLE "UI Showcase - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-    target_link_options(ui_showcase PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-endif()
+nt_configure_shell(ui_showcase TITLE "UI Showcase - Neotolis Engine")

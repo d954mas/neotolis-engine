@@ -34,20 +34,15 @@ if(WIN32)
     target_compile_definitions(devapi_host PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+nt_configure_shell(devapi_host TITLE "DevAPI Host - Neotolis Engine")
 if(EMSCRIPTEN)
     # fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but pin FPNG_NO_SSE=1 explicitly
     # so the WASM build never reaches the SSE intrinsics.
     target_compile_definitions(nt_fpng PRIVATE FPNG_NO_SSE=1)
 
-    # Emit index.html via the shared shell; export the KEEPALIVE transport wrappers + main, and the
-    # ccall/UTF8ToString runtime methods the window.__devapi bridge needs. WebGL2 for the GL
-    # context the capture seam reads, mirroring tests/browser/app browser_smoke.
-    set_target_properties(devapi_host PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(devapi_host TITLE "DevAPI Host - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
+    # The KEEPALIVE transport wrappers + main, and the ccall/UTF8ToString runtime methods the
+    # window.__devapi bridge needs.
     target_link_options(devapi_host PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
         "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll','_nt_devapi_web_reset']"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
     )

@@ -139,6 +139,18 @@ if(EMSCRIPTEN)
     if(NT_GFX_WEB_GL_DEBUG)
         add_link_options(-sGL_ASSERTIONS=1 -sGL_DEBUG=1)
     endif()
+
+    # The GL backend creates a WebGL2 context and nothing falls back to WebGL1.
+    add_link_options(-sUSE_WEBGL2=1 -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2)
+
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_link_options(-sASSERTIONS=2 -gsource-map)
+    endif()
+
+    # Without the name section scripts/size-report.sh reports function indices, not symbols.
+    if(NT_WASM_ANALYSIS)
+        add_link_options(--profiling-funcs)
+    endif()
 endif()
 
 # Output-layout name (build/engine|tests|examples/<name>) follows the BINARY DIR name,
