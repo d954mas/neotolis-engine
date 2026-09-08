@@ -15,10 +15,6 @@
  * alpha -- the emit path uses it directly (never out = base * color). */
 #include "ui/nt_ui_rich_text.h"
 
-/* The identity result: no shift, no tint change, no scale, visible. Use as the base a stock fn
- * mutates so a future field addition stays forward-compatible (no bare {0}, alpha 0 != opaque). */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]);
-
 /* ---- Stock catalog. Constants are DEFAULTS; user_data (nt_ui_rich_fx_params_t) tunes amp/speed. ---- */
 /* offset.y = AMP * sin(time*SPEED + atom_idx*PHASE) -- a per-atom phase-shifted vertical wave. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
@@ -45,29 +41,5 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t
 /* offset.x = AMP * sin(time*SPEED + atom_idx*PHASE) -- a per-atom phase-shifted horizontal sway. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_sway(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                           void *user_data);
-
-/* Resolve a stock effect_id (1-based catalog index; 0 = none) to its fn, or NULL if out of range.
- * The composed style carries the effect_id; the emit path maps it to a fn through this table so a
- * game that registered a stock effect by name gets the matching curve. */
-nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id);
-
-/* ---- Stock catalog ids (the effect_id the style carries; register the matching fn by name). ---- */
-#define NT_UI_RICH_FX_ID_WAVE 1U
-#define NT_UI_RICH_FX_ID_SHAKE 2U
-#define NT_UI_RICH_FX_ID_RAINBOW 3U
-#define NT_UI_RICH_FX_ID_PULSE 4U
-#define NT_UI_RICH_FX_ID_FADE_IN 5U
-#define NT_UI_RICH_FX_ID_BOUNCE 6U
-#define NT_UI_RICH_FX_ID_GLOW 7U
-#define NT_UI_RICH_FX_ID_SWAY 8U
-
-/* ---- Custom (game-supplied) effects ----
- * The (fn,user_data) pair lives in a per-block fixed-cap table captured at build (NOT the style, NOT
- * the tagset -- absent at emit); the style's uint8 effect_id carries a CUSTOM index when it is
- * >= NT_UI_RICH_FX_CUSTOM_BASE, else a stock id resolved via nt_ui_rich_fx_stock. */
-#define NT_UI_RICH_FX_CUSTOM_BASE 128U /* effect_id >= this -> index (id - BASE) into the per-block custom table */
-
-/* True when a composed-style effect_id names a custom (game-supplied) fn, not a stock id. */
-static inline bool nt_ui_rich_fx_id_is_custom(uint8_t effect_id) { return effect_id >= NT_UI_RICH_FX_CUSTOM_BASE; }
 
 #endif /* NT_UI_RICH_FX_H */

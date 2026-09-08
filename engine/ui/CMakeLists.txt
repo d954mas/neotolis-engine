@@ -177,9 +177,11 @@ target_link_libraries(nt_ui
 nt_add_module(nt_ui_rich LOG_DOMAIN "ui.rich"
     nt_ui_rich_text.c nt_ui_rich_text.h
     nt_ui_rich_tagset.c nt_ui_rich_tagset.h
-    nt_ui_rich_fx.c nt_ui_rich_fx.h
 )
 target_include_directories(nt_ui_rich SYSTEM PRIVATE "${NT_ENGINE_ROOT}/deps/clay")
 target_link_libraries(nt_ui_rich
     PUBLIC nt_ui_interface nt_atlas nt_font nt_material nt_mem_scratch
     PRIVATE nt_sprite_renderer nt_text_renderer nt_gfx_interface nt_hash nt_utf8 nt_log_interface)
+
+nt_add_module(nt_ui_rich_fx LOG_DOMAIN "ui.rich_fx" nt_ui_rich_fx.c nt_ui_rich_fx.h)
+target_link_libraries(nt_ui_rich_fx PUBLIC nt_ui_interface nt_font nt_atlas nt_material)

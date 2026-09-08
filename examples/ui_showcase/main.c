@@ -2354,14 +2354,14 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);  /* hover highlight */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U); /* accepted state */
     /* All eight stock effects so <fx=name> resolves in the markup front. */
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", NT_UI_RICH_FX_ID_BOUNCE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", NT_UI_RICH_FX_ID_GLOW);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", nt_ui_rich_fx_wave);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", nt_ui_rich_fx_shake);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", nt_ui_rich_fx_rainbow);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", nt_ui_rich_fx_pulse);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", nt_ui_rich_fx_fade_in);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", nt_ui_rich_fx_bounce);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", nt_ui_rich_fx_glow);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", nt_ui_rich_fx_sway);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
     nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
     /* "pull" == the builder's push_effect_fn(rich_fx_pull_left): same heart nudge so both fronts overlap identically. */
@@ -2478,36 +2478,36 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     RICH_TEXT_LIT(ctx, ". Effects: ");
 
     /* Effects gallery: 7 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_wave);
     RICH_TEXT_LIT(ctx, "wave ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SHAKE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_shake);
     RICH_TEXT_LIT(ctx, "shake ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_RAINBOW);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_rainbow);
     RICH_TEXT_LIT(ctx, "rainbow ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_pulse);
     RICH_TEXT_LIT(ctx, "pulse ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
     RICH_TEXT_LIT(ctx, "fade ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_BOUNCE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_bounce);
     RICH_TEXT_LIT(ctx, "bounce ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_glow);
     nt_ui_rich_push_color(ctx, 0xFF2A5A7AU); /* dark amber: glow brightens toward white, so a dark base shows the pulse */
     RICH_TEXT_LIT(ctx, "glow ");
     nt_ui_rich_pop(ctx); /* color */
     nt_ui_rich_pop(ctx); /* effect */
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SWAY);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_sway);
     RICH_TEXT_LIT(ctx, "sway");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, " ");
     /* A TUNED stock wave: big amplitude + faster speed via push_effect_ex (markup parity: <fx=wave amp=14 speed=5>). */
     const nt_ui_rich_fx_params_t big_wave = {.amp = 14.0F, .speed = 5.0F};
-    nt_ui_rich_push_effect_ex(ctx, NT_UI_RICH_FX_ID_WAVE, &big_wave);
+    nt_ui_rich_push_effect_ex(ctx, nt_ui_rich_fx_wave, &big_wave);
     RICH_TEXT_LIT(ctx, "BIG");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
@@ -2530,7 +2530,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
      * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
     if (look.emphasize) {
-        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+        nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_pulse);
     }
     nt_ui_rich_push_color(ctx, look.color);
     nt_ui_rich_link(ctx, rich_link_quest());
@@ -2620,7 +2620,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     {
         nt_ui_rich_style_t tw = rich_base_style();
         nt_ui_rich_begin(ctx, &tw);
-        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
+        nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_fade_in);
         RICH_TEXT_LIT(ctx, "The drake stirs... glyphs reveal one by one.");
         nt_ui_rich_pop(ctx);
         nt_ui_rich_end(ctx);

@@ -1018,7 +1018,7 @@ static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("tw_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_push_effect_ex(s_fx.ctx, NT_UI_RICH_FX_ID_WAVE, params);
+        nt_ui_rich_push_effect_ex(s_fx.ctx, nt_ui_rich_fx_wave, params);
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
@@ -1051,7 +1051,7 @@ static void test_fx_push_effect_ex_tunes_emit(void) {
 static uint8_t markup_wave_atom_effect_id(const char *markup) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -1071,7 +1071,7 @@ static uint8_t markup_wave_atom_effect_id(const char *markup) {
 static void test_fx_markup_params_apply(void) {
     const uint8_t id_default = markup_wave_atom_effect_id("<fx=wave>X</fx>");
     const uint8_t id_tuned = markup_wave_atom_effect_id("<fx=wave amp=14 speed=5>X</fx>");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_ID_WAVE, id_default, "default <fx=wave> carries the stock id");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_CUSTOM_BASE, id_default, "default <fx=wave> uses the block table");
     TEST_ASSERT_TRUE_MESSAGE(id_tuned >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave amp=.. speed=..> routes through the per-block custom table");
 
     /* An only-speed form also routes through the params path (amp omitted -> default amp). */
@@ -1081,7 +1081,7 @@ static void test_fx_markup_params_apply(void) {
 
 /* (10d) BUILDER push_effect_ex(WAVE, NULL): the NULL-params path carries the STOCK id (no custom-table
  * slot allocated), mirroring the markup-side STOCK-id assertion in (10c). */
-static void test_fx_push_effect_ex_null_stock_id(void) {
+static void test_fx_push_effect_ex_defaults(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
@@ -1089,20 +1089,19 @@ static void test_fx_push_effect_ex_null_stock_id(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_begin(s_fx.ctx, &base);
-    nt_ui_rich_push_effect_ex(s_fx.ctx, NT_UI_RICH_FX_ID_WAVE, NULL); /* NULL params -> stock id, no custom slot */
+    nt_ui_rich_push_effect_ex(s_fx.ctx, nt_ui_rich_fx_wave, NULL); /* NULL params -> function defaults */
     nt_ui_rich_text_n(s_fx.ctx, "X", 1);
     nt_ui_rich_pop(s_fx.ctx);
     nt_ui_rich_end(s_fx.ctx);
     nt_ui_rich_test_solve(s_fx.ctx, 400.0F, FONT_SIZE_DEFAULT);
 
     const uint8_t id = nt_ui_rich_test_atom_effect_id(s_fx.ctx, 0U);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_ID_WAVE, id, "push_effect_ex(WAVE, NULL) carries the stock id");
-    TEST_ASSERT_TRUE_MESSAGE(id < NT_UI_RICH_FX_CUSTOM_BASE, "NULL-params path does not allocate a custom-table slot");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_CUSTOM_BASE, id, "push_effect_ex(WAVE, NULL) uses the block table");
 }
 
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
  * carries the effect_id; emit folds the wave offset into the image quad + the tint into the sprite color. */
-static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time) {
+static void frame_effected_image(nt_material_t img_mat, nt_ui_rich_fx_fn effect_fn, float time) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -1116,7 +1115,7 @@ static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_push_effect(s_fx.ctx, effect_id); /* effect on TEXT + IMAGE together */
+        nt_ui_rich_push_effect(s_fx.ctx, effect_fn); /* effect on TEXT + IMAGE together */
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
@@ -1143,7 +1142,7 @@ static void test_fx_image_shifts_quad_visual_only(void) {
 
     /* Wave effect at a time whose offset.y is clearly non-zero. The image atom's fx_idx is its
      * solved index; the quad shifts by the wave offset, but the SOLVED box y is unchanged. */
-    frame_effected_image(mat, NT_UI_RICH_FX_ID_WAVE, 0.4F);
+    frame_effected_image(mat, nt_ui_rich_fx_wave, 0.4F);
     float pos_eff[3] = {0};
     nt_sprite_renderer_test_last_emit_position(0U, pos_eff);
     const float total_h_eff = nt_ui_rich_test_total_h(s_fx.ctx);
@@ -1161,7 +1160,7 @@ static void test_fx_fade_in_skips_image(void) {
     const nt_material_t mat = make_rich_image_material();
 
     /* time 0: every atom's fade window is closed -> the image is skipped. */
-    frame_effected_image(mat, NT_UI_RICH_FX_ID_FADE_IN, 0.0F);
+    frame_effected_image(mat, nt_ui_rich_fx_fade_in, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "fade_in t=0 skips the image atom emit");
     /* The image's solved box is still reserved (layout unchanged) -- the solver placed it. */
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > 0.0F, "layout still solved with the box reserved");
@@ -1514,7 +1513,7 @@ static void stub_draw(void *user_data, float x, float y, float w, float h, const
 }
 
 /* Build "A [object] B" with an optional effect; walk once. Records the draw_fn call args. */
-static void frame_object(uint8_t effect_id, float time) {
+static void frame_object(nt_ui_rich_fx_fn effect_fn, float time) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -1528,13 +1527,13 @@ static void frame_object(uint8_t effect_id, float time) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("obj_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
-        if (effect_id != 0U) {
-            nt_ui_rich_push_effect(s_fx.ctx, effect_id);
+        if (effect_fn != NULL) {
+            nt_ui_rich_push_effect(s_fx.ctx, effect_fn);
         }
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
         nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
-        if (effect_id != 0U) {
+        if (effect_fn != NULL) {
             nt_ui_rich_pop(s_fx.ctx);
         }
         nt_ui_rich_end(s_fx.ctx);
@@ -1548,7 +1547,7 @@ static void frame_object(uint8_t effect_id, float time) {
 /* (14) an OBJECT run reserves a box via measure_fn and calls draw_fn(x,y,w,h) exactly once at
  * the solved box position; the surrounding text wraps around the reserved box. */
 static void test_object_draws_at_solved_box(void) {
-    frame_object(0U, 0.0F);
+    frame_object(NULL, 0.0F);
     TEST_ASSERT_TRUE_MESSAGE(s_obj_measure_calls >= 1U, "measure_fn called to reserve the box");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "draw_fn called exactly once");
     TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "draw_fn w == measured width (box reserved)");
@@ -1560,16 +1559,16 @@ static void test_object_draws_at_solved_box(void) {
 /* (15) an effect on the object run shifts the draw_fn box (vs no effect); fade_in t=0 -> the
  * draw_fn is NOT called (visible=false skips the object). */
 static void test_object_effect_and_skip(void) {
-    frame_object(0U, 0.0F);
+    frame_object(NULL, 0.0F);
     const float x_noeff = s_obj_draw_x;
     const float y_noeff = s_obj_draw_y;
 
-    frame_object(NT_UI_RICH_FX_ID_WAVE, 0.4F);
+    frame_object(nt_ui_rich_fx_wave, 0.4F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "effected object still draws once");
     const bool shifted = (fabsf(s_obj_draw_x - x_noeff) > 0.1F) || (fabsf(s_obj_draw_y - y_noeff) > 0.1F);
     TEST_ASSERT_TRUE_MESSAGE(shifted, "wave effect shifts the draw_fn box");
 
-    frame_object(NT_UI_RICH_FX_ID_FADE_IN, 0.0F);
+    frame_object(nt_ui_rich_fx_fade_in, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_obj_draw_calls, "fade_in t=0 (visible=false) skips the draw_fn call");
 }
 
@@ -1974,7 +1973,7 @@ static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
  * callback at emit time, not just that some custom fn ran. */
 static void test_custom_fx_runs_via_builder(void) {
     /* No-effect baseline box position. */
-    frame_object(0U, 0.5F);
+    frame_object(NULL, 0.5F);
     const float x_base = s_obj_draw_x;
     const float y_base = s_obj_draw_y;
 
@@ -2000,7 +1999,7 @@ static fx_param_t s_markup_param = {.off_x = 11.0F, .off_y = -3.0F};
 static void test_custom_fx_runs_via_markup(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_effect(&ts, "wavename", NT_UI_RICH_FX_ID_WAVE);           /* stock entry coexists */
+    nt_ui_rich_tagset_register_effect(&ts, "wavename", nt_ui_rich_fx_wave);              /* stock entry coexists */
     nt_ui_rich_tagset_register_effect_fn(&ts, "myfx", custom_fx_param, &s_markup_param); /* custom + user_data */
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -2391,8 +2390,135 @@ static void test_over_cap_layers_hard_guard(void) {
     NT_TEST_EXPECT_ASSERT(frame_over_cap_layers());
 }
 
+static void test_late_effect_preserves_plain_text_runs(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    fx_param_t param = {.off_x = 37.0F, .off_y = -19.0F};
+    s_custom_fx_calls = 0U;
+    s_custom_fx_seen_user = NULL;
+    s_obj_draw_calls = 0U;
+    nt_text_renderer_test_reset_call_counters();
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("late_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "P", 1U);
+        nt_ui_rich_push_effect_fn(s_fx.ctx, custom_fx_param, &param);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "Q", 1U);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("late_fx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_custom_fx_calls, "only the object carries the newly interned effect");
+    TEST_ASSERT_EQUAL_PTR(&param, s_custom_fx_seen_user);
+    TEST_ASSERT_EQUAL_UINT32(1U, s_obj_draw_calls);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_text_renderer_test_draw_n_calls(), "plain runs before and after the effect both render");
+}
+
+static nt_ui_rich_fx_params_t s_seen_tuned_params[NT_UI_RICH_MAX_CUSTOM_FX + 1U];
+static uint32_t s_seen_tuned_count;
+
+static nt_ui_rich_fx_result_t capture_tuned_params(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                                   void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)time;
+    (void)hovered;
+    TEST_ASSERT_NOT_NULL(user_data);
+    TEST_ASSERT_TRUE(s_seen_tuned_count < NT_UI_RICH_MAX_CUSTOM_FX + 1U);
+    s_seen_tuned_params[s_seen_tuned_count++] = *(const nt_ui_rich_fx_params_t *)user_data;
+    return nt_ui_rich_fx_identity(base_color);
+}
+
+static void test_tuned_effect_copies_each_push_before_emit(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_fx_params_t params = {.amp = 3.0F, .speed = 5.0F};
+    s_seen_tuned_count = 0U;
+    s_obj_draw_calls = 0U;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("copied_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_effect_ex(s_fx.ctx, capture_tuned_params, &params);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        params = (nt_ui_rich_fx_params_t){.amp = 7.0F, .speed = 11.0F};
+        nt_ui_rich_push_effect_ex(s_fx.ctx, capture_tuned_params, &params);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("copied_fx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    params = (nt_ui_rich_fx_params_t){.amp = 101.0F, .speed = 103.0F};
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(2U, s_seen_tuned_count);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_obj_draw_calls);
+    TEST_ASSERT_EQUAL_INT32(3, (int32_t)s_seen_tuned_params[0].amp);
+    TEST_ASSERT_EQUAL_INT32(5, (int32_t)s_seen_tuned_params[0].speed);
+    TEST_ASSERT_EQUAL_INT32(7, (int32_t)s_seen_tuned_params[1].amp);
+    TEST_ASSERT_EQUAL_INT32(11, (int32_t)s_seen_tuned_params[1].speed);
+    TEST_ASSERT_EQUAL_INT32(101, (int32_t)params.amp);
+}
+
+static void test_markup_effect_capacity_keeps_prior_params_and_balances_close(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_effect(&ts, "copy", capture_tuned_params);
+    nt_ui_rich_tagset_register_object_tag(&ts, "box", stub_measure, stub_draw, NULL);
+
+    char markup[((NT_UI_RICH_MAX_CUSTOM_FX + 1U) * 64U) + 16U];
+    size_t used = 0U;
+    for (uint32_t i = 0; i < NT_UI_RICH_MAX_CUSTOM_FX + 1U; i++) {
+        const int n = snprintf(markup + used, sizeof markup - used, "<fx=copy amp=%u speed=%u><obj=box/></fx>", i + 1U, i + 2U);
+        TEST_ASSERT_TRUE(n > 0 && (size_t)n < sizeof markup - used);
+        used += (size_t)n;
+    }
+    const char trailing[] = "<obj=box/>";
+    memcpy(markup + used, trailing, sizeof trailing);
+    used += sizeof trailing - 1U;
+    s_seen_tuned_count = 0U;
+    s_obj_draw_calls = 0U;
+    s_fx.ctx->rich_max_runs = NT_UI_RICH_MAX_CUSTOM_FX + 2U;
+    s_fx.ctx->rich_max_styles = NT_UI_RICH_MAX_CUSTOM_FX + 2U;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 4096.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("capacity_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(4096), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("capacity_fx").id, NULL, &ts, &base, markup, used, 4096.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    memset(&ts, 0, sizeof ts);
+    nt_ui_target_t target = {.viewport = {0, 0, 4096, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UI_RICH_MAX_CUSTOM_FX, s_seen_tuned_count, "overflow and trailing objects have identity effects");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UI_RICH_MAX_CUSTOM_FX + 2U, s_obj_draw_calls, "overflow preserves content and the closing tag balances");
+    for (uint32_t i = 0; i < NT_UI_RICH_MAX_CUSTOM_FX; i++) {
+        TEST_ASSERT_EQUAL_INT32((int32_t)i + 1, (int32_t)s_seen_tuned_params[i].amp);
+        TEST_ASSERT_EQUAL_INT32((int32_t)i + 2, (int32_t)s_seen_tuned_params[i].speed);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_late_effect_preserves_plain_text_runs);
+    RUN_TEST(test_tuned_effect_copies_each_push_before_emit);
+    RUN_TEST(test_markup_effect_capacity_keeps_prior_params_and_balances_close);
     RUN_TEST(test_emit_produces_text_spans);
     RUN_TEST(test_rich_only_frame_binds_text_material);
     RUN_TEST(test_fixed_block_size_matches_solved);
@@ -2431,7 +2557,7 @@ int main(void) {
     RUN_TEST(test_fx_sway_deterministic);
     RUN_TEST(test_fx_params_override_vs_default);
     RUN_TEST(test_fx_push_effect_ex_tunes_emit);
-    RUN_TEST(test_fx_push_effect_ex_null_stock_id);
+    RUN_TEST(test_fx_push_effect_ex_defaults);
     RUN_TEST(test_fx_markup_params_apply);
     RUN_TEST(test_fx_fade_in_visibility);
     RUN_TEST(test_fx_image_shifts_quad_visual_only);

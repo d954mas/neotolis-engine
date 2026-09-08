@@ -96,7 +96,7 @@ static void test_tagset_color_atlas_effect(void) {
 
     nt_ui_rich_tagset_register_color(&ts, "gold", 0xFF00D7FFU);
     nt_ui_rich_tagset_register_atlas(&ts, "icons", (nt_resource_t){.id = 42U});
-    nt_ui_rich_tagset_register_effect(&ts, "wave", 3U);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
 
     uint32_t color = 0;
     TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_color(&ts, h("gold"), &color));
@@ -106,9 +106,13 @@ static void test_tagset_color_atlas_effect(void) {
     TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_atlas(&ts, h("icons"), &atlas));
     TEST_ASSERT_EQUAL_UINT32(42U, atlas.id);
 
-    uint8_t fx = 0;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("wave"), &fx));
-    TEST_ASSERT_EQUAL_UINT8(3U, fx);
+    bool tunable = false;
+    nt_ui_rich_fx_fn fx = NULL;
+    void *user = NULL;
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("wave"), &tunable, &fx, &user));
+    TEST_ASSERT_TRUE(fx == nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
 }
 
 /* A stub custom effect fn (identity) used only to prove tagset custom registration/lookup. */
@@ -130,8 +134,6 @@ static nt_ui_rich_object_measure_t parse_stub_object_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = 8.0F, .height = 8.0F, .ascent = 8.0F};
 }
 
-/* (2b) register_effect_fn registers a CUSTOM effect: the full lookup returns fn+user_data, and the
- * stock-only lookup MISSES it (so a custom name never resolves to a bogus stock id). */
 static void test_tagset_custom_effect_fn(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
@@ -140,40 +142,56 @@ static void test_tagset_custom_effect_fn(void) {
     nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
 
     /* Full lookup resolves the custom entry to its fn + user_data. */
-    uint8_t id = 0xFFU;
+    bool tunable = true;
     nt_ui_rich_fx_fn fn = NULL;
     void *user = NULL;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &id, &fn, &user));
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
     TEST_ASSERT_TRUE_MESSAGE(fn == parse_stub_fx, "custom lookup returns the registered fn");
     TEST_ASSERT_TRUE_MESSAGE(user == &marker, "custom lookup returns the registered user_data");
 
-    /* Stock-only lookup misses the custom entry (fn != NULL). */
-    uint8_t stock_id = 0;
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_rich_tagset_lookup_effect(&ts, h("customfx"), &stock_id), "stock-only lookup misses a custom entry");
+    TEST_ASSERT_FALSE(tunable);
 
     /* register_effect_fn requires a non-NULL fn. */
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "bad", NULL, NULL));
 }
 
-/* (2c) a STOCK entry coexists with custom entries: it resolves via BOTH the stock-only lookup and
- * the full lookup (which reports fn==NULL for a stock entry). */
-static void test_tagset_stock_effect_coexists(void) {
+static void test_tagset_tunable_effect_coexists(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
     int marker = 0;
     nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
-    nt_ui_rich_tagset_register_effect(&ts, "stockfx", NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_tagset_register_effect(&ts, "stockfx", nt_ui_rich_fx_pulse);
 
-    uint8_t stock_id = 0;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("stockfx"), &stock_id));
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, stock_id);
-
-    uint8_t id = 0;
-    nt_ui_rich_fx_fn fn = parse_stub_fx;
+    bool tunable = false;
+    nt_ui_rich_fx_fn fn = NULL;
     void *user = NULL;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("stockfx"), &id, &fn, &user));
-    TEST_ASSERT_TRUE_MESSAGE(fn == NULL, "stock entry full-lookup reports fn==NULL");
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, id);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("stockfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == nt_ui_rich_fx_pulse);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "bad", NULL));
+}
+
+static void test_tagset_effect_protocol_override(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    int marker = 0;
+    bool tunable = false;
+    nt_ui_rich_fx_fn fn = NULL;
+    void *user = NULL;
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+    nt_ui_rich_tagset_register_effect(&ts, "customfx", nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == parse_stub_fx);
+    TEST_ASSERT_FALSE(tunable);
+    TEST_ASSERT_EQUAL_PTR(&marker, user);
+    TEST_ASSERT_EQUAL_UINT32(1U, ts.effect_count);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "bad", NULL));
 }
 
 /* (3) re-registering a name overrides it in place (no duplicate entry). */
@@ -212,7 +230,7 @@ static void test_tagset_empty_name_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_font(&ts, "", fam));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_atlas(&ts, "", (nt_resource_t){.id = 1U}));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_color(&ts, "", 0xFFFFFFFFU));
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", 1U));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", nt_ui_rich_fx_wave));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "", parse_stub_fx, NULL));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "", parse_stub_object_measure, NULL, NULL));
 }
@@ -400,7 +418,7 @@ static void test_parse_empty_scale_value_graceful(void) {
 static void parse_fx(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
     nt_ui_rich_tagset_register_effect_fn(&ts, "fade", parse_stub_fx, NULL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -854,7 +872,7 @@ static void parse_named_miss(const char *m, nt_ui_rich_style_t *base) {
     nt_ui_rich_tagset_register_color(&ts, "accent", 0xFFAABBCCU);
     const nt_font_t hdr[4] = {{.id = 21}, {.id = 22}, {.id = 23}, {.id = 24}};
     nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
-    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -1317,12 +1335,33 @@ static void test_log_wellformed_silent_and_byte_identical(void) {
     sink_detach();
 }
 
+static void test_base_effect_rejected_before_scratch_allocation(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const uint8_t invalid_ids[] = {1U, 128U};
+    for (uint32_t i = 0; i < sizeof invalid_ids / sizeof invalid_ids[0]; i++) {
+        base.effect_id = invalid_ids[i];
+        const size_t used = nt_mem_scratch_used();
+        NT_TEST_EXPECT_ASSERT(nt_ui_rich_begin(s_fx.ctx, &base));
+        TEST_ASSERT_TRUE_MESSAGE(used == nt_mem_scratch_used(), "invalid base is rejected before scratch allocation");
+        TEST_ASSERT_NULL(s_fx.ctx->pending_rich);
+        TEST_ASSERT_FALSE(s_fx.ctx->rich_session_open);
+    }
+    base.effect_id = 0U;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx->pending_rich);
+    TEST_ASSERT_TRUE(s_fx.ctx->rich_session_open);
+    nt_ui_rich_end(s_fx.ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_base_effect_rejected_before_scratch_allocation);
     RUN_TEST(test_tagset_font_register_lookup);
     RUN_TEST(test_tagset_color_atlas_effect);
     RUN_TEST(test_tagset_custom_effect_fn);
-    RUN_TEST(test_tagset_stock_effect_coexists);
+    RUN_TEST(test_tagset_tunable_effect_coexists);
+    RUN_TEST(test_tagset_effect_protocol_override);
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
     RUN_TEST(test_tagset_empty_name_asserts);

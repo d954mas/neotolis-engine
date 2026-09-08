@@ -1268,13 +1268,15 @@ if(NOT EMSCRIPTEN)
     # distinct message (nt_log_warn_unique dedup). It links the REAL nt_log impl instead of the no-op
     # nt_log_stub the other ui tests use -- so nt_log_add_sink / nt_log_write_unique actually fan out.
     # Provider (nt_log) trails its consumers; nt_hash/nt_core trail last (GNU-ld single-pass order).
+    target_link_libraries(test_nt_ui_rich_emit PRIVATE nt_ui_rich_fx)
+
     string(REPLACE "nt_log_stub" "nt_log;nt_hash;nt_core" _nt_ui_rich_parse_libs "${_nt_ui_test_libs}")
     add_executable(test_nt_ui_rich_parse
         unit/test_nt_ui_rich_parse.c
         ${_nt_ui_test_helper_sources}
     )
     target_include_directories(test_nt_ui_rich_parse PRIVATE ${_nt_ui_test_helper_includes})
-    target_link_libraries(test_nt_ui_rich_parse PRIVATE nt_ui_rich ${_nt_ui_rich_parse_libs})
+    target_link_libraries(test_nt_ui_rich_parse PRIVATE nt_ui_rich nt_ui_rich_fx ${_nt_ui_rich_parse_libs})
     target_compile_definitions(test_nt_ui_rich_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_rich_parse)
 

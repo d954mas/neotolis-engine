@@ -35,7 +35,7 @@ typedef struct nt_ui_rich_tagset nt_ui_rich_tagset_t; /* parser vocabulary; defi
 #define NT_UI_RICH_MAX_LINKS 32 /* hitbox rects per call */
 #endif
 #ifndef NT_UI_RICH_MAX_CUSTOM_FX
-#define NT_UI_RICH_MAX_CUSTOM_FX 16 /* distinct game-supplied (fn,user_data) effects per call */
+#define NT_UI_RICH_MAX_CUSTOM_FX 16 /* all default, tuned and borrowed effects per block */
 #endif
 /* Shared UTF-8 text buffer for all TEXT runs in one call. */
 #ifndef NT_UI_RICH_MAX_TEXT_BYTES
@@ -49,7 +49,7 @@ typedef enum {
     NT_RICH_ATOM_OBJECT,
 } nt_rich_atom_kind_t;
 
-/* ---- Per-atom effect ABI (full catalog + stock curves in nt_ui_rich_fx.h) ----
+/* ---- Per-atom effect ABI (optional ready-made curves in nt_ui_rich_fx.h) ----
  * Declared here, not fx.h, so push_effect_fn's signature avoids a text.h<->fx.h include cycle
  * (fx.h includes this header). */
 typedef struct {
@@ -61,12 +61,28 @@ typedef struct {
 } nt_ui_rich_fx_result_t;
 _Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t stable ABI (6 float + 1 bool + pad)");
 
+static inline nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]) {
+    nt_ui_rich_fx_result_t r;
+    r.offset_x = 0.0F;
+    r.offset_y = 0.0F;
+    r.color[0] = base_color[0];
+    r.color[1] = base_color[1];
+    r.color[2] = base_color[2];
+    r.color[3] = base_color[3];
+    r.scale = 1.0F;
+    r.visible = true;
+    return r;
+}
+
+#define NT_UI_RICH_FX_CUSTOM_BASE 128U
+static inline bool nt_ui_rich_fx_id_is_custom(uint8_t effect_id) { return effect_id >= NT_UI_RICH_FX_CUSTOM_BASE; }
+
 /* Per-atom effect callback. hovered is true only for the hovered link's atoms (hover gates
  * effects). Returns a visual-only transform; MUST NOT mutate layout. */
 typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                                    void *user_data);
 
-/* Runtime tuning for the STOCK effect catalog, passed as the stock fn's user_data. Convention: a
+/* Runtime tuning for effect functions, passed as user_data. Convention: a
  * field <= 0 means "use the effect's compile-time default" (a partial struct tunes only its set fields). */
 typedef struct {
     float amp;   /* 0: effect-specific magnitude (wave px / shake px / pulse scale delta); <=0 -> default */
@@ -114,7 +130,7 @@ typedef struct {
     uint32_t color_abgr;                 /* 32: innermost <color> override */
     float font_size;                     /* 36: RESOLVED px size (> 0); <scale> multiplies it, a future <size> sets it absolute */
     uint8_t variant;                     /* 40: NT_UI_RICH_VARIANT_* -> selects font_id[] */
-    uint8_t effect_id;                   /* 41: stock effect catalog index; 0 = none */
+    uint8_t effect_id;                   /* 41: internal block index; public base must be 0 */
     uint8_t layer;                       /* 42: z-order band; 255 (AUTO) -> per-kind default (TEXT<IMAGE<OBJECT) */
     uint8_t _pad;                        /* 43: alignment pad to the 4-byte material handle */
     nt_material_t image_material;        /* 44: inline-image material; .id==0 -> default from ctx->sprite_material */
@@ -170,17 +186,15 @@ void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_a
 void nt_ui_rich_push_shadow(nt_ui_context_t *ctx, float dx, float dy, uint32_t color_abgr);
 void nt_ui_rich_push_underline(nt_ui_context_t *ctx);
 void nt_ui_rich_push_strikethrough(nt_ui_context_t *ctx);
-void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
+/* NULL clears the current effect; non-NULL uses the function defaults. */
+void nt_ui_rich_push_effect(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn);
 /* Push a z-order LAYER (0..254) for the enclosed atoms; the self-emit draws ascending by layer with a
  * flush between bands so a lower layer fully lands before a higher one. 255 == AUTO (per-kind default). */
 void nt_ui_rich_push_layer(nt_ui_context_t *ctx, uint8_t layer);
-/* Push a game-supplied CUSTOM effect fn (resolved at emit, BEFORE the stock catalog). The
- * (fn,user_data) is captured into a per-call fixed-cap table; the composed style carries a
- * custom effect_id index into it. fn must be non-NULL. */
+/* Borrow user_data until the consuming walk. fn must be non-NULL. */
 void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data);
-/* Push a STOCK effect TUNED by `params`. params are COPIED into per-block storage (read at EMIT, so
- * the transient caller struct must not be aliased). params==NULL == nt_ui_rich_push_effect(stock). */
-void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_ui_rich_fx_params_t *params);
+/* Copy params into block storage. NULL params uses the function defaults; fn must be non-NULL. */
+void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params);
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
 void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);

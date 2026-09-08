@@ -11,7 +11,6 @@
 
 #include "font/nt_font.h"         /* nt_font_t */
 #include "resource/nt_resource.h" /* nt_resource_t (atlas alias handle) */
-#include "ui/nt_ui_rich_fx.h"     /* nt_ui_rich_fx_result_t / nt_ui_rich_fx_identity */
 #include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_fx_fn + object measure/draw fns */
 
 /* ---- Vocabulary caps (no heap; NT_ASSERT on overflow) ---- */
@@ -47,14 +46,12 @@ typedef struct {
     uint32_t color_abgr; /* semantic/named color -> packed AABBGGRR */
 } nt_ui_rich_tagset_color_t;
 
-/* An <fx=name> resolves to EITHER a stock catalog id OR a game-supplied custom fn. fn==NULL ->
- * stock (effect_id carries the catalog index); fn!=NULL -> custom (effect_id is ignored, the
- * builder captures fn+user_data into the per-block table at build time). */
+/* Effect functions are captured into the block during parsing. */
 typedef struct {
     uint64_t name_hash;
-    uint8_t effect_id;   /* stock-catalog index when fn==NULL */
-    nt_ui_rich_fx_fn fn; /* custom effect callback, or NULL for a stock effect */
-    void *user_data;     /* passed back to the custom fn (NULL for stock) */
+    bool tunable;        /* accepts nt_ui_rich_fx_params_t */
+    nt_ui_rich_fx_fn fn; /* non-NULL effect callback */
+    void *user_data;     /* borrowed until the consuming walk; NULL for tunable */
 } nt_ui_rich_tagset_effect_t;
 
 typedef struct {
@@ -87,9 +84,9 @@ void nt_ui_rich_tagset_reset(nt_ui_rich_tagset_t *ts);
 void nt_ui_rich_tagset_register_font(nt_ui_rich_tagset_t *ts, const char *name, const nt_font_t family[4]);
 void nt_ui_rich_tagset_register_atlas(nt_ui_rich_tagset_t *ts, const char *name, nt_resource_t atlas);
 void nt_ui_rich_tagset_register_color(nt_ui_rich_tagset_t *ts, const char *name, uint32_t color_abgr);
-void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name, uint8_t effect_id);
-/* Register a game-supplied custom effect fn under `name` so `<fx=name>` resolves to it (resolved
- * BEFORE stock). The (fn,user_data) is captured into the run-list at parse/build time. */
+/* Tunable functions accept nt_ui_rich_fx_params_t through user_data. */
+void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn);
+/* Borrow user_data until the consuming walk; markup amp/speed is ignored. */
 void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn, void *user_data);
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
 
@@ -97,12 +94,8 @@ void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *
 bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_font_t out_family[4]);
 bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_resource_t *out_atlas);
 bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint32_t *out_color_abgr);
-/* Stock-only effect lookup: hits ONLY a stock entry (fn==NULL), writes its catalog id. A custom
- * (fn) entry MISSES here -- use nt_ui_rich_tagset_lookup_effect_fn to resolve custom-or-stock. */
-bool nt_ui_rich_tagset_lookup_effect(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id);
-/* Full effect lookup: hits a stock OR a custom entry. On a custom hit *out_fn!=NULL (+ *out_user);
- * on a stock hit *out_fn==NULL and *out_effect_id is the catalog id. Returns false on a miss. */
-bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id, nt_ui_rich_fx_fn *out_fn, void **out_user);
+/* Lookup a callback and whether it accepts markup amp/speed parameters. */
+bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, bool *out_tunable, nt_ui_rich_fx_fn *out_fn, void **out_user);
 bool nt_ui_rich_tagset_lookup_object(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_ui_rich_tagset_object_t *out_object);
 
 #endif /* NT_UI_RICH_TAGSET_H */

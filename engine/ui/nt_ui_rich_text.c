@@ -23,7 +23,6 @@
 #include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_rich_fx.h" /* per-atom effect ABI + stock catalog */
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
@@ -83,7 +82,7 @@ typedef struct {
     uint32_t text_off; /* byte range into st->text */
     uint32_t text_len;
     uint8_t flags;     /* NT_UI_RICH_RUN_SYNTH_ITALIC -> shear at emit */
-    uint8_t effect_id; /* stock effect catalog index from the run's style; 0 = none */
+    uint8_t effect_id; /* block effect index from the run's style; 0 = none */
     uint8_t layer;     /* EFFECTIVE z-order band (AUTO already resolved to the per-kind default) */
     uint32_t fx_idx;   /* stable per-block atom index fed to the effect curve (phase/stagger) */
     /* IMAGE/OBJECT box context. */
@@ -286,8 +285,10 @@ static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_
 // #endregion
 
 // #region builder
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat capacity selection and scratch allocations.
 void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     NT_ASSERT(ctx != NULL);
+    NT_ASSERT(base == NULL || base->effect_id == 0U);
     NT_ASSERT(!ctx->rich_session_open && "rich-text calls do not nest");
 
     nt_ui_rich_state_t *st = NT_MEM_SCRATCH_ALLOC(nt_ui_rich_state_t);
@@ -392,78 +393,58 @@ void nt_ui_rich_push_strikethrough(nt_ui_context_t *ctx) {
     rich_style_top(st)->variant |= NT_UI_RICH_VARIANT_STRIKE; /* additive; decoration bit, not a font variant */
 }
 
-void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id) {
-    nt_ui_rich_state_t *st = rich_state(ctx);
-    rich_push_copy(st);
-    rich_style_top(st)->effect_id = effect_id;
-}
-
 void nt_ui_rich_push_layer(nt_ui_context_t *ctx, uint8_t layer) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
-    rich_style_top(st)->layer = layer; /* 255 (AUTO) is a valid no-op override; resolved per-kind at atom build */
+    rich_style_top(st)->layer = layer;
 }
 
-/* Intern a custom (fn,user_data) into the per-call table; returns its custom effect_id (base +
- * index). Dedups identical pairs so a repeated <fx=name> shares a slot (and a table entry). */
-static uint8_t rich_intern_custom_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, void *user_data) {
-    for (uint32_t i = 0; i < st->custom_fx_count; i++) {
-        if (st->custom_fx[i] == fn && st->custom_fx_user[i] == user_data) {
-            return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + i);
+static uint8_t rich_intern_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, void *user_data, const nt_ui_rich_fx_params_t *params, bool from_markup) {
+    (void)from_markup;
+    if (fn == NULL) {
+        return 0U;
+    }
+    if (params == NULL) {
+        for (uint32_t i = 0; i < st->custom_fx_count; i++) {
+            if (st->custom_fx[i] == fn && st->custom_fx_user[i] == user_data) {
+                return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + i);
+            }
         }
     }
-    /* The cap ceiling is enforced at compile time (see the _Static_assert at the table), so the
-     * runtime check is just the table-overflow guard -- the id range can never exhaust first. */
-    NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
-    /* HARD cap (survives NT_ASSERT OFF): the parser mints a custom slot per distinct <fx=name>;
-     * once full, reuse the last slot rather than write past custom_fx[] (a wrong effect beats OOB). */
     if (st->custom_fx_count >= NT_UI_RICH_MAX_CUSTOM_FX) {
-        const uint32_t last = NT_UI_RICH_MAX_CUSTOM_FX - 1U;
-        st->custom_fx[last] = fn;
-        st->custom_fx_user[last] = user_data;
-        return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + last);
+        NT_ASSERT(from_markup && "rich effect table overflow");
+        NT_LOG_WARN_UNIQUE("rich effect table full -- new effect skipped");
+        return 0U;
     }
     const uint32_t idx = st->custom_fx_count++;
     st->custom_fx[idx] = fn;
-    st->custom_fx_user[idx] = user_data;
+    if (params != NULL) {
+        // Each tuned push owns its copy until the consuming walk.
+        st->custom_fx_params[idx] = *params;
+        st->custom_fx_user[idx] = &st->custom_fx_params[idx];
+    } else {
+        st->custom_fx_user[idx] = user_data;
+    }
     return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + idx);
 }
+
+static void rich_push_fx(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data, const nt_ui_rich_fx_params_t *params, bool from_markup) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    const uint8_t id = rich_intern_fx(st, fn, user_data, params, from_markup);
+    rich_push_copy(st);
+    rich_style_top(st)->effect_id = id;
+}
+
+void nt_ui_rich_push_effect(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn) { rich_push_fx(ctx, fn, NULL, NULL, false); }
 
 void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data) {
-    NT_ASSERT(fn != NULL && "nt_ui_rich_push_effect_fn: fn must be non-NULL");
-    nt_ui_rich_state_t *st = rich_state(ctx);
-    const uint8_t id = rich_intern_custom_fx(st, fn, user_data);
-    rich_push_copy(st);
-    rich_style_top(st)->effect_id = id; /* >= NT_UI_RICH_FX_CUSTOM_BASE -> custom table index */
+    NT_ASSERT(fn != NULL);
+    rich_push_fx(ctx, fn, user_data, NULL, false);
 }
 
-/* Intern a (stock fn, by-value params) into a FRESH custom slot whose user_data points at the
- * block-owned params copy. No dedup: each tuned push gets its own params slot (different params with
- * the same fn must not alias). Returns the custom effect_id. */
-static uint8_t rich_intern_stock_ex(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params) {
-    NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
-    /* HARD cap (survives NT_ASSERT OFF): the parser mints a slot per tuned <fx=name k=v>; once full,
-     * reuse the last slot rather than write past custom_fx_params[]. */
-    const uint32_t idx = (st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX) ? st->custom_fx_count++ : (NT_UI_RICH_MAX_CUSTOM_FX - 1U);
-    st->custom_fx[idx] = fn;
-    st->custom_fx_params[idx] = *params;                  /* COPY by value -- read at emit, must be block-owned */
-    st->custom_fx_user[idx] = &st->custom_fx_params[idx]; /* stock fn reads params via user_data */
-    return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + idx);
-}
-
-void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_ui_rich_fx_params_t *params) {
-    nt_ui_rich_state_t *st = rich_state(ctx);
-    /* No params -> plain stock path (NULL user_data -> compile-time defaults), byte-identical to push_effect. */
-    if (params == NULL) {
-        rich_push_copy(st);
-        rich_style_top(st)->effect_id = stock_id;
-        return;
-    }
-    nt_ui_rich_fx_fn fn = nt_ui_rich_fx_stock(stock_id);
-    NT_ASSERT(fn != NULL && "nt_ui_rich_push_effect_ex: stock_id is not a stock catalog id");
-    const uint8_t id = rich_intern_stock_ex(st, fn, params);
-    rich_push_copy(st);
-    rich_style_top(st)->effect_id = id; /* routed through the per-block custom table -> &params copy at emit */
+void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params) {
+    NT_ASSERT(fn != NULL);
+    rich_push_fx(ctx, fn, NULL, params, false);
 }
 
 void nt_ui_rich_pop(nt_ui_context_t *ctx) {
@@ -1165,27 +1146,19 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         nt_ui_rich_fx_params_t params = {0};
         const bool has_params = rich_parse_fx_params(val + nlen_fx, vlen - nlen_fx, &params);
 
-        uint8_t effect_id = 0;
+        bool tunable = false;
         nt_ui_rich_fx_fn fn = NULL;
         void *fx_user = NULL;
-        const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, nlen_fx).value, &effect_id, &fn, &fx_user);
+        const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, nlen_fx).value, &tunable, &fn, &fx_user);
         /* Unknown name -> never push effect_id 0 as a real effect. Log + skip. */
         if (!fx_ok) {
             NT_LOG_WARN_UNIQUE("rich markup: unknown effect name '%.*s' -- skipped", (int)nlen_fx, val);
             break;
         }
-        if (fn != NULL) {
-            /* Markup k=v params apply to STOCK effects only: a custom fn carries its own user_data.
-             * Log + push the custom fn IGNORING the params (the fn is valid, only the params don't apply). */
-            if (has_params) {
-                NT_LOG_WARN_UNIQUE("rich markup: <fx=%.*s k=v> params apply to STOCK effects only -- params ignored", (int)nlen_fx, val);
-            }
-            nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock */
-        } else if (has_params) {
-            nt_ui_rich_push_effect_ex(ctx, effect_id, &params);
-        } else {
-            nt_ui_rich_push_effect(ctx, effect_id);
+        if (has_params && !tunable) {
+            NT_LOG_WARN_UNIQUE("rich markup: <fx=%.*s k=v> effect uses borrowed data -- params ignored", (int)nlen_fx, val);
         }
+        rich_push_fx(ctx, fn, fx_user, has_params && tunable ? &params : NULL, true);
         pushed_style = true;
         break;
     }
@@ -1478,7 +1451,7 @@ typedef struct {
     uint32_t text_off;
     uint32_t text_len;
     uint8_t flags;
-    uint8_t effect_id; /* stock effect catalog index from the run's style; 0 = none */
+    uint8_t effect_id; /* block effect index from the run's style; 0 = none */
     uint8_t layer;     /* EFFECTIVE z-order band (per-kind default already resolved from style.layer AUTO) */
     uint16_t run_idx;
     uint32_t link_id;
@@ -1966,18 +1939,15 @@ static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
 
 /* Evaluate the per-atom effect -> visual-only transform; effect_id 0 / unregistered -> identity. */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
-    /* Custom (game-supplied) fns resolve BEFORE stock: a custom effect_id indexes the
-     * per-block table captured at build; otherwise fall back to the stock catalog. */
+    /* The table belongs to the block; the tagset may already be gone. */
     nt_ui_rich_fx_fn fn = NULL;
-    void *user_data = NULL; /* custom fn gets its registered pointer; stock fns get NULL */
+    void *user_data = NULL;
     if (nt_ui_rich_fx_id_is_custom(s->effect_id)) {
         const uint32_t idx = (uint32_t)s->effect_id - NT_UI_RICH_FX_CUSTOM_BASE;
         if (idx < st->custom_fx_count) {
             fn = st->custom_fx[idx];
             user_data = st->custom_fx_user[idx];
         }
-    } else {
-        fn = nt_ui_rich_fx_stock(s->effect_id);
     }
     if (fn == NULL) {
         return nt_ui_rich_fx_identity(base_color);

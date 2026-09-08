@@ -45,7 +45,7 @@ attr (bad float, unknown key, unknown valign) is **logged once (`nt_log_warn_uni
 markup is untrusted localization DATA, so a bad value degrades gracefully (the rest renders) and never
 asserts; the code-first builder, being trusted game code, still asserts. Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
-`<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, stock effects
+`<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, tunable effects
 only), an `<img=alias:region/>` atlas alias, and the self-closing
 `<obj=name/>` (a game-drawn WidgetSpan resolved like `<img=alias:region/>`) —
 passing one of these with a `NULL` tagset (or an unresolved name) is **logged once and skipped** — the tag
@@ -63,7 +63,7 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   baseline. Horizontal alignment (L/C/R) offsets each line.
 - **One Clay FIXED block.** The solved total size feeds a single
   `CLAY_SIZING_FIXED` Clay element; text emits during that element's
-  custom-walk via `NT_UI_CUSTOM_TYPE_RICH_TEXT`. Keeping text under one measured
+  custom-walk via `NT_UI_CUSTOM_TYPE_CALLBACK`. Keeping text under one measured
   block is what lets the whole paragraph wrap and align as a unit.
 - **Base font size is a STYLE FIELD.** `nt_ui_rich_style_t.font_size` (px, > 0)
   mirrors `nt_ui_label_style_t.font_size` — the base size lives in the style, not a
@@ -158,55 +158,46 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
   (no 5th custom attr). They are **visual-only**: the solver layout never re-flows.
   The animation clock is **passed in by the game** (`time`) — there is no engine
   global frame clock (RESEARCH Pitfall 4). The `user_data` is the pointer the game
-  registered with the fn (see below): the same fn can be **parameterized per
-  registration** (e.g. amplitude/offset read from `user_data`); stock catalogue fns
-  receive `NULL` and ignore it.
-- **Tunable stock effects (revises the earlier compile-time-constants stance).**
-  The stock catalogue constants are now **defaults**, not the final word: a stock
-  effect is tunable at runtime via `nt_ui_rich_fx_params_t { float amp; float
-  speed; }` passed as the stock fn's `user_data`. Two fronts deliver it: the builder
-  `nt_ui_rich_push_effect_ex(ctx, stock_id, params)` (params are **copied by value**
-  into per-block storage — they are read at emit, so they must outlive the transient
-  caller struct) and the markup `<fx=name amp=8 speed=3>` (the tag value is the
-  effect name followed by space-separated `key=value` pairs; keys `amp`/`speed`,
-  float values; a malformed pair logs once and is skipped — markup is untrusted
-localization content, never an assert). **Convention: a field
-  `<= 0` means "use the effect's compile-time default"**, so a partly-specified
-  struct tunes only the field it sets. `params == NULL` (the plain
-  `nt_ui_rich_push_effect` / bare `<fx=name>` path) is **byte-identical** to the
-  original compile-time-default behaviour. Per-effect mapping: wave `amp` = vertical
-  px / `speed` = rad/s; shake `amp` = jitter px / `speed` = steps/s; rainbow `speed`
-  = hue turns/s (`amp` unused); pulse `amp` = scale delta / `speed` = rad/s; fade_in
-  `speed` = per-atom reveal rate (`amp` unused). The params struct is **in-memory
-  only** (never serialized), and tuned stock effects route through the SAME per-block
-  custom-fx table as game-supplied fns (a tuned effect carries an `effect_id >=
-  NT_UI_RICH_FX_CUSTOM_BASE`). Markup `k=v` params apply to **stock effects only** —
-  a `<fx=name>` resolving to a custom fn carries that fn's own `user_data`, so
-  passing `k=v` on a custom name is **logged once (`nt_log_warn_unique`) and the params ignored**.
-  This **revises** the original
-  proposal's stance that per-effect tuning was compile-time constants and NOT tag
-  params; the catalogue constants are now the defaults.
-- **Stock + custom effect catalog (extensible).** A stock catalogue
-  (wave / shake / rainbow / pulse / fade_in / bounce / glow / sway) ships as a
-  starting set, registered piecemeal by name. The visual-only additions:
-  **bounce** (`offset_y = -amp*|sin(time*speed + idx*PHASE)|`, an always-upward
-  sharp-bottom hop — distinct from wave's smooth swing), **glow**
-  (`color.rgb = base + (1-base)*amp*(0.5+0.5*sin(time*speed))`, a brightness pulse
-  toward white, alpha kept), **sway** (`offset_x = amp*sin(time*speed + idx*PHASE)`,
-  the horizontal counterpart to wave). All three honour the `amp`/`speed` params
-  (`<=0` keeps the default). A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
-  it from **both** authoring fronts: the builder's
-  `nt_ui_rich_push_effect_fn(ctx, fn, user_data)` and, for markup `<fx=name>`,
-  `nt_ui_rich_tagset_register_effect_fn(ts, name, fn, user_data)`. A custom name
-  resolves **before** the stock catalogue. Because effects evaluate at emit — when
-  only the solved run-list (parked in the custom command) is available and the
-  tagset is **not** guaranteed present — the resolved effect is captured at
-  build/solve into the solved state: the composed style carries a `uint8_t`
-  `effect_id`, and an id `>= NT_UI_RICH_FX_CUSTOM_BASE` indexes a per-block
-  fixed-cap `(fn, user_data)` table (no heap; the table lives outside the style); a smaller
-  id is a stock catalogue index resolved via `nt_ui_rich_fx_stock`. An unknown
-  stock id falls back to identity. The 72 B `nt_ui_rich_style_t` and the
-  per-block custom table are in-memory-only, never serialized.
+  registered with the function.
+- **Optional modules.** Link `nt_ui` and `nt_ui_rich` explicitly for rich text.
+  Add `nt_ui_rich_fx` only when using ready-made curves: wave, shake, rainbow,
+  pulse, fade_in, bounce, glow, sway. The rich core has no stock catalogue,
+  numeric stock IDs, or references to these functions. Identity is inline in
+  `nt_ui_rich_text.h`; custom functions need no FX library.
+- **Function selection.** `nt_ui_rich_push_effect(ctx, fn)` uses defaults;
+  `NULL` clears the effect until pop. `nt_ui_rich_push_effect_ex(ctx, fn, params)`
+  requires non-NULL `fn` and copies each non-NULL params struct into block storage;
+  NULL params uses defaults. `nt_ui_rich_push_effect_fn(ctx, fn, user_data)`
+  requires non-NULL `fn` and borrows data until the consuming walk.
+- **Markup vocabulary.** `nt_ui_rich_tagset_register_effect(ts, name, fn)` marks
+  a function as accepting `nt_ui_rich_fx_params_t {amp, speed}` through user_data.
+  This works for ready-made and game functions. `register_effect_fn` instead
+  borrows arbitrary data; markup amp/speed logs a warning and is ignored for
+  that registration. Name, function and data are resolved into the block during
+  parsing, so the tagset may be reset before the walk. Unknown names warn and
+  are skipped. Re-registering a name replaces its function and parameter protocol.
+- **Parameters.** A ready-made curve field <= 0 keeps its default. Wave, bounce
+  and sway use amp in pixels and speed in rad/s; shake uses pixels and steps/s;
+  pulse uses scale delta and rad/s; glow uses brightness fraction and rad/s;
+  rainbow uses hue turns/s and fade_in uses reveal rate (both ignore amp).
+  Malformed markup parameter pairs warn and are skipped.
+- **Block capacity and lifetime.** `NT_UI_RICH_MAX_CUSTOM_FX` defaults to 16 and
+  now covers every default, tuned and borrowed effect together. Identical
+  `(fn, user_data)` pairs share a slot; each tuned push owns a separate copy.
+  Changing the limit requires recompiling the rich library consistently with
+  its consumers. Programmer overflow asserts. Markup overflow warns and applies
+  identity to the new span without overwriting prior slots or unbalancing pop.
+  `nt_ui_rich_style_t` remains 72 bytes; its `effect_id` is an internal block
+  index (`>= NT_UI_RICH_FX_CUSTOM_BASE`) or zero. Public `base.effect_id` must
+  be zero and is checked before scratch allocation. No effect IDs are serialized.
+
+```c
+nt_ui_rich_tagset_register_effect(&tags, "wave", nt_ui_rich_fx_wave);
+nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_wave);
+nt_ui_rich_text_n(ctx, "Hello", 5);
+nt_ui_rich_pop(ctx);
+```
+
 - **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
   the pointer (offset by the block's prev-frame bbox origin) and reports
   `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
