@@ -120,19 +120,14 @@ typedef struct {
     /* Pending link id applied to the next emitted run(s); 0 = none. */
     uint32_t pending_link;
 
-    /* ---- Custom (game-supplied) effects ----
-     * A per-call fixed-cap table captured at build: a composed-style effect_id >= the custom base
-     * indexes (id - base) here. Captured so emit (which sees only the solved state, never the
-     * tagset) can resolve a custom fn. */
+    /* Effects outlive the tagset; effect_id is slot + 1, with zero reserved for none. */
     nt_ui_rich_fx_fn custom_fx[NT_UI_RICH_MAX_CUSTOM_FX];
     void *custom_fx_user[NT_UI_RICH_MAX_CUSTOM_FX];
     /* By-value param storage for stock effects tuned via push_effect_ex / `<fx=name k=v>`: the slot's
      * custom_fx_user points HERE so the params outlive the (transient) caller struct until emit. */
     nt_ui_rich_fx_params_t custom_fx_params[NT_UI_RICH_MAX_CUSTOM_FX];
     uint32_t custom_fx_count;
-    /* The cap must keep every custom id (BASE + index) inside a uint8_t -- ceiling enforced here, not
-     * by a dead runtime assert. */
-    _Static_assert(NT_UI_RICH_MAX_CUSTOM_FX <= (255 - NT_UI_RICH_FX_CUSTOM_BASE), "custom-fx cap exceeds the uint8_t effect-id range above NT_UI_RICH_FX_CUSTOM_BASE");
+    _Static_assert(NT_UI_RICH_MAX_CUSTOM_FX <= UINT8_MAX, "effect table exceeds the uint8_t ID range");
 
     /* ---- Solver output (frame scratch; consumed by emit + the test probes) ---- */
     nt_ui_rich_solved_atom_t *solved; /* NT_UI_RICH_MAX_GLYPHS cap */
@@ -142,8 +137,7 @@ typedef struct {
     uint32_t link_count;
     float total_w;
     float total_h;
-    bool solved_ready;        /* solver ran for this call (emit re-walk safe, read-only) */
-    uint32_t emit_span_count; /* draw_n spans the last emit produced (probe) */
+    bool solved_ready; /* solver ran for this call (emit re-walk safe, read-only) */
 
     /* ---- Effects + links ---- */
     float time;            /* game-passed animation clock fed to per-atom effects */
@@ -154,9 +148,12 @@ typedef struct {
     nt_material_t text_material; /* base-style text material (.id==0 -> ctx->text_material) */
     /* ---- Inline-image emit ---- */
     nt_material_t image_material; /* base-style inline-image material (.id==0 -> ctx->sprite_material) */
-    uint32_t image_emit_count;    /* IMAGE atoms emitted this call, post-walk (probe) */
-    uint32_t image_region;        /* by-name resolved region index of the first IMAGE atom (probe) */
-    float image_y;                /* solved y of the first IMAGE atom (probe) */
+#ifdef NT_TEST_ACCESS
+    uint32_t emit_span_count;
+    uint32_t image_emit_count;
+    uint32_t image_region;
+    float image_y;
+#endif
 } nt_ui_rich_state_t;
 
 static nt_ui_rich_state_t *rich_state(nt_ui_context_t *ctx) {
@@ -410,7 +407,7 @@ static uint8_t rich_intern_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, void 
     if (params == NULL) {
         for (uint32_t i = 0; i < st->custom_fx_count; i++) {
             if (st->custom_fx[i] == fn && st->custom_fx_user[i] == user_data) {
-                return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + i);
+                return (uint8_t)(i + 1U);
             }
         }
     }
@@ -428,7 +425,7 @@ static uint8_t rich_intern_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, void 
     } else {
         st->custom_fx_user[idx] = user_data;
     }
-    return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + idx);
+    return (uint8_t)(idx + 1U);
 }
 
 static void rich_push_fx(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data, const nt_ui_rich_fx_params_t *params, bool from_markup) {
@@ -1921,7 +1918,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     st->total_w = align_w;
     st->total_h = pen_y;
 
-    /* Probe: record the first IMAGE atom's by-name-resolved region + solved y. */
+#ifdef NT_TEST_ACCESS
     st->image_region = NT_ATLAS_INVALID_REGION;
     st->image_y = 0.0F;
     for (uint32_t i = 0; i < st->solved_count; i++) {
@@ -1931,6 +1928,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             break;
         }
     }
+#endif
     st->solved_ready = true;
 }
 // #endregion
@@ -1944,25 +1942,19 @@ static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
     out[3] *= opacity;
 }
 
-/* Evaluate the per-atom effect -> visual-only transform; effect_id 0 / unregistered -> identity. */
+/* Evaluate the per-atom effect -> visual-only transform; zero means identity. */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
-    /* The table belongs to the block; the tagset may already be gone. */
-    nt_ui_rich_fx_fn fn = NULL;
-    void *user_data = NULL;
-    if (nt_ui_rich_fx_id_is_custom(s->effect_id)) {
-        const uint32_t idx = (uint32_t)s->effect_id - NT_UI_RICH_FX_CUSTOM_BASE;
-        if (idx < st->custom_fx_count) {
-            fn = st->custom_fx[idx];
-            user_data = st->custom_fx_user[idx];
-        }
-    }
-    if (fn == NULL) {
+    if (s->effect_id == 0U) {
         return nt_ui_rich_fx_identity(base_color);
     }
+    const uint32_t idx = (uint32_t)s->effect_id - 1U;
+    NT_ASSERT(idx < st->custom_fx_count);
+    const nt_ui_rich_fx_fn fn = st->custom_fx[idx];
+    NT_ASSERT(fn != NULL);
     const float base_xy[2] = {s->x, s->y};
     const float base_wh[2] = {s->w, s->h};
     const bool hovered = (s->link_id != 0U) && (s->link_id == st->hovered_link);
-    return fn(s->fx_idx, s->kind, base_xy, base_wh, base_color, st->time, hovered, user_data);
+    return fn(s->fx_idx, s->kind, base_xy, base_wh, base_color, st->time, hovered, st->custom_fx_user[idx]);
 }
 
 /* Emit one TEXT atom WITHOUT an effect: one span per atom (batch-friendly). */
@@ -1973,7 +1965,9 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     float color[4];
     rich_unpack_color(s->color, frame->opacity, color);
     nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, color, 0.0F, 0.0F);
+#ifdef NT_TEST_ACCESS
     st->emit_span_count++;
+#endif
 }
 
 /* Emit one effected TEXT atom: per-glyph draw_n (curve phase-shifts per glyph), VISUAL-ONLY.
@@ -2016,7 +2010,9 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
             float model[16];
             nt_ui_sprite_mat4(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, 1.0F, 1.0F, model);
             nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, fx.color, 0.0F, 0.0F);
+#ifdef NT_TEST_ACCESS
             st->emit_span_count++;
+#endif
         }
         prefix_w = prefix_incl;
         glyph_ord++;
@@ -2105,7 +2101,9 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             bound = true;
         }
         nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U);
+#ifdef NT_TEST_ACCESS
         st->image_emit_count++;
+#endif
     }
 }
 
@@ -2236,8 +2234,10 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     const float box_x = c->boundingBox.x; /* FIXED block origin in LAYOUT (Y-down) */
     const float box_y = c->boundingBox.y;
 
+#ifdef NT_TEST_ACCESS
     st->emit_span_count = 0;
-    st->image_emit_count = 0; /* single reset point: rich_emit_images sums into this across all layer passes */
+    st->image_emit_count = 0;
+#endif
 
     rich_resolve_materials(st, frame->ctx);           /* style override, else ctx default (resolved in place) */
     nt_text_renderer_set_material(st->text_material); /* resolved text material: style override or ctx default */

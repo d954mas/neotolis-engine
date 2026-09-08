@@ -211,8 +211,11 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
   its consumers. Programmer overflow asserts. Markup overflow warns and applies
   identity to the new span without overwriting prior slots or unbalancing pop.
   `nt_ui_rich_style_t` remains 72 bytes; its `effect_id` is an internal block
-  index (`>= NT_UI_RICH_FX_CUSTOM_BASE`) or zero. Public `base.effect_id` must
+  index (slot + 1) or zero. Public `base.effect_id` must
   be zero and is checked before scratch allocation. No effect IDs are serialized.
+
+Rich test counters and first-image observations exist only with `NT_TEST_ACCESS`.
+Production builds omit their fields, counter updates and the diagnostic atom scan.
 
 ```c
 nt_ui_rich_tagset_register_effect(&tags, "wave", nt_ui_rich_fx_wave);
@@ -310,7 +313,7 @@ proposal is not misled.
 | D-67-21 | per-run alignment | one per-block `nt_rich_align_t` (L/C/R) offsetting each solved line |
 | D-67-22 | free pixel offset for image vertical placement | a `valign` enum (`baseline/middle/top/bottom`) on the image atom |
 | D-67-23 | a new block-origin getter | the FIXED block reuses `nt_ui_get_bbox` for its prev-frame origin, so the block carries `decl.id` |
-| D-67-26 | game effect callback looked up in an extensible tagset catalog | custom `nt_ui_rich_fx_fn` interned into a per-block table at build/solve and addressed by `effect_id >= NT_UI_RICH_FX_CUSTOM_BASE` — the tagset is game-owned and may be absent during the walk |
+| D-67-26 | game effect callback looked up in an extensible tagset catalog | `nt_ui_rich_fx_fn` interned into a per-block table at build/solve and addressed by `effect_id = slot + 1` — the tagset is game-owned and may be absent during the walk |
 | D-67-27 | per-effect tuning is compile-time constants, never tag params | catalogue constants are defaults; stock effects take `nt_ui_rich_fx_params_t` via `push_effect_ex` or `<fx=name amp=.. speed=..>` |
 | D-67-28 | `draw_fn(user_data, x, y, w, h)` | `draw_fn(..., color, world_mat4)` so a game-drawn object lands under the same transform as TEXT/IMAGE |
 | D-67-29 | per-atom z-layers as a draw-call saving | layers are an explicit flush boundary for overlap order (one flush per band); DC wins stay within a band |

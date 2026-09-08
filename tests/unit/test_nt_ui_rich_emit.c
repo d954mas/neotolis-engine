@@ -1049,9 +1049,7 @@ static void test_fx_push_effect_ex_tunes_emit(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabsf(y_tuned - y_default) > 0.1F, "push_effect_ex tuned wave shifts the quad differently than the default");
 }
 
-/* Parse a wave markup over a one-glyph block and return the first solved atom's effect_id. A plain
- * <fx=wave> carries the STOCK id; a tuned <fx=wave amp=.. speed=..> routes through the per-block
- * custom table -> a CUSTOM id (>= NT_UI_RICH_FX_CUSTOM_BASE). The solve uses the test probe. */
+/* Each parse starts a fresh block, so both default and tuned effects occupy slot 1. */
 static uint8_t markup_wave_atom_effect_id(const char *markup) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
@@ -1068,23 +1066,17 @@ static uint8_t markup_wave_atom_effect_id(const char *markup) {
     return nt_ui_rich_test_atom_effect_id(s_fx.ctx, 0U);
 }
 
-/* (10c) MARKUP <fx=wave amp=14 speed=5> applies the params via the per-block custom table: the
- * tuned markup carries a CUSTOM effect_id (the params path), the plain <fx=wave> a STOCK id. The
- * builder/markup VALUE parity (same emitted offset) is covered by the direct-ABI test (10) +
- * push_effect_ex emit test (10b); here we prove the markup front reaches the params path at all. */
 static void test_fx_markup_params_apply(void) {
     const uint8_t id_default = markup_wave_atom_effect_id("<fx=wave>X</fx>");
     const uint8_t id_tuned = markup_wave_atom_effect_id("<fx=wave amp=14 speed=5>X</fx>");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_CUSTOM_BASE, id_default, "default <fx=wave> uses the block table");
-    TEST_ASSERT_TRUE_MESSAGE(id_tuned >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave amp=.. speed=..> routes through the per-block custom table");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, id_default, "default effect occupies the first block slot");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, id_tuned, "tuned effect occupies the first block slot");
 
     /* An only-speed form also routes through the params path (amp omitted -> default amp). */
     const uint8_t id_speed_only = markup_wave_atom_effect_id("<fx=wave speed=5>X</fx>");
-    TEST_ASSERT_TRUE_MESSAGE(id_speed_only >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave speed=5> routes through the params path");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, id_speed_only, "speed-only effect occupies the first block slot");
 }
 
-/* (10d) BUILDER push_effect_ex(WAVE, NULL): the NULL-params path carries the STOCK id (no custom-table
- * slot allocated), mirroring the markup-side STOCK-id assertion in (10c). */
 static void test_fx_push_effect_ex_defaults(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -1100,7 +1092,7 @@ static void test_fx_push_effect_ex_defaults(void) {
     nt_ui_rich_test_solve(s_fx.ctx, 400.0F, FONT_SIZE_DEFAULT);
 
     const uint8_t id = nt_ui_rich_test_atom_effect_id(s_fx.ctx, 0U);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_CUSTOM_BASE, id, "push_effect_ex(WAVE, NULL) uses the block table");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, id, "NULL params uses the first block slot");
 }
 
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run

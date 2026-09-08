@@ -74,9 +74,6 @@ static inline nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_col
     return r;
 }
 
-#define NT_UI_RICH_FX_CUSTOM_BASE 128U
-static inline bool nt_ui_rich_fx_id_is_custom(uint8_t effect_id) { return effect_id >= NT_UI_RICH_FX_CUSTOM_BASE; }
-
 /* Per-atom effect callback. hovered is true only for the hovered link's atoms (hover gates
  * effects). Returns a visual-only transform; MUST NOT mutate layout. */
 typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
