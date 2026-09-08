@@ -112,6 +112,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "NT_BUILD_TESTS": "OFF",
                 "NT_UI_DEBUG_TOOLS": "OFF",
                 "NT_LOG_RING_ENABLED": "OFF",
                 "NT_METRICS_ENABLED": "OFF",
@@ -135,6 +136,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
                 "NT_ASSERT_MODE": "2",
+                "NT_BUILD_TESTS": "ON",
                 "NT_UI_DEBUG_TOOLS": "ON",
                 "NT_LOG_RING_ENABLED": "ON",
                 "NT_METRICS_ENABLED": "ON",

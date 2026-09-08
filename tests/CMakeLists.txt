@@ -1,6 +1,8 @@
 # Native unit tests (Unity framework via CTest)
 # WASM tests run through CTest via Node.js when available
 #
+# This whole directory is gated by the NT_BUILD_TESTS option (top-level CMakeLists.txt):
+# skipping it is how a release measurement build ends up with no probe surface at all.
 # NT_TEST_ACCESS: single shared define that gates every module's test
 # surface (the `// #region test_access` block at the bottom of each
 # header). Applied at directory level here so all binaries below pick

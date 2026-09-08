@@ -13,6 +13,21 @@ void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sam
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
+/* Draw trace: recorded by the fake backend, so the engine's draw path stays
+ * free of test bookkeeping. pipeline/program are the FRONTEND handles bound at
+ * draw time, read through nt_gfx_test_bound_pipeline and nt_gfx_pipeline_program. */
+typedef struct {
+    nt_pipeline_t pipeline;
+    nt_program_t program;
+    uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
+    uint32_t instance_count;
+} nt_gfx_fake_draw_t;
+
+void nt_gfx_fake_draw_trace_reset(bool enabled);
+uint32_t nt_gfx_fake_draw_trace_count(void);
+nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index);
+bool nt_gfx_fake_draw_trace_overflowed(void);
+
 /* Test-only backend observations and failure injection. */
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot);
 uint32_t nt_gfx_fake_bind_sampler_count(void);
@@ -47,6 +62,11 @@ nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);
 uint32_t nt_gfx_fake_update_buffer_count(void);
+/* nt_hash32 of the bytes the last created VERTEX / INDEX buffer uploaded -- pins that mesh wire
+ * decode ran before the upload. Scope is per buffer creation, not per mesh: a mesh that creates no
+ * index buffer leaves the previous one readable. Only nt_gfx_fake_reset clears them. */
+uint32_t nt_gfx_fake_last_vertex_buffer_hash(void);
+uint32_t nt_gfx_fake_last_index_buffer_hash(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 void nt_gfx_fake_fail_texture_creates(uint8_t mask);

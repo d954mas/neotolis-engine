@@ -58,7 +58,7 @@ void setUp(void) {
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
-    nt_postfx_blur_test_reset_counters();
+    nt_gfx_fake_draw_trace_reset(true);
 }
 
 void tearDown(void) {
@@ -114,7 +114,7 @@ static void test_invalid_descriptors_assert_without_draw(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = NAN}));
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 4.0F, .sigma = -1.0F}));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_feedback_aliases_assert_without_draw(void) {
@@ -139,7 +139,7 @@ static void test_feedback_aliases_assert_without_draw(void) {
         .radius = 4.0F,
     }));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_depth_feedback_alias_asserts_without_draw(void) {
@@ -163,7 +163,7 @@ static void test_depth_feedback_alias_asserts_without_draw(void) {
     }));
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_stale_source_asserts_without_draw(void) {
@@ -185,7 +185,7 @@ static void test_stale_source_asserts_without_draw(void) {
     }));
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_integer_source_asserts_without_draw(void) {
@@ -213,7 +213,7 @@ static void test_integer_source_asserts_without_draw(void) {
     }));
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_blur_outside_frame_asserts_without_draw(void) {
@@ -230,7 +230,7 @@ static void test_blur_outside_frame_asserts_without_draw(void) {
         .dest = dest,
         .radius = 4.0F,
     }));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
@@ -249,7 +249,7 @@ static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
         .dest = dest,
         .radius = 4.0F,
     }));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -276,7 +276,7 @@ static void test_incomplete_targets_assert_without_draw(void) {
         .radius = 4.0F,
     }));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_end_frame();
 }
 
@@ -297,7 +297,7 @@ static void test_mixed_size_targets_assert_without_draw(void) {
     }));
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_enabled_scissor_asserts_without_draw(void) {
@@ -321,7 +321,7 @@ static void test_enabled_scissor_asserts_without_draw(void) {
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_count());
 }
 
@@ -346,7 +346,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_fake_pass_target_at(0));
@@ -386,21 +386,21 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     /* A pass while the rebuild is still pending skips instead of trapping: the
      * state is recoverable, so it must not crash a game that blurs every frame. */
     nt_gfx_fake_set_context_lost(false);
-    nt_postfx_blur_test_reset_counters();
+    nt_gfx_fake_draw_trace_reset(true);
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 
     /* Still active, only its GPU objects are gone: the next restore rebuilds
      * rather than asserting on a module that shut itself down. */
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
 
-    nt_postfx_blur_test_reset_counters();
+    nt_gfx_fake_draw_trace_reset(true);
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_postfx_blur_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
 }
 
 /* Separate vec4 uniforms and a masked index avoid driver-dependent array bounds

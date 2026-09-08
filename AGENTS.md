@@ -23,6 +23,12 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
 - **Standard**: C17
 - **Why C17**: broader compiler, Emscripten toolchain, and build environment support
 - **NT_STATIC_CRT** (CMake option, default ON): pins the static release CRT on Windows. Consumers embedding builder + runtime in one exe set OFF to inherit their own `CMAKE_MSVC_RUNTIME_LIBRARY`. All pinning goes through `nt_set_static_crt(_cxx)` — never raw `-U_DLL` (gated by `scripts/check_crt_pins.sh`).
+- **NT_BUILD_TESTS** (CMake option, default ON): builds `tests/`, which is also what hands the
+  `NT_TEST_ACCESS` compile define — the module test-probe surfaces (`// #region test_access`) — to the
+  engine libraries the tests link. `native-release` pins it OFF, so perf measurement (`bunnymark`,
+  `bench_shapes`, `atlas_bench`) and the release `builder` carry no probe state or probe bookkeeping,
+  the way wasm always has (`tests/` has always been `if(NOT EMSCRIPTEN)`). On a wasm preset the option
+  gates only the ctest targets. Test TUs meet NDEBUG in `native-release-test`, a CI-only job.
 - **NT_HYBRID_HPG** (CMake option, default ON): exe exports the NVIDIA/AMD hint symbols so hybrid-GPU Windows laptops run games on the discrete GPU. OFF for battery-friendly games/tools; the user's per-app Windows graphics preference always overrides the hint.
 
 If specific build, check, or run commands appear in the repo, keep them up to date in this file.
@@ -150,6 +156,8 @@ Environment differences a local Windows host cannot reproduce:
 - **CI debug ctest runs under ASan/LeakSanitizer** — an `NT_TEST_EXPECT_ASSERT` that longjmps past a live `malloc` fails the test with a leak report printed *after* Unity's `OK`; code an assert-trip test crosses must hold no heap (stack or preallocated buffers).
 - **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the real-GL tests hold `RESOURCE_LOCK gl_display` (list in `cmake/test_target.cmake`).
 - **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
+- **Test TUs are not built by a local `--push`** — `native-release` pins `NT_BUILD_TESTS=OFF`, so a
+  `-Wunused` that only NDEBUG shows in a `tests/` file first fires in CI's `native-release-test` job.
 - **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/tidy-ci <file>` directly (the devapi-enabled DB check.sh creates; plain native-debug lacks devapi TUs); that reproduces CI.
 
 ## Test-infra & debugging gotchas

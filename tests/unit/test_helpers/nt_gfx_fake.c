@@ -95,6 +95,8 @@ static uint32_t s_fake_uniform_vec4_count;
 static uint32_t s_fake_bind_pipeline_count;
 static uint32_t s_fake_update_texture_count;
 static uint32_t s_fake_update_buffer_count;
+static uint32_t s_fake_last_vertex_buffer_hash;
+static uint32_t s_fake_last_index_buffer_hash;
 static uint32_t s_fake_backend_restore_count;
 static uint32_t s_fake_gpu_caps_probe_count;
 static uint16_t s_fake_last_render_target_width;
@@ -159,6 +161,8 @@ void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]) {
 }
 uint32_t nt_gfx_fake_update_texture_count(void) { return s_fake_update_texture_count; }
 uint32_t nt_gfx_fake_update_buffer_count(void) { return s_fake_update_buffer_count; }
+uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_buffer_hash; }
+uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void) { return s_fake_gpu_caps_probe_count; }
 uint16_t nt_gfx_fake_last_render_target_width(void) { return s_fake_last_render_target_width; }
@@ -212,6 +216,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_bind_pipeline_count = 0;
     s_fake_update_texture_count = 0;
     s_fake_update_buffer_count = 0;
+    s_fake_last_vertex_buffer_hash = 0;
+    s_fake_last_index_buffer_hash = 0;
     s_fake_backend_restore_count = 0;
     s_fake_gpu_caps_probe_count = 0;
     s_fake_last_render_target_width = 0;
@@ -241,8 +247,48 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_render_target_resize = false;
 }
 
+/* Deliberately outside nt_gfx_fake_reset: test_sprite_renderer's capacity-flush test resets the
+ * other observations mid-scenario and still reads draws recorded before that. Scope is the explicit
+ * nt_gfx_fake_draw_trace_reset alone (plus the disarm in backend_init). */
+static nt_gfx_fake_draw_t s_fake_draws[128];
+static uint32_t s_fake_draw_count;
+static bool s_fake_draw_enabled;
+static bool s_fake_draw_overflow;
+
+void nt_gfx_fake_draw_trace_reset(bool enabled) {
+    s_fake_draw_count = 0;
+    s_fake_draw_overflow = false;
+    s_fake_draw_enabled = enabled;
+}
+
+uint32_t nt_gfx_fake_draw_trace_count(void) { return s_fake_draw_count; }
+bool nt_gfx_fake_draw_trace_overflowed(void) { return s_fake_draw_overflow; }
+
+nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
+    NT_ASSERT(index < s_fake_draw_count);
+    return s_fake_draws[index];
+}
+
+static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
+    if (!s_fake_draw_enabled) {
+        return;
+    }
+    if (s_fake_draw_count == sizeof(s_fake_draws) / sizeof(s_fake_draws[0])) {
+        s_fake_draw_overflow = true;
+        return;
+    }
+    nt_pipeline_t pipeline = {nt_gfx_test_bound_pipeline()};
+    s_fake_draws[s_fake_draw_count++] = (nt_gfx_fake_draw_t){
+        .pipeline = pipeline,
+        .program = nt_gfx_pipeline_program(pipeline),
+        .num_indices = num_indices,
+        .instance_count = instance_count,
+    };
+}
+
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc != NULL);
+    nt_gfx_fake_draw_trace_reset(false);
     free(s_fake_program_table);
     s_fake_max_programs = desc->max_programs;
     /* Init-only: a mid-test reset must never re-issue a texture id that is still live. */
@@ -382,7 +428,15 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
 }
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
-    (void)desc;
+    /* Hash at the upload boundary: the only place the GPU-form bytes exist. */
+    if (desc->data != NULL && desc->size > 0) {
+        uint32_t h = nt_hash32(desc->data, desc->size).value;
+        if (desc->type == NT_BUFFER_INDEX) {
+            s_fake_last_index_buffer_hash = h;
+        } else if (desc->type == NT_BUFFER_VERTEX) {
+            s_fake_last_vertex_buffer_hash = h;
+        }
+    }
     bool fail = (s_fake_fail_buffer_creates & 1U) != 0;
     s_fake_fail_buffer_creates >>= 1U;
     if (fail) {
@@ -604,26 +658,26 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
 }
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
+    fake_record_draw(0, 1);
     (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
+    fake_record_draw(num_indices, 1);
     (void)first_index;
-    (void)num_indices;
     (void)index_type;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    fake_record_draw(0, instance_count);
     (void)first_vertex;
     (void)num_vertices;
-    (void)instance_count;
 }
 
 void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    fake_record_draw(num_indices, instance_count);
     (void)first_index;
-    (void)num_indices;
-    (void)instance_count;
     (void)index_type;
 }
 

@@ -199,7 +199,7 @@ if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$
     CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
 fi
 CTEST_LOG="$NATIVE_BUILD_DIR/check-ctest.log" # kept on disk; overwritten per run
-ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure --no-tests=error "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
 CTEST_PID=$!
 echo "(backgrounded, pid $CTEST_PID)"
 
@@ -248,9 +248,10 @@ fi
 collect_ctest
 
 if [ "$MODE" = "push" ]; then
-    # Release compiles the same TUs with NDEBUG (asserts -> TRAP, so NT_ASSERT_FULL-only code drops out)
-    # and -O2: a test registered behind an assert-mode guard, or a variable only an assert reads, is
-    # -Wunused under -Werror here and nowhere in the debug builds. Mirrors ci.yml's native-release job.
+    # Release compiles the ENGINE TUs with NDEBUG (asserts -> TRAP, so NT_ASSERT_FULL-only code drops
+    # out) and -O2: a variable only an assert reads is -Wunused under -Werror here and nowhere in the
+    # debug builds. tests/ is NOT in this build (NT_BUILD_TESTS=OFF) -- test TUs meet NDEBUG only in
+    # ci.yml's native-release-test job. Mirrors ci.yml's native-release job.
     step "build (native-release)"
     NR_CACHE="build/_cmake/native-release/CMakeCache.txt"
     if [ ! -f "$NR_CACHE" ]; then
@@ -262,6 +263,12 @@ if [ "$MODE" = "push" ]; then
     # compiles again and the -Wunused class the step exists for disappears.
     if ! grep -q '^NT_ASSERT_MODE:STRING=$' "$NR_CACHE"; then
         echo "ERROR: native-release cache overrides NT_ASSERT_MODE — it must stay empty (auto -> TRAP)."
+        exit 1
+    fi
+    # The preset pins NT_BUILD_TESTS=OFF, but a directory configured before that pin keeps the
+    # option default (ON) across an implicit reconfigure -- probes back in, measurements instrumented.
+    if ! grep -q '^NT_BUILD_TESTS:BOOL=OFF$' "$NR_CACHE"; then
+        echo "ERROR: native-release cache has NT_BUILD_TESTS != OFF — reconfigure it: cmake --preset native-release"
         exit 1
     fi
     cmake --build build/_cmake/native-release

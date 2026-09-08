@@ -69,9 +69,6 @@ static struct {
      * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
     bool gpu_ready;
-#ifdef NT_TEST_ACCESS
-    uint32_t draw_count;
-#endif
 } s_blur;
 
 /* Fixed uniform names: hashed once at init, the blur path sets them every pass. */
@@ -406,9 +403,6 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     upload_kernel(radius, packed);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-#ifdef NT_TEST_ACCESS
-    s_blur.draw_count++;
-#endif
 }
 
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
@@ -429,9 +423,5 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
 #ifdef NT_TEST_ACCESS
 uint32_t nt_postfx_blur_test_build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) { return build_kernel(radius, sigma, out_weights); }
 
-uint32_t nt_postfx_blur_test_draw_count(void) { return s_blur.draw_count; }
-
 const char *nt_postfx_blur_test_fs_source(void) { return s_blur_fs_src; }
-
-void nt_postfx_blur_test_reset_counters(void) { s_blur.draw_count = 0; }
 #endif

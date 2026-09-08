@@ -161,46 +161,6 @@ _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
-#ifdef NT_TEST_ACCESS
-static nt_gfx_test_draw_t s_test_draws[128];
-static uint32_t s_test_draw_count;
-static bool s_test_draw_enabled;
-static bool s_test_draw_overflow;
-
-void nt_gfx_test_draw_trace_reset(bool enabled) {
-    s_test_draw_count = 0;
-    s_test_draw_overflow = false;
-    s_test_draw_enabled = enabled;
-}
-
-uint32_t nt_gfx_test_draw_trace_count(void) { return s_test_draw_count; }
-bool nt_gfx_test_draw_trace_overflowed(void) { return s_test_draw_overflow; }
-
-nt_gfx_test_draw_t nt_gfx_test_draw_trace_at(uint32_t index) {
-    NT_ASSERT(index < s_test_draw_count);
-    return s_test_draws[index];
-}
-
-static void test_record_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
-    if (!s_test_draw_enabled) {
-        return;
-    }
-    if (s_test_draw_count == sizeof(s_test_draws) / sizeof(s_test_draws[0])) {
-        s_test_draw_overflow = true;
-        return;
-    }
-    s_test_draws[s_test_draw_count++] = (nt_gfx_test_draw_t){
-        .pipeline = {s_gfx.bound_pipeline},
-        .program = {s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)]},
-        .first_vertex = first_vertex,
-        .num_vertices = num_vertices,
-        .first_index = first_index,
-        .num_indices = num_indices,
-        .instance_count = instance_count,
-    };
-}
-#endif
-
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
@@ -231,9 +191,6 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
-#ifdef NT_TEST_ACCESS
-    nt_gfx_test_draw_trace_reset(false);
-#endif
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_programs > 0 && "nt_gfx_desc_t.max_programs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
@@ -1966,9 +1923,6 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
-#ifdef NT_TEST_ACCESS
-    test_record_draw(first_vertex, num_vertices, 0, 0, 1);
-#endif
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
@@ -1998,9 +1952,6 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
-#ifdef NT_TEST_ACCESS
-    test_record_draw(first_vertex, num_vertices, 0, 0, instance_count);
-#endif
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
 }
 
@@ -2030,9 +1981,6 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
-#ifdef NT_TEST_ACCESS
-    test_record_draw(0, num_vertices, first_index, num_indices, 1);
-#endif
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
 }
 
@@ -2064,9 +2012,6 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
-#ifdef NT_TEST_ACCESS
-    test_record_draw(0, num_vertices, first_index, num_indices, instance_count);
-#endif
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }
 
@@ -2556,21 +2501,11 @@ static bool mesh_blob_valid(const uint8_t *data, uint32_t size) {
     return true;
 }
 
-#ifdef NT_TEST_ACCESS
-static uint32_t s_test_last_mesh_vertex_hash;
-static uint32_t s_test_last_mesh_index_hash;
-uint32_t nt_gfx_test_last_mesh_vertex_hash(void) { return s_test_last_mesh_vertex_hash; }
-uint32_t nt_gfx_test_last_mesh_index_hash(void) { return s_test_last_mesh_index_hash; }
-#endif
-
 /* Uploads the IBO from the wire index block (decoding MESHOPT first).
  * *out_ibo stays {0} for non-indexed meshes; returns false on failure
  * (nothing left to clean up). */
 static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_data, nt_buffer_t *out_ibo) {
     *out_ibo = (nt_buffer_t){0};
-#ifdef NT_TEST_ACCESS
-    s_test_last_mesh_index_hash = 0;
-#endif
     if (hdr->index_type == 0 || hdr->index_count == 0) {
         return true;
     }
@@ -2590,9 +2525,6 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
         }
         gpu_index_data = idx_tmp;
     }
-#ifdef NT_TEST_ACCESS
-    s_test_last_mesh_index_hash = nt_hash32(gpu_index_data, gpu_index_size).value;
-#endif
     *out_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_IMMUTABLE,
@@ -2639,9 +2571,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         gpu_vertex_data = soa_tmp;
     }
 
-#ifdef NT_TEST_ACCESS
-    s_test_last_mesh_vertex_hash = (hdr->vertex_data_size > 0) ? nt_hash32(gpu_vertex_data, hdr->vertex_data_size).value : 0;
-#endif
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_IMMUTABLE,
