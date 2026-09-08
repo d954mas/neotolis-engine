@@ -59,7 +59,10 @@ With OFF, `Clay_IsDebugModeEnabled()` returns false and
 `Clay_SetDebugModeEnabled(false)` is valid. Passing true reports the disabled
 feature through the existing error handler; Neotolis treats this as an assert.
 Enable `-DNT_UI_CLAY_DEBUG_VIEW=ON` explicitly to use the view. `nt_ui_begin`
-resets it to false as before; enable it after begin to inspect that frame.
+resets it to false as before; call `Clay_SetDebugModeEnabled(true)` after begin
+and before `nt_ui_end` to inspect that frame. Layout finalization reserves the
+sidebar width, keeping the panel inside the viewport and shrinking the content
+area. The next frame uses the full width unless the game enables the view again.
 Both view settings work with the engine inspector ON or OFF. Internal debug
 child floats use relative z offsets, like other engine floating elements.
 

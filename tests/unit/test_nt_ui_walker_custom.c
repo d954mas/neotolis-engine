@@ -207,6 +207,37 @@ static void test_callback_receives_layout_bbox_and_composed_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, s_callback_a.calls);
 }
 
+#if NT_TEST_CLAY_DEBUG_VIEW
+static void test_clay_debug_view_after_begin_reserves_visible_sidebar(void) {
+    nt_pointer_t mouse = {0};
+    for (uint32_t frame = 0U; frame < 3U; frame++) {
+        nt_ui_begin(s_fx.ctx, 1000.0F, 800.0F, 0.0F, &mouse, 1);
+        TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
+        if (frame != 1U) {
+            Clay_SetDebugModeEnabled(true);
+        }
+        if (frame == 2U) {
+            Clay_SetDebugModeEnabled(false);
+        }
+        const uint32_t content_id = CLAY_ID("debug_content").id;
+        const uint32_t view_id = CLAY_ID("Clay__DebugView").id;
+        CLAY({.id = CLAY_ID("debug_content"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
+        nt_ui_end(s_fx.ctx);
+
+        const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, content_id);
+        TEST_ASSERT_EQUAL_INT(frame == 0U ? 600 : 1000, (int)content.width);
+        if (frame == 0U) {
+            const nt_ui_bbox_t view = nt_ui_get_bbox(s_fx.ctx, view_id);
+            TEST_ASSERT_EQUAL_INT(600, (int)view.x);
+            TEST_ASSERT_EQUAL_INT(400, (int)view.width);
+            TEST_ASSERT_EQUAL_INT(1000, (int)(view.x + view.width));
+        }
+        const nt_ui_target_t target = {.viewport = {0, 0, 1000, 800}};
+        nt_ui_walk(s_fx.ctx, &target);
+    }
+}
+#endif
+
 static void test_null_command_callback_asserts_without_game_fallback(void) {
     int game_user = 99;
     nt_ui_set_custom_handler(s_fx.ctx, test_custom_handler, &game_user);
@@ -228,5 +259,8 @@ int main(void) {
     RUN_TEST(test_callbacks_game_and_none_keep_dispatch_and_repeat_order);
     RUN_TEST(test_callback_receives_layout_bbox_and_composed_frame);
     RUN_TEST(test_null_command_callback_asserts_without_game_fallback);
+#if NT_TEST_CLAY_DEBUG_VIEW
+    RUN_TEST(test_clay_debug_view_after_begin_reserves_visible_sidebar);
+#endif
     return UNITY_END();
 }

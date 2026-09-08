@@ -24,6 +24,7 @@
 //   5. NT_CLAY_DEBUG_VIEW removes built-in debug code, fields and arena storage.
 //      Public toggle API reports disabled-view requests through the error handler.
 //      Debug child floats use relative zIndex=1 to match patch 4.
+//      EndLayout reserves sidebar width so games can enable it after nt_ui_begin.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -4258,11 +4259,6 @@ void Clay_BeginLayout(void) {
     context->dynamicElementIndex = 0;
     // Set up the root container that covers the entire window
     Clay_Dimensions rootDimensions = {context->layoutDimensions.width, context->layoutDimensions.height};
-#if NT_CLAY_DEBUG_VIEW
-    if (context->debugModeEnabled) {
-        rootDimensions.width -= (float)Clay__debugViewWidth;
-    }
-#endif
     context->booleanWarnings = CLAY__INIT(Clay_BooleanWarnings) CLAY__DEFAULT_STRUCT;
     Clay__OpenElement();
     Clay__ConfigureOpenElement(CLAY__INIT(Clay_ElementDeclaration) {
@@ -4276,6 +4272,12 @@ void Clay_BeginLayout(void) {
 CLAY_WASM_EXPORT("Clay_EndLayout")
 Clay_RenderCommandArray Clay_EndLayout(void) {
     Clay_Context* context = Clay_GetCurrentContext();
+#if NT_CLAY_DEBUG_VIEW
+    if (context->debugModeEnabled && !context->booleanWarnings.maxElementsExceeded) {
+        Clay_LayoutElement *root = Clay_LayoutElementArray_Get(&context->layoutElements, 0);
+        root->layoutConfig->sizing.width = CLAY_SIZING_FIXED(context->layoutDimensions.width - (float)Clay__debugViewWidth);
+    }
+#endif
     Clay__CloseElement();
 #if NT_CLAY_DEBUG_VIEW
     bool elementsExceededBeforeDebugView = context->booleanWarnings.maxElementsExceeded;
