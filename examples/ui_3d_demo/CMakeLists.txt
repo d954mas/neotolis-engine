@@ -52,13 +52,4 @@ if(NT_CDN_URL)
     target_compile_definitions(ui_3d_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-# WASM-specific settings
-if(EMSCRIPTEN)
-    set_target_properties(ui_3d_demo PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(ui_3d_demo TITLE "UI 3D Demo - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-    target_link_options(ui_3d_demo PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-endif()
+nt_configure_wasm_app(ui_3d_demo TITLE "UI 3D Demo - Neotolis Engine")

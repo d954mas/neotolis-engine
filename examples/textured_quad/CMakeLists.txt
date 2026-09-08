@@ -47,22 +47,4 @@ if(NT_CDN_URL)
     target_compile_definitions(textured_quad PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-# WASM-specific settings
-if(EMSCRIPTEN)
-    set_target_properties(textured_quad PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(textured_quad TITLE "Textured Cube - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-    target_link_options(textured_quad PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_link_options(textured_quad PRIVATE
-            "SHELL:-sASSERTIONS=2"
-            "SHELL:-gsource-map"
-        )
-    endif()
-    if(NT_WASM_ANALYSIS)
-        target_link_options(textured_quad PRIVATE "SHELL:--profiling-funcs")
-    endif()
-endif()
+nt_configure_wasm_app(textured_quad TITLE "Textured Cube - Neotolis Engine")

@@ -10,6 +10,7 @@ include(cmake/warnings.cmake)
 include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
+include(cmake/nt_wasm_app.cmake)
 include(cmake/nt_example_packs.cmake)
 
 if(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)

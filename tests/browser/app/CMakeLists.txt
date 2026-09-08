@@ -59,14 +59,5 @@ if(NT_CDN_URL)
     target_compile_definitions(browser_smoke PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-# WASM-specific settings: emit index.html via the shared shell; the hooks are always compiled in the
-# wasm build (this app's whole purpose), so there is NO test-hooks gate.
-if(EMSCRIPTEN)
-    set_target_properties(browser_smoke PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(browser_smoke TITLE "Browser Smoke - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
-    target_link_options(browser_smoke PRIVATE
-        "SHELL:-sUSE_WEBGL2=1"
-        "SHELL:-sMAX_WEBGL_VERSION=2"
-        "SHELL:-sMIN_WEBGL_VERSION=2"
-    )
-endif()
+# The hooks are always compiled in the wasm build (this app's whole purpose): NO test-hooks gate.
+nt_configure_wasm_app(browser_smoke TITLE "Browser Smoke - Neotolis Engine")
