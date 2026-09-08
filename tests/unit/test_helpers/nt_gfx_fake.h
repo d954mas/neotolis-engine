@@ -15,7 +15,7 @@ nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint
 
 /* Draw trace: recorded by the fake backend, so the engine's draw path stays
  * free of test bookkeeping. pipeline/program are the FRONTEND handles bound at
- * draw time, read back through nt_gfx_test_bound_pipeline/_bound_program. */
+ * draw time, read through nt_gfx_test_bound_pipeline and nt_gfx_pipeline_program. */
 typedef struct {
     nt_pipeline_t pipeline;
     nt_program_t program;

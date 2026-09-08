@@ -193,6 +193,10 @@ done
 if [[ ! -f "build/_cmake/${PRESET}/CMakeCache.txt" ]]; then
     cmake --preset "$PRESET"
 fi
+if [[ "$PRESET" == native-release ]] && ! grep -q '^NT_BUILD_TESTS:BOOL=OFF$' "build/_cmake/${PRESET}/CMakeCache.txt"; then
+    echo "ERROR: native-release cache has NT_BUILD_TESTS != OFF — reconfigure it: cmake --preset native-release" >&2
+    exit 1
+fi
 echo "=== Building atlas_bench (${PRESET}) ==="
 cmake --build "build/_cmake/${PRESET}" --target atlas_bench
 

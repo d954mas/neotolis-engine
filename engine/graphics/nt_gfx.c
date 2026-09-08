@@ -1714,8 +1714,6 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 
 uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
 
-uint32_t nt_gfx_test_bound_program(void) { return (s_gfx.bound_pipeline != 0) ? s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)] : 0; }
-
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 
 uint8_t nt_gfx_test_texture_set_state(void) { return s_gfx.texture_set_state; }

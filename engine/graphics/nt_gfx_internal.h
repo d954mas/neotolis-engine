@@ -179,8 +179,6 @@ uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);
-/* Full program handle the bound pipeline borrows; 0 when no pipeline is bound. */
-uint32_t nt_gfx_test_bound_program(void);
 uint32_t nt_gfx_test_bound_vertex_input(void);
 uint8_t nt_gfx_test_texture_set_state(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);

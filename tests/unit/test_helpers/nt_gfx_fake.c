@@ -277,9 +277,10 @@ static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
         s_fake_draw_overflow = true;
         return;
     }
+    nt_pipeline_t pipeline = {nt_gfx_test_bound_pipeline()};
     s_fake_draws[s_fake_draw_count++] = (nt_gfx_fake_draw_t){
-        .pipeline = {nt_gfx_test_bound_pipeline()},
-        .program = {nt_gfx_test_bound_program()},
+        .pipeline = pipeline,
+        .program = nt_gfx_pipeline_program(pipeline),
         .num_indices = num_indices,
         .instance_count = instance_count,
     };

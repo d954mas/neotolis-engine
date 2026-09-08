@@ -199,7 +199,7 @@ if [ "$MODE" = "default" ] && ! printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE "$
     CTEST_ARGS=(-E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$')
 fi
 CTEST_LOG="$NATIVE_BUILD_DIR/check-ctest.log" # kept on disk; overwritten per run
-ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
+ctest --test-dir "$NATIVE_BUILD_DIR" -j "$(nproc)" --output-on-failure --no-tests=error "${CTEST_ARGS[@]}" > "$CTEST_LOG" 2>&1 &
 CTEST_PID=$!
 echo "(backgrounded, pid $CTEST_PID)"
 
