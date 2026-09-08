@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 5ea7e4b
+# Commit: ed1fdd3
 
 ## WASM Section Sizes
 
