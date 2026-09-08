@@ -1082,12 +1082,12 @@ static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8
     }
 }
 
+#if NT_FONT_EMBOLDEN_ENABLED
 /* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
  * SAFETY gate: a shrinker whose erosion by r_off empties (inradius <= r_off) fills solid;
  * counter-preservation caps r_off < inradius so this never fires for a real counter — it is
  * the fallback for a degenerate/uncapped path. Loops opposing the original winding are dropped. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-#if NT_FONT_EMBOLDEN_ENABLED
 static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t *oon, uint16_t on_n, const int32_t *bx, const int32_t *by, uint16_t bn, double a0, bool is_shrinker,
                              double base_inradius, double r_off, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
     (void)bx;

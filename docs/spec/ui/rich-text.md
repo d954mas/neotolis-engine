@@ -99,7 +99,11 @@ Under OFF, every finite nonzero renderer weight (positive, negative or below
 the quantization step) and every positive outline width violates the contract,
 even with transparent outline color. Setters assert before storing that state;
 zero and reset remain legal. Rich outline pushes and base styles enforce the
-same requirement. FULL diagnoses, release TRAP terminates. Disabling assertions
+same requirement. This also applies to syntactically valid markup: a positive
+`<outline>` width or `<b>` that requires missing synthetic support is a game
+configuration error and asserts. Malformed tags and values still warn and are
+skipped; they are not requests for an unavailable feature. A real bold family
+face remains valid with OFF. FULL diagnoses, release TRAP terminates. Disabling assertions
 does not promise recovery after violating this precondition. Existing finite
 input normalization remains unchanged.
 

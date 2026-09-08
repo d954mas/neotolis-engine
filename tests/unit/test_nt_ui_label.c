@@ -346,7 +346,7 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
         .font_id = 0,
         .font_size = 16,
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
-        .variant = NT_UI_LABEL_VARIANT_UNDERLINE,
+        .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -378,7 +378,7 @@ static void test_label_decoration_preserves_element_data(void) {
         .font_id = 0,
         .font_size = 14,
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
-        .variant = NT_UI_LABEL_VARIANT_UNDERLINE,
+        .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);

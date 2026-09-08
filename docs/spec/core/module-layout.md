@@ -238,6 +238,10 @@ central catalogue retaining unselected effects. A call to rich API without its
 library fails at link time. Identity and custom effect types are available from
 the rich header without linking the ready-made effects.
 
+For static linkers that resolve archives left to right, put the rich consumer
+before its UI provider: `target_link_libraries(game PRIVATE nt_ui_rich nt_ui)`.
+This preserves the application's explicit implementation choice on GNU ld too.
+
 `scripts/check_ui_composition.py <submodule-build-dir>` verifies plain, custom,
 wave and full-effect compositions, plus the expected missing-rich link failure.
 WASM Release verification uses final symbol maps without enabling LTO or keeping

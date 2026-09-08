@@ -1,9 +1,7 @@
 /* Rich text: run-list SoA build + style-stack composition + builder + full
  * word-wrap/baseline/emit solver. */
 
-/* Markup is UNTRUSTED localization data: a malformed tag/value logs once + degrades
- * (skip -> visible unstyled text), it never asserts. Distinct messages => distinct lines.
- * Defined BEFORE any include so nt_log.h (pulled transitively) picks "ui.rich", not the module default. */
+/* Set before includes so transitive log headers use the rich domain. */
 #define NT_LOG_DOMAIN "ui.rich"
 
 #include "ui/nt_ui_rich_text.h"
@@ -1173,7 +1171,7 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         pushed_style = true;
         break;
     case RICH_TAG_OUTLINE: {
-        /* Defaults stand when a key is absent/malformed (untrusted markup degrades, never asserts). */
+        /* Malformed values keep defaults; valid requests still require the build feature. */
         float ow = 0.0F;
         uint32_t oc = 0xFFFFFFFFU; /* opaque white until <outline color=> overrides */
         rich_parse_deco_attrs(val, vlen, &ow, NULL, NULL, &oc);

@@ -1440,8 +1440,42 @@ static void test_base_effect_rejected_before_scratch_allocation(void) {
     nt_ui_rich_end(s_fx.ctx);
 }
 
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_markup_missing_bold_requires_enabled_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const char markup[] = "<b>B</b>";
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+}
+
+static void test_markup_outline_requires_enabled_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const char markup[] = "<outline width=0.06 color=#000000>X</outline>";
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+}
+#endif
+
+static void test_markup_real_bold_needs_no_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.font_id[1] = s_fx.stub_font;
+    const char markup[] = "<b>B</b>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(s_fx.stub_font.id, nt_ui_rich_test_run_font(s_fx.ctx, 0U).id);
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_rich_test_run_flags(s_fx.ctx, 0U));
+}
+
 int main(void) {
     UNITY_BEGIN();
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_markup_missing_bold_requires_enabled_synthesis);
+    RUN_TEST(test_markup_outline_requires_enabled_synthesis);
+#endif
+    RUN_TEST(test_markup_real_bold_needs_no_synthesis);
     RUN_TEST(test_base_effect_rejected_before_scratch_allocation);
     RUN_TEST(test_tagset_font_register_lookup);
     RUN_TEST(test_tagset_color_atlas_effect);
