@@ -400,7 +400,9 @@ void test_font_unready_pair_keeps_cpu_queries_gpu_free(void) {
         TEST_ASSERT_FALSE(restored->is_tofu);
         TEST_ASSERT_EQUAL_UINT32('A', restored->codepoint);
         TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
+#if NT_FONT_EMBOLDEN_ENABLED
         TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph_offset(nt_font_get_slot(font), 'A', 40));
+#endif
         nt_font_destroy(font);
         free(blob);
     }
@@ -1772,6 +1774,7 @@ static uint32_t build_contour_blob_1(uint8_t *buf, const int16_t (*pts)[2], uint
 }
 
 /* Append ONE all-on-curve closed contour at *wp; advance *wp. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void append_contour(uint8_t **wp, const int16_t (*pts)[2], uint16_t n) {
     memcpy(*wp, &n, 2);
     *wp += 2;
@@ -1795,8 +1798,10 @@ static void append_contour(uint8_t **wp, const int16_t (*pts)[2], uint16_t n) {
         py = pts[i][1];
     }
 }
+#endif
 
 /* Build contour_data for TWO closed contours (outer + inner counter). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static uint32_t build_contour_blob_2(uint8_t *buf, const int16_t (*outer)[2], uint16_t no, const int16_t (*inner)[2], uint16_t ni) {
     uint8_t *wp = buf;
     wp[0] = 2; /* contour_count LE (decode reads native-endian on LE targets) */
@@ -1806,8 +1811,10 @@ static uint32_t build_contour_blob_2(uint8_t *buf, const int16_t (*outer)[2], ui
     append_contour(&wp, inner, ni);
     return (uint32_t)(wp - buf);
 }
+#endif
 
 /* bbox over flat [p0x,p0y,p1x,p1y,p2x,p2y] curves. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void flat_curves_bbox(const float *cv, uint16_t n, float *out, int *finite) {
     float minx = 1e30F;
     float miny = 1e30F;
@@ -1840,8 +1847,10 @@ static void flat_curves_bbox(const float *cv, uint16_t n, float *out, int *finit
     out[2] = maxx;
     out[3] = maxy;
 }
+#endif
 
 /* point-ring bbox area (int coords). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static float ring_area(const int32_t *x, const int32_t *y, uint16_t n) {
     int32_t minx = x[0];
     int32_t maxx = x[0];
@@ -1863,11 +1872,13 @@ static float ring_area(const int32_t *x, const int32_t *y, uint16_t n) {
     }
     return (float)(maxx - minx) * (float)(maxy - miny);
 }
+#endif
 
 /* --- Emitted-curve raster helpers: treat each quad's p0->p2 chord as a segment.
  * Synthetic fixtures are all straight lines (p1 = midpoint), so chords are exact. --- */
 
 /* Nonzero-winding (rendered fill) at (px,py) via a +X ray over all curve chords. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static int curves_fill_nonzero(const float *cv, uint16_t n, float px, float py) {
     int w = 0;
     for (uint16_t i = 0; i < n; i++) {
@@ -1886,14 +1897,18 @@ static int curves_fill_nonzero(const float *cv, uint16_t n, float px, float py) 
     }
     return w != 0;
 }
+#endif
 
 /* Orient sign in float. Synthetic fixtures are integer-valued <= 1000, so products
  * (<= 2^21) are exact in float — no precision loss, no double promotion. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static float f_orient(float ax, float ay, float bx, float by, float cx, float cy) { return ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax)); }
+#endif
 
 /* True if any two curve chords PROPERLY cross (shared endpoints/touching excluded).
  * After resolution the emitted loops are simple and only touch at split vertices, so
  * this must be 0. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static int curves_have_crossing(const float *cv, uint16_t n) {
     for (uint16_t i = 0; i < n; i++) {
         float ax = cv[(i * 6) + 0];
@@ -1916,6 +1931,7 @@ static int curves_have_crossing(const float *cv, uint16_t n) {
     }
     return 0;
 }
+#endif
 
 /* W=0 decode is byte-identical to the un-emboldened path: the gated offset never
  * runs, so curve endpoints equal the raw input points exactly. */
@@ -1936,13 +1952,16 @@ void test_embolden_w0_identity(void) {
     TEST_ASSERT_TRUE(cv[10] == 400.0F && cv[11] == 800.0F);
 
     /* W>0 must MOVE those endpoints (proves the offset path actually ran). */
+#if NT_FONT_EMBOLDEN_ENABLED
     float cw[4 * 6];
     nt_font_test_decode_contours(blob, 40.0F, cw, 4);
     TEST_ASSERT_TRUE(cw[4] != 400.0F || cw[5] != 0.0F);
+#endif
 }
 
 /* W>0: all curve points finite and bbox area changes monotonically (same
  * direction every step) across the spike-tested weight ramp. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_monotonic_bbox(void) {
     /* CW outer square (builder/stbtt winding): sign=-1 grows it. */
     const int16_t sq[4][2] = {{0, 0}, {0, 800}, {400, 800}, {400, 0}};
@@ -1969,9 +1988,11 @@ void test_embolden_monotonic_bbox(void) {
     /* CW outer grows: end area strictly exceeds W=0. */
     TEST_ASSERT_TRUE(areas[5] > areas[0]);
 }
+#endif
 
 /* Sign=-1: outer silhouette grows, inner counter shrinks (offset ring, no reflex joins
  * on convex squares so dst point count is unchanged). */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_counter_shrinks(void) {
     /* Outer CW, inner counter CCW (opposite winding). */
     int32_t ox[4] = {0, 0, 800, 800};
@@ -1999,9 +2020,11 @@ void test_embolden_counter_shrinks(void) {
     TEST_ASSERT_TRUE(ring_area(odx, ody, on) > outer_before);  /* outer grows */
     TEST_ASSERT_TRUE(ring_area(idx, idy, inn) < inner_before); /* counter shrinks */
 }
+#endif
 
 /* No aesthetic W clamp (locked decision): a large weight well past the 0.04em
  * recommendation stays FINITE (guards hold). Self-intersection is allowed. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_large_w_stays_finite(void) {
     const int16_t sq[4][2] = {{0, 0}, {0, 800}, {400, 800}, {400, 0}};
     uint8_t blob[128];
@@ -2014,8 +2037,10 @@ void test_embolden_large_w_stays_finite(void) {
     flat_curves_bbox(cv, n, bb, &finite);
     TEST_ASSERT_TRUE(finite);
 }
+#endif
 
 /* Signed shoelace area of a closed int point ring (mirrors nt_font.c's internal). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     int64_t acc = 0;
     for (uint16_t p = 0; p < n; p++) {
@@ -2024,8 +2049,10 @@ static double ring_signed_area(const int32_t *x, const int32_t *y, uint16_t n) {
     }
     return 0.5 * (double)acc;
 }
+#endif
 
 /* bbox min corner over emitted flat curves (for outer full-thickness check). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void curves_min_corner(const float *cv, uint16_t n, float *out_minx, float *out_miny) {
     float bb[4];
     int finite = 0;
@@ -2033,10 +2060,12 @@ static void curves_min_corner(const float *cv, uint16_t n, float *out_minx, floa
     *out_minx = bb[0];
     *out_miny = bb[1];
 }
+#endif
 
 /* COUNTER-PRESERVING outline: the OUTER (grower) offsets by full W, but a COUNTER (hole) caps its
  * inward offset to keep >= NT_FONT_COUNTER_KEEP of its own inradius, so it NEVER closes at any
  * width — where a uniform Minkowski offset would fill it once R=W/2 >= inradius. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_counter_preserving_outline(void) {
     /* Outer CW box; inner CCW counter SQUARE, half-width 100 -> inradius 100. Uniform would FILL
      * this counter at any W >= 200 (R >= 100); counter-preserve keeps it open at every width. */
@@ -2076,6 +2105,7 @@ void test_counter_preserving_outline(void) {
     TEST_ASSERT_EQUAL_UINT16(8, n_wr);
     TEST_ASSERT_FALSE(curves_fill_nonzero(cv, n_wr, 500.0F, 500.0F)); /* wide-rect counter open */
 }
+#endif
 
 /* NECK/CHANNEL preservation (the '@'/'e'/'a' seal-fill fix): a counter with a narrow WAIST
  * (much thinner than its widest inscribed circle) SEALS at that waist under a uniform inward
@@ -2084,6 +2114,7 @@ void test_counter_preserving_outline(void) {
  * NEVER touches: the counter stays a single CONNECTED open region at any width. Fixture: an
  * hourglass counter (two wide lobes + a ~60u waist, inradius ~125). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_counter_preserving_neck(void) {
     const int16_t outer[4][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {1000, 0}};
     /* CCW hourglass hole: wide bottom lobe, ~60u waist at y=450, wide top lobe. */
@@ -2113,11 +2144,13 @@ void test_counter_preserving_neck(void) {
     TEST_ASSERT_TRUE(mnx < -100.0F);
     TEST_ASSERT_TRUE(mny < -100.0F);
 }
+#endif
 
 /* '8'/'W' waist: an OUTER contour whose offset ring self-intersects (swallowtail)
  * is RESOLVED — the offset ring self-crosses, but the emitted curves are simple (no
  * residual crossing) and the interior stays solid (the inverted loop is excised, no
  * winding-cancellation notch). Fixture: a {5/2} pentagram (self-crossing at every W). */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_resolves_self_intersecting_outer(void) {
     /* Pentagram tips connected every-other; CW (grows under sign=-1), 5 on-curve points. */
     const int16_t star[5][2] = {{500, 950}, {802, 90}, {24, 620}, {976, 620}, {198, 90}};
@@ -2153,10 +2186,12 @@ void test_embolden_resolves_self_intersecting_outer(void) {
     TEST_ASSERT_FALSE(curves_have_crossing(cv, n_wide));
     TEST_ASSERT_TRUE(curves_fill_nonzero(cv, n_wide, 500.0F, 474.0F)); /* centroid solid */
 }
+#endif
 
 /* Unit-tests the '@' seal-fill KEEP decision directly (real curved keyhole geometry that simple
  * integer polygons can't reproduce): a grower's opposite loop is KEPT iff its pole lies OUTSIDE the
  * true dilation of the ORIGINAL glyph — inverting the fill/distance test or dropping r_off breaks it. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_grower_loop_membership(void) {
     /* Original glyph = solid square [0..600] as flat curves (weight-0 raw outline). */
     const int16_t sq[4][2] = {{0, 0}, {600, 0}, {600, 600}, {0, 600}};
@@ -2180,10 +2215,12 @@ void test_grower_loop_membership(void) {
     const int32_t cy[4] = {280, 280, 320, 320};
     TEST_ASSERT_FALSE(nt_font_test_grower_loop_kept(orig, on, cx, cy, 4, 80.0));
 }
+#endif
 
 /* Convex glyph preservation: a convex contour has no reflex corners and no
  * self-crossings, so a wide offset leaves it a simple grown ring — same curve count,
  * no crossing, bbox strictly larger. Guards against join/uncross touching convex data. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_convex_unchanged(void) {
     const int16_t sq[4][2] = {{0, 0}, {0, 800}, {800, 800}, {800, 0}}; /* CW convex square */
     uint8_t blob[128];
@@ -2207,10 +2244,12 @@ void test_embolden_convex_unchanged(void) {
     float aw = (bbw[2] - bbw[0]) * (bbw[3] - bbw[1]);
     TEST_ASSERT_TRUE(aw > a0); /* grew */
 }
+#endif
 
 /* Direct unit of the self-intersection primitive: a proper crossing (bowtie quad)
  * is detected; a simple convex square and a triangle (n<4) are not; a shape that
  * merely shares a vertex (touching, not crossing) is not flagged. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_contour_self_intersects_primitive(void) {
     /* Bowtie: edges (0,0)->(100,100) and (100,0)->(0,100) cross at the center. */
     const int32_t bx[4] = {0, 100, 100, 0};
@@ -2227,11 +2266,13 @@ void test_contour_self_intersects_primitive(void) {
     const int32_t ty[3] = {0, 0, 100};
     TEST_ASSERT_FALSE(nt_font_test_contour_self_intersects(tx, ty, 3));
 }
+#endif
 
 /* ================= (codepoint, key_offset) cache key ================= */
 
 /* Two lookups of the same codepoint at different key_offset resolve to DISTINCT,
  * non-tofu cache slots (no collision-overwrite) with distinct geometry. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_cache_variant_distinct_slots(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_variant", &blob);
@@ -2256,6 +2297,7 @@ void test_cache_variant_distinct_slots(void) {
     nt_font_destroy(font);
     free(blob);
 }
+#endif
 
 /* The public wrapper delegates to key_offset 0 and returns the same slot as a direct offset-0 lookup. */
 void test_cache_key_offset_zero_parity(void) {
@@ -2277,6 +2319,7 @@ void test_cache_key_offset_zero_parity(void) {
  * emboldened edge is not clipped; the regular (key_offset=0) entry stays exactly
  * the raw glyph bbox (byte-identity guard). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_entry_bbox_grows(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_bbox_grow", &blob);
@@ -2309,11 +2352,13 @@ void test_embolden_entry_bbox_grows(void) {
     nt_font_destroy(font);
     free(blob);
 }
+#endif
 
 /* Insert many (cp, offset) variants to force eviction, then re-lookup every live
  * entry: probe chains stay intact (identical fmix32 home in lookup/insert/remove
  * incl. backshift) — no orphaned/duplicated slots, no infinite probe. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_cache_evict_chain_integrity(void) {
     /* Small cache: 4 glyph slots. tofu takes one, leaving 3 evictable. */
     nt_font_create_desc_t desc = {
@@ -2356,9 +2401,11 @@ void test_cache_evict_chain_integrity(void) {
     nt_font_destroy(font);
     free(blob);
 }
+#endif
 
 /* nt_font_quantize_weight rounds to the step and saturates to int16 — an absurd
  * weight can never wrap to a small/negative colliding bucket. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_quantize_weight_saturates(void) {
     /* Rounds to NT_FONT_WEIGHT_QUANT_STEP. */
     TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(0.0F));
@@ -2374,6 +2421,7 @@ void test_quantize_weight_saturates(void) {
     /* Non-finite is safe (identity 0). */
     TEST_ASSERT_EQUAL_INT16(0, nt_font_quantize_weight(INFINITY));
 }
+#endif
 
 /* ================= underline/strike metrics from v5 header ================= */
 
@@ -2421,6 +2469,7 @@ void test_font_decoration_metrics_from_header(void) {
  * wound grower KEEP path that simple integer polygons can't reproduce. Asserts the '@' inner
  * counter stays OPEN under a wide synthetic outline. */
 
+#if NT_FONT_EMBOLDEN_ENABLED
 typedef struct {
     int16_t x[600];
     int16_t y[600];
@@ -2706,6 +2755,7 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 
 /* ---- Main ---- */
 
+#endif
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_font_blob_valid);
@@ -2751,6 +2801,7 @@ int main(void) {
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);
     RUN_TEST(test_embolden_large_w_stays_finite);
@@ -2762,12 +2813,17 @@ int main(void) {
     RUN_TEST(test_font_worstcase_glyph_miss_budget);
     RUN_TEST(test_embolden_convex_unchanged);
     RUN_TEST(test_contour_self_intersects_primitive);
+#endif
     /* (codepoint, key_offset) cache key */
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_cache_variant_distinct_slots);
+#endif
     RUN_TEST(test_cache_key_offset_zero_parity);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_embolden_entry_bbox_grows);
     RUN_TEST(test_cache_evict_chain_integrity);
     RUN_TEST(test_quantize_weight_saturates);
+#endif
     /* underline/strike metrics from v5 header */
     RUN_TEST(test_font_decoration_metrics_from_header);
     return UNITY_END();

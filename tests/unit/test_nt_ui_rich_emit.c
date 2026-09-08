@@ -333,6 +333,7 @@ static void test_emit_real_italic_face_no_oblique(void) {
 
 /* Build a block whose LAST run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD.
  * Bold is last so a MISSING reset would leave the renderer at the synth weight, not 0. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void frame_synth_bold(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -356,16 +357,19 @@ static void frame_synth_bold(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 }
+#endif
 
 /* WIRING + LEAK-GUARD: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD,
  * which the emit pass feeds to nt_text_renderer_set_weight as NT_TEXT_SYNTH_BOLD_WEIGHT, then resets to
  * 0 after the pass. Mirrors the SYNTH_ITALIC wire-and-reset. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void test_emit_synth_bold_wires_and_resets_weight(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_synth_bold();
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_weight(), NT_TEXT_SYNTH_BOLD_WEIGHT), "SYNTH_BOLD run feeds the shared weight to the renderer during emit");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "emit resets weight to 0 after the pass (no synth-bold leak onto the next caller)");
 }
+#endif
 
 /* NEGATIVE: a family WITH a real bold face selects it -> no synthetic weight ever reaches the renderer.
  * frame_multi_face pushes <b> against a family whose font_id[1] IS a distinct bold face. */
@@ -2514,8 +2518,33 @@ static void test_markup_effect_capacity_keeps_prior_params_and_balances_close(vo
     }
 }
 
+static void test_nonfinite_base_outline_emits_plain_text(void) {
+    const float widths[] = {INFINITY, NAN};
+    for (uint32_t i = 0; i < 2U; i++) {
+        nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+        base.font_id[0] = s_fx.stub_font;
+        base.outline_w = widths[i];
+        base.outline_color_abgr = 0xFFFFFFFFU;
+        nt_text_renderer_test_reset_call_counters();
+        nt_pointer_t mouse = {0};
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("nonfinite_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+            nt_ui_rich_begin(s_fx.ctx, &base);
+            nt_ui_rich_text_n(s_fx.ctx, "A", 1U);
+            nt_ui_rich_end(s_fx.ctx);
+            nt_ui_rich_text(s_fx.ctx, CLAY_ID("nonfinite_text").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+        }
+        nt_ui_end(s_fx.ctx);
+        nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+        nt_ui_walk(s_fx.ctx, &target);
+        TEST_ASSERT_TRUE(nt_text_renderer_test_draw_n_calls() > 0U);
+        TEST_ASSERT_TRUE(nt_text_renderer_test_max_outline_width() == 0.0F);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_nonfinite_base_outline_emits_plain_text);
     RUN_TEST(test_late_effect_preserves_plain_text_runs);
     RUN_TEST(test_tuned_effect_copies_each_push_before_emit);
     RUN_TEST(test_markup_effect_capacity_keeps_prior_params_and_balances_close);
@@ -2528,7 +2557,9 @@ int main(void) {
     RUN_TEST(test_emit_single_face_one_set_font);
     RUN_TEST(test_emit_synth_italic_wires_and_resets_oblique);
     RUN_TEST(test_emit_real_italic_face_no_oblique);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_emit_synth_bold_wires_and_resets_weight);
+#endif
     RUN_TEST(test_emit_real_bold_face_no_weight);
     RUN_TEST(test_emit_more_than_four_fonts_no_drop);
     RUN_TEST(test_default_layers_by_kind);

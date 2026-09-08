@@ -629,11 +629,17 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     /* Per-pass embolden cache key from the sticky weight (font units). Fill uses the weight; outline
      * grows by outline_w; shadow reuses the outermost visible variant (outline if active, else fill) so
      * it adds NO new cache entry. */
+#if NT_FONT_EMBOLDEN_ENABLED
     const float upm = (float)metrics.units_per_em;
     const int16_t fill_key = nt_font_quantize_weight(s_text.deco.weight_em * upm);
     /* alpha 0 -> invisible: no outline pass, no extra cache variant, and the shadow tracks the fill silhouette (not the dilated outline). */
     const bool outline_active = (s_text.deco.outline_w > 0.0F && s_text.deco.outline_color[3] > 0.0F);
     const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
+    const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
+#else
+    const int16_t fill_key = 0;
+    const int16_t shadow_key = 0;
+#endif
     const bool shadow_active = (s_text.deco.shadow_color[3] > 0.0F);
 
     float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
@@ -642,13 +648,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * self-flush mid-pass does NOT reorder: passes emit in global order and flush draws the FIFO prefix,
      * so no shadow/outline quad is ever drawn after a later pass's quad. */
     if (shadow_active) {
-        const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
         emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size,
                         &glyph_bias);
     }
+#if NT_FONT_EMBOLDEN_ENABLED
     if (outline_active) {
         emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
     }
+#endif
     emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
@@ -677,9 +684,13 @@ void nt_text_renderer_set_weight(float weight_em) {
         NT_ASSERT(0 && "nt_text_renderer_set_weight: weight must be finite");
         return;
     }
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(weight_em == 0.0F && "weight requires NT_FONT_EMBOLDEN_ENABLED=ON");
+#endif
     s_text.deco.weight_em = weight_em; /* no clamp (locked decision); folded into the fill key_offset */
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat initialization, finite-value and feature preconditions.
 void nt_text_renderer_set_outline(float width, const float color[4]) {
     NT_ASSERT(s_text.initialized);
     NT_ASSERT(color != NULL);
@@ -687,6 +698,9 @@ void nt_text_renderer_set_outline(float width, const float color[4]) {
         NT_ASSERT(0 && "nt_text_renderer_set_outline: width/color must be finite");
         return;
     }
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(width <= 0.0F && "outline requires NT_FONT_EMBOLDEN_ENABLED=ON");
+#endif
     s_text.deco.outline_w = width;
     memcpy(s_text.deco.outline_color, color, sizeof s_text.deco.outline_color);
 }

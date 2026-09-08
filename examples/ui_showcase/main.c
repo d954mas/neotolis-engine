@@ -2721,11 +2721,17 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         od_base.font_size = 30.0F; /* readable specimen (rich default is 16) */
 
         /* Runtime markup front. */
+#if NT_FONT_EMBOLDEN_ENABLED
         const char *od_mk = "Outline <outline width=0.06 color=#4c8cf0>quest reward</outline>  "
                             "thick <outline width=0.12 color=#f05a4c>@ 100 gold @</outline>.  "
                             "Shadow <shadow dx=0.1 dy=0.1 color=#000000>the drake stirs</shadow>.  "
                             "Lines <u>underline</u> <s>strike</s>.  "
                             "Combined <b><u><shadow dx=0.1 dy=0.1 color=#000000><outline width=0.08 color=#f0c84c>DRAKE @quest</outline></shadow></u></b>.";
+#else
+        const char *od_mk = "Enable NT_FONT_EMBOLDEN_ENABLED=ON for outline. "
+                            "<shadow dx=0.1 dy=0.1 color=#000000>Shadow</shadow> "
+                            "<u>underline</u> <s>strike</s> <b>real bold</b>.";
+#endif
         nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_outline_shadow"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &od_base, od_mk, strlen(od_mk), container_w, NT_RICH_ALIGN_LEFT,
                                st->rich.time, NULL);
 
@@ -2733,7 +2739,9 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_rich_style_t ob_base = od_base;
         nt_ui_rich_begin(ctx, &ob_base);
         RICH_TEXT_LIT(ctx, "Builder: ");
+#if NT_FONT_EMBOLDEN_ENABLED
         nt_ui_rich_push_outline(ctx, 0.09F, 0xFFF0C84BU); /* amber stroke (0xAABBGGRR) */
+#endif
         nt_ui_rich_push_shadow(ctx, 0.1F, 0.1F, 0xC0000000U);
         nt_ui_rich_push_bold(ctx);
         nt_ui_rich_push_underline(ctx);
@@ -2741,7 +2749,9 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_rich_pop(ctx); /* underline */
         nt_ui_rich_pop(ctx); /* bold */
         nt_ui_rich_pop(ctx); /* shadow */
+#if NT_FONT_EMBOLDEN_ENABLED
         nt_ui_rich_pop(ctx); /* outline */
+#endif
         RICH_TEXT_LIT(ctx, "  ");
         nt_ui_rich_push_strikethrough(ctx);
         RICH_TEXT_LIT(ctx, "sold out");
@@ -2837,6 +2847,7 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     deco_markup(ctx, nt_ui_id("showcase/deco_inline"), &db, "regular <b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>", cw);
     // #endregion
 
+#if NT_FONT_EMBOLDEN_ENABLED
     // #region 3) Weight -- synthetic-weight ramp (label weight, single face)
     deco_header(ctx, "Weight");
     deco_label_emit(ctx, "thin  A a g 8", 26.0F, 0U, -0.04F, 0.0F, 0U, 0.0F, 0.0F, 0U);
@@ -2867,6 +2878,10 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#else
+    deco_header(ctx, "Weight / Outline");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Enable NT_FONT_EMBOLDEN_ENABLED=ON to show synthetic weight and outline.", g_current->body);
+#endif
     // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
     deco_header(ctx, "Shadow");
     {
@@ -2883,6 +2898,7 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#if NT_FONT_EMBOLDEN_ENABLED
     // #region 6) Outline + Shadow on one string
     deco_header(ctx, "Outline+Shadow");
     {
@@ -2903,12 +2919,13 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#endif
     // #region 8) Underline / Strike (<u>/<s> markup + label variant bits)
     deco_header(ctx, "Underline / Strike");
     /* Descender-rich sample (y g p q j) so the underline/strike offset vs glyphs below the baseline is visible. */
     deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>Typography jumps gpqy</u> and <s>lazy dog: jumping pg qy</s> and <u><s>gjpqy both</s></u>", cw);
     deco_label_emit(ctx, "label underline Typography jumps gpqy", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label strike + bold lazy dog jumping pg qy", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_markup(ctx, nt_ui_id("showcase/deco_strike_bold"), &db, "<b><s>real bold strike: lazy dog jumping pg qy</s></b>", cw);
     // #endregion
 }
 #undef DECO_SENT

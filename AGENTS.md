@@ -30,6 +30,7 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
   the way wasm always has (`tests/` has always been `if(NOT EMSCRIPTEN)`). On a wasm preset the option
   gates only the ctest targets. Test TUs meet NDEBUG in `native-release-test`, a CI-only job.
 - **NT_HYBRID_HPG** (CMake option, default ON): exe exports the NVIDIA/AMD hint symbols so hybrid-GPU Windows laptops run games on the discrete GPU. OFF for battery-friendly games/tools; the user's per-app Windows graphics preference always overrides the hint.
+- **NT_FONT_EMBOLDEN_ENABLED** (default OFF, debug included): opt in to synthetic font weight and outline. Real B/BI faces, oblique, shadow and line decorations work with OFF. Verify geometry changes in both configurations; the ON mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label`, and all `test_nt_ui_rich_*` suites.
 
 If specific build, check, or run commands appear in the repo, keep them up to date in this file.
 

@@ -431,6 +431,12 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
+      - name: Test optional font geometry (FULL asserts)
+        run: |
+          cmake --preset native-debug-test -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON
+          cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse
+          xvfb-run ctest --test-dir build/_cmake/native-debug-embolden-on --output-on-failure -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse))$'
+
       # NT_UI_DEBUG_TOOLS=OFF under Debug + FULL asserts + sanitizers: the release
       # presets build the stub bodies too, but only this mirror runs ctest over them.
       - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)

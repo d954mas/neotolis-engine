@@ -83,6 +83,29 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
 
 ## Text decoration (weight / outline / shadow / underline / strike)
 
+`NT_FONT_EMBOLDEN_ENABLED` is **OFF by default**, including debug presets.
+Enable it explicitly with `-DNT_FONT_EMBOLDEN_ENABLED=ON` to use synthetic
+weight or outline. OFF excludes offset geometry, its static scratch buffers,
+renderer weight quantization and the outline pass. The ordinary glyph decoder,
+shadow, underline, strike and oblique remain available.
+
+Rich text does not require this option: real B/BI family faces work with OFF;
+the existing fallback to B plus oblique also works. If font selection requires
+synthetic bold, forming the text run asserts under OFF. Supply the appropriate
+family face or enable the option. A label can select a real bold `font_id`
+without the synthetic `NT_UI_LABEL_VARIANT_BOLD` bit.
+
+Under OFF, every finite nonzero renderer weight (positive, negative or below
+the quantization step) and every positive outline width violates the contract,
+even with transparent outline color. Setters assert before storing that state;
+zero and reset remain legal. Rich outline pushes and base styles enforce the
+same requirement. FULL diagnoses, release TRAP terminates. Disabling assertions
+does not promise recovery after violating this precondition. Existing finite
+input normalization remains unchanged.
+
+The showcase displays an opt-in instruction in the synthetic weight/outline
+sections under OFF and keeps real font styles and other decorations active.
+
 Five decoration axes are **renderer-level sticky state** on `nt_text_renderer`, set via
 `set_weight` / `set_outline` / `set_shadow` / `set_underline` / `set_strikethrough`. Both authoring
 fronts feed the SAME setters at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich text
@@ -124,9 +147,9 @@ subsystem — decoration reuses the text pipeline and the `slug_text` shader.
 - **Parent opacity** folds into the fill AND the outline/shadow alpha (the walker pre-multiplies only
   the fill's `textColor.a`, so `nt_ui_label_deco_apply` / the rich emit multiply the decoration colors
   by the accumulated opacity too — a faded panel fades its outline/shadow consistently).
-- **Fallback (explicit).** Bold with no bold family member → synthetic weight; italic with no italic
+- **Fallback (explicit).** Bold with no bold family member requires embolden ON for synthetic weight; italic with no italic
   member → faux-italic oblique ([Design — synthetic italic](#design-flat-run-list--solver--one-fixed-block)); underline/strike are decoration toggles needing no family
-  member. A label has a single `font_id`, so its bold always degenerates to the synthetic weight.
+  member. A label's BOLD variant bit requests synthetic weight; a real bold `font_id` needs no BOLD bit.
 
 ## Inline images ride the standard u8 sprite path
 

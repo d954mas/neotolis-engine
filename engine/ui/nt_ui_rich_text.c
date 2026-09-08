@@ -360,6 +360,9 @@ void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_a
     if (!(width > 0.0F) || !isfinite(width)) {
         width = 0.0F;
     }
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(width == 0.0F && "outline requires NT_FONT_EMBOLDEN_ENABLED=ON");
+#endif
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     nt_ui_rich_style_t *s = rich_style_top(st);
@@ -473,6 +476,10 @@ static void rich_text_finalize_run(nt_ui_rich_state_t *st, uint32_t off, uint32_
     bool synth_bold = false;
     const nt_ui_rich_style_t *top = rich_style_top(st);
     (void)rich_resolve_font(top, &synth_italic, &synth_bold);
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(!synth_bold && "missing bold face requires NT_FONT_EMBOLDEN_ENABLED=ON");
+    NT_ASSERT(!(isfinite(top->outline_w) && top->outline_w > 0.0F) && "outline requires NT_FONT_EMBOLDEN_ENABLED=ON");
+#endif
     uint8_t flags = 0U;
     flags |= synth_italic ? NT_UI_RICH_RUN_SYNTH_ITALIC : 0U;
     flags |= synth_bold ? NT_UI_RICH_RUN_SYNTH_BOLD : 0U;

@@ -47,6 +47,8 @@ static void family(nt_font_t out[4], uint32_t r, uint32_t b, uint32_t i, uint32_
 /* (1) push_scale(1.5) then push_scale(2.0) -> font_size folds the product (16 * 3.0 == 48). */
 static void test_scale_multiplies(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_push_scale(s_fx.ctx, 1.5F);
     nt_ui_rich_push_scale(s_fx.ctx, 2.0F);
@@ -63,6 +65,8 @@ static void test_color_override_and_pop(void) {
     const uint32_t color_a = 0xFF112233U;
     const uint32_t color_b = 0xFFAABBCCU;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_push_color(s_fx.ctx, color_a);
     nt_ui_rich_push_color(s_fx.ctx, color_b);
@@ -81,6 +85,8 @@ static void test_variant_selects_family_member(void) {
     nt_font_t fam[4];
     family(fam, 10, 11, 12, 13);
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_push_font(s_fx.ctx, fam);
 
@@ -105,6 +111,8 @@ static void test_variant_fallback_and_synth_italic(void) {
     nt_font_t fam[4];
     family(fam, 10, 11, 0, 0); /* only R + B; no italic, no bold-italic */
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_push_font(s_fx.ctx, fam);
 
@@ -122,6 +130,8 @@ static void test_variant_fallback_and_synth_italic(void) {
  * color change between them starts a NEW run. */
 static void test_dedup_and_split_on_style_change(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
     nt_ui_rich_text_n(s_fx.ctx, "ab", 2);
     nt_ui_rich_text_n(s_fx.ctx, "cd", 2); /* same style -> extends run 0 */
@@ -199,6 +209,8 @@ static void assert_snapshots_identical(const run_snapshot_t *a, const run_snapsh
 /* The base style carrying a default atlas so <img=heart/> resolves against it. */
 static nt_ui_rich_style_t base_with_atlas(nt_resource_t atlas) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas = nt_atlas_ref(atlas, 0U); /* name_hash filled per-image by the parser/builder */
     return base;
 }
@@ -241,7 +253,9 @@ static void test_markup_equals_builder_full(void) {
     nt_ui_rich_tagset_init(&ts);
     nt_ui_rich_tagset_register_font(&ts, "heading", fam);
 
-    const nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     const uint32_t color = 0xFF0088FFU; /* <color=#FF8800> -> packed AABBGGRR (RGB FF8800) */
 
     /* Builder path. */
@@ -325,6 +339,8 @@ static nt_ui_context_t *make_capped_ctx(uint32_t runs, uint32_t styles, uint32_t
 /* Emit n distinct-style TEXT runs (each a new color -> no dedup merge). */
 static void emit_distinct_runs(nt_ui_context_t *ctx, uint32_t n) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(ctx, &base);
     for (uint32_t i = 0; i < n; i++) {
         nt_ui_rich_push_color(ctx, 0xFF000000U | (i + 1U)); /* distinct composed style each time */
@@ -367,6 +383,8 @@ static void test_runtime_text_cap_respected(void) {
     nt_ui_context_t *small = make_capped_ctx(256U, 32U, 8U);
     /* 8 bytes fit exactly. */
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(small, &base);
     nt_ui_rich_text_n(small, "12345678", 8);
     nt_ui_rich_end(small);
@@ -412,6 +430,8 @@ static void test_default_caps_when_desc_zero(void) {
     deflt->pending_rich = NULL;
     deflt->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     static char big[2000];
     memset(big, 'a', sizeof big);
     nt_ui_rich_begin(deflt, &base);
@@ -424,8 +444,53 @@ static void test_default_caps_when_desc_zero(void) {
     nt_ui_destroy_context(deflt);
 }
 
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_missing_bold_rejected_when_text_run_is_formed(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_push_bold(s_fx.ctx);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_text_n(s_fx.ctx, "B", 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_text_n(s_fx.ctx, "R", 1U);
+    nt_ui_rich_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(s_fx.stub_font.id, nt_ui_rich_test_run_font(s_fx.ctx, 0U).id);
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_rich_test_run_flags(s_fx.ctx, 0U));
+}
+
+static void test_missing_bold_in_base_rejected_for_text(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.variant = NT_UI_RICH_VARIANT_BOLD | NT_UI_RICH_VARIANT_ITALIC;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_text_n(s_fx.ctx, "BI", 2U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+    nt_ui_rich_end(s_fx.ctx);
+}
+
+static void test_rich_outline_off_rejected_before_run(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_push_outline(s_fx.ctx, 0x1p-20F, 0U));
+    nt_ui_rich_push_outline(s_fx.ctx, 0.0F, 0U);
+    nt_ui_rich_text_n(s_fx.ctx, "R", 1U);
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_rich_test_run_style(s_fx.ctx, 0U).outline_w == 0.0F);
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_missing_bold_rejected_when_text_run_is_formed);
+    RUN_TEST(test_missing_bold_in_base_rejected_for_text);
+    RUN_TEST(test_rich_outline_off_rejected_before_run);
+#endif
     RUN_TEST(test_scale_multiplies);
     RUN_TEST(test_color_override_and_pop);
     RUN_TEST(test_variant_selects_family_member);
