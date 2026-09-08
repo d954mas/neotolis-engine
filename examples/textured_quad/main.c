@@ -25,7 +25,9 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
+#endif
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -400,7 +402,9 @@ int main(void) {
 
     /* Init I/O and resource systems */
     nt_http_init();
+#ifndef NT_PLATFORM_WEB
     nt_fs_init();
+#endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
 

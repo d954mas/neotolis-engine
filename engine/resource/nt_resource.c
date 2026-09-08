@@ -8,7 +8,10 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "core/nt_platform.h"
+#ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
+#endif
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "log/nt_log.h"
@@ -387,9 +390,11 @@ static uint32_t resource_io_issue(const char *path, uint8_t io_type) {
     if (io_type == NT_IO_HTTP) {
         return nt_http_request(path).id;
     }
+#ifndef NT_PLATFORM_WEB
     if (io_type == NT_IO_FS) {
         return nt_fs_read_file(path).id;
     }
+#endif
     return 0;
 }
 
@@ -527,7 +532,9 @@ void nt_resource_step(void) {
                     pack->io_request_id = 0;
                     io_failed = true;
                 }
-            } else if (pack->io_type == NT_IO_FS) {
+            }
+#ifndef NT_PLATFORM_WEB
+            if (pack->io_type == NT_IO_FS) {
                 nt_fs_request_t req = {.id = pack->io_request_id};
                 nt_fs_state_t st = nt_fs_state(req);
                 if (st == NT_FS_STATE_DONE) {
@@ -541,6 +548,7 @@ void nt_resource_step(void) {
                     io_failed = true;
                 }
             }
+#endif
 
             /* A completed load with no bytes (204, empty file) is a failure — without
              * this the pack would sit in REQUESTED forever with io_request_id 0.
@@ -840,9 +848,12 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
     if (pack->io_request_id != 0) {
         if (pack->io_type == NT_IO_HTTP) {
             nt_http_free((nt_http_request_t){.id = pack->io_request_id});
-        } else if (pack->io_type == NT_IO_FS) {
+        }
+#ifndef NT_PLATFORM_WEB
+        if (pack->io_type == NT_IO_FS) {
             nt_fs_free((nt_fs_request_t){.id = pack->io_request_id});
         }
+#endif
     }
 
     /* Sever every zero-copy provider viewing this pack's blob BEFORE the free, else a font read before
@@ -1381,7 +1392,9 @@ static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_
     return NT_OK;
 }
 
+#ifndef NT_PLATFORM_WEB
 nt_result_t nt_resource_load_file(nt_hash32_t pack_id, const char *path) { return resource_load(pack_id.value, path, NT_IO_FS); }
+#endif
 
 nt_result_t nt_resource_load_url(nt_hash32_t pack_id, const char *url) { return resource_load(pack_id.value, url, NT_IO_HTTP); }
 

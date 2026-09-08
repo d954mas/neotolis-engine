@@ -142,7 +142,7 @@ If any check fails — fix before committing. Do not commit code that hasn't pas
 
 Environment differences a local Windows host cannot reproduce:
 
-- **GNU ld link order** — Linux resolves archives left-to-right; Windows/wasm links don't. Swappable impls + stubs must trail every consumer (`... nt_resource ... nt_http_stub nt_fs_stub nt_log_stub` last; see `tests/submodule/CMakeLists.txt`). A standalone test using libm also needs `if(NOT WIN32) target_link_libraries(<test> PRIVATE m) endif()`.
+- **GNU ld link order** — Linux resolves archives left-to-right; Windows/wasm links don't. Swappable impls + stubs must trail every consumer (`... nt_resource ... nt_http_stub nt_fs_stub nt_log_stub` last; see `tests/submodule/CMakeLists.txt`; `nt_fs_stub` is native-only — omit it on wasm, where `nt_resource` compiles its FS path out). A standalone test using libm also needs `if(NOT WIN32) target_link_libraries(<test> PRIVATE m) endif()`.
 - **clang-format version skew** — CI's Linux clang-format flags multi-space-aligned trailing comments the local one accepts. Keep trailing comments single-spaced.
 - **emsdk pin skew** — CI installs `.emsdk-version`; if local `emcc --version` differs, wasm-release/Closure can false-green locally. Compare versions before trusting it.
 - **clang-tidy skips `#if defined(__linux__)` blocks off-Linux** — reason about platform-`#if` code as Linux code or add `NOLINT` defensively.

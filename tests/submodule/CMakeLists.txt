@@ -26,6 +26,7 @@ target_link_libraries(submodule_test PRIVATE
     nt_hash
     # GNU ld resolves archives left-to-right, so swappable impls and nt_log must
     # trail every lib that references them (nt_resource -> nt_http/nt_fs -> nt_log).
+    # Native list: nt_fs_stub does not exist under EMSCRIPTEN.
     nt_http_stub
     nt_fs_stub
     nt_meshwire_stub

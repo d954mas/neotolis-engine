@@ -17,6 +17,8 @@ A fixed module is a single directory with its header + TU(s).
 
 A **swappable** module is a directory with a public interface header plus
 per-platform impl subdirs (`native/`, `web/`, `stub/`); the executable picks one.
+A module may omit a platform whose capability does not exist there (`nt_fs` has
+no `web/`), in which case nothing on that platform can select it.
 
 ```text
 engine/
@@ -35,7 +37,7 @@ engine/
         nt_clipboard.h
         native/  web/  stub/
         CMakeLists.txt
-    fs/                     # swappable: nt_fs.h + native/ web/ stub/
+    fs/                     # swappable: nt_fs.h + native/ stub/ (no web impl)
     http/                   # swappable: nt_http.h + native/ web/ stub/
     window/                 # swappable: nt_window.h + native/ web/ stub/
     app/                    # swappable: nt_app.h + native/ web/ stub/
@@ -68,13 +70,14 @@ Every swappable module exposes a header-only `nt_X_interface` target, declared
 via `nt_declare_interface()` in `cmake/nt_module.cmake`. It carries ONLY the
 public header + the engine include root — no TU, no symbols.
 
-Two or more concrete targets implement that interface with identical signatures:
+On each platform where the module exists, two or more concrete targets implement
+that interface with identical signatures:
 the real `nt_X` and the `nt_X_stub` (the web/native variant of the real impl is
 selected inside `nt_X`'s own `CMakeLists.txt`).
 
 Consumer modules link ONLY `nt_X_interface` — never a concrete impl. The
 **executable** selects exactly one impl per interface in its
-`target_link_libraries`.
+`target_link_libraries`, for every interface that has impls on its platform.
 
 Omitting an impl is a LOUD unresolved-symbol link error, not a silent no-op.
 Two gates enforce this:
@@ -88,8 +91,17 @@ Two gates enforce this:
   expected unresolved-symbol error is observed).
 
 Current swappable pairs: `nt_log`, `nt_input`, `nt_http`, `nt_gfx`,
-`nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs`,
-`nt_clipboard`.
+`nt_basisu_transcoder`, `nt_meshwire`, `nt_window`, `nt_app`, `nt_fs` (native
+only), `nt_clipboard`.
+
+`nt_fs` is native-only: neither `nt_fs` nor `nt_fs_stub` is declared under
+`EMSCRIPTEN`. The browser has no filesystem, so an always-failing web backend
+would only disguise a platform mistake as a load failure; a wasm link that asks
+for either target fails the link with an unknown-library error (CMake passes the
+name through as `-lnt_fs`), and `fs/nt_fs.h` refuses to be included there at all.
+`nt_resource`
+compiles its `NT_IO_FS` path out on web, where `nt_resource_load_file` does not
+exist and `nt_resource_load_auto` routes to `nt_http`.
 
 `nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
 Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a
@@ -141,7 +153,8 @@ gate-enforced instead of buried in per-TU macros.
 1. Create the interface header `nt_X.h` (public API only).
 2. Declare the interface target: `nt_declare_interface(nt_X)` in the module's
    `CMakeLists.txt`.
-3. Write `native/`, `web/`, `stub/` impls with identical signatures.
+3. Write `native/`, `web/`, `stub/` impls with identical signatures — omitting a
+   platform subdir is allowed when the capability does not exist there.
 4. Each executable picks exactly one impl in its `target_link_libraries`
    (the real `nt_X` or `nt_X_stub`).
 

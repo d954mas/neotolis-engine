@@ -8,7 +8,9 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "font/nt_font.h"
+#ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
+#endif
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -621,7 +623,9 @@ int main(int argc, char *argv[]) {
     nt_gfx_register_global_block("Globals", 0);
 
     nt_http_init();
+#ifndef NT_PLATFORM_WEB
     nt_fs_init();
+#endif
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
