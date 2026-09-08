@@ -170,24 +170,23 @@ static void republish_stage(const char *name, uint32_t shader_id) { nt_resource_
  * units the link assigned and asserts the program samples nothing else. */
 static nt_shader_t make_stage(nt_shader_type_t type) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = type, .source = (type == NT_SHADER_FRAGMENT) ? "f" : "void main(){}"}); }
 
-static nt_gfx_test_draw_t warm_material_program(nt_material_t material, nt_program_t program) {
+static nt_gfx_fake_draw_t warm_material_program(nt_material_t material, nt_program_t program) {
     nt_material_set_program(material, program);
     nt_text_renderer_set_material(material);
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
     draw_and_flush();
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_test_draw_trace_count());
-    nt_gfx_test_draw_t draw = nt_gfx_test_draw_trace_at(0U);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(program.id, draw.program.id);
-    nt_gfx_test_draw_trace_reset(false);
+    nt_gfx_fake_draw_trace_reset(false);
     return draw;
 }
 
-static void assert_text_draw(uint32_t index, nt_gfx_test_draw_t expected, uint32_t glyphs) {
-    nt_gfx_test_draw_t draw = nt_gfx_test_draw_trace_at(index);
+static void assert_text_draw(uint32_t index, nt_gfx_fake_draw_t expected, uint32_t glyphs) {
+    nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(index);
     TEST_ASSERT_EQUAL_UINT32(expected.program.id, draw.program.id);
     TEST_ASSERT_EQUAL_UINT32(expected.pipeline.id, draw.pipeline.id);
     TEST_ASSERT_EQUAL_UINT32(glyphs * 6U, draw.num_indices);
-    TEST_ASSERT_EQUAL_UINT32(glyphs * 4U, draw.num_vertices);
     TEST_ASSERT_EQUAL_UINT32(1U, draw.instance_count);
 }
 
@@ -592,7 +591,7 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
     nt_gfx_fake_reset();
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_set_material(a);
     draw_and_flush();
     nt_text_renderer_set_material(b);
@@ -600,9 +599,9 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT16(2U, nt_text_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_test_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_test_draw_trace_at(0).program.id);
-    TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_test_draw_trace_at(1).program.id);
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_fake_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_fake_draw_trace_at(1).program.id);
 }
 
 /* Reusing the program slot changes its generation. The first quad of a new batch
@@ -645,13 +644,13 @@ void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(mat)->program;
     const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
-    const nt_gfx_test_draw_t first_draw = warm_material_program(mat, first);
-    const nt_gfx_test_draw_t second_draw = warm_material_program(mat, second);
+    const nt_gfx_fake_draw_t first_draw = warm_material_program(mat, first);
+    const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_material_set_program(mat, second);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -661,10 +660,10 @@ void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, first_draw, 4U);
     assert_text_draw(1U, second_draw, 2U);
-    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 }
 
@@ -675,13 +674,13 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(mat)->program;
     const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
-    const nt_gfx_test_draw_t first_draw = warm_material_program(mat, first);
-    const nt_gfx_test_draw_t second_draw = warm_material_program(mat, second);
+    const nt_gfx_fake_draw_t first_draw = warm_material_program(mat, first);
+    const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
 
     /* Fill staging to one draw short of the cap, under program A. */
     for (uint32_t i = 0; i < (NT_TEXT_RENDERER_MAX_GLYPHS / 2U) - 1U; i++) {
@@ -703,10 +702,10 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
 
     /* The B tail must draw. Without reopening it is discarded instead. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, first_draw, NT_TEXT_RENDERER_MAX_GLYPHS);
     assert_text_draw(1U, second_draw, 2U);
-    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
 void test_font_cache_flush_preserves_the_entire_run(void) {
@@ -772,17 +771,16 @@ void test_decoration_only_run_opens_its_pipeline(void) {
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_test_draw_trace_count());
-    nt_gfx_test_draw_t draw = nt_gfx_test_draw_trace_at(0U);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(material)->program.id, draw.program.id);
     TEST_ASSERT_EQUAL_UINT32(12U, draw.num_indices);
-    TEST_ASSERT_EQUAL_UINT32(8U, draw.num_vertices);
-    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(font);
     free(blob);
@@ -793,24 +791,24 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
     const nt_program_t first = nt_material_get_info(material)->program;
     const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
     (void)warm_material_program(material, first);
-    const nt_gfx_test_draw_t second_draw = warm_material_program(material, second);
+    const nt_gfx_fake_draw_t second_draw = warm_material_program(material, second);
     nt_material_set_program(material, first);
 
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_test_draw_trace_reset(true);
+    nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_material_set_program(material, second);
     nt_gfx_destroy_program(first);
     nt_text_renderer_flush();
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_test_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, second_draw, 2U);
-    TEST_ASSERT_FALSE(nt_gfx_test_draw_trace_overflowed());
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {

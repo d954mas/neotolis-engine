@@ -1944,7 +1944,7 @@ void test_activate_mesh_soa_wire_decodes(void) {
         memcpy(expected + ((size_t)v * 16), wire + ((size_t)v * 12), 12);
         memcpy(expected + ((size_t)v * 16) + 12, wire + 36 + ((size_t)v * 4), 4);
     }
-    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected, VD).value, nt_gfx_test_last_mesh_vertex_hash());
+    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected, VD).value, nt_gfx_fake_last_vertex_buffer_hash());
     nt_gfx_deactivate_mesh(handle);
 }
 
@@ -1988,7 +1988,7 @@ void test_activate_mesh_meshopt_wire_decodes(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, info->ibo.id);
     /* The UPLOADED bytes must be the decoded canonical triangle list */
     static const uint16_t expected_idx[24] = {0, 1, 5, 5, 1, 6, 6, 1, 2, 6, 2, 7, 7, 2, 3, 7, 3, 8, 8, 3, 4, 8, 4, 9};
-    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected_idx, sizeof(expected_idx)).value, nt_gfx_test_last_mesh_index_hash());
+    TEST_ASSERT_EQUAL_HEX32(nt_hash32(expected_idx, sizeof(expected_idx)).value, nt_gfx_fake_last_index_buffer_hash());
     nt_gfx_deactivate_mesh(handle);
 }
 
