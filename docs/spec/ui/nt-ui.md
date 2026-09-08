@@ -18,6 +18,10 @@ building blocks per the engine's "set of modules" principle.
 
 ## Clay as a public dependency
 
+`NT_UI_TIMING_ENABLED` independently selects layout/build/walk measurement.
+OFF keeps the getters but returns zero without clock reads or timing fields;
+see [optional measurements](../debug/logging-errors-debugging.md#optional-measurements).
+
 `nt_ui_rich` is an optional library in the UI family: link it alongside `nt_ui`
 for rich text and markup. It depends on `nt_ui_interface`, leaving the executable
 to select the UI implementation. It shares the UI private ABI and must be built with the

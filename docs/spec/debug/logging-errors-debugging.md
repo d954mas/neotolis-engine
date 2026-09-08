@@ -10,11 +10,65 @@ Related: [Module Layout](../core/module-layout.md), [Input](../io/input.md), [Re
 
 ## Logging levels
 
-- INFO
-- WARN
-- ERROR
-- ASSERT
-- PANIC
+`NT_LOG_MIN_LEVEL` selects the compile-time floor: numeric `0` INFO, `1` WARN,
+`2` ERROR, `3` NONE. Plain CMake defaults to INFO; Debug presets select INFO and
+Release presets WARN. Set the cache value when building the engine, not only a
+define on the final executable. `nt_log_interface` publishes the value to its
+consumers. Asserts are a separate policy, below.
+
+Below-floor ordinary, domain, ONCE and UNIQUE macros retain no arguments,
+format strings or ONCE latch. Disabled UNIQUE is a boolean `false` expression.
+Uppercase domain macros still require `NT_LOG_DOMAIN` or `NT_LOG_DOMAIN_DEFAULT`.
+Enabled ONCE keeps its call-site latch semantics, including a runtime-filtered
+first call. `nt_log_set_level` can further suppress enabled levels.
+
+Direct `nt_log_write` and `nt_log_write_unique` filter before formatting, but C
+still evaluates their caller arguments. `nt_log_entity` skips its internal
+entity description below the floor; independent introspection remains usable.
+At NONE the normal `nt_log` target uses the existing inert stub source and has
+no logger formatting/dedup storage. `nt_log_stub` remains useful for link-time
+suppression of prebuilt libraries; it cannot remove their caller-side work.
+
+## Optional measurements
+
+`NT_UI_TIMING_ENABLED` and `NT_GFX_GPU_TIMING_ENABLED` are independent CMake
+options, both OFF by default, ON in Debug presets and OFF in Release presets.
+Their existing interfaces publish numeric 0/1 values. Neither producer depends
+on `NT_METRICS_ENABLED`: the game may consume measurements directly.
+
+UI timing OFF removes the layout/build/walk clock reads and three private
+results. The existing getters require a non-NULL context and return zero.
+ON measures Clay finalization, tree building and the main walk; a separate
+inspector walk does not replace the main result. Main-walk early-outs reset
+only the walk result.
+
+GPU timing OFF removes timer rings, timer-extension probes and query calls.
+Segment/toggle calls are inert; supported returns false and poll returns false
+with a zero output when non-NULL. With timing compiled ON, an unsuccessful poll
+leaves its output unchanged. Runtime disable closes an active segment and its
+native debug group, cancels pending samples, and retains query objects until
+shutdown. Re-enable starts fresh samples. The runtime choice survives context
+loss; dead-context cleanup performs no GL calls. Support reports capability,
+independently of the runtime choice.
+
+WebGL disjoint status is read once at begin-frame only while timing is enabled
+and an active or pending query exists. Disjoint closes an active segment and
+invalidates all pending samples. An old disjoint event latched during idle may
+conservatively discard the first new batch. Context creation disables automatic
+extension activation; existing capability probes explicitly enable the texture
+and float extensions, and the compiled timer producer enables its own extension.
+
+Example hosts compile out metrics-only clocks, memory sampling and sample
+preparation with metrics OFF. GPU segments also require GPU timing ON. With
+metrics ON and GPU timing OFF they report `gpu_ms = -1`; UI timing OFF omits
+the UI duration user channels.
+
+Missing log-floor, metrics, log-ring or introspection configuration is a header
+error, not an implicit development configuration. Introspection read/write
+values propagate through `nt_core`, so external component consumers share the
+same layout without linking the introspection implementation. Devapi group
+choices are dormant without warnings while its master switch is OFF; enabled
+groups retain their dependency errors.
 
 ## Assert policy
 

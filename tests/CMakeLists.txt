@@ -83,6 +83,16 @@ if(NOT EMSCRIPTEN)
     endif()
 
     # --- Swap demo tests ---
+    add_executable(test_log_floor unit/test_log_floor.c)
+    target_link_libraries(test_log_floor PRIVATE nt_log unity)
+    target_compile_definitions(test_log_floor PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_log_floor)
+
+    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c)
+    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log_stub unity glad nt_meshwire_stub)
+    target_compile_definitions(test_nt_gfx_gpu_timing_native PRIVATE NT_LOG_DOMAIN="gfx_timer_test")
+    nt_setup_test_target(test_nt_gfx_gpu_timing_native)
+
     # Same source, different implementation linked.
     # Proves: swapping = one target_link_libraries change.
 
@@ -1185,6 +1195,7 @@ if(NOT EMSCRIPTEN)
     endif()
 
     set(_nt_ui_test_names
+        test_nt_ui_timing
         test_nt_ui_lifecycle
         test_nt_ui_multictx
         test_nt_ui_begin_end

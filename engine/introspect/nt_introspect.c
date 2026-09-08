@@ -136,9 +136,17 @@ void nt_entity_to_string(nt_entity_t e, char *buf, size_t cap) {
 }
 
 void nt_log_entity(nt_log_level_t level, nt_entity_t e) {
+#if NT_LOG_MIN_LEVEL < 3
+    if (level < NT_LOG_MIN_LEVEL || level >= NT_LOG_LEVEL_NONE) {
+        return;
+    }
     char buf[NT_LOG_BUF_SIZE];
     nt_entity_to_string(e, buf, sizeof(buf));
     nt_log_write(level, NULL, "%s", buf);
+#else
+    (void)level;
+    (void)e;
+#endif
 }
 // #endregion
 

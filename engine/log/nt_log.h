@@ -2,6 +2,13 @@
 #define NT_LOG_H
 
 #include <stdbool.h>
+#include <stddef.h>
+
+#ifndef NT_LOG_MIN_LEVEL
+#error "NT_LOG_MIN_LEVEL must be defined by the nt_log_interface target (0..3)"
+#elif NT_LOG_MIN_LEVEL < 0 || NT_LOG_MIN_LEVEL > 3
+#error "NT_LOG_MIN_LEVEL must be in 0..3"
+#endif
 
 /* Log levels (ordered by severity) */
 typedef enum {
@@ -10,6 +17,8 @@ typedef enum {
     NT_LOG_LEVEL_ERROR = 2,
     NT_LOG_LEVEL_NONE = 3 /* suppress all logging */
 } nt_log_level_t;
+
+_Static_assert(NT_LOG_LEVEL_INFO == 0 && NT_LOG_LEVEL_WARN == 1 && NT_LOG_LEVEL_ERROR == 2 && NT_LOG_LEVEL_NONE == 3, "log floor values must match levels");
 
 /* Format attribute for printf-style type checking */
 #if defined(__GNUC__) || defined(__clang__)
@@ -47,15 +56,6 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
  * Bounded + saturating; single-threaded (same assumption as NT_LOG_ONCE_). */
 bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
 
-/* --- Plain macros (no domain, for game/example code) --- */
-#define nt_log_info(...) nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__)
-#define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
-#define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
-
-/* --- Once-per-callsite variants (not resettable) ---
- * Single-threaded: WASM has one main thread, native debug/builder likewise.
- * A race would produce at most a duplicate line, never UB. If multi-threaded
- * logging is needed later, gate this on a build flag and switch to atomic_flag. */
 #define NT_LOG_ONCE_(write_call)                                                                                                                                                                       \
     do {                                                                                                                                                                                               \
         static bool nt_log_once_done_ = false;                                                                                                                                                         \
@@ -65,14 +65,45 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
         }                                                                                                                                                                                              \
     } while (0)
 
-#define nt_log_info_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__))
-#define nt_log_warn_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__))
-#define nt_log_error_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__))
+#if NT_LOG_MIN_LEVEL <= 0
+#define NT_LOG_INFO_(domain, ...) nt_log_write(NT_LOG_LEVEL_INFO, domain, __VA_ARGS__)
+#define NT_LOG_INFO_ONCE_(domain, ...) NT_LOG_ONCE_(NT_LOG_INFO_(domain, __VA_ARGS__))
+#define NT_LOG_INFO_UNIQUE_(domain, ...) nt_log_write_unique(NT_LOG_LEVEL_INFO, domain, __VA_ARGS__)
+#else
+#define NT_LOG_INFO_(...) ((void)0)
+#define NT_LOG_INFO_ONCE_(...) ((void)0)
+#define NT_LOG_INFO_UNIQUE_(...) false
+#endif
 
-/* --- Content-deduped variants (dedup by message text, program-wide) --- */
-#define nt_log_info_unique(...) nt_log_write_unique(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__)
-#define nt_log_warn_unique(...) nt_log_write_unique(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
-#define nt_log_error_unique(...) nt_log_write_unique(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
+#if NT_LOG_MIN_LEVEL <= 1
+#define NT_LOG_WARN_(domain, ...) nt_log_write(NT_LOG_LEVEL_WARN, domain, __VA_ARGS__)
+#define NT_LOG_WARN_ONCE_(domain, ...) NT_LOG_ONCE_(NT_LOG_WARN_(domain, __VA_ARGS__))
+#define NT_LOG_WARN_UNIQUE_(domain, ...) nt_log_write_unique(NT_LOG_LEVEL_WARN, domain, __VA_ARGS__)
+#else
+#define NT_LOG_WARN_(...) ((void)0)
+#define NT_LOG_WARN_ONCE_(...) ((void)0)
+#define NT_LOG_WARN_UNIQUE_(...) false
+#endif
+
+#if NT_LOG_MIN_LEVEL <= 2
+#define NT_LOG_ERROR_(domain, ...) nt_log_write(NT_LOG_LEVEL_ERROR, domain, __VA_ARGS__)
+#define NT_LOG_ERROR_ONCE_(domain, ...) NT_LOG_ONCE_(NT_LOG_ERROR_(domain, __VA_ARGS__))
+#define NT_LOG_ERROR_UNIQUE_(domain, ...) nt_log_write_unique(NT_LOG_LEVEL_ERROR, domain, __VA_ARGS__)
+#else
+#define NT_LOG_ERROR_(...) ((void)0)
+#define NT_LOG_ERROR_ONCE_(...) ((void)0)
+#define NT_LOG_ERROR_UNIQUE_(...) false
+#endif
+
+#define nt_log_info(...) NT_LOG_INFO_(NULL, __VA_ARGS__)
+#define nt_log_info_once(...) NT_LOG_INFO_ONCE_(NULL, __VA_ARGS__)
+#define nt_log_info_unique(...) NT_LOG_INFO_UNIQUE_(NULL, __VA_ARGS__)
+#define nt_log_warn(...) NT_LOG_WARN_(NULL, __VA_ARGS__)
+#define nt_log_warn_once(...) NT_LOG_WARN_ONCE_(NULL, __VA_ARGS__)
+#define nt_log_warn_unique(...) NT_LOG_WARN_UNIQUE_(NULL, __VA_ARGS__)
+#define nt_log_error(...) NT_LOG_ERROR_(NULL, __VA_ARGS__)
+#define nt_log_error_once(...) NT_LOG_ERROR_ONCE_(NULL, __VA_ARGS__)
+#define nt_log_error_unique(...) NT_LOG_ERROR_UNIQUE_(NULL, __VA_ARGS__)
 
 /* --- Domain resolution --- */
 #ifndef NT_LOG_DOMAIN
@@ -81,40 +112,33 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
 #endif
 #endif
 
-/* --- Domain macros (engine modules, domain auto-injected) --- */
+/* Domain configuration remains required even when a level is compiled out. */
 #ifdef NT_LOG_DOMAIN
-#define NT_LOG_INFO(...) nt_log_write(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_WARN(...) nt_log_write(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_ERROR(...) nt_log_write(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_INFO_ONCE(...) NT_LOG_ONCE_(NT_LOG_INFO(__VA_ARGS__))
-#define NT_LOG_WARN_ONCE(...) NT_LOG_ONCE_(NT_LOG_WARN(__VA_ARGS__))
-#define NT_LOG_ERROR_ONCE(...) NT_LOG_ONCE_(NT_LOG_ERROR(__VA_ARGS__))
-#define NT_LOG_INFO_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_WARN_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_ERROR_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO(...) NT_LOG_INFO_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO_ONCE(...) NT_LOG_INFO_ONCE_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO_UNIQUE(...) NT_LOG_INFO_UNIQUE_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_WARN(...) NT_LOG_WARN_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_WARN_ONCE(...) NT_LOG_WARN_ONCE_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_WARN_UNIQUE(...) NT_LOG_WARN_UNIQUE_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_ERROR(...) NT_LOG_ERROR_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_ERROR_ONCE(...) NT_LOG_ERROR_ONCE_(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_ERROR_UNIQUE(...) NT_LOG_ERROR_UNIQUE_(NT_LOG_DOMAIN, __VA_ARGS__)
 #else
-/* Compile error when domain macros used without domain defined */
-#define NT_LOG_INFO(...)                                                                                                                                                                               \
-    do {                                                                                                                                                                                               \
-        _Static_assert(0, "NT_LOG_DOMAIN not defined. Either #define "                                                                                                                                 \
-                          "NT_LOG_DOMAIN \"name\" before "                                                                                                                                             \
-                          "including nt_log.h, or add LOG_DOMAIN to "                                                                                                                                  \
-                          "nt_add_module()");                                                                                                                                                          \
-    } while (0)
-#define NT_LOG_WARN(...)                                                                                                                                                                               \
-    do {                                                                                                                                                                                               \
-        _Static_assert(0, "NT_LOG_DOMAIN not defined. Either #define "                                                                                                                                 \
-                          "NT_LOG_DOMAIN \"name\" before "                                                                                                                                             \
-                          "including nt_log.h, or add LOG_DOMAIN to "                                                                                                                                  \
-                          "nt_add_module()");                                                                                                                                                          \
-    } while (0)
-#define NT_LOG_ERROR(...)                                                                                                                                                                              \
-    do {                                                                                                                                                                                               \
-        _Static_assert(0, "NT_LOG_DOMAIN not defined. Either #define "                                                                                                                                 \
-                          "NT_LOG_DOMAIN \"name\" before "                                                                                                                                             \
-                          "including nt_log.h, or add LOG_DOMAIN to "                                                                                                                                  \
-                          "nt_add_module()");                                                                                                                                                          \
-    } while (0)
+#define NT_LOG_MISSING_DOMAIN_                                                                                                                                                                         \
+    ((bool)sizeof(struct {                                                                                                                                                                             \
+        _Static_assert(0, "NT_LOG_DOMAIN not defined: define NT_LOG_DOMAIN or use nt_add_module LOG_DOMAIN");                                                                                          \
+        char unused;                                                                                                                                                                                   \
+    }))
+#define NT_LOG_INFO(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_INFO_ONCE(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_INFO_UNIQUE(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_WARN(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_WARN_ONCE(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_WARN_UNIQUE(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_ERROR(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_ERROR_ONCE(...) NT_LOG_MISSING_DOMAIN_
+#define NT_LOG_ERROR_UNIQUE(...) NT_LOG_MISSING_DOMAIN_
+
 #endif
 
 #endif /* NT_LOG_H */

@@ -611,7 +611,9 @@ void nt_resource_step(void) {
         double t_start = nt_time_now();
         float budget_ms = s_resource.activate_time_budget_ms;
         bool activated_any = false;
+#if NT_LOG_MIN_LEVEL == 0
         uint32_t activated_count = 0;
+#endif
 
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
             NtPackMeta *pack = &s_resource.packs[pi];
@@ -675,14 +677,18 @@ void nt_resource_step(void) {
                 }
                 pack->blob_last_access_ms = resource_get_time_ms();
                 activated_any = true;
+#if NT_LOG_MIN_LEVEL == 0
                 activated_count++;
+#endif
             }
         }
-    budget_exhausted:
+    budget_exhausted:;
+#if NT_LOG_MIN_LEVEL == 0
         if (activated_count > 0) {
             double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
             NT_LOG_INFO("activated %u assets (%.1fms / %.1fms budget)", activated_count, elapsed_ms, (double)budget_ms);
         }
+#endif
     }
 
     /* ===================================================
@@ -1667,12 +1673,14 @@ void nt_resource_set_placeholder_texture(nt_hash64_t resource_id) {
 /* ---- Debug: dump loaded pack contents to log ---- */
 
 void nt_resource_dump_pack(nt_hash32_t pack_id) {
+#if NT_LOG_MIN_LEVEL < 3
     int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         NT_LOG_ERROR("dump_pack: not mounted");
         return;
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     NtPackMeta *pack = &s_resource.packs[idx];
     NT_LOG_INFO("  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority, (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
 
@@ -1705,6 +1713,10 @@ void nt_resource_dump_pack(nt_hash32_t pack_id) {
         }
         NT_LOG_INFO("    [%u] 0x%016" PRIX64 "  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
     }
+#endif
+#else
+    (void)pack_id;
+#endif
 }
 
 /* ---- Test access (test-only) ---- */

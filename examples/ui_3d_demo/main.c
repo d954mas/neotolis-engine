@@ -762,6 +762,7 @@ static void draw_hud(float fb_w, float fb_h) {
 
 // #region frame
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
 static float ui3d_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
     bool ready = false;
@@ -770,15 +771,18 @@ static float ui3d_poll_gpu_ms(void) {
     }
     return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
 }
+#endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
+#if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
     double now = nt_time_now();
     float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
     s_last_begin = now;
     double cpu_begin = now;
+#endif
 
     nt_window_poll();
     nt_input_poll();
@@ -862,7 +866,9 @@ static void frame(void) {
     uniforms_2d.near_far[1] = 1.0F;
 
     nt_gfx_begin_frame();
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
+#endif
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -891,7 +897,9 @@ static void frame(void) {
          * the gate call nt_font_add twice, which asserts on the duplicate. */
         /* Everything decided before begin_frame described the dead context, so
          * this frame draws nothing -- the next one is built from scratch. */
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
         nt_gfx_end_segment();
+#endif
         nt_gfx_end_frame();
         nt_window_swap_buffers();
         return;
@@ -988,9 +996,12 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
+#endif
     nt_gfx_end_frame();
 
+#if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
@@ -1002,13 +1013,18 @@ static void frame(void) {
     nt_metrics_frame_t mf = {
         .frame_ms = frame_ms,
         .cpu_ms = cpu_ms,
+#if NT_GFX_GPU_TIMING_ENABLED
         .gpu_ms = ui3d_poll_gpu_ms(),
+#else
+        .gpu_ms = -1.0F,
+#endif
         .draw_calls = nt_gfx_get_frame_draw_calls(),
         .mem_used = s_mem_used,
         .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
         .scratch_used = (uint32_t)nt_mem_scratch_used(),
     };
     nt_metrics_sample(&mf);
+#endif
 
     nt_window_swap_buffers();
 }

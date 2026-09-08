@@ -35,6 +35,10 @@ linked stages; see [Shader System](shader.md).
 
 ## Renderer backend API shape
 
+GPU segment timing is an optional producer selected by
+`NT_GFX_GPU_TIMING_ENABLED`, independent of metrics. Its compile-time and runtime
+OFF contracts are in [optional measurements](../debug/logging-errors-debugging.md#optional-measurements).
+
 Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 
 ```c

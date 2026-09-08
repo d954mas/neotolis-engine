@@ -3999,21 +3999,29 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     }
 
     NT_LOG_INFO("  atlas_commit: %u sprites, starting pipeline...", p.sprite_count);
+#if NT_LOG_MIN_LEVEL == 0
     double t0 = nt_time_now();
     double t_total = t0;
+#endif
 
     pipeline_resolve_geometry_opts(&p);
     pipeline_alpha_trim(&p);
+#if NT_LOG_MIN_LEVEL == 0
     double bench_alpha_trim = nt_time_now() - t0;
+#endif
 
     /* Geometry still runs on survivors to collect cross-stage content errors. */
     if (!state->failed) {
         pipeline_cache_check(&p);
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     t0 = nt_time_now();
+#endif
     pipeline_dedup(&p);
+#if NT_LOG_MIN_LEVEL == 0
     double bench_dedup = nt_time_now() - t0;
+#endif
 
     if (p.cache_hit && !pipeline_cache_placements_consistent(&p)) {
         NT_LOG_WARN("atlas '%s': cached placements are inconsistent — discarding the entry and repacking", state->name);
@@ -4032,9 +4040,13 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
     }
 
     NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", p.sprite_count, p.unique_count);
+#if NT_LOG_MIN_LEVEL == 0
     t0 = nt_time_now();
+#endif
     pipeline_geometry(&p);
+#if NT_LOG_MIN_LEVEL == 0
     double bench_geometry = nt_time_now() - t0;
+#endif
     NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
 
     /* Non-mutating pre-pack validation on every surviving sprite (empty-page fit
@@ -4050,13 +4062,19 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
         goto cleanup;
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     double bench_tile_pack = 0.0;
     double bench_compose = 0.0;
     double bench_debug_png = 0.0;
+#endif
     if (!p.cache_hit) {
+#if NT_LOG_MIN_LEVEL == 0
         t0 = nt_time_now();
+#endif
         pipeline_tile_pack(&p);
+#if NT_LOG_MIN_LEVEL == 0
         bench_tile_pack = nt_time_now() - t0;
+#endif
 
         /* A PAGES_EXHAUSTED (vector_pack) content error skips compose/serialize
          * and falls through to the one cleanup block. */
@@ -4064,21 +4082,33 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
             goto cleanup;
         }
 
+#if NT_LOG_MIN_LEVEL == 0
         t0 = nt_time_now();
+#endif
         pipeline_compose(&p);
+#if NT_LOG_MIN_LEVEL == 0
         bench_compose = nt_time_now() - t0;
+#endif
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     t0 = nt_time_now();
+#endif
     pipeline_serialize(&p);
+#if NT_LOG_MIN_LEVEL == 0
     double bench_serialize = nt_time_now() - t0;
+#endif
 
     if (!p.cache_hit) {
         pipeline_cache_write(&p);
     }
+#if NT_LOG_MIN_LEVEL == 0
     t0 = nt_time_now();
+#endif
     pipeline_debug_png(&p);
+#if NT_LOG_MIN_LEVEL == 0
     bench_debug_png = nt_time_now() - t0;
+#endif
     pipeline_publish_outputs(&p);
 
     /* Published, so the numbers describe a real atlas. Every sprite is either its
@@ -4095,6 +4125,7 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
                                                                         .cache_hit = p.cache_hit};
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     double bench_total = nt_time_now() - t_total;
     p.stats.used_area = 0;
     for (uint32_t i = 0; i < p.page_count; i++) {
@@ -4114,6 +4145,8 @@ nt_build_result_t nt_atlas_commit(NtAtlasBuild *atlas) {
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
                 (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count, p.folds_exact, p.folds_d4, (unsigned long long)p.area_saved_px,
                 p.vertex_blocks_shared);
+
+#endif
 
 cleanup:;
     nt_build_result_t result = state->failed ? atlas_merge_errors(state) : NT_BUILD_OK;

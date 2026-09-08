@@ -19,6 +19,7 @@ typedef struct {
     char name[256];
 } NameEntry;
 
+#if NT_LOG_MIN_LEVEL == 0
 static uint32_t parse_header_file(const char *header_path, NameEntry *entries, uint32_t max_entries) {
     FILE *f = fopen(header_path, "r");
     if (!f) {
@@ -480,6 +481,8 @@ static void print_summary(const DumpStats *st) {
     NT_LOG_INFO("  Total:   %s raw -> %s gz (%u%%)", raw_str, gz_str, pct);
 }
 
+#endif
+
 /* ---- Main dump function ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -562,10 +565,13 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         return NT_BUILD_ERR_FORMAT;
     }
 
+#if NT_LOG_MIN_LEVEL == 0
     /* Verify CRC32 */
     uint32_t data_region_size = file_size - header->header_size;
     uint32_t computed_crc = nt_crc32(buffer + header->header_size, data_region_size);
     const char *crc_status = (computed_crc == header->checksum) ? "OK" : "MISMATCH";
+
+#endif
 
     /* Parse entries */
     if (header->header_size < (uint32_t)sizeof(NtPackHeader)) {
@@ -573,7 +579,7 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         free(buffer);
         return NT_BUILD_ERR_FORMAT;
     }
-    const NtAssetEntry *entries = (const NtAssetEntry *)(buffer + sizeof(NtPackHeader));
+
     uint32_t max_entries = (header->header_size - (uint32_t)sizeof(NtPackHeader)) / (uint32_t)sizeof(NtAssetEntry);
     uint32_t count = header->asset_count;
     if (count > max_entries) {
@@ -581,6 +587,8 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         count = max_entries;
     }
 
+#if NT_LOG_MIN_LEVEL == 0
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buffer + sizeof(NtPackHeader));
     /* Parse .h file for name resolution */
     NameEntry *name_entries = (NameEntry *)calloc(MAX_NAME_ENTRIES, sizeof(NameEntry));
     uint32_t name_count = 0;
@@ -671,6 +679,7 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
 
     free(compress_buf);
     free(name_entries);
+#endif
     free(buffer);
     return NT_BUILD_OK;
 }

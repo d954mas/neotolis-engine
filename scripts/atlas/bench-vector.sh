@@ -10,12 +10,14 @@ SPRITES="${1:-1000}"
 NO_BUILD=false
 if [[ "${2:-}" == "--no-build" ]]; then NO_BUILD=true; fi
 
-BUILDER="build/examples/atlas/native-release/build_atlas_packs.exe"
+PRESET="native-release-atlas-bench"
+BUILDER="build/examples/atlas/${PRESET}/build_atlas_packs.exe"
 OUT_DIR="build/examples/atlas"
 
 if [[ "$NO_BUILD" == false ]]; then
-    echo "=== Building ==="
-    cmake --build build/_cmake/native-release --target build_atlas_packs 2>&1 | tail -3
+    echo "=== Building ${PRESET} ==="
+    cmake --preset native-release -B "build/_cmake/${PRESET}" -DNT_PRESET_NAME="${PRESET}" -DNT_LOG_MIN_LEVEL=0
+    cmake --build "build/_cmake/${PRESET}" --target build_atlas_packs 2>&1 | tail -3
 fi
 
 RUNS=3

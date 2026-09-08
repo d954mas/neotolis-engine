@@ -268,10 +268,16 @@ static void test_walk_ms_set_then_reset_on_early_return(void) {
     inject_frozen_cmds(3);
 
     /* Sentinel: a missing walk-exit write leaves -1.0F and trips the assert. */
+#if NT_UI_TIMING_ENABLED
     s_fx.ctx->last_walk_ms = -1.0F;
+#endif
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
+#if NT_UI_TIMING_ENABLED
     TEST_ASSERT_TRUE(nt_ui_get_last_walk_ms(s_fx.ctx) >= 0.0F);
+#else
+    TEST_ASSERT_TRUE(nt_ui_get_last_walk_ms(s_fx.ctx) == 0.0F);
+#endif
 
     /* Zero-width viewport hits the early return, which must zero walk_ms.
      * Value is non-negative, so "not positive" pins it to exactly 0 without a

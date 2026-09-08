@@ -397,6 +397,7 @@ static void frame(void) {
     if (!s_prof_reported && s_prof_frames > 0) {
         double now = nt_time_now();
         if (now - s_prof_reset_time >= PROF_REPORT_DELAY) {
+#if NT_LOG_MIN_LEVEL == 0
             double inv = 1.0 / (double)s_prof_frames;
             nt_font_stats_t fs = nt_font_get_stats(s_font);
             const char *label = s_prof_cjk_reset ? "after CJK" : "base";
@@ -408,6 +409,7 @@ static void frame(void) {
             nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)  band %u/%u texels (%.0f%%)", fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
                         fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0, fs.band_texels_used, fs.band_texels_total,
                         fs.band_texels_total > 0 ? 100.0 * fs.band_texels_used / fs.band_texels_total : 0.0);
+#endif
             s_prof_reported = true;
         }
     }

@@ -19,15 +19,17 @@ cd "$(git rev-parse --show-toplevel)"
 NO_BUILD=false
 if [[ "${1:-}" == "--no-build" ]]; then NO_BUILD=true; fi
 
-BUILDER="build/examples/atlas/native-release/build_atlas_packs.exe"
+PRESET="native-release-atlas-bench"
+BUILDER="build/examples/atlas/${PRESET}/build_atlas_packs.exe"
 OUT_DIR="build/examples/atlas"
 REFERENCE_HASH="849ff8f3ef95c6ae0f0885aa00a15bf2b3819fba3295e080792d365466f30584"
 NTPACK="${OUT_DIR}/atlas_demo.ntpack"
 
 # --- Step 1: Build ---
 if [[ "$NO_BUILD" == false ]]; then
-    echo "=== Building native-release ==="
-    if ! cmake --build build/_cmake/native-release --target build_atlas_packs 2>&1 | tail -3; then
+    echo "=== Building ${PRESET} ==="
+    cmake --preset native-release -B "build/_cmake/${PRESET}" -DNT_PRESET_NAME="${PRESET}" -DNT_LOG_MIN_LEVEL=0
+    if ! cmake --build "build/_cmake/${PRESET}" --target build_atlas_packs 2>&1 | tail -3; then
         echo "FATAL: build failed"
         exit 1
     fi

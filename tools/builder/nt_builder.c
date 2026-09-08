@@ -497,15 +497,22 @@ static int parallel_encode_worker(void *arg) {
         NtBuildEntry *pe = &pctx->pending[pi];
         NtEncodeResult *result = &pctx->results[pi];
 
+#if NT_LOG_MIN_LEVEL == 0
         double t_start = nt_time_now();
+#endif
         nt_build_result_t ret = encode_one_asset(pe, result, pctx->encode_threads);
+
+#if NT_LOG_MIN_LEVEL == 0
         result->encode_secs = nt_time_now() - t_start;
+#endif
 
         if (ret != NT_BUILD_OK) {
             atomic_store(&pctx->error_flag, 1);
             NT_LOG_ERROR("parallel encode failed for asset [%u] %s", pi, pe->path);
         } else {
+#if NT_LOG_MIN_LEVEL == 0
             uint32_t done = atomic_fetch_add(&pctx->done_count, 1) + 1;
+#endif
             NT_LOG_INFO("  [%u/%u] %s (%.2fs)", done, pctx->work_count, pe->path, result->encode_secs);
             (void)fflush(stdout);
         }
@@ -602,7 +609,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
+#if NT_LOG_MIN_LEVEL == 0
     double t_encode_start = nt_time_now();
+#endif
     nt_cache_status_t *cache_status = (nt_cache_status_t *)calloc(ctx->pending_count, sizeof(nt_cache_status_t));
     NT_BUILD_ASSERT(cache_status && "finish_pack: alloc failed");
     double cache_restore_secs = 0.0;
@@ -702,6 +711,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Pre-encode shaders (GL context is thread-bound, cannot parallelize).
      * Cache check happens here too — shaders are skipped by the main cache loop. */
+#if NT_LOG_MIN_LEVEL == 0
     uint32_t shader_done = 0;
     uint32_t shader_total = 0;
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
@@ -710,6 +720,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         shader_total++;
     }
+#endif
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0 || pe->kind != NT_BUILD_ASSET_SHADER) {
@@ -731,7 +742,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 results[i].encode_secs = 0.0;
                 cache_status[i] = NT_CACHE_HIT;
                 ctx->cache_hit_count++;
+
+#if NT_LOG_MIN_LEVEL == 0
                 shader_done++;
+#endif
                 NT_LOG_INFO("  [%u/%u] %s (cached)", shader_done, shader_total, pe->path);
                 (void)fflush(stdout);
                 continue;
@@ -740,12 +754,18 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             ctx->cache_miss_count++;
         }
 
+#if NT_LOG_MIN_LEVEL == 0
         double t_start = nt_time_now();
+#endif
         NtBuildShaderData *sd = (NtBuildShaderData *)pe->data;
         nt_build_result_t ret = nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "shader encode failed");
+
+#if NT_LOG_MIN_LEVEL == 0
         results[i].encode_secs = nt_time_now() - t_start;
+
         shader_done++;
+#endif
         NT_LOG_INFO("  [%u/%u] %s (%.2fs)", shader_done, shader_total, pe->path, results[i].encode_secs);
         (void)fflush(stdout);
     }
@@ -769,12 +789,17 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], &cached_data, &cached_size);
 
         if (status == NT_CACHE_HIT) {
+
+#if NT_LOG_MIN_LEVEL == 0
             double t_restore_start = nt_time_now();
+#endif
             results[i].data = cached_data;
             results[i].size = cached_size;
             derive_asset_type(pe->kind, &results[i].type, &results[i].format_version);
             results[i].from_cache = true;
+#if NT_LOG_MIN_LEVEL == 0
             cache_restore_secs += nt_time_now() - t_restore_start;
+#endif
             cache_status[i] = NT_CACHE_HIT;
             ctx->cache_hit_count++;
             results[i].encode_secs = 0.0;
@@ -843,7 +868,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         thrd_t *threads = (thrd_t *)malloc(num_threads * sizeof(thrd_t));
         NT_BUILD_ASSERT(threads && "parallel: thread array malloc failed");
 
+#if NT_LOG_MIN_LEVEL == 0
         double t_parallel_start = nt_time_now();
+#endif
 
         for (uint32_t t = 0; t < num_threads; t++) {
             int rc = thrd_create(&threads[t], parallel_encode_worker, &pctx);
@@ -855,7 +882,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         free((void *)threads);
 
+#if NT_LOG_MIN_LEVEL == 0
         double parallel_secs = nt_time_now() - t_parallel_start;
+#endif
         NT_LOG_INFO("Parallel encode complete: %.2fs (%u items, %u threads)", parallel_secs, work_count, num_threads);
 
         /* Check for errors after join */
@@ -867,9 +896,14 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             uint32_t i = work_indices[wi];
             NtBuildEntry *pe = &ctx->pending[i];
 
+#if NT_LOG_MIN_LEVEL == 0
             double t_asset_start = nt_time_now();
+#endif
             nt_build_result_t ret = encode_one_asset(pe, &results[i], 1);
+
+#if NT_LOG_MIN_LEVEL == 0
             results[i].encode_secs = nt_time_now() - t_asset_start;
+#endif
 
             NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed");
 
@@ -956,7 +990,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx->entry_count == ctx->pending_count && "entry/pending count mismatch after encode+dedup registration");
 
     ctx->cache_restore_secs = cache_restore_secs;
+
+#if NT_LOG_MIN_LEVEL == 0
     double encode_secs = nt_time_now() - t_encode_start;
+#endif
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
      * Meta entries grouped by resource_id, covered by CRC32. */
@@ -1013,10 +1050,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
     /* Compute gzip sizes BEFORE shifting offsets (entries still data_buf-relative) */
+#if NT_LOG_MIN_LEVEL == 0
     uint32_t *gz_sizes = (uint32_t *)calloc(ctx->entry_count > 0 ? ctx->entry_count : 1, sizeof(uint32_t));
     uint32_t total_gz = 0;
     double gzip_secs = 0.0;
     if (ctx->gzip_estimate) {
+
         double t_gzip_start = nt_time_now();
         /* Find max asset size to allocate one compression buffer */
         uint32_t max_asset_size = 0;
@@ -1038,8 +1077,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 free(comp_buf);
             }
         }
+
         gzip_secs = nt_time_now() - t_gzip_start;
     }
+
+#endif
 
     /* entry->offset is relative to data_buf start (set in register_asset).
      * Shift to absolute file offset by adding header_size. */
@@ -1064,7 +1106,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     header.total_size = total_size;
     header.checksum = checksum;
 
+#if NT_LOG_MIN_LEVEL == 0
     double t_write_start = nt_time_now();
+#endif
 
     /* Write to a per-process .tmp, publish by atomic rename — the shared pack
      * path can be observed (and rewritten) by concurrent preset builds; a torn
@@ -1097,7 +1141,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
      * a failed close means the tmp is not a valid pack. */
     write_ok = (fclose(file) == 0) && write_ok;
 
+#if NT_LOG_MIN_LEVEL == 0
     double write_secs = nt_time_now() - t_write_start;
+#endif
 
     /* A failed write/publish must leave NO pack at the final path — a stale
      * previous pack would be silently copied by later wasm builds. */
@@ -1111,7 +1157,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     nt_build_result_t codegen_result = nt_builder_generate_header(ctx);
     NT_BUILD_ASSERT(codegen_result == NT_BUILD_OK && "codegen header generation failed -- check header_dir exists and is writable");
 
+#if NT_LOG_MIN_LEVEL == 0
     /* Enhanced summary */
+
     double total_secs = nt_time_now() - t_encode_start;
     NT_LOG_INFO("Build complete: %s", ctx->output_path);
     NT_LOG_INFO("");
@@ -1223,12 +1271,14 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->early_dedup_count > 0) {
         NT_LOG_INFO("  Early dedup: %u assets skipped", ctx->early_dedup_count);
     }
+#endif
     if (ctx->dedup_warn_count > 0) {
         NT_LOG_WARN("  Same data, different opts (%u pairs):", ctx->dedup_warn_count);
         for (uint32_t w = 0; w < ctx->dedup_warn_count; w++) {
             NT_LOG_WARN("    %s  vs  %s", ctx->pending[ctx->dedup_warn_a[w]].path, ctx->pending[ctx->dedup_warn_b[w]].path);
         }
     }
+#if NT_LOG_MIN_LEVEL == 0
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
     }
@@ -1249,12 +1299,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", encode_secs, write_secs, total_secs);
     }
     NT_LOG_INFO("  CRC32:  0x%08X", checksum);
+#endif
 
     free(results);
     free(opts_hashes);
     free(cache_status);
     free(work_indices);
+#if NT_LOG_MIN_LEVEL == 0
     free(gz_sizes);
+#endif
     return NT_BUILD_OK;
 }
 

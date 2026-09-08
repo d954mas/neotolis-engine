@@ -6,16 +6,25 @@
 
 # Header-only interface carries nt_log.h's include root; the exe selects the impl.
 nt_declare_interface(nt_log)
+target_compile_definitions(nt_log_interface INTERFACE NT_LOG_MIN_LEVEL=${NT_LOG_MIN_LEVEL})
+
+if(NT_LOG_MIN_LEVEL EQUAL 3)
+    set(_nt_log_source stub/nt_log_stub.c)
+else()
+    set(_nt_log_source default/nt_log.c)
+endif()
 
 nt_add_module(nt_log LOG_DOMAIN "log"
-    default/nt_log.c
+    ${_nt_log_source}
     nt_log.h
 )
 target_link_libraries(nt_log PUBLIC nt_log_interface)
 
 # Real impl dedups nt_log_write_unique by xxHash64 of the message; the stub stays dep-free.
 # nt_core supplies nt_assert_handler for the NT_ASSERT in nt_log_add_sink.
-target_link_libraries(nt_log PRIVATE nt_hash nt_core)
+if(NOT NT_LOG_MIN_LEVEL EQUAL 3)
+    target_link_libraries(nt_log PRIVATE nt_hash nt_core)
+endif()
 
 nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     stub/nt_log_stub.c

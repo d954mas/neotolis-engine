@@ -115,10 +115,16 @@ static void test_end_sets_layout_ms(void) {
 
     /* Sentinel: a removed/forgotten write leaves -1.0F and trips the assert;
      * a real write in nt_ui_end replaces it with a non-negative ms value. */
+#if NT_UI_TIMING_ENABLED
     a->last_layout_ms = -1.0F;
+#endif
     nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse, 1);
     nt_ui_end(a);
+#if NT_UI_TIMING_ENABLED
     TEST_ASSERT_TRUE(nt_ui_get_last_layout_ms(a) >= 0.0F);
+#else
+    TEST_ASSERT_TRUE(nt_ui_get_last_layout_ms(a) == 0.0F);
+#endif
 
     nt_ui_destroy_context(a);
 }

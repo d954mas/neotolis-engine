@@ -55,6 +55,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     return caps;
 }
 
+#if NT_GFX_GPU_TIMING_ENABLED
 bool nt_gfx_gl_ctx_enable_timer_query(void) {
     /* GL_TIME_ELAPSED + glBeginQuery were promoted to core in GL 3.3, so on
      * desktop with a 3.3+ context the entry points are already loaded by
@@ -69,6 +70,8 @@ bool nt_gfx_gl_ctx_enable_debug_groups(void) {
      * we no-op the labeling (segments still work, just unlabeled). */
     return GLAD_GL_KHR_debug != 0;
 }
+
+#endif
 
 #ifdef NT_DEBUG
 /* GLAD_API_PTR matches GLDEBUGPROC's calling convention (__stdcall on Windows); a plain

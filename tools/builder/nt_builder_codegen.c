@@ -170,10 +170,8 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
 
     for (uint32_t i = 1; i < count; i++) {
         if (strcmp(sorted[i - 1].identifier, sorted[i].identifier) == 0) {
-            uint32_t a = sorted[i - 1].index;
-            uint32_t b = sorted[i].index;
-            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — entries[b].path is valid: b < count and entries[] is fully populated by the caller; analyzer loses track across qsort
-            NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", sorted[i].identifier, entries[a].path, entries[b].path);
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — sorted indices stay below count; the analyzer loses track across qsort
+            NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", sorted[i].identifier, entries[sorted[i - 1].index].path, entries[sorted[i].index].path);
             free(sorted);
             NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
         }

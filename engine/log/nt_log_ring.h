@@ -9,7 +9,7 @@
  *
  * NT_LOG_RING_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. */
 #ifndef NT_LOG_RING_ENABLED
-#define NT_LOG_RING_ENABLED 1
+#error "NT_LOG_RING_ENABLED must be defined by the nt_log_ring target (0 or 1)"
 #endif
 
 #ifndef NT_LOG_RING_DEPTH

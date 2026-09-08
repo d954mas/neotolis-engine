@@ -2,7 +2,7 @@ nt_add_module(nt_shape_renderer LOG_DOMAIN "shape_renderer"
     nt_shape_renderer.c
     nt_shape_renderer.h
 )
-target_link_libraries(nt_shape_renderer PUBLIC nt_core nt_math)
+target_link_libraries(nt_shape_renderer PUBLIC nt_core nt_math nt_gfx_interface)
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
 nt_add_module(nt_mesh_renderer LOG_DOMAIN "mesh_renderer"

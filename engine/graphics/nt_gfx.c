@@ -2126,9 +2126,11 @@ void nt_gfx_end_segment(void) {
 }
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+#if NT_GFX_GPU_TIMING_ENABLED
     if (g_nt_gfx.context_lost || name == NULL || out_ns == NULL) {
         return false;
     }
+#endif
     return nt_gfx_backend_poll_segment_time_ns(name, out_ns);
 }
 

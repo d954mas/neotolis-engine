@@ -17,6 +17,7 @@ bool nt_gfx_gl_ctx_is_lost(void);
  * the test backend also implements it, so the declaration lives at the
  * shared internal layer, not the GL-only header. */
 
+#if NT_GFX_GPU_TIMING_ENABLED
 /* Enable EXT_disjoint_timer_query_webgl2 (web) or check ARB_timer_query
  * support (native). Returns true if GL_TIME_ELAPSED queries are usable. */
 bool nt_gfx_gl_ctx_enable_timer_query(void);
@@ -26,6 +27,8 @@ bool nt_gfx_gl_ctx_enable_timer_query(void);
  * call. The GL backend uses these to label GPU timer segments so RenderDoc
  * / Apitrace / gDEBugger show segment names as debug groups. */
 bool nt_gfx_gl_ctx_enable_debug_groups(void);
+
+#endif
 
 /* Install a KHR_debug message callback that routes GL errors to NT_LOG_ERROR + assert, synchronously
  * so a breakpoint lands on the offending call. Native + NT_DEBUG only; no-op (returns false) in

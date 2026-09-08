@@ -31,6 +31,7 @@
 #define nt_gl_clear_depth(d) glClearDepth((double)(d))
 #endif
 
+#if NT_GFX_GPU_TIMING_ENABLED
 /* EXT_disjoint_timer_query_webgl2 / ARB_timer_query constants. Spec-fixed
  * values — define them inline so the file compiles on both GLES3 (where
  * these are extension-only) and core GL 3.3+ (where glad already exposes
@@ -62,6 +63,8 @@ extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 #define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64vEXT((id), (pname), (out))
 #else
 #define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64v((id), (pname), (out))
+#endif
+
 #endif
 
 /* ---- Pipeline backend data ---- */
@@ -153,6 +156,7 @@ static GLuint s_bound_framebuffer;
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
 // #region GPU timer segments — types & state
+#if NT_GFX_GPU_TIMING_ENABLED
 /* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query).
  *
  * Self-contained sub-system inside this GL backend. Lives in three clusters:
@@ -186,6 +190,8 @@ static uint8_t s_segment_count;
 static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
 static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-enable */
 // #endregion
+
+#endif
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -537,11 +543,13 @@ static GLenum map_texture_wrap(nt_texture_wrap_t w) {
 /* ==== Backend interface implementation ==== */
 
 static void nt_gfx_gl_init_context_features(void) {
+
+#if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
+    nt_gfx_backend_drop_timer_segments();
+#endif
     nt_gfx_gl_ctx_enable_debug_callback();
-    s_segment_count = 0;
-    s_active_segment = -1;
     /* Fresh context (init or restore): the previous upload VAO died with it. */
     glGenVertexArrays(1, &s_ebo_upload_vao);
     /* 0 with a live context would silently break every index-buffer upload on
@@ -575,13 +583,16 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_backend_shutdown(void) {
-    if (s_timer_enabled) {
+#if NT_GFX_GPU_TIMING_ENABLED
+    if (s_timer_enabled && !nt_gfx_gl_ctx_is_lost()) {
+        nt_gfx_backend_end_segment();
         for (uint8_t i = 0; i < s_segment_count; i++) {
             glDeleteQueries(NT_GFX_TIMER_RING, s_segments[i].queries);
         }
-        s_segment_count = 0;
-        s_timer_enabled = false;
     }
+    nt_gfx_backend_drop_timer_segments();
+    s_timer_enabled = false;
+#endif
 
     free(s_programs);
     free(s_pipelines);
@@ -618,6 +629,7 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 /* ---- Frame / Pass ---- */
 
 // #region GPU timer segments — begin/end
+#if NT_GFX_GPU_TIMING_ENABLED
 /* Find existing segment by name hash, or allocate a new slot with its own
  * ring of GL_TIME_ELAPSED queries. Linear scan is fine for small N (<= 16). */
 static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
@@ -706,26 +718,29 @@ void nt_gfx_backend_end_segment(void) {
     seg->head = (uint8_t)((seg->head + 1U) % NT_GFX_TIMER_RING);
     s_active_segment = -1;
 }
+#else
+void nt_gfx_backend_begin_segment(const char *name) { (void)name; }
+void nt_gfx_backend_end_segment(void) {}
+#endif
 // #endregion
 
 void nt_gfx_backend_begin_frame(void) {
-    /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
-     * GLES variants). Native ARB_timer_query has no disjoint concept — GPU
-     * clock is reliable by spec there. Reading 0x8FBB on the desktop driver
-     * triggers GL_INVALID_ENUM and pollutes glGetError() / KHR_debug callback
-     * output every frame. Web-only.
-     *
-     * Cleared on read, so we check once per frame here rather than on every
-     * poll: on disjoint hit, drop all in-flight timer queries across every
-     * segment (results are unreliable). */
-#ifdef NT_PLATFORM_WEB
-    if (s_timer_enabled) {
-        GLint disjoint = 0;
-        glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
-        if (disjoint) {
-            for (uint8_t i = 0; i < s_segment_count; i++) {
-                memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
-                s_segments[i].tail = s_segments[i].head;
+#if NT_GFX_GPU_TIMING_ENABLED && defined(NT_PLATFORM_WEB)
+    if (s_timer_enabled && s_timer_user_enabled) {
+        /* A full ring has head == tail too; in_flight owns pending state. */
+        bool pending = s_active_segment >= 0;
+        for (uint8_t i = 0; i < s_segment_count && !pending; i++) {
+            pending = s_segments[i].in_flight[s_segments[i].tail];
+        }
+        if (pending) {
+            GLint disjoint = 0;
+            glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+            if (disjoint) {
+                nt_gfx_backend_end_segment();
+                for (uint8_t i = 0; i < s_segment_count; i++) {
+                    memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+                    s_segments[i].tail = s_segments[i].head;
+                }
             }
         }
     }
@@ -744,8 +759,9 @@ void nt_gfx_backend_end_frame(void) {
 }
 
 // #region GPU timer segments — poll/lifecycle
+#if NT_GFX_GPU_TIMING_ENABLED
 bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
-    if (!s_timer_enabled || name == NULL || out_ns == NULL) {
+    if (!s_timer_enabled || !s_timer_user_enabled || name == NULL || out_ns == NULL) {
         return false;
     }
     nt_hash32_t name_hash = nt_hash32_str(name);
@@ -789,16 +805,16 @@ void nt_gfx_backend_drop_timer_segments(void) {
 }
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
-    if (!enabled && s_timer_enabled) {
-        /* Close any in-flight query, drain all segment rings so re-enable starts clean. */
-        if (s_active_segment >= 0) {
-            glEndQuery(GL_TIME_ELAPSED);
-            s_active_segment = -1;
-        }
-        for (uint8_t i = 0; i < s_segment_count; i++) {
-            memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
-            s_segments[i].head = 0;
-            s_segments[i].tail = 0;
+    if (!enabled && s_timer_user_enabled && s_timer_enabled) {
+        if (nt_gfx_gl_ctx_is_lost()) {
+            nt_gfx_backend_drop_timer_segments();
+        } else {
+            nt_gfx_backend_end_segment();
+            for (uint8_t i = 0; i < s_segment_count; i++) {
+                memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+                s_segments[i].head = 0;
+                s_segments[i].tail = 0;
+            }
         }
     }
     if (enabled && !s_timer_user_enabled) {
@@ -808,6 +824,18 @@ void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
 }
 
 bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
+#else
+bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    (void)name;
+    if (out_ns != NULL) {
+        *out_ns = 0;
+    }
+    return false;
+}
+void nt_gfx_backend_drop_timer_segments(void) {}
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) { (void)enabled; }
+bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
+#endif
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

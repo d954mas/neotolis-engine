@@ -1,6 +1,10 @@
 #ifndef NT_UI_H
 #define NT_UI_H
 
+#ifndef NT_UI_TIMING_ENABLED
+#error "NT_UI_TIMING_ENABLED must be defined by the nt_ui_interface target"
+#endif
+
 /* Immediate-mode UI bridge over Clay v0.14. Only one ctx may be in-frame at a time. */
 
 /* Must come from the nt_ui target compile-defines; consumers without the link see stubs that mismatch ABI. */

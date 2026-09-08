@@ -41,6 +41,7 @@ static void test_stub_returns_empty_queries_without_fabricating_pixels(void) {
     TEST_ASSERT_EQUAL_UINT16(0, height);
     uint64_t time_ns = 123;
     TEST_ASSERT_FALSE(nt_gfx_poll_segment_time_ns("frame", &time_ns));
+    TEST_ASSERT_FALSE(nt_gfx_poll_segment_time_ns(NULL, NULL));
     TEST_ASSERT_EQUAL_UINT64(0, time_ns);
     TEST_ASSERT_FALSE(nt_gfx_is_gpu_timing_supported());
     const nt_global_block_t *blocks = NULL;

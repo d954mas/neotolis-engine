@@ -542,12 +542,16 @@ static void test_build_tree_ms_recorded_and_under_budget(void) {
     nt_ui_end(s_fx.ctx);
 
     const float ms = nt_ui_get_last_build_tree_ms(s_fx.ctx);
+#if NT_UI_TIMING_ENABLED
     /* Field populated (not garbage). */
     TEST_ASSERT_TRUE_MESSAGE(ms >= 0.0F && ms < 1000.0F, "build_tree_ms outside [0, 1000] — likely uninit/garbage");
     /* Native-debug budget: 5 ms for 100 elements. O(N) DFS over N=101 with a
      * single compose_transform_level call per element should run in microseconds
      * on any reasonable hardware. 5 ms is a 1000× margin for slow CI / valgrind. */
     TEST_ASSERT_TRUE_MESSAGE(ms < 5.0F, "build_tree exceeded 5 ms perf budget for 100-element layout — likely O(N²) regression");
+#else
+    TEST_ASSERT_TRUE(ms == 0.0F);
+#endif
 }
 
 #if NT_UI_DEBUG_TOOLS

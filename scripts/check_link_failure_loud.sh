@@ -37,7 +37,7 @@ EOF
 LINK_LOG="$TMP/link.log"
 # errexit is off (script runs under `set -uo pipefail`), so the expected link FAILURE does not abort
 # the script -- we capture its exit code explicitly and assert on it below.
-"$CC" -I "$ROOT_DIR/engine" "$SRC" -o "$OUT" > "$LINK_LOG" 2>&1
+"$CC" -DNT_LOG_MIN_LEVEL=0 -I "$ROOT_DIR/engine" "$SRC" -o "$OUT" > "$LINK_LOG" 2>&1
 RC=$?
 
 if [ "$RC" -eq 0 ]; then

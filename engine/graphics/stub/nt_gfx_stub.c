@@ -281,7 +281,9 @@ void nt_gfx_end_segment(void) {}
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     (void)name;
-    *out_ns = 0;
+    if (out_ns != NULL) {
+        *out_ns = 0;
+    }
     return false;
 }
 
