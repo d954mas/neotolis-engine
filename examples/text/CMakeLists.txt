@@ -53,4 +53,4 @@ if(NT_CDN_URL)
     target_compile_definitions(text_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(text_demo TITLE "Text Demo - Neotolis Engine")
+nt_configure_shell(text_demo TITLE "Text Demo - Neotolis Engine")

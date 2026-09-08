@@ -60,4 +60,4 @@ if(NT_CDN_URL)
 endif()
 
 # The hooks are always compiled in the wasm build (this app's whole purpose): NO test-hooks gate.
-nt_configure_wasm_app(browser_smoke TITLE "Browser Smoke - Neotolis Engine")
+nt_configure_shell(browser_smoke TITLE "Browser Smoke - Neotolis Engine")

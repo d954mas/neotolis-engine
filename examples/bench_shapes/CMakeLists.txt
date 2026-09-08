@@ -15,4 +15,4 @@ set_target_properties(bench_shapes PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/examples/bench_shapes/${NT_PRESET_NAME}"
 )
 
-nt_configure_wasm_app(bench_shapes TITLE "Shape Benchmark - Neotolis Engine")
+nt_configure_shell(bench_shapes TITLE "Shape Benchmark - Neotolis Engine")

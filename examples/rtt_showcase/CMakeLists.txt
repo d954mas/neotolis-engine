@@ -47,4 +47,4 @@ if(NT_CDN_URL)
     target_compile_definitions(rtt_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(rtt_showcase TITLE "RTT Showcase - Neotolis Engine")
+nt_configure_shell(rtt_showcase TITLE "RTT Showcase - Neotolis Engine")

@@ -71,7 +71,7 @@ ENGINE_LIB_DIR="$ROOT_DIR/build/engine/$PRESET"
 # Find .wasm file (OUTPUT_NAME may differ from target name, e.g. "index")
 WASM_FILE=""
 if [ -d "$OUTPUT_DIR" ]; then
-    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | head -1)
+    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | sort | head -1)
 fi
 
 if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
@@ -131,15 +131,17 @@ FUNC_ROWS=$(wasm-objdump -j Code -x "$WASM_FILE" 2>/dev/null \
     | grep -E '^\s+-\s+func\[' \
     | sed -E -e 's/^\s*-\s+func\[[0-9]+\] size=([0-9]+)\s+<(.*)>\s*$/\1\t\2/' \
              -e 's/^\s*-\s+func\[([0-9]+)\] size=([0-9]+)\s*$/\2\tfunc[\1]/' \
-    | sort -t$'\t' -k1,1nr -k2,2)
+    | sort -t$'\t' -k1,1nr -k2,2) || {
+    echo "ERROR: no function entries in the Code section of: $WASM_FILE" >&2
+    exit 1
+}
 
 FUNC_COUNT=0
 FUNC_TOTAL=0
 while IFS=$'\t' read -r size name; do
-    [ -n "$size" ] || continue
     case "$size" in
         *[!0-9]*)
-            echo "ERROR: unparsed wasm-objdump function entry: $size"
+            echo "ERROR: unparsed wasm-objdump function entry: $size" >&2
             exit 1
             ;;
     esac

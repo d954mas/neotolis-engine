@@ -48,4 +48,4 @@ if(NT_CDN_URL)
     target_compile_definitions(sponza PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(sponza TITLE "Sponza - Neotolis Engine")
+nt_configure_shell(sponza TITLE "Sponza - Neotolis Engine")

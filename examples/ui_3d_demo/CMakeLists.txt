@@ -52,4 +52,4 @@ if(NT_CDN_URL)
     target_compile_definitions(ui_3d_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(ui_3d_demo TITLE "UI 3D Demo - Neotolis Engine")
+nt_configure_shell(ui_3d_demo TITLE "UI 3D Demo - Neotolis Engine")

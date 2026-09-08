@@ -34,7 +34,7 @@ if(WIN32)
     target_compile_definitions(devapi_host PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-nt_configure_wasm_app(devapi_host TITLE "DevAPI Host - Neotolis Engine")
+nt_configure_shell(devapi_host TITLE "DevAPI Host - Neotolis Engine")
 if(EMSCRIPTEN)
     # fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but pin FPNG_NO_SSE=1 explicitly
     # so the WASM build never reaches the SSE intrinsics.

@@ -15,4 +15,4 @@ set_target_properties(spinning_cube PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/examples/spinning_cube/${NT_PRESET_NAME}"
 )
 
-nt_configure_wasm_app(spinning_cube TITLE "Spinning Shapes - Neotolis Engine")
+nt_configure_shell(spinning_cube TITLE "Spinning Shapes - Neotolis Engine")

@@ -53,4 +53,4 @@ if(NT_CDN_URL)
     target_compile_definitions(ui_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(ui_showcase TITLE "UI Showcase - Neotolis Engine")
+nt_configure_shell(ui_showcase TITLE "UI Showcase - Neotolis Engine")

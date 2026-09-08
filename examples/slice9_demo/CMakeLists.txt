@@ -54,4 +54,4 @@ if(NT_CDN_URL)
     target_compile_definitions(slice9_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(slice9_demo TITLE "Slice9 Demo - Neotolis Engine")
+nt_configure_shell(slice9_demo TITLE "Slice9 Demo - Neotolis Engine")

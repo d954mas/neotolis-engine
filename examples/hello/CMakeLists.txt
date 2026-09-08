@@ -13,4 +13,4 @@ set_target_properties(hello PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/examples/hello/${NT_PRESET_NAME}"
 )
 
-nt_configure_wasm_app(hello TITLE "Hello - Neotolis Engine")
+nt_configure_shell(hello TITLE "Hello - Neotolis Engine")

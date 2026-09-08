@@ -97,4 +97,4 @@ if(NT_CDN_URL)
     target_compile_definitions(bunnymark_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_wasm_app(bunnymark_demo TITLE "Bunnymark Demo - Neotolis Engine")
+nt_configure_shell(bunnymark_demo TITLE "Bunnymark Demo - Neotolis Engine")
