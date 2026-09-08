@@ -19,9 +19,7 @@ nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint
 typedef struct {
     nt_pipeline_t pipeline;
     nt_program_t program;
-    uint32_t first_vertex; /* 0 on an indexed draw */
-    uint32_t first_index;
-    uint32_t num_indices;
+    uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
     uint32_t instance_count;
 } nt_gfx_fake_draw_t;
 
@@ -64,8 +62,9 @@ nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);
 uint32_t nt_gfx_fake_update_buffer_count(void);
-/* nt_hash32 of the bytes the last created VERTEX / INDEX buffer uploaded --
- * pins that mesh wire decode ran before the upload. 0 until one is created. */
+/* nt_hash32 of the bytes the last created VERTEX / INDEX buffer uploaded -- pins that mesh wire
+ * decode ran before the upload. Scope is per buffer creation, not per mesh: a mesh that creates no
+ * index buffer leaves the previous one readable. Only nt_gfx_fake_reset clears them. */
 uint32_t nt_gfx_fake_last_vertex_buffer_hash(void);
 uint32_t nt_gfx_fake_last_index_buffer_hash(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);

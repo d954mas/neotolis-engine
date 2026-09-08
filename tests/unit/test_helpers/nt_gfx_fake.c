@@ -247,6 +247,9 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_render_target_resize = false;
 }
 
+/* Deliberately outside nt_gfx_fake_reset: test_sprite_renderer's capacity-flush test resets the
+ * other observations mid-scenario and still reads draws recorded before that. Scope is the explicit
+ * nt_gfx_fake_draw_trace_reset alone (plus the disarm in backend_init). */
 static nt_gfx_fake_draw_t s_fake_draws[128];
 static uint32_t s_fake_draw_count;
 static bool s_fake_draw_enabled;
@@ -266,7 +269,7 @@ nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
     return s_fake_draws[index];
 }
 
-static void fake_record_draw(uint32_t first_vertex, uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
     if (!s_fake_draw_enabled) {
         return;
     }
@@ -277,8 +280,6 @@ static void fake_record_draw(uint32_t first_vertex, uint32_t first_index, uint32
     s_fake_draws[s_fake_draw_count++] = (nt_gfx_fake_draw_t){
         .pipeline = {nt_gfx_test_bound_pipeline()},
         .program = {nt_gfx_test_bound_program()},
-        .first_vertex = first_vertex,
-        .first_index = first_index,
         .num_indices = num_indices,
         .instance_count = instance_count,
     };
@@ -431,7 +432,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         uint32_t h = nt_hash32(desc->data, desc->size).value;
         if (desc->type == NT_BUFFER_INDEX) {
             s_fake_last_index_buffer_hash = h;
-        } else {
+        } else if (desc->type == NT_BUFFER_VERTEX) {
             s_fake_last_vertex_buffer_hash = h;
         }
     }
@@ -656,22 +657,26 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
 }
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
-    fake_record_draw(first_vertex, 0, 0, 1);
+    fake_record_draw(0, 1);
+    (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
-    fake_record_draw(0, first_index, num_indices, 1);
+    fake_record_draw(num_indices, 1);
+    (void)first_index;
     (void)index_type;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    fake_record_draw(first_vertex, 0, 0, instance_count);
+    fake_record_draw(0, instance_count);
+    (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
-    fake_record_draw(0, first_index, num_indices, instance_count);
+    fake_record_draw(num_indices, instance_count);
+    (void)first_index;
     (void)index_type;
 }
 

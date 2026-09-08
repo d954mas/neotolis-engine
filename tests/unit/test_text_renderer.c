@@ -780,6 +780,7 @@ void test_decoration_only_run_opens_its_pipeline(void) {
     nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(material)->program.id, draw.program.id);
     TEST_ASSERT_EQUAL_UINT32(12U, draw.num_indices);
+    TEST_ASSERT_EQUAL_UINT32(8U, g_nt_gfx.frame_stats.vertices); /* glyph + decoration quad */
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(font);

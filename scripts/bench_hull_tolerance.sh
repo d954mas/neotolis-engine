@@ -193,9 +193,17 @@ done
 if [[ ! -f "build/_cmake/${PRESET}/CMakeCache.txt" ]]; then
     cmake --preset "$PRESET"
 fi
-echo "=== Building atlas_bench and focused acceptance (${PRESET}) ==="
-cmake --build "build/_cmake/${PRESET}" --target atlas_bench test_builder
-ctest --test-dir "build/_cmake/${PRESET}" -R '^test_builder$' --output-on-failure
+echo "=== Building atlas_bench (${PRESET}) ==="
+cmake --build "build/_cmake/${PRESET}" --target atlas_bench
+
+# native-release carries no test targets (NT_BUILD_TESTS=OFF, so its builder measures what
+# ships); the acceptance run moves to the debug preset, which always has them.
+if [[ ! -f "build/_cmake/native-debug/CMakeCache.txt" ]]; then
+    cmake --preset native-debug
+fi
+echo "=== Focused builder acceptance (native-debug) ==="
+cmake --build build/_cmake/native-debug --target test_builder
+ctest --test-dir build/_cmake/native-debug -R '^test_builder$' --output-on-failure
 
 BENCH_BASE="build/tools/research/${PRESET}/atlas_bench"
 if [[ -x "${BENCH_BASE}.exe" ]]; then

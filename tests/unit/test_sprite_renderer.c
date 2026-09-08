@@ -717,6 +717,7 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     nt_sprite_renderer_flush();
     nt_gfx_fake_draw_trace_reset(true);
+    const uint32_t vertices_before = g_nt_gfx.frame_stats.vertices;
 
     nt_sprite_renderer_set_material(mat);
     for (uint32_t i = 0; i < 4; i++) {
@@ -747,6 +748,8 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
         nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
         TEST_ASSERT_EQUAL_UINT32(i == 0 ? 24 : 6, draw.num_indices);
     }
+    /* 16 + 4 + 4: the per-cmd delta, not 3x the batch total. */
+    TEST_ASSERT_EQUAL_UINT32(24U, g_nt_gfx.frame_stats.vertices - vertices_before);
 }
 
 /* Queued work outlives the program it was built on when the owner destroys it

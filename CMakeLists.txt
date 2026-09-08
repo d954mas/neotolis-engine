@@ -63,10 +63,10 @@ option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_U
 option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
 # Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Build-wide below so component apply()/registration agree without linking introspect.
 option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
-# The module test-probe surfaces (`// #region test_access`). tests/ hands the define to the engine
-# libraries it links, so OFF is expressed by skipping tests/ entirely: a release measurement build
-# must carry no probe state and no probe bookkeeping in its draw and emit paths.
-option(NT_TEST_ACCESS "Build the unit tests and the module test-probe surfaces they read." ON)
+# OFF skips tests/ entirely, which is also how a build ends up without the NT_TEST_ACCESS compile
+# define: tests/ is what hands that define to the engine libraries it links. A release measurement
+# build must carry no probe state and no probe bookkeeping in its draw and emit paths.
+option(NT_BUILD_TESTS "Build the unit tests (they compile the engine test-probe surfaces in)." ON)
 
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
@@ -320,7 +320,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         add_subdirectory(tools/research/hash_benchmark)
         add_subdirectory(tools/research/atlas_bench)
     endif()
-    if(NT_TEST_ACCESS)
+    if(NT_BUILD_TESTS)
         add_subdirectory(tests)
     endif()
 endif()
