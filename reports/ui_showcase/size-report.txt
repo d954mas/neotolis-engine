@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: ee0dd6d
+# Commit: 5ea7e4b
 
 ## WASM Section Sizes
 
@@ -7,16 +7,16 @@ Section                Size
 ---------------- ----------
 Type                 586 B
 Import               682 B
-Function             377 B
+Function             376 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                 142 B
-Code              469882 B
+Code              469184 B
 Data               39601 B
 ---------------- ----------
-TOTAL             511386 B
+TOTAL             510687 B
 
 ## Top 30 Functions by Size
 
