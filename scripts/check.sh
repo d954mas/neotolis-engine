@@ -310,5 +310,6 @@ if [ "$MODE" = "push" ]; then
     fi
     cmake --build "$SUBMODULE_DIR"
     "./$SUBMODULE_DIR/submodule_test"
+    python3 scripts/check_ui_composition.py "$SUBMODULE_DIR"
     ok
 fi

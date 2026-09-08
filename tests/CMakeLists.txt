@@ -1230,6 +1230,7 @@ if(NOT EMSCRIPTEN)
         test_ui_radial
         test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
+        test_nt_ui_rich_custom
         test_nt_ui_rich_wrap
         test_nt_ui_rich_emit
     )

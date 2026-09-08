@@ -4,6 +4,7 @@
 
 // #region includes
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -101,6 +102,12 @@ static nt_buffer_t s_frame_ubo;
 static bool s_atlas_bound;
 static bool s_font_bound;
 static bool s_rich_font_bound;
+static uint32_t s_atlas_white_region;
+static uint32_t s_rich_composition_mode;
+
+#define RICH_COMPOSITION_ENABLED 1U
+#define RICH_COMPOSITION_CLIP 2U
+#define RICH_COMPOSITION_NO_EFFECT 4U
 
 static uint32_t s_id_input_cyrillic; /* nt_ui_id, resolved once */
 
@@ -219,6 +226,7 @@ static void try_bind_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         const uint32_t white = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value);
         NT_ASSERT(white != NT_ATLAS_INVALID_REGION);
+        s_atlas_white_region = white;
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, white);
         s_atlas_bound = true;
     }
@@ -337,6 +345,13 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_stat
  * glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
 EM_JS_DEPS(nt_browser_app_test_hooks, "$UTF8ToString")
 
+EM_JS(unsigned int, nt_test_rich_composition_mode, (void), {
+    const query = new URLSearchParams(window.location.search);
+    const mode = query.get('rich_composition');
+    if (mode !== 'clip' && mode !== 'open') return 0;
+    return 1 | (mode === 'clip' ? 2 : 0) | (query.get('rich_effect') === 'off' ? 4 : 0);
+})
+
 /* Quoted keys keep the Playwright-facing API stable under Closure. */
 EM_JS(void, nt_test_install_hooks, (void), {
     window['__nt'] = {
@@ -414,6 +429,77 @@ static void render_rich(nt_ui_context_t *ctx) {
 #endif
     if (res.clicked_link != 0U) {
         s_state.link_clicks++;
+    }
+}
+// #endregion
+
+// #region fixed-time rich composition pixel witness
+static float s_rich_composition_speed = 32.0F;
+
+static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                                 void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    const float *speed = (const float *)user_data;
+    nt_ui_rich_fx_result_t result = nt_ui_rich_fx_identity(base_color);
+    result.offset_x = time * *speed;
+    return result;
+}
+
+static nt_ui_rich_object_measure_t composition_object_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
+}
+
+static void composition_object_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    (void)user_data;
+    const float positions[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_set_material(s_sprite_material);
+    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, nt_color_pack(color));
+}
+
+static void render_rich_composition(nt_ui_context_t *ctx) {
+    const bool clip = (s_rich_composition_mode & RICH_COMPOSITION_CLIP) != 0U;
+    const bool effect = (s_rich_composition_mode & RICH_COMPOSITION_NO_EFFECT) == 0U;
+    static const char *const row_ids[] = {"composition/text-row", "composition/image-row", "composition/object-row"};
+    static const char *const block_ids[] = {"composition/text", "composition/image", "composition/object"};
+    static const uint32_t colors[] = {0xFFFFC040U, 0xFF4040FFU, 0xFF40FF40U};
+
+    /* A fixed parent keeps clip/open layout identical; only the scissor changes. */
+    CLAY({.id = CLAY_ID("composition/clip"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED(192), CLAY_SIZING_FIXED(192)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {80.0F, 320.0F}},
+          .clip = {.horizontal = clip, .vertical = clip},
+          .userData = (void *)NT_UI_DATA_LAYER(LAYER_TEXT)}) {
+        for (uint32_t row = 0; row < 3U; row++) {
+            CLAY({.id = {.id = nt_ui_id(row_ids[row])}, .layout = {.sizing = {CLAY_SIZING_FIXED(512), CLAY_SIZING_FIXED(56)}}}) {
+                nt_ui_rich_style_t base = rich_base_style();
+                base.font_size = 32.0F;
+                base.color_abgr = colors[row];
+                nt_ui_rich_begin(ctx, &base);
+                if (effect) {
+                    nt_ui_rich_push_effect_fn(ctx, composition_effect, &s_rich_composition_speed);
+                }
+                if (row == 0U) {
+                    nt_ui_rich_text_n(ctx, "MMMMMMMMMMMMMM", 14U);
+                } else if (row == 1U) {
+                    for (uint32_t image = 0; image < 10U; image++) {
+                        nt_ui_rich_image(ctx, nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value), NT_RICH_VALIGN_BASELINE, 0.0F, 32.0F);
+                    }
+                } else {
+                    nt_ui_rich_object(ctx, composition_object_measure, composition_object_draw, NULL);
+                }
+                if (effect) {
+                    nt_ui_rich_pop(ctx);
+                }
+                nt_ui_rich_end(ctx);
+                nt_ui_rich_text(ctx, nt_ui_id(block_ids[row]), NT_UI_DATA_LAYER(LAYER_TEXT), &base, 512.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
+            }
+        }
     }
 }
 // #endregion
@@ -542,6 +628,10 @@ static void frame(void) {
             /* Surface 2: rich-text block with one clickable link. */
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text (one clickable <link>):", &s_body);
             render_rich(s_ctx);
+        }
+
+        if ((s_rich_composition_mode & RICH_COMPOSITION_ENABLED) != 0U) {
+            render_rich_composition(s_ctx);
         }
 
         nt_ui_end(s_ctx);
@@ -744,6 +834,7 @@ int main(int argc, char *argv[]) {
 #endif
 
 #if defined(__EMSCRIPTEN__)
+    s_rich_composition_mode = nt_test_rich_composition_mode();
     /* Transparency removes one probe's pixels without changing layout or readiness. */
     s_nt_hidden_input_style = s_input_style;
     for (uint32_t i = 0; i < NT_UI_INPUT_STATE_COUNT; i++) {

@@ -227,3 +227,19 @@ differ per-executable for a consumer that is compiled once.
 
 This matches established practice: SDL `SDL_HasClipboardText`, GLFW
 `glfwVulkanSupported`, Godot `DisplayServer::has_feature(FEATURE_CLIPBOARD)`.
+
+### Optional UI companions
+
+`nt_ui` supplies layout, widgets and CUSTOM callback dispatch. Applications add
+`nt_ui_rich` for rich text and add `nt_ui_rich_fx` only for the ready-made effect
+functions they use. The rich target depends on `nt_ui_interface`; applications
+explicitly select the `nt_ui` implementation too. There is no rich stub and no
+central catalogue retaining unselected effects. A call to rich API without its
+library fails at link time. Identity and custom effect types are available from
+the rich header without linking the ready-made effects.
+
+`scripts/check_ui_composition.py <submodule-build-dir>` verifies plain, custom,
+wave and full-effect compositions, plus the expected missing-rich link failure.
+WASM Release verification uses final symbol maps without enabling LTO or keeping
+the name section. These small executables verify linking and effect functions;
+the UI and browser suites verify rendering.

@@ -7,6 +7,7 @@ if(NOT DEFINED ENGINE_ROOT)
     message(FATAL_ERROR "ENGINE_ROOT must be set to the engine source directory")
 endif()
 
+get_filename_component(ENGINE_ROOT "${ENGINE_ROOT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 add_subdirectory(${ENGINE_ROOT} ${CMAKE_BINARY_DIR}/engine)
 
 add_executable(submodule_test main.c)
@@ -28,7 +29,9 @@ target_link_libraries(submodule_test PRIVATE
     # trail every lib that references them (nt_resource -> nt_http/nt_fs -> nt_log).
     # Native list: nt_fs_stub does not exist under EMSCRIPTEN.
     nt_http_stub
-    nt_fs_stub
+    $<$<NOT:$<BOOL:${EMSCRIPTEN}>>:nt_fs_stub>
     nt_meshwire_stub
     nt_log_stub
 )
+
+add_subdirectory(ui)

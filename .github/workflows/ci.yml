@@ -147,6 +147,11 @@ jobs:
           emcmake cmake --preset wasm-release
           cmake --build --preset wasm-release
 
+      - name: Verify optional UI composition in WASM release
+        run: |
+          emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
+          python3 scripts/check_ui_composition.py build/_cmake/ui-composition-wasm-release --nm "$EMSDK/upstream/bin/llvm-nm"
+
       - name: Verify baseline WASM release output
         run: |
           test -f build/examples/hello/wasm-release/index.html
@@ -720,7 +725,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts context_loss.spec.ts http.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts
 
   deploy:
     name: Deploy
