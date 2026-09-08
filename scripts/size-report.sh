@@ -68,14 +68,10 @@ fi
 OUTPUT_DIR="$ROOT_DIR/build/examples/$TARGET/$PRESET"
 ENGINE_LIB_DIR="$ROOT_DIR/build/engine/$PRESET"
 
-# Find .wasm file (OUTPUT_NAME may differ from target name, e.g. "index")
-WASM_FILE=""
-if [ -d "$OUTPUT_DIR" ]; then
-    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | sort | head -1)
-fi
+WASM_FILE="$OUTPUT_DIR/index.wasm"
 
-if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
-    echo "ERROR: No .wasm binary found in: $OUTPUT_DIR"
+if [ ! -f "$WASM_FILE" ]; then
+    echo "ERROR: WASM binary not found: $WASM_FILE"
     echo "Build the target first:"
     echo "  emcmake cmake --preset $PRESET && cmake --build --preset $PRESET"
     exit 1
