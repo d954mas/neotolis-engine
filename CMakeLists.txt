@@ -56,6 +56,8 @@ endif()
 # so external consumers see the same value via target_link_libraries.
 option(NT_FONT_EMBOLDEN_ENABLED "Build synthetic font weight and outline support." OFF)
 
+option(NT_UI_CLAY_DEBUG_VIEW "Build the upstream Clay debug view." OFF)
+
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})

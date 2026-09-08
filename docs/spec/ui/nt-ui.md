@@ -49,6 +49,20 @@ manual callback setup.
 
 ### Public Clay surface
 
+`NT_UI_CLAY_DEBUG_VIEW` defaults to **OFF** in every preset, independently of
+`NT_UI_DEBUG_TOOLS` (the Neotolis inspector). OFF removes Clay's built-in debug
+renderer, helpers, strings, per-element debug data and arena allocations. It
+preserves layout and duplicate-ID reporting. The vendor guard is private to the
+Clay implementation TU; applications use the same public headers.
+
+With OFF, `Clay_IsDebugModeEnabled()` returns false and
+`Clay_SetDebugModeEnabled(false)` is valid. Passing true reports the disabled
+feature through the existing error handler; Neotolis treats this as an assert.
+Enable `-DNT_UI_CLAY_DEBUG_VIEW=ON` explicitly to use the view. `nt_ui_begin`
+resets it to false as before; enable it after begin to inspect that frame.
+Both view settings work with the engine inspector ON or OFF. Internal debug
+child floats use relative z offsets, like other engine floating elements.
+
 Clay v0.14 is vendored as a **public** dependency of `nt_ui`: game
 code declares layout and widgets via `CLAY_*` macros directly,
 while `nt_ui` owns lifecycle (contexts, the walker that turns Clay's

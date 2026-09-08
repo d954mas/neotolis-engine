@@ -1228,6 +1228,7 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
+        test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
         test_nt_ui_rich_wrap
         test_nt_ui_rich_emit
@@ -1350,3 +1351,8 @@ foreach(_nt_t IN LISTS _nt_all_tests)
         set_tests_properties(${_nt_t} PROPERTIES TIMEOUT 120)
     endif()
 endforeach()
+
+if(TARGET test_nt_ui_clay_debug_view)
+    target_compile_definitions(test_nt_ui_clay_debug_view PRIVATE NT_TEST_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>)
+    target_compile_definitions(test_nt_ui_begin_end PRIVATE NT_TEST_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>)
+endif()

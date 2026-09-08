@@ -185,3 +185,5 @@ target_link_libraries(nt_ui_rich
 
 nt_add_module(nt_ui_rich_fx LOG_DOMAIN "ui.rich_fx" nt_ui_rich_fx.c nt_ui_rich_fx.h)
 target_link_libraries(nt_ui_rich_fx PUBLIC nt_ui_interface nt_font nt_atlas nt_material)
+
+set_source_files_properties(nt_ui_clay_impl.c PROPERTIES COMPILE_DEFINITIONS "NT_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>")

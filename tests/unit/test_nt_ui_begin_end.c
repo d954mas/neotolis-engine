@@ -123,8 +123,29 @@ static void test_end_sets_layout_ms(void) {
     nt_ui_destroy_context(a);
 }
 
+static void test_clay_debug_view_engine_contract(void) {
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
+#if NT_TEST_CLAY_DEBUG_VIEW
+    nt_ui_end(ctx);
+    Clay_SetCurrentContext(ctx->clay);
+    Clay_SetDebugModeEnabled(true);
+    TEST_ASSERT_TRUE(Clay_IsDebugModeEnabled());
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
+#elif NT_ASSERT_MODE == NT_ASSERT_FULL
+    NT_TEST_EXPECT_ASSERT(Clay_SetDebugModeEnabled(true));
+    TEST_ASSERT_FALSE(Clay_IsDebugModeEnabled());
+#endif
+    nt_ui_end(ctx);
+    nt_ui_destroy_context(ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_clay_debug_view_engine_contract);
     RUN_TEST(test_begin_sets_current_ctx);
     RUN_TEST(test_stray_nested_begin_asserts);
     RUN_TEST(test_end_clears_in_frame);

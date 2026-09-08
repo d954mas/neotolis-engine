@@ -21,6 +21,9 @@
 //      DEPENDS ON the tree-root sort staying STABLE (swaps on strict `<`): a
 //      delta-0 child paints above its floating parent only because equal-z roots
 //      keep registration order — re-run tests/unit/test_nt_ui_slider.c on a bump.
+//   5. NT_CLAY_DEBUG_VIEW removes built-in debug code, fields and arena storage.
+//      Public toggle API reports disabled-view requests through the error handler.
+//      Debug child floats use relative zIndex=1 to match patch 4.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -965,6 +968,10 @@ extern uint32_t Clay__debugViewWidth;
 #ifdef CLAY_IMPLEMENTATION
 #undef CLAY_IMPLEMENTATION
 
+#ifndef NT_CLAY_DEBUG_VIEW
+#define NT_CLAY_DEBUG_VIEW 1
+#endif
+
 #ifndef CLAY__NULL
 #define CLAY__NULL 0
 #endif
@@ -1190,6 +1197,7 @@ typedef struct {
 
 CLAY__ARRAY_DEFINE(Clay__ScrollContainerDataInternal, Clay__ScrollContainerDataInternalArray)
 
+#if NT_CLAY_DEBUG_VIEW
 typedef struct {
     bool collision;
     bool collapsed;
@@ -1197,6 +1205,7 @@ typedef struct {
 
 CLAY__ARRAY_DEFINE(Clay__DebugElementData, Clay__DebugElementDataArray)
 
+#endif
 typedef struct { // todo get this struct into a single cache line
     Clay_BoundingBox boundingBox;
     Clay_ElementId elementId;
@@ -1206,7 +1215,9 @@ typedef struct { // todo get this struct into a single cache line
     int32_t nextIndex;
     uint32_t generation;
     uint32_t idAlias;
+#if NT_CLAY_DEBUG_VIEW
     Clay__DebugElementData *debugData;
+#endif
 } Clay_LayoutElementHashMapItem;
 
 CLAY__ARRAY_DEFINE(Clay_LayoutElementHashMapItem, Clay__LayoutElementHashMapItemArray)
@@ -1264,10 +1275,14 @@ struct Clay_Context {
     Clay_Dimensions layoutDimensions;
     Clay_ElementId dynamicElementIndexBaseHash;
     uint32_t dynamicElementIndex;
+#if NT_CLAY_DEBUG_VIEW
     bool debugModeEnabled;
+#endif
     bool disableCulling;
     bool externalScrollHandlingEnabled;
+#if NT_CLAY_DEBUG_VIEW
     uint32_t debugSelectedElementId;
+#endif
     uint32_t generation;
     uintptr_t arenaResetOffset;
     void *measureTextUserData;
@@ -1311,8 +1326,12 @@ struct Clay_Context {
     Clay_ElementIdArray pointerOverIds;
     Clay__ScrollContainerDataInternalArray scrollContainerDatas;
     Clay__boolArray treeNodeVisited;
+#if NT_CLAY_DEBUG_VIEW
     Clay__charArray dynamicStringData;
+#endif
+#if NT_CLAY_DEBUG_VIEW
     Clay__DebugElementDataArray debugElementData;
+#endif
 };
 
 Clay_Context* Clay__Context_Allocate_Arena(Clay_Arena *arena) {
@@ -1744,7 +1763,9 @@ Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Cl
                 hashItem->idAlias = idAlias;
                 hashItem->generation = context->generation + 1;
                 hashItem->layoutElement = layoutElement;
+#if NT_CLAY_DEBUG_VIEW
                 hashItem->debugData->collision = false;
+#endif
                 hashItem->onHoverFunction = NULL;
                 hashItem->hoverFunctionUserData = 0;
             } else { // Multiple collisions this frame - two elements have the same ID
@@ -1752,9 +1773,11 @@ Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Cl
                     .errorType = CLAY_ERROR_TYPE_DUPLICATE_ID,
                     .errorText = CLAY_STRING("An element with this ID was already previously declared during this layout."),
                     .userData = context->errorHandler.userData });
+#if NT_CLAY_DEBUG_VIEW
                 if (context->debugModeEnabled) {
                     hashItem->debugData->collision = true;
                 }
+#endif
             }
             return hashItem;
         }
@@ -1762,7 +1785,9 @@ Clay_LayoutElementHashMapItem* Clay__AddHashMapItem(Clay_ElementId elementId, Cl
         hashItemIndex = hashItem->nextIndex;
     }
     Clay_LayoutElementHashMapItem *hashItem = Clay__LayoutElementHashMapItemArray_Add(&context->layoutElementsHashMapInternal, item);
+#if NT_CLAY_DEBUG_VIEW
     hashItem->debugData = Clay__DebugElementDataArray_Add(&context->debugElementData, CLAY__INIT(Clay__DebugElementData) CLAY__DEFAULT_STRUCT);
+#endif
     if (hashItemPrevious != -1) {
         Clay__LayoutElementHashMapItemArray_Get(&context->layoutElementsHashMapInternal, hashItemPrevious)->nextIndex = (int32_t)context->layoutElementsHashMapInternal.length - 1;
     } else {
@@ -2236,7 +2261,9 @@ void Clay__InitializeEphemeralMemory(Clay_Context* context) {
     context->openFloatingZStack = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena); // NT patch 4
     context->reusableElementIndexBuffer = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementClipElementIds = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+#if NT_CLAY_DEBUG_VIEW
     context->dynamicStringData = Clay__charArray_Allocate_Arena(maxElementCount, arena);
+#endif
 }
 
 void Clay__InitializePersistentMemory(Clay_Context* context) {
@@ -2254,7 +2281,9 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     context->measureTextHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->measuredWords = Clay__MeasuredWordArray_Allocate_Arena(maxMeasureTextCacheWordCount, arena);
     context->pointerOverIds = Clay_ElementIdArray_Allocate_Arena(maxElementCount, arena);
+#if NT_CLAY_DEBUG_VIEW
     context->debugElementData = Clay__DebugElementDataArray_Allocate_Arena(maxElementCount, arena);
+#endif
     context->arenaResetOffset = arena->nextAllocation;
 }
 
@@ -2470,6 +2499,7 @@ void Clay__SizeContainersAlongAxis(bool xAxis) {
     }
 }
 
+#if NT_CLAY_DEBUG_VIEW
 Clay_String Clay__IntToString(int32_t integer) {
     if (integer == 0) {
         return CLAY__INIT(Clay_String) { .length = 1, .chars = "0" };
@@ -2501,6 +2531,7 @@ Clay_String Clay__IntToString(int32_t integer) {
     return CLAY__INIT(Clay_String) { .length = length, .chars = chars };
 }
 
+#endif
 void Clay__AddRenderCommand(Clay_RenderCommand renderCommand) {
     Clay_Context* context = Clay_GetCurrentContext();
     renderCommand.nt_layout_index = context->nt_current_layout_index; // NT patch
@@ -3158,6 +3189,7 @@ CLAY_DLL_EXPORT Clay_ElementIdArray Clay_GetPointerOverIds(void) {
     return Clay_GetCurrentContext()->pointerOverIds;
 }
 
+#if NT_CLAY_DEBUG_VIEW
 #pragma region DebugTools
 Clay_Color CLAY__DEBUGVIEW_COLOR_1 = {58, 56, 52, 255};
 Clay_Color CLAY__DEBUGVIEW_COLOR_2 = {62, 60, 58, 255};
@@ -3348,7 +3380,7 @@ Clay__RenderDebugLayoutData Clay__RenderDebugLayoutElementsList(int32_t initialR
     }
 
     if (highlightedElementId) {
-        CLAY({ .id = CLAY_ID("Clay__DebugView_ElementHighlight"), .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)} }, .floating = { .parentId = highlightedElementId, .zIndex = 32767, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID } }) {
+        CLAY({ .id = CLAY_ID("Clay__DebugView_ElementHighlight"), .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)} }, .floating = { .parentId = highlightedElementId, .zIndex = 1, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID } }) {
             CLAY({ .id = CLAY_ID("Clay__DebugView_ElementHighlightRectangle"), .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)} }, .backgroundColor = Clay__debugViewHighlightColor }) {}
         }
     }
@@ -3499,7 +3531,7 @@ void Clay__RenderDebugView(void) {
             CLAY({ .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM }, .backgroundColor = ((initialElementsLength + initialRootsLength) & 1) == 0 ? CLAY__DEBUGVIEW_COLOR_2 : CLAY__DEBUGVIEW_COLOR_1 }) {
                 Clay_ElementId panelContentsId = Clay__HashString(CLAY_STRING("Clay__DebugViewPaneOuter"), 0, 0);
                 // Element list
-                CLAY({ .id = panelContentsId, .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)} }, .floating = { .zIndex = 32766, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT } }) {
+                CLAY({ .id = panelContentsId, .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)} }, .floating = { .zIndex = 1, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT } }) {
                     CLAY({ .layout = { .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = { CLAY__DEBUGVIEW_OUTER_PADDING, CLAY__DEBUGVIEW_OUTER_PADDING, 0, 0 }, .layoutDirection = CLAY_TOP_TO_BOTTOM } }) {
                         layoutData = Clay__RenderDebugLayoutElementsList((int32_t)initialRootsLength, highlightedRow);
                     }
@@ -3848,6 +3880,7 @@ void Clay__RenderDebugView(void) {
 }
 #pragma endregion
 
+#endif
 uint32_t Clay__debugViewWidth = 400;
 Clay_Color Clay__debugViewHighlightColor = { 168, 66, 28, 100 };
 
@@ -4225,9 +4258,11 @@ void Clay_BeginLayout(void) {
     context->dynamicElementIndex = 0;
     // Set up the root container that covers the entire window
     Clay_Dimensions rootDimensions = {context->layoutDimensions.width, context->layoutDimensions.height};
+#if NT_CLAY_DEBUG_VIEW
     if (context->debugModeEnabled) {
         rootDimensions.width -= (float)Clay__debugViewWidth;
     }
+#endif
     context->booleanWarnings = CLAY__INIT(Clay_BooleanWarnings) CLAY__DEFAULT_STRUCT;
     Clay__OpenElement();
     Clay__ConfigureOpenElement(CLAY__INIT(Clay_ElementDeclaration) {
@@ -4242,17 +4277,22 @@ CLAY_WASM_EXPORT("Clay_EndLayout")
 Clay_RenderCommandArray Clay_EndLayout(void) {
     Clay_Context* context = Clay_GetCurrentContext();
     Clay__CloseElement();
+#if NT_CLAY_DEBUG_VIEW
     bool elementsExceededBeforeDebugView = context->booleanWarnings.maxElementsExceeded;
     if (context->debugModeEnabled && !elementsExceededBeforeDebugView) {
         context->warningsEnabled = false;
         Clay__RenderDebugView();
         context->warningsEnabled = true;
     }
+#endif
     if (context->booleanWarnings.maxElementsExceeded) {
         Clay_String message;
+#if NT_CLAY_DEBUG_VIEW
         if (!elementsExceededBeforeDebugView) {
             message = CLAY_STRING("Clay Error: Layout elements exceeded Clay__maxElementCount after adding the debug-view to the layout.");
-        } else {
+        } else
+#endif
+        {
             message = CLAY_STRING("Clay Error: Layout elements exceeded Clay__maxElementCount");
         }
         Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand ) {
@@ -4357,13 +4397,26 @@ Clay_ElementData Clay_GetElementData(Clay_ElementId id){
 CLAY_WASM_EXPORT("Clay_SetDebugModeEnabled")
 void Clay_SetDebugModeEnabled(bool enabled) {
     Clay_Context* context = Clay_GetCurrentContext();
+#if NT_CLAY_DEBUG_VIEW
     context->debugModeEnabled = enabled;
+#else
+    if (enabled) {
+        context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+            .errorType = CLAY_ERROR_TYPE_INTERNAL_ERROR,
+            .errorText = CLAY_STRING("Clay debug view requires NT_UI_CLAY_DEBUG_VIEW=ON"),
+            .userData = context->errorHandler.userData });
+    }
+#endif
 }
 
 CLAY_WASM_EXPORT("Clay_IsDebugModeEnabled")
 bool Clay_IsDebugModeEnabled(void) {
+#if NT_CLAY_DEBUG_VIEW
     Clay_Context* context = Clay_GetCurrentContext();
     return context->debugModeEnabled;
+#else
+    return false;
+#endif
 }
 
 CLAY_WASM_EXPORT("Clay_SetCullingEnabled")

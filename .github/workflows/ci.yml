@@ -448,6 +448,15 @@ jobs:
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
 
+      - name: Test Clay view with both inspector settings
+        run: |
+          for inspector in ON OFF; do
+            build_dir="build/_cmake/native-debug-clay-on-${inspector}"
+            cmake --preset native-debug-test -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_UI_DEBUG_TOOLS="$inspector"
+            cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
+            xvfb-run ctest --test-dir "$build_dir" --output-on-failure -R '^test_nt_ui_(clay_debug_view|inspector|debug_hit_zones|probe)$'
+          done
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \

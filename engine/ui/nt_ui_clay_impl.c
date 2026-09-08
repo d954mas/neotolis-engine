@@ -1283,7 +1283,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
      * pane) and indent via inner left-padding, not nested wrappers, so they scroll. */
     int32_t dfs_depth[CDV_DFS_CAP];
     int32_t dfs_length = 0;
-    Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
+    const Clay_LayoutConfig row_layout = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
     cdv_layout_data_t layoutData = {0};
     uint32_t highlightedElementId = 0U;
     /* Latch: once the budget runs out mid-walk it stays out. Without it, when emission stops the
@@ -1292,7 +1292,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     /* BG/TEXT split keeps walker batching one BG->TEXT boundary per segment. */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
-    Clay_TextElementConfig debug_text_name_cfg_storage = Clay__DebugView_TextNameConfig;
+    Clay_TextElementConfig debug_text_name_cfg_storage = {.textColor = {238, 226, 231, 255}, .fontSize = 16, .wrapMode = CLAY_TEXT_WRAP_NONE};
     debug_text_name_cfg_storage.userData = debug_text_data;
     Clay_TextElementConfig *const debug_text_name_cfg = Clay__StoreTextElementConfig(debug_text_name_cfg_storage);
     // #endregion
@@ -1369,7 +1369,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(row_h)}, .padding = {(uint16_t)(currentDepth * (int32_t)indent_w), 0, 0, 0}},
                       .backgroundColor = rowColor,
                       .userData = debug_bg_data}) {
-                    CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig, .userData = debug_bg_data}) {
+                    CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = row_layout, .userData = debug_bg_data}) {
                         const bool currently_collapsed = cdv_is_collapsed(ctx, currentElement->id);
                         const Clay_ElementId dotId = Clay__HashString(CLAY_STRING("ntInsp_CollapseDot"), 0, currentElement->id);
                         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
