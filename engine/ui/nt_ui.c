@@ -550,8 +550,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const float clay_pointer_y = primary->y;
 #endif
 
-    /* nt_ui_inspector replaces Clay's built-in debug view. Keeping it off is also what makes NT patch 4
-     * safe there: that view nests zIndex 32766 inside 32765, which would saturate the accumulated band. */
+    /* The game opts into Clay's built-in debug view per frame, after begin. */
     Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
@@ -1531,13 +1530,9 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
     frame.opacity = opacity;
 
-    /* Rich-text self-emits its solved text spans through the text renderer (ONE
-     * measured FIXED block hosts the wrapped run-list); the game handler owns every other
-     * CUSTOM element. */
-    if (cd->type == NT_UI_CUSTOM_TYPE_RICH_TEXT) {
-        /* Self-emit resolves + binds its own text material now that it reads ctx via frame->ctx:
-         * the block's style override, or the ctx->text_material default. */
-        nt_ui_rich_internal_emit_custom(&frame, cd->data);
+    if (cd->type == NT_UI_CUSTOM_TYPE_CALLBACK) {
+        NT_ASSERT(cd->emit != NULL && "CUSTOM callback must be non-NULL");
+        cd->emit(&frame, cd->data);
         return;
     }
     if (ctx->custom_fn != NULL) {

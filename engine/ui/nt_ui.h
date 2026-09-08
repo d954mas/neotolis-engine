@@ -126,16 +126,6 @@ _Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) &
 #define NT_UI_IMAGE_GEOM_REGION 0U
 #define NT_UI_IMAGE_GEOM_GEOMETRY 1U
 
-/* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
-typedef struct {
-    uint8_t type;
-    void *data;
-} nt_ui_custom_data_t;
-
-#define NT_UI_CUSTOM_TYPE_NONE 0      /* engine anchor: skip, bbox only */
-#define NT_UI_CUSTOM_TYPE_GAME 1      /* game handler */
-#define NT_UI_CUSTOM_TYPE_RICH_TEXT 2 /* rich-text widget self-emit (solved span draw_n) */
-
 /* Frame snapshot passed to the CUSTOM handler.
  *   ctx        — the UI context (read-only): lets a handler read state/material defaults + viewport
  *                without closing over it. Opaque to game handlers (the full struct is engine-internal).
@@ -153,6 +143,20 @@ typedef struct {
 
 /* Handler owns any GL state it touches; walker only rebinds sprite material on return. */
 typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
+
+/* Command and borrowed payload must outlive every consuming walk; scratch reset invalidates both.
+ * CALLBACK receives data, GAME receives the context handler's user_data. No ownership transfer. */
+typedef struct {
+    uint8_t type;
+    void *data;
+    nt_ui_custom_handler_t emit;
+} nt_ui_custom_data_t;
+
+#define NT_UI_CUSTOM_TYPE_NONE 0     /* engine anchor: skip, bbox only */
+#define NT_UI_CUSTOM_TYPE_GAME 1     /* context handler; emit is unused */
+#define NT_UI_CUSTOM_TYPE_CALLBACK 2 /* command handler; emit must be non-NULL */
+
+_Static_assert(sizeof(nt_ui_custom_data_t) == 3U * sizeof(void *), "CUSTOM command layout");
 
 /* Render-time transform — no layout effect.
  * 3D-capable: offset_z + rotation_x/y for card-flip and world-space UI; 2D paths

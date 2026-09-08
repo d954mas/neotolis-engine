@@ -13,7 +13,6 @@
 #include "renderers/nt_text_renderer.h" /* sticky decoration setters */
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_rich_text.h" /* NT_UI_RICH_SYNTH_BOLD_WEIGHT: shared synth-bold weight */
 
 const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
     .name = "nt_label",
@@ -54,7 +53,7 @@ void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity) {
      * degenerates to synth). Explicit weight overrides; else the BOLD bit picks the shared synth weight. */
     float weight = isfinite(d->weight) ? d->weight : 0.0F;
     if (weight == 0.0F && (d->variant & NT_UI_LABEL_VARIANT_BOLD) != 0U) {
-        weight = NT_UI_RICH_SYNTH_BOLD_WEIGHT;
+        weight = NT_TEXT_SYNTH_BOLD_WEIGHT;
     }
     nt_text_renderer_set_weight(weight);
     /* Fold parent opacity into outline/shadow alpha to match the walker's fill fade (the walker

@@ -276,6 +276,7 @@ static void test_label_sized_overrides_font_size(void) {
 /* a label whose style carries decoration sets the sticky renderer decoration state per draw
  * (bold->synth weight, outline width, underline) through the walker, then resets after (no leak). Pinned
  * via the renderer observe hooks (the stub font emits no glyphs, but draw_n observes the state at entry). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void test_label_decoration_wires_and_resets_setters(void) {
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
     nt_text_renderer_test_reset_call_counters();
@@ -304,25 +305,32 @@ static void test_label_decoration_wires_and_resets_setters(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_saw_underline(), "label underline reaches the renderer");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "decoration reset after the label draw (no leak onto later text)");
 }
+#endif
 
 /* Parent opacity must fold into outline/shadow alpha (not just the fill): the walker pre-multiplies
  * only textColor.a, so nt_ui_label_deco_apply folds accum_opacity into the decoration colors — else a
  * faded panel keeps opaque outline/shadow. */
 static void test_label_deco_folds_parent_opacity(void) {
     nt_ui_label_deco_t d = {0};
+#if NT_FONT_EMBOLDEN_ENABLED
     d.outline_w = 0.06F;
     d.outline_color = 0xFFFFFFFFU; /* opaque white (AABBGGRR): alpha 1.0 */
+#endif
     d.shadow_dx = 0.1F;
     d.shadow_dy = 0.1F;
     d.shadow_color = 0xFFFFFFFFU; /* alpha > 0 -> shadow active */
 
     /* Float asserts are excluded in this suite; compare alpha*100 as int (0.5 -> 50, 1.0 -> 100). */
     nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
+#if NT_FONT_EMBOLDEN_ENABLED
     TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+#endif
     TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
 
     nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
+#if NT_FONT_EMBOLDEN_ENABLED
     TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+#endif
     TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
     nt_text_renderer_reset_decoration();
 }
@@ -338,7 +346,7 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
         .font_id = 0,
         .font_size = 16,
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
-        .variant = NT_UI_LABEL_VARIANT_BOLD | NT_UI_LABEL_VARIANT_UNDERLINE,
+        .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -370,7 +378,7 @@ static void test_label_decoration_preserves_element_data(void) {
         .font_id = 0,
         .font_size = 14,
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
-        .variant = NT_UI_LABEL_VARIANT_BOLD,
+        .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -421,7 +429,9 @@ int main(void) {
     RUN_TEST(test_label_element_data_passthrough);
     RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_label_decoration_wires_and_resets_setters);
+#endif
     RUN_TEST(test_label_decoration_applies_to_wrapped_lines);
     RUN_TEST(test_label_decoration_preserves_element_data);
     RUN_TEST(test_label_deco_folds_parent_opacity);

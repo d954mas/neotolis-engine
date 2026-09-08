@@ -147,6 +147,16 @@ jobs:
           emcmake cmake --preset wasm-release
           cmake --build --preset wasm-release
 
+      - name: Verify optional UI composition in WASM release
+        run: |
+          emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
+          python3 scripts/check_ui_composition.py build/_cmake/ui-composition-wasm-release --nm "$EMSDK/upstream/bin/llvm-nm"
+
+      - name: Build optional UI features in WASM release
+        run: |
+          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
+          cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
+
       - name: Verify baseline WASM release output
         run: |
           test -f build/examples/hello/wasm-release/index.html
@@ -402,6 +412,12 @@ jobs:
       - name: Run tests (release)
         run: xvfb-run ctest --preset native-release-test
 
+      - name: Test optional UI features under NDEBUG
+        run: |
+          cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
+          cmake --build build/_cmake/native-release-ui-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom
+          xvfb-run ctest --test-dir build/_cmake/native-release-ui-on --output-on-failure -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
+
       # Debug after release — packs already on disk from release build
       - name: Configure native debug
         run: cmake --preset native-debug
@@ -431,6 +447,12 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
+      - name: Test optional font geometry (FULL asserts)
+        run: |
+          cmake --preset native-debug-test -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON
+          cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom
+          xvfb-run ctest --test-dir build/_cmake/native-debug-embolden-on --output-on-failure -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
+
       # NT_UI_DEBUG_TOOLS=OFF under Debug + FULL asserts + sanitizers: the release
       # presets build the stub bodies too, but only this mirror runs ctest over them.
       - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
@@ -441,6 +463,18 @@ jobs:
 
       - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
         run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
+
+      - name: Test Clay view with both inspector settings
+        run: |
+          for inspector in ON OFF; do
+            build_dir="build/_cmake/native-debug-clay-on-${inspector}"
+            cmake --preset native-debug-test -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_UI_DEBUG_TOOLS="$inspector"
+            cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
+            xvfb-run ctest --test-dir "$build_dir" --output-on-failure -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
+          done
+
+      - name: Verify Clay debug arena exclusion
+        run: python3 scripts/check_clay_arena.py build/_cmake/native-debug-test build/_cmake/native-debug-clay-on-ON
 
       - name: Submodule consumption test
         run: |
@@ -705,7 +739,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts context_loss.spec.ts http.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts
 
   deploy:
     name: Deploy

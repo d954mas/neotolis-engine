@@ -96,7 +96,7 @@ static void test_tagset_color_atlas_effect(void) {
 
     nt_ui_rich_tagset_register_color(&ts, "gold", 0xFF00D7FFU);
     nt_ui_rich_tagset_register_atlas(&ts, "icons", (nt_resource_t){.id = 42U});
-    nt_ui_rich_tagset_register_effect(&ts, "wave", 3U);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
 
     uint32_t color = 0;
     TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_color(&ts, h("gold"), &color));
@@ -106,9 +106,13 @@ static void test_tagset_color_atlas_effect(void) {
     TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_atlas(&ts, h("icons"), &atlas));
     TEST_ASSERT_EQUAL_UINT32(42U, atlas.id);
 
-    uint8_t fx = 0;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("wave"), &fx));
-    TEST_ASSERT_EQUAL_UINT8(3U, fx);
+    bool tunable = false;
+    nt_ui_rich_fx_fn fx = NULL;
+    void *user = NULL;
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("wave"), &tunable, &fx, &user));
+    TEST_ASSERT_TRUE(fx == nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
 }
 
 /* A stub custom effect fn (identity) used only to prove tagset custom registration/lookup. */
@@ -130,8 +134,6 @@ static nt_ui_rich_object_measure_t parse_stub_object_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = 8.0F, .height = 8.0F, .ascent = 8.0F};
 }
 
-/* (2b) register_effect_fn registers a CUSTOM effect: the full lookup returns fn+user_data, and the
- * stock-only lookup MISSES it (so a custom name never resolves to a bogus stock id). */
 static void test_tagset_custom_effect_fn(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
@@ -140,40 +142,56 @@ static void test_tagset_custom_effect_fn(void) {
     nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
 
     /* Full lookup resolves the custom entry to its fn + user_data. */
-    uint8_t id = 0xFFU;
+    bool tunable = true;
     nt_ui_rich_fx_fn fn = NULL;
     void *user = NULL;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &id, &fn, &user));
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
     TEST_ASSERT_TRUE_MESSAGE(fn == parse_stub_fx, "custom lookup returns the registered fn");
     TEST_ASSERT_TRUE_MESSAGE(user == &marker, "custom lookup returns the registered user_data");
 
-    /* Stock-only lookup misses the custom entry (fn != NULL). */
-    uint8_t stock_id = 0;
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_rich_tagset_lookup_effect(&ts, h("customfx"), &stock_id), "stock-only lookup misses a custom entry");
+    TEST_ASSERT_FALSE(tunable);
 
     /* register_effect_fn requires a non-NULL fn. */
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "bad", NULL, NULL));
 }
 
-/* (2c) a STOCK entry coexists with custom entries: it resolves via BOTH the stock-only lookup and
- * the full lookup (which reports fn==NULL for a stock entry). */
-static void test_tagset_stock_effect_coexists(void) {
+static void test_tagset_tunable_effect_coexists(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
     int marker = 0;
     nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
-    nt_ui_rich_tagset_register_effect(&ts, "stockfx", NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_tagset_register_effect(&ts, "stockfx", nt_ui_rich_fx_pulse);
 
-    uint8_t stock_id = 0;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("stockfx"), &stock_id));
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, stock_id);
-
-    uint8_t id = 0;
-    nt_ui_rich_fx_fn fn = parse_stub_fx;
+    bool tunable = false;
+    nt_ui_rich_fx_fn fn = NULL;
     void *user = NULL;
-    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("stockfx"), &id, &fn, &user));
-    TEST_ASSERT_TRUE_MESSAGE(fn == NULL, "stock entry full-lookup reports fn==NULL");
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, id);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("stockfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == nt_ui_rich_fx_pulse);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "bad", NULL));
+}
+
+static void test_tagset_effect_protocol_override(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    int marker = 0;
+    bool tunable = false;
+    nt_ui_rich_fx_fn fn = NULL;
+    void *user = NULL;
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+    nt_ui_rich_tagset_register_effect(&ts, "customfx", nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == nt_ui_rich_fx_wave);
+    TEST_ASSERT_TRUE(tunable);
+    TEST_ASSERT_NULL(user);
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &tunable, &fn, &user));
+    TEST_ASSERT_TRUE(fn == parse_stub_fx);
+    TEST_ASSERT_FALSE(tunable);
+    TEST_ASSERT_EQUAL_PTR(&marker, user);
+    TEST_ASSERT_EQUAL_UINT32(1U, ts.effect_count);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "bad", NULL));
 }
 
 /* (3) re-registering a name overrides it in place (no duplicate entry). */
@@ -212,7 +230,7 @@ static void test_tagset_empty_name_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_font(&ts, "", fam));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_atlas(&ts, "", (nt_resource_t){.id = 1U}));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_color(&ts, "", 0xFFFFFFFFU));
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", 1U));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", nt_ui_rich_fx_wave));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "", parse_stub_fx, NULL));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "", parse_stub_object_measure, NULL, NULL));
 }
@@ -229,6 +247,8 @@ static void parse_lit(const char *m) {
  * composed style at append time, so "HP" is still bold (the <b> push stands). */
 static void test_parse_unclosed_tag_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -242,6 +262,8 @@ static void test_parse_unclosed_tag_graceful(void) {
  * OPEN, never an underflow-pop). HP is bold; the stack returns to base. */
 static void test_parse_mismatched_close_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -258,6 +280,8 @@ static void test_parse_mismatched_close_graceful(void) {
  * so x carries the base style and the run-list is as-if the tag were absent. */
 static void test_parse_unknown_tag_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF445566U;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -273,6 +297,8 @@ static void test_parse_unknown_tag_graceful(void) {
  * unstyled-white run rather than trapping). */
 static void test_parse_bad_hex_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -291,8 +317,11 @@ static void parse_reset(void) {
 
 /* <outline width=2 color=#ff0000> parses width + color into the composed run style
  * (inline key=value attr tail via the rich_parse_deco_attrs scanner). */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void test_parse_outline_wellformed(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_reset();
     const char *m = "<outline width=2 color=#ff0000>x</outline>";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
@@ -301,10 +330,13 @@ static void test_parse_outline_wellformed(void) {
     TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "outline width parsed");
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF0000FFU, s.outline_color_abgr, "outline color #ff0000 -> AABBGGRR red");
 }
+#endif
 
 /* <shadow dx=1 dy=1 color=#000000> parses dx/dy + color into the composed run style. */
 static void test_parse_shadow_wellformed(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_reset();
     const char *m = "<shadow dx=1 dy=1 color=#000000>x</shadow>";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
@@ -319,6 +351,8 @@ static void test_parse_shadow_wellformed(void) {
  * no OOB/crash: <outline width= =2 color=#00ff00> -> width stays 0 (no outline), color still parses. */
 static void test_parse_outline_malformed_degrades(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_reset();
     sink_attach();
     const char *m = "<outline width= =2 color=#00ff00>x</outline>";
@@ -332,8 +366,11 @@ static void test_parse_outline_malformed_degrades(void) {
 }
 
 /* an unknown attr key inside the tag is skipped, not fatal: the recognised key still applies. */
+#if NT_FONT_EMBOLDEN_ENABLED
 static void test_parse_outline_unknown_key_skips(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_reset();
     sink_attach();
     const char *m = "<outline foo=3 width=2>x</outline>";
@@ -343,10 +380,13 @@ static void test_parse_outline_unknown_key_skips(void) {
     const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
     TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "unknown key skipped; width=2 still applies");
 }
+#endif
 
 /* <u>/<s> raise the underline/strike RUN flags (decoration toggles, not font variants). */
 static void test_parse_underline_strike_flags(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_reset();
     const char *m = "<u>a</u><s>b</s>";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
@@ -359,6 +399,8 @@ static void test_parse_underline_strike_flags(void) {
 /* (9) a close tag with no matching open (HP</b>) -> graceful: log + no-op, HP is the only run. */
 static void test_parse_orphan_close_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF778899U;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -373,6 +415,8 @@ static void test_parse_orphan_close_graceful(void) {
  * the close balances on `top` (LINK -> clear pending), never nt_ui_rich_pop past base. No trap. */
 static void test_parse_mismatched_link_close_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -385,6 +429,8 @@ static void test_parse_mismatched_link_close_graceful(void) {
  * SCALE path validates >0 and degrades to identity 1.0 BEFORE the builder (no <=0 font size, no trap). */
 static void test_parse_empty_scale_value_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -400,12 +446,14 @@ static void test_parse_empty_scale_value_graceful(void) {
 static void parse_fx(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
     nt_ui_rich_tagset_register_effect_fn(&ts, "fade", parse_stub_fx, NULL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
 }
 
@@ -459,6 +507,8 @@ static void parse_obj(const char *m) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
 }
 
@@ -525,6 +575,8 @@ static void parse_img_null_tagset(const char *m) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
 }
@@ -546,6 +598,8 @@ static void test_parse_img_alias_null_tagset_graceful(void) {
  * lookup derefs the NULL tagset), so 'x' carries the base style. No trap. */
 static void test_parse_color_null_tagset_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF010203U;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -556,6 +610,8 @@ static void test_parse_color_null_tagset_graceful(void) {
 }
 static void test_parse_font_null_tagset_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     const nt_font_t base_face = {.id = 9};
     for (uint32_t i = 0; i < 4U; i++) {
         base.font_id[i] = base_face;
@@ -569,6 +625,8 @@ static void test_parse_font_null_tagset_graceful(void) {
 }
 static void test_parse_fx_null_tagset_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -586,6 +644,8 @@ static void parse_img_no_alias(const char *m) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
 }
@@ -605,6 +665,8 @@ static void test_parse_img_unknown_alias_graceful(void) {
  * builder nt_ui_rich_image(ref, MIDDLE, -4, 1.8): same kind, same region ref, same scale/oy/valign. */
 static void test_parse_img_attrs_match_builder(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
 
     /* BUILDER: a single inline image with explicit scale/oy/valign. */
@@ -656,6 +718,8 @@ static void test_parse_img_attrs_match_builder(void) {
 /* (img-attrs) a bare <img=heart/> (no attr tail) keeps the historical defaults: scale=1, oy=0, MIDDLE. */
 static void test_parse_img_no_attrs_defaults(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -702,6 +766,8 @@ static bool first_image_scale(uint32_t *out_bits) {
  * image is present with scale clamped to 1.0 -- never trapped, never a 0/NaN box. */
 static void test_parse_img_bad_attr_float_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -719,6 +785,8 @@ static void test_parse_img_bad_attr_float_graceful(void) {
  * default MIDDLE. The image is present. No trap. */
 static void test_parse_img_bad_valign_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -739,6 +807,8 @@ static void test_parse_img_bad_valign_graceful(void) {
  * is present with default scale/valign. No trap. */
 static void test_parse_img_unknown_attr_key_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -763,7 +833,9 @@ static void test_parse_over_deep_style_stack_graceful(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n); /* no trap, no OOB */
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, buf, n);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "over-deep nesting parses bounded (no trap, run produced)");
 }
 
@@ -777,6 +849,8 @@ static void test_parse_balanced_at_cap_stays_synced(void) {
      * so a balanced nest at this depth must NOT over-cap the style stack. */
     const uint32_t parse_tag_depth = nt_ui_rich_test_parse_tag_depth();
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U; /* a base tint distinguishable from any <b> push (bold doesn't change color) */
     for (uint32_t depth = 1U; depth <= parse_tag_depth; depth++) {
         char buf[512];
@@ -821,6 +895,8 @@ static void test_parse_mixed_tag_stack_sync(void) {
     nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U; /* distinguishable from the accent push */
     const nt_font_t base_face = {.id = 7};
     for (uint32_t i = 0; i < 4U; i++) {
@@ -854,7 +930,7 @@ static void parse_named_miss(const char *m, nt_ui_rich_style_t *base) {
     nt_ui_rich_tagset_register_color(&ts, "accent", 0xFFAABBCCU);
     const nt_font_t hdr[4] = {{.id = 21}, {.id = 22}, {.id = 23}, {.id = 24}};
     nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
-    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", nt_ui_rich_fx_wave);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -864,6 +940,8 @@ static void test_parse_unknown_named_tags_graceful(void) {
     /* <b><font=typo>x</font>y</b>: the unknown <font=typo> pushes nothing, its </font> pops nothing,
      * so BOTH x and y stay bold (the enclosing <b> is preserved). */
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     parse_named_miss("<b><font=typo>x</font>y</b>", &base); /* no trap */
     const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
     TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "unknown font miss -> runs, no trap");
@@ -873,11 +951,15 @@ static void test_parse_unknown_named_tags_graceful(void) {
 
     /* Unknown color/fx misses likewise skip without trapping; the text is preserved unstyled. */
     nt_ui_rich_style_t base2 = nt_ui_rich_style_defaults();
+    base2.font_id[1] = s_fx.stub_font;
+    base2.font_id[3] = s_fx.stub_font;
     base2.color_abgr = 0xFF0A0B0CU;
     parse_named_miss("<color=xyz>x</color>", &base2); /* no trap */
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF0A0B0CU, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "unknown color miss keeps the base color");
 
     nt_ui_rich_style_t base3 = nt_ui_rich_style_defaults();
+    base3.font_id[1] = s_fx.stub_font;
+    base3.font_id[3] = s_fx.stub_font;
     parse_named_miss("<fx=bad>x</fx>", &base3); /* no trap */
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_rich_test_run_style(s_fx.ctx, 0).effect_id, "unknown fx miss keeps no effect");
 }
@@ -887,6 +969,8 @@ static void test_parse_unknown_named_tags_graceful(void) {
  * the pushed-flag refactor did not break well-formed nesting (no over-pop, no leaked push). */
 static void test_parse_wellformed_nesting_pops_correctly(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -909,6 +993,8 @@ static void test_parse_wellformed_nesting_pops_correctly(void) {
  * 0. The image is present with scale clamped to 1.0. No trap. */
 static void test_parse_img_zero_scale_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -926,6 +1012,8 @@ static void test_parse_img_zero_scale_graceful(void) {
  * builder (no <=0 font size into nt_font_measure_n). No trap. */
 static void test_parse_scale_nonpositive_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -1109,6 +1197,8 @@ static void rich_session_begin(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     nt_ui_rich_begin(s_fx.ctx, &base);
 }
 
@@ -1152,6 +1242,8 @@ static void test_rich_image_bad_scale_asserts(void) {
 /* (18) the public widget + markup entries with id==0 -> NT_ASSERT (id drives bbox/link origin). */
 static void test_rich_text_zero_id_asserts(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.font_id[0] = s_fx.stub_font;
 
     nt_pointer_t mouse = {0};
@@ -1176,6 +1268,8 @@ static void test_rich_text_zero_id_asserts(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- two authoring fronts built then compared run-by-run
 static void test_parse_layer_matches_builder(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
     const nt_font_t base_face = {.id = 7};
     for (uint32_t i = 0; i < 4U; i++) {
@@ -1224,6 +1318,8 @@ static void test_parse_layer_out_of_range_graceful(void) {
     const char *cases[] = {"<layer=255>x</layer>", "<layer=300>x</layer>", "<layer=>x</layer>", "<layer=ab>x</layer>"};
     for (uint32_t c = 0; c < 4U; c++) {
         nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+        base.font_id[1] = s_fx.stub_font;
+        base.font_id[3] = s_fx.stub_font;
         nt_mem_scratch_reset();
         s_fx.ctx->pending_rich = NULL;
         s_fx.ctx->rich_session_open = false;
@@ -1243,6 +1339,8 @@ static void test_parse_layer_out_of_range_graceful(void) {
 static void test_log_malformed_logs_once_per_unique(void) {
     sink_attach();
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
 
     /* First sight of the bad-hex "#zqzqzq" -> exactly one warn line. */
     nt_mem_scratch_reset();
@@ -1267,6 +1365,8 @@ static void test_log_malformed_logs_once_per_unique(void) {
 static void test_log_distinct_errors_each_log_once(void) {
     sink_attach();
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -1286,6 +1386,8 @@ static void test_log_distinct_errors_each_log_once(void) {
  * sequence (byte-identical happy path: no regression from the log+skip refactor). */
 static void test_log_wellformed_silent_and_byte_identical(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
     base.color_abgr = 0xFF112233U;
 
     /* BUILDER: "a " then <b>"bold"</b> then " c". */
@@ -1317,12 +1419,69 @@ static void test_log_wellformed_silent_and_byte_identical(void) {
     sink_detach();
 }
 
+static void test_base_effect_rejected_before_scratch_allocation(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[1] = s_fx.stub_font;
+    base.font_id[3] = s_fx.stub_font;
+    base.font_id[0] = s_fx.stub_font;
+    const uint8_t invalid_ids[] = {1U, 128U};
+    for (uint32_t i = 0; i < sizeof invalid_ids / sizeof invalid_ids[0]; i++) {
+        base.effect_id = invalid_ids[i];
+        const size_t used = nt_mem_scratch_used();
+        NT_TEST_EXPECT_ASSERT(nt_ui_rich_begin(s_fx.ctx, &base));
+        TEST_ASSERT_TRUE_MESSAGE(used == nt_mem_scratch_used(), "invalid base is rejected before scratch allocation");
+        TEST_ASSERT_NULL(s_fx.ctx->pending_rich);
+        TEST_ASSERT_FALSE(s_fx.ctx->rich_session_open);
+    }
+    base.effect_id = 0U;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx->pending_rich);
+    TEST_ASSERT_TRUE(s_fx.ctx->rich_session_open);
+    nt_ui_rich_end(s_fx.ctx);
+}
+
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_markup_missing_bold_requires_enabled_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const char markup[] = "<b>B</b>";
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+}
+
+static void test_markup_outline_requires_enabled_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    const char markup[] = "<outline width=0.06 color=#000000>X</outline>";
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_rich_test_run_count(s_fx.ctx));
+}
+#endif
+
+static void test_markup_real_bold_needs_no_synthesis(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.font_id[1] = s_fx.stub_font;
+    const char markup[] = "<b>B</b>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, sizeof markup - 1U);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(s_fx.stub_font.id, nt_ui_rich_test_run_font(s_fx.ctx, 0U).id);
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_rich_test_run_flags(s_fx.ctx, 0U));
+}
+
 int main(void) {
     UNITY_BEGIN();
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_markup_missing_bold_requires_enabled_synthesis);
+    RUN_TEST(test_markup_outline_requires_enabled_synthesis);
+#endif
+    RUN_TEST(test_markup_real_bold_needs_no_synthesis);
+    RUN_TEST(test_base_effect_rejected_before_scratch_allocation);
     RUN_TEST(test_tagset_font_register_lookup);
     RUN_TEST(test_tagset_color_atlas_effect);
     RUN_TEST(test_tagset_custom_effect_fn);
-    RUN_TEST(test_tagset_stock_effect_coexists);
+    RUN_TEST(test_tagset_tunable_effect_coexists);
+    RUN_TEST(test_tagset_effect_protocol_override);
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
     RUN_TEST(test_tagset_empty_name_asserts);
@@ -1330,10 +1489,14 @@ int main(void) {
     RUN_TEST(test_parse_mismatched_close_graceful);
     RUN_TEST(test_parse_unknown_tag_graceful);
     RUN_TEST(test_parse_bad_hex_graceful);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_parse_outline_wellformed);
+#endif
     RUN_TEST(test_parse_shadow_wellformed);
     RUN_TEST(test_parse_outline_malformed_degrades);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_parse_outline_unknown_key_skips);
+#endif
     RUN_TEST(test_parse_underline_strike_flags);
     RUN_TEST(test_parse_orphan_close_graceful);
     RUN_TEST(test_parse_mismatched_link_close_graceful);

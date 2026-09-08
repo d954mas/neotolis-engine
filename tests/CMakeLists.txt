@@ -23,7 +23,7 @@ if(NOT EMSCRIPTEN)
     nt_set_warning_flags(nt_gfx_fake)
     nt_set_sanitizer_flags(nt_gfx_fake)
     set(NT_TEST_ACCESS_LIBS
-        nt_atlas nt_ui nt_gfx nt_gfx_fake nt_font nt_text_renderer
+        nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
@@ -1228,7 +1228,9 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
+        test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
+        test_nt_ui_rich_custom
         test_nt_ui_rich_wrap
         test_nt_ui_rich_emit
     )
@@ -1247,6 +1249,9 @@ if(NOT EMSCRIPTEN)
             ${_nt_ui_test_helper_sources}
         )
         target_include_directories(${_t} PRIVATE ${_nt_ui_test_helper_includes})
+        if(_t MATCHES "^test_nt_ui_rich_")
+            target_link_libraries(${_t} PRIVATE nt_ui_rich)
+        endif()
         target_link_libraries(${_t} PRIVATE ${_nt_ui_test_libs})
         target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         nt_setup_test_target(${_t})
@@ -1265,13 +1270,15 @@ if(NOT EMSCRIPTEN)
     # distinct message (nt_log_warn_unique dedup). It links the REAL nt_log impl instead of the no-op
     # nt_log_stub the other ui tests use -- so nt_log_add_sink / nt_log_write_unique actually fan out.
     # Provider (nt_log) trails its consumers; nt_hash/nt_core trail last (GNU-ld single-pass order).
+    target_link_libraries(test_nt_ui_rich_emit PRIVATE nt_ui_rich_fx)
+
     string(REPLACE "nt_log_stub" "nt_log;nt_hash;nt_core" _nt_ui_rich_parse_libs "${_nt_ui_test_libs}")
     add_executable(test_nt_ui_rich_parse
         unit/test_nt_ui_rich_parse.c
         ${_nt_ui_test_helper_sources}
     )
     target_include_directories(test_nt_ui_rich_parse PRIVATE ${_nt_ui_test_helper_includes})
-    target_link_libraries(test_nt_ui_rich_parse PRIVATE ${_nt_ui_rich_parse_libs})
+    target_link_libraries(test_nt_ui_rich_parse PRIVATE nt_ui_rich nt_ui_rich_fx ${_nt_ui_rich_parse_libs})
     target_compile_definitions(test_nt_ui_rich_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_rich_parse)
 
@@ -1345,3 +1352,9 @@ foreach(_nt_t IN LISTS _nt_all_tests)
         set_tests_properties(${_nt_t} PROPERTIES TIMEOUT 120)
     endif()
 endforeach()
+
+if(TARGET test_nt_ui_clay_debug_view)
+    target_compile_definitions(test_nt_ui_clay_debug_view PRIVATE NT_TEST_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>)
+    target_compile_definitions(test_nt_ui_begin_end PRIVATE NT_TEST_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>)
+    target_compile_definitions(test_nt_ui_walker_custom PRIVATE NT_TEST_CLAY_DEBUG_VIEW=$<BOOL:${NT_UI_CLAY_DEBUG_VIEW}>)
+endif()

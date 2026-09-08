@@ -2354,14 +2354,14 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);  /* hover highlight */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U); /* accepted state */
     /* All eight stock effects so <fx=name> resolves in the markup front. */
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", NT_UI_RICH_FX_ID_BOUNCE);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", NT_UI_RICH_FX_ID_GLOW);
-    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", nt_ui_rich_fx_wave);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", nt_ui_rich_fx_shake);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", nt_ui_rich_fx_rainbow);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", nt_ui_rich_fx_pulse);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", nt_ui_rich_fx_fade_in);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", nt_ui_rich_fx_bounce);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", nt_ui_rich_fx_glow);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", nt_ui_rich_fx_sway);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
     nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
     /* "pull" == the builder's push_effect_fn(rich_fx_pull_left): same heart nudge so both fronts overlap identically. */
@@ -2478,36 +2478,36 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     RICH_TEXT_LIT(ctx, ". Effects: ");
 
     /* Effects gallery: 7 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_wave);
     RICH_TEXT_LIT(ctx, "wave ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SHAKE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_shake);
     RICH_TEXT_LIT(ctx, "shake ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_RAINBOW);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_rainbow);
     RICH_TEXT_LIT(ctx, "rainbow ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_pulse);
     RICH_TEXT_LIT(ctx, "pulse ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
     RICH_TEXT_LIT(ctx, "fade ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_BOUNCE);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_bounce);
     RICH_TEXT_LIT(ctx, "bounce ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_glow);
     nt_ui_rich_push_color(ctx, 0xFF2A5A7AU); /* dark amber: glow brightens toward white, so a dark base shows the pulse */
     RICH_TEXT_LIT(ctx, "glow ");
     nt_ui_rich_pop(ctx); /* color */
     nt_ui_rich_pop(ctx); /* effect */
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SWAY);
+    nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_sway);
     RICH_TEXT_LIT(ctx, "sway");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, " ");
     /* A TUNED stock wave: big amplitude + faster speed via push_effect_ex (markup parity: <fx=wave amp=14 speed=5>). */
     const nt_ui_rich_fx_params_t big_wave = {.amp = 14.0F, .speed = 5.0F};
-    nt_ui_rich_push_effect_ex(ctx, NT_UI_RICH_FX_ID_WAVE, &big_wave);
+    nt_ui_rich_push_effect_ex(ctx, nt_ui_rich_fx_wave, &big_wave);
     RICH_TEXT_LIT(ctx, "BIG");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
@@ -2530,7 +2530,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
      * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
     if (look.emphasize) {
-        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+        nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_pulse);
     }
     nt_ui_rich_push_color(ctx, look.color);
     nt_ui_rich_link(ctx, rich_link_quest());
@@ -2620,7 +2620,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     {
         nt_ui_rich_style_t tw = rich_base_style();
         nt_ui_rich_begin(ctx, &tw);
-        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
+        nt_ui_rich_push_effect(ctx, nt_ui_rich_fx_fade_in);
         RICH_TEXT_LIT(ctx, "The drake stirs... glyphs reveal one by one.");
         nt_ui_rich_pop(ctx);
         nt_ui_rich_end(ctx);
@@ -2721,11 +2721,17 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         od_base.font_size = 30.0F; /* readable specimen (rich default is 16) */
 
         /* Runtime markup front. */
+#if NT_FONT_EMBOLDEN_ENABLED
         const char *od_mk = "Outline <outline width=0.06 color=#4c8cf0>quest reward</outline>  "
                             "thick <outline width=0.12 color=#f05a4c>@ 100 gold @</outline>.  "
                             "Shadow <shadow dx=0.1 dy=0.1 color=#000000>the drake stirs</shadow>.  "
                             "Lines <u>underline</u> <s>strike</s>.  "
                             "Combined <b><u><shadow dx=0.1 dy=0.1 color=#000000><outline width=0.08 color=#f0c84c>DRAKE @quest</outline></shadow></u></b>.";
+#else
+        const char *od_mk = "Enable NT_FONT_EMBOLDEN_ENABLED=ON for outline. "
+                            "<shadow dx=0.1 dy=0.1 color=#000000>Shadow</shadow> "
+                            "<u>underline</u> <s>strike</s> <b>real bold</b>.";
+#endif
         nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_outline_shadow"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &od_base, od_mk, strlen(od_mk), container_w, NT_RICH_ALIGN_LEFT,
                                st->rich.time, NULL);
 
@@ -2733,7 +2739,9 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_rich_style_t ob_base = od_base;
         nt_ui_rich_begin(ctx, &ob_base);
         RICH_TEXT_LIT(ctx, "Builder: ");
+#if NT_FONT_EMBOLDEN_ENABLED
         nt_ui_rich_push_outline(ctx, 0.09F, 0xFFF0C84BU); /* amber stroke (0xAABBGGRR) */
+#endif
         nt_ui_rich_push_shadow(ctx, 0.1F, 0.1F, 0xC0000000U);
         nt_ui_rich_push_bold(ctx);
         nt_ui_rich_push_underline(ctx);
@@ -2741,7 +2749,9 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_rich_pop(ctx); /* underline */
         nt_ui_rich_pop(ctx); /* bold */
         nt_ui_rich_pop(ctx); /* shadow */
+#if NT_FONT_EMBOLDEN_ENABLED
         nt_ui_rich_pop(ctx); /* outline */
+#endif
         RICH_TEXT_LIT(ctx, "  ");
         nt_ui_rich_push_strikethrough(ctx);
         RICH_TEXT_LIT(ctx, "sold out");
@@ -2837,6 +2847,7 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     deco_markup(ctx, nt_ui_id("showcase/deco_inline"), &db, "regular <b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>", cw);
     // #endregion
 
+#if NT_FONT_EMBOLDEN_ENABLED
     // #region 3) Weight -- synthetic-weight ramp (label weight, single face)
     deco_header(ctx, "Weight");
     deco_label_emit(ctx, "thin  A a g 8", 26.0F, 0U, -0.04F, 0.0F, 0U, 0.0F, 0.0F, 0U);
@@ -2867,6 +2878,10 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#else
+    deco_header(ctx, "Weight / Outline");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Enable NT_FONT_EMBOLDEN_ENABLED=ON to show synthetic weight and outline.", g_current->body);
+#endif
     // #region 5) Shadow -- hard drop-shadow variants (<shadow dx= dy= color=#RRGGBB>)
     deco_header(ctx, "Shadow");
     {
@@ -2883,6 +2898,7 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#if NT_FONT_EMBOLDEN_ENABLED
     // #region 6) Outline + Shadow on one string
     deco_header(ctx, "Outline+Shadow");
     {
@@ -2903,12 +2919,13 @@ static void render_deco(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+#endif
     // #region 8) Underline / Strike (<u>/<s> markup + label variant bits)
     deco_header(ctx, "Underline / Strike");
     /* Descender-rich sample (y g p q j) so the underline/strike offset vs glyphs below the baseline is visible. */
     deco_markup(ctx, nt_ui_id("showcase/deco_us"), &db, "<u>Typography jumps gpqy</u> and <s>lazy dog: jumping pg qy</s> and <u><s>gjpqy both</s></u>", cw);
     deco_label_emit(ctx, "label underline Typography jumps gpqy", 26.0F, NT_UI_LABEL_VARIANT_UNDERLINE, 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
-    deco_label_emit(ctx, "label strike + bold lazy dog jumping pg qy", 26.0F, (uint8_t)(NT_UI_LABEL_VARIANT_STRIKE | NT_UI_LABEL_VARIANT_BOLD), 0.0F, 0.0F, 0U, 0.0F, 0.0F, 0U);
+    deco_markup(ctx, nt_ui_id("showcase/deco_strike_bold"), &db, "<b><s>real bold strike: lazy dog jumping pg qy</s></b>", cw);
     // #endregion
 }
 #undef DECO_SENT

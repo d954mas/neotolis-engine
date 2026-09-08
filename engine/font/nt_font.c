@@ -604,6 +604,7 @@ static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_
     }
 }
 
+#if NT_FONT_EMBOLDEN_ENABLED
 /* CPU embolden + offset self-intersection resolution; scratch is static preallocated
  * (no heap on the decode miss path). Overflow degrades to the raw offset ring, never crashes. */
 #define NT_FONT_OFFSET_MAX_JOINS 64 /* reflex retraction joins/contour; beyond -> plain miter (>= today) */
@@ -1021,6 +1022,7 @@ static uint8_t s_offset_lon[NT_FONT_OFFSET_NODE_MAX];
 
 /* Walk a closed point ring into quadratic curves (TrueType rules; on-curve = degenerate
  * line quad, off→off = implicit midpoint). Shared by the plain and resolved paths. */
+#endif
 static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8_t *pon, uint16_t n, nt_curve_t *curves, uint16_t *total_curves, uint16_t max_curves) {
     if (n == 0) {
         return;
@@ -1080,6 +1082,7 @@ static void convert_point_ring(const int32_t *px, const int32_t *py, const uint8
     }
 }
 
+#if NT_FONT_EMBOLDEN_ENABLED
 /* Resolve an offset ring's self-intersections and emit the surviving loops as curves.
  * SAFETY gate: a shrinker whose erosion by r_off empties (inradius <= r_off) fills solid;
  * counter-preservation caps r_off < inradius so this never fires for a real counter — it is
@@ -1213,6 +1216,7 @@ static void resolve_and_emit(const int32_t *ox, const int32_t *oy, const uint8_t
 
 /* Parse one v4 contour's absolute points, advancing *rp; fills pts_x/y/on, returns point_count.
  * Shared by the plain (pass 0) and the two offset passes so re-walking the blob stays consistent. */
+#endif
 static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t *pts_y, uint8_t *pts_on) {
     uint16_t point_count;
     memcpy(&point_count, *rp, 2);
@@ -1259,6 +1263,9 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
     const uint8_t *body = contour_data + 2;
     uint16_t total_curves = 0;
 
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(weight == 0.0F);
+#endif
     if (weight == 0.0F) {
         const uint8_t *rp = body;
         for (uint16_t ci = 0; ci < contour_count; ci++) {
@@ -1268,6 +1275,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         return total_curves;
     }
 
+#if NT_FONT_EMBOLDEN_ENABLED
     /* Pass A: whole-glyph ORIGINAL outline (weight-0 curves) for the grower dilation-membership
      * filter — needs ALL contours (a keyhole counter is bounded by a different contour's hole).
      * Read only when a grower's offset ring self-intersects into an opposite-wound loop. */
@@ -1305,6 +1313,9 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         resolve_and_emit(s_offset_x, s_offset_y, s_offset_on, offn, pts_x, pts_y, point_count, a0, is_shrinker, base_inrad, r_off, curves, &total_curves, max_curves);
     }
     return total_curves;
+#else
+    return total_curves;
+#endif
 }
 
 /* Upload a glyph to GPU textures and fill cache entry.
@@ -2010,6 +2021,9 @@ nt_font_slot_t *nt_font_get_slot(nt_font_t font) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     NT_ASSERT(slot != NULL);
+#if !NT_FONT_EMBOLDEN_ENABLED
+    NT_ASSERT(key_offset == 0);
+#endif
 
     // #region Cache hit check (hash table)
     nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint, key_offset);
@@ -2685,6 +2699,7 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
     slot->metrics_set = true;
 }
 
+#if NT_FONT_EMBOLDEN_ENABLED
 uint16_t nt_font_test_offset_ring(const int32_t *sx, const int32_t *sy, const uint8_t *son, uint16_t n, float weight, int32_t *dx, int32_t *dy, uint8_t *don) {
     double a0 = contour_signed_area(sx, sy, n);
     return offset_with_joins(sx, sy, son, n, dx, dy, don, weight, a0);
@@ -2703,6 +2718,7 @@ bool nt_font_test_grower_loop_kept(const float *orig_curves, uint16_t orig_n, co
     return !in_dilation;
 }
 
+#endif
 uint16_t nt_font_test_decode_contours(const uint8_t *contour_data, float weight, float *out_curves, uint16_t max_curves) {
     uint16_t count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, weight);
     if (count > max_curves) {

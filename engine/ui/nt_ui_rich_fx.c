@@ -49,19 +49,6 @@ static float rich_fx_clamp01(float v) {
 static float rich_fx_amp(const nt_ui_rich_fx_params_t *p, float def) { return (p != NULL && p->amp > 0.0F) ? p->amp : def; }
 static float rich_fx_speed(const nt_ui_rich_fx_params_t *p, float def) { return (p != NULL && p->speed > 0.0F) ? p->speed : def; }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]) {
-    nt_ui_rich_fx_result_t r;
-    r.offset_x = 0.0F;
-    r.offset_y = 0.0F;
-    r.color[0] = base_color[0];
-    r.color[1] = base_color[1];
-    r.color[2] = base_color[2];
-    r.color[3] = base_color[3];
-    r.scale = 1.0F;
-    r.visible = true;
-    return r;
-}
-
 /* A cheap deterministic [0,1) hash of two integers (xorshift-mix; no table). */
 static float rich_fx_hash01(uint32_t a, uint32_t b) {
     uint32_t h = (a * 0x9E3779B1U) + (b * 0x85EBCA77U);
@@ -240,27 +227,4 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_sway(uint32_t atom_idx, nt_rich_atom_kind_t
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     r.offset_x = amp * sinf((time * speed) + ((float)atom_idx * RICH_FX_SWAY_PHASE));
     return r;
-}
-
-nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id) {
-    switch (effect_id) {
-    case NT_UI_RICH_FX_ID_WAVE:
-        return nt_ui_rich_fx_wave;
-    case NT_UI_RICH_FX_ID_SHAKE:
-        return nt_ui_rich_fx_shake;
-    case NT_UI_RICH_FX_ID_RAINBOW:
-        return nt_ui_rich_fx_rainbow;
-    case NT_UI_RICH_FX_ID_PULSE:
-        return nt_ui_rich_fx_pulse;
-    case NT_UI_RICH_FX_ID_FADE_IN:
-        return nt_ui_rich_fx_fade_in;
-    case NT_UI_RICH_FX_ID_BOUNCE:
-        return nt_ui_rich_fx_bounce;
-    case NT_UI_RICH_FX_ID_GLOW:
-        return nt_ui_rich_fx_glow;
-    case NT_UI_RICH_FX_ID_SWAY:
-        return nt_ui_rich_fx_sway;
-    default:
-        return NULL; /* 0 = none, or an unregistered id -> no effect */
-    }
 }

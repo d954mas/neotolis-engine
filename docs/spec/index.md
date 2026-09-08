@@ -88,7 +88,7 @@ lifetime, and naming vocabulary.
 | `engine/atlas` | [assets/resource.md](assets/resource.md) (format), [builder/builder.md](builder/builder.md) (atlas builder) |
 | `engine/font` | [assets/resource.md](assets/resource.md) (NT_ASSET_FONT), [ui/rich-text.md](ui/rich-text.md) (decoration) |
 | `engine/hash` | [assets/resource.md](assets/resource.md) (identity hashing) |
-| `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) |
+| `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md) (`nt_ui`), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) (optional `nt_ui_rich` / `nt_ui_rich_fx`) |
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |

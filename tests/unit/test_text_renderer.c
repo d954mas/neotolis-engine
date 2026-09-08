@@ -832,7 +832,9 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+#if NT_FONT_EMBOLDEN_ENABLED
         nt_text_renderer_set_weight(0.04F);
+#endif
         nt_text_renderer_set_underline(true);
         nt_text_renderer_set_strikethrough(true);
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -1268,14 +1270,20 @@ void test_oblique_resets_on_reinit(void) {
 
 /* Decoration state is renderer state like oblique: survives a GPU context-loss restore. */
 void test_decoration_persists_across_restore(void) {
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_weight(0.25F); /* exactly representable */
+#endif
     const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_outline(0.5F, red);
+#endif
     nt_text_renderer_set_shadow(2.0F, -1.0F, 0.0F, red);
     nt_text_renderer_set_underline(true);
     nt_text_renderer_restore_gpu();
+#if NT_FONT_EMBOLDEN_ENABLED
     TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.25F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.5F);
+#endif
     TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 2.0F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_underline());
     nt_text_renderer_reset_decoration();
@@ -1284,8 +1292,10 @@ void test_decoration_persists_across_restore(void) {
 /* reset_decoration clears every axis (weight/outline/shadow/underline) AND oblique in one call. */
 void test_reset_decoration_clears_all(void) {
     const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_weight(0.25F);
     nt_text_renderer_set_outline(0.5F, red);
+#endif
     nt_text_renderer_set_shadow(2.0F, -1.0F, 0.0F, red);
     nt_text_renderer_set_underline(true);
     nt_text_renderer_set_strikethrough(true);
@@ -1302,9 +1312,11 @@ void test_reset_decoration_clears_all(void) {
 
 /* Cold shutdown/init clears decoration state (test isolation; no leak across renderer reinit). */
 void test_decoration_resets_on_reinit(void) {
+#if NT_FONT_EMBOLDEN_ENABLED
     const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     nt_text_renderer_set_weight(0.25F);
     nt_text_renderer_set_outline(0.5F, red);
+#endif
     nt_text_renderer_set_underline(true);
     nt_text_renderer_shutdown();
     nt_text_renderer_init();
@@ -1318,17 +1330,21 @@ void test_decoration_resets_on_reinit(void) {
 static const float s_black[4] = {0.0F, 0.0F, 0.0F, 1.0F};
 
 /* Outline adds a second draw span (fill + outline pass) → exactly 2× the fill-only vertex count. */
+#if NT_FONT_EMBOLDEN_ENABLED
 void test_outline_emits_extra_span(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     const uint32_t fill_only = nt_text_renderer_test_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(4U, fill_only); /* one visible glyph */
     nt_text_renderer_flush();
 
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_outline(0.05F, s_black);
+#endif
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(2U * fill_only, nt_text_renderer_test_vertex_count()); /* fill + outline */
     nt_text_renderer_reset_decoration();
 }
+#endif
 
 /* Shadow adds one more pass; shadow+outline = three passes. */
 void test_shadow_emits_extra_span(void) {
@@ -1337,9 +1353,11 @@ void test_shadow_emits_extra_span(void) {
     TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count()); /* fill + shadow */
     nt_text_renderer_flush();
 
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_outline(0.05F, s_black);
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(12U, nt_text_renderer_test_vertex_count()); /* fill + outline + shadow */
+#endif
     nt_text_renderer_reset_decoration();
 }
 
@@ -1412,7 +1430,9 @@ void test_underline_quad_per_line(void) {
 
 /* After reset_decoration a draw emits fill-only vertices (no pass/quad leak). */
 void test_reset_decoration_fill_only(void) {
+#if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_outline(0.05F, s_black);
+#endif
     nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, s_black);
     nt_text_renderer_set_underline(true);
     nt_text_renderer_reset_decoration();
@@ -1424,8 +1444,33 @@ void test_reset_decoration_fill_only(void) {
 
 /* ---- main ---- */
 
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+void test_embolden_off_rejects_nonzero_before_drawing(void) {
+    const float weights[] = {0.25F, -0.25F, 0x1p-20F, -0x1p-20F};
+    const float transparent[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    for (uint32_t i = 0; i < sizeof weights / sizeof weights[0]; i++) {
+        NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_weight(weights[i]));
+        TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
+    }
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_outline(0.25F, transparent));
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_outline(0x1p-20F, transparent));
+    TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.0F);
+
+    nt_text_renderer_set_weight(0.0F);
+    nt_text_renderer_set_weight(-0.0F);
+    nt_text_renderer_set_outline(0.0F, transparent);
+    nt_text_renderer_reset_decoration();
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_glyph_count());
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
+#if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_embolden_off_rejects_nonzero_before_drawing);
+#endif
     RUN_TEST(test_utf8_decode_ascii);
     RUN_TEST(test_text_renderer_forwards_material_blend_state);
     RUN_TEST(test_text_renderer_font_textures_land_on_program_units);
@@ -1473,7 +1518,9 @@ int main(void) {
     RUN_TEST(test_decoration_persists_across_restore);
     RUN_TEST(test_reset_decoration_clears_all);
     RUN_TEST(test_decoration_resets_on_reinit);
+#if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_outline_emits_extra_span);
+#endif
     RUN_TEST(test_shadow_emits_extra_span);
     RUN_TEST(test_shadow_pass_offset);
     RUN_TEST(test_passes_grouped_not_interleaved);
