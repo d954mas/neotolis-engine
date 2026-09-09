@@ -25,7 +25,7 @@ MODE="poly"
 MAX_AREA=""
 MAX_PAGES=""
 NO_BUILD=false
-PRESET="native-release"
+PRESET="native-release-atlas-bench"
 OUT_DIR="build/examples/atlas"
 BUILDER="${OUT_DIR}/${PRESET}/build_atlas_packs.exe"
 PACK_DIR="${OUT_DIR}"
@@ -49,6 +49,7 @@ done
 # --- Step 1: Build ---
 if [[ "$NO_BUILD" == false ]]; then
     echo "=== Building ${PRESET} ==="
+    cmake --preset native-release -B "build/_cmake/${PRESET}" -DNT_PRESET_NAME="${PRESET}" -DNT_LOG_MIN_LEVEL=0
     cmake --build "build/_cmake/${PRESET}" --target build_atlas_packs 2>&1 | tail -3
     echo ""
 fi

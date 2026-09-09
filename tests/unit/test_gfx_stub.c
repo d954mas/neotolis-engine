@@ -1,4 +1,6 @@
+#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
 void setUp(void) {
@@ -52,6 +54,25 @@ static void test_stub_returns_empty_queries_without_fabricating_pixels(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gpu_caps()->max_texture_size);
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_stub_timer_requires_name_and_output(void) {
+    uint64_t out = 0;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_segment(NULL));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_poll_segment_time_ns(NULL, &out));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_poll_segment_time_ns("frame", NULL));
+}
+
+static void test_stub_queries_require_outputs(void) {
+    uint16_t size = 0;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_texture_size((nt_texture_t){0}, NULL, &size));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_texture_size((nt_texture_t){0}, &size, NULL));
+    uint32_t count = 0;
+    const nt_global_block_t *blocks = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_get_global_blocks(NULL, &count));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_get_global_blocks(&blocks, NULL));
+}
+#endif
+
 static void test_stub_drops_draws_and_state_changes(void) {
     TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
     nt_gfx_begin_frame();
@@ -89,5 +110,9 @@ int main(void) {
     RUN_TEST(test_stub_returns_empty_queries_without_fabricating_pixels);
     RUN_TEST(test_stub_drops_draws_and_state_changes);
     RUN_TEST(test_stub_packs_pipeline_keys);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_stub_timer_requires_name_and_output);
+    RUN_TEST(test_stub_queries_require_outputs);
+#endif
     return UNITY_END();
 }

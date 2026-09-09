@@ -357,7 +357,11 @@ static void test_parse_outline_malformed_degrades(void) {
     sink_attach();
     const char *m = "<outline width= =2 color=#00ff00>x</outline>";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+#if NT_LOG_MIN_LEVEL <= 1
     TEST_ASSERT_TRUE_MESSAGE(s_sink.warn_count >= 1U, "malformed outline attr logs at least once (never asserts)");
+#else
+    TEST_ASSERT_EQUAL_UINT32(0U, s_sink.warn_count);
+#endif
     sink_detach();
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "degraded outline -> still one text run for x");
     const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
@@ -375,7 +379,11 @@ static void test_parse_outline_unknown_key_skips(void) {
     sink_attach();
     const char *m = "<outline foo=3 width=2>x</outline>";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+#if NT_LOG_MIN_LEVEL <= 1
     TEST_ASSERT_TRUE_MESSAGE(s_sink.warn_count >= 1U, "unknown attr key logs once");
+#else
+    TEST_ASSERT_EQUAL_UINT32(0U, s_sink.warn_count);
+#endif
     sink_detach();
     const nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
     TEST_ASSERT_EQUAL_INT32_MESSAGE(2, (int32_t)s.outline_w, "unknown key skipped; width=2 still applies");
@@ -1347,15 +1355,19 @@ static void test_log_malformed_logs_once_per_unique(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "first malformed parse logs exactly one warn line");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_sink.warn_count, "first malformed parse logs exactly one warn line");
+#if NT_LOG_MIN_LEVEL <= 1
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_sink.last_msg, "zqzqzq"), "the warn line carries the offending token");
+#else
+    TEST_ASSERT_EQUAL_STRING("", s_sink.last_msg);
+#endif
 
     /* Re-parse the IDENTICAL bad string -> the unique dedup swallows it (still 1 total). */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "re-parsing the same bad string logs nothing new (dedup by message)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_sink.warn_count, "re-parsing the same bad string logs nothing new (dedup by message)");
     sink_detach();
 }
 
@@ -1372,13 +1384,13 @@ static void test_log_distinct_errors_each_log_once(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#wqwqwq>x</color>", 24U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "first distinct bad value -> one line");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_sink.warn_count, "first distinct bad value -> one line");
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#vqvqvq>x</color>", 24U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_sink.warn_count, "a SECOND distinct bad value -> a SECOND line (distinct message)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_sink.warn_count, "a SECOND distinct bad value -> a SECOND line (distinct message)");
     sink_detach();
 }
 

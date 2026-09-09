@@ -1,3 +1,4 @@
+#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 
 /* This implementation has no GPU resources or draw state. */
@@ -9,6 +10,7 @@ void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
 }
 
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
+    NT_ASSERT(blocks != NULL && count != NULL);
     *blocks = NULL;
     *count = 0;
 }
@@ -144,6 +146,7 @@ nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
 
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height) {
     (void)tex;
+    NT_ASSERT(out_width != NULL && out_height != NULL);
     *out_width = 0;
     *out_height = 0;
     return false;
@@ -275,11 +278,15 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     (void)size;
 }
 
-void nt_gfx_begin_segment(const char *name) { (void)name; }
+void nt_gfx_begin_segment(const char *name) {
+    NT_ASSERT(name != NULL);
+    (void)name;
+}
 
 void nt_gfx_end_segment(void) {}
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    NT_ASSERT(name != NULL && out_ns != NULL);
     (void)name;
     *out_ns = 0;
     return false;

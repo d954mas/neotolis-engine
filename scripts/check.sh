@@ -3,7 +3,7 @@
 # opts into running the formatter under the same lock first. Modes:
 #   scripts/check.sh                    gates + build + ctest + format/tidy on changed files
 #   scripts/check.sh --full             default + whole-tree format + full tidy
-#   scripts/check.sh --push             default + native-release + wasm-debug + wasm-release + submodule test
+#   scripts/check.sh --push             default + release/wasm builds + submodule + diagnostics matrices
 #   scripts/check.sh --format [--full|--push]  format changed files under the same run lock first
 # The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
@@ -311,5 +311,10 @@ if [ "$MODE" = "push" ]; then
     cmake --build "$SUBMODULE_DIR"
     "./$SUBMODULE_DIR/submodule_test"
     python scripts/check_ui_composition.py "$SUBMODULE_DIR"
+    ok
+
+    step "diagnostics configuration and runtime matrix"
+    python scripts/check_diagnostics_config.py
+    python scripts/check_diagnostics_runtime.py
     ok
 fi

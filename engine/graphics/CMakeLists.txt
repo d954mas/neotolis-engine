@@ -6,6 +6,7 @@
 
 # Header-only interface carries nt_gfx.h's include root; the exe selects the impl.
 nt_declare_interface(nt_gfx)
+target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_GPU_TIMING_ENABLED=$<BOOL:${NT_GFX_GPU_TIMING_ENABLED}>)
 
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"

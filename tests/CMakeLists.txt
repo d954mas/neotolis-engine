@@ -83,6 +83,16 @@ if(NOT EMSCRIPTEN)
     endif()
 
     # --- Swap demo tests ---
+    add_executable(test_log_floor unit/test_log_floor.c)
+    target_link_libraries(test_log_floor PRIVATE nt_log unity)
+    target_compile_definitions(test_log_floor PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_log_floor)
+
+    add_executable(test_nt_gfx_gpu_timing_native unit/test_nt_gfx_gpu_timing_native.c)
+    target_link_libraries(test_nt_gfx_gpu_timing_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window_stub nt_log_stub unity glad nt_meshwire_stub)
+    target_compile_definitions(test_nt_gfx_gpu_timing_native PRIVATE NT_LOG_DOMAIN="gfx_timer_test")
+    nt_setup_test_target(test_nt_gfx_gpu_timing_native)
+
     # Same source, different implementation linked.
     # Proves: swapping = one target_link_libraries change.
 
@@ -255,7 +265,8 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input_char COMMAND test_input_char)
 
-    add_executable(test_gfx_stub unit/test_gfx_stub.c)
+    add_executable(test_gfx_stub unit/test_gfx_stub.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_gfx_stub PRIVATE unit)
     target_link_libraries(test_gfx_stub PRIVATE nt_gfx_stub unity)
     nt_setup_test_target(test_gfx_stub)
 
@@ -834,6 +845,11 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    add_executable(test_builder_codegen unit/test_builder_codegen.c)
+    target_link_libraries(test_builder_codegen PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_compile_definitions(test_builder_codegen PRIVATE NT_LOG_DOMAIN="builder_codegen_test" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_codegen)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
@@ -1185,6 +1201,7 @@ if(NOT EMSCRIPTEN)
     endif()
 
     set(_nt_ui_test_names
+        test_nt_ui_timing
         test_nt_ui_lifecycle
         test_nt_ui_multictx
         test_nt_ui_begin_end

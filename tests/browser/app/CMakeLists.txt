@@ -13,8 +13,9 @@ target_link_libraries(browser_smoke PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_ui_rich nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch
+    nt_render nt_hash nt_mem_scratch nt_metrics
 )
+target_compile_definitions(browser_smoke PRIVATE NT_TEST_PRESET_NAME="${NT_PRESET_NAME}")
 # Reuse the showcase's generated asset header (ui_showcase_assets.h).
 target_include_directories(browser_smoke PRIVATE "${CMAKE_SOURCE_DIR}/examples/ui_showcase/generated")
 

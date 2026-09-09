@@ -82,7 +82,7 @@ static void append_truncation_marker(char *buf, size_t cap) {
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
-    if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
+    if (level < NT_LOG_MIN_LEVEL || s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
         return;
     }
     char msg[NT_LOG_BUF_SIZE];
@@ -143,7 +143,7 @@ static uint32_t s_unique_count;
 static bool s_unique_saturated;
 
 bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *fmt, ...) {
-    if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
+    if (level < NT_LOG_MIN_LEVEL || s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
         return false; /* filtered: don't record, so it can still log if the level is lowered later */
     }
     char msg[NT_LOG_BUF_SIZE];

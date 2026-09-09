@@ -274,6 +274,97 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
+    const int values[] = {NT_LOG_MIN_LEVEL, NT_UI_TIMING_ENABLED, NT_GFX_GPU_TIMING_ENABLED, NT_METRICS_ENABLED};
+    NT_ASSERT(field >= 0 && field < 4);
+    return values[field];
+}
+EMSCRIPTEN_KEEPALIVE const char *nt_test_diagnostics_preset(void) { return NT_TEST_PRESET_NAME; }
+EMSCRIPTEN_KEEPALIVE int nt_test_gpu_supported(void) { return nt_gfx_is_gpu_timing_supported() ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
+    const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
+    if ((use_texture != 0 && !caps->has_float_texture_linear) || (use_texture == 0 && !caps->has_float_render_target)) {
+        return -1;
+    }
+    nt_render_target_t target = {0};
+    nt_texture_t texture = {0};
+    if (use_texture != 0) {
+        const float pixels[] = {1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1};
+        texture =
+            nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .data = pixels, .format = NT_TEXTURE_FORMAT_RGBA32F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    } else {
+        target = nt_gfx_make_render_target(
+            &(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA16F, .color_min_filter = NT_FILTER_LINEAR, .color_mag_filter = NT_FILTER_LINEAR});
+        if (target.id == 0) {
+            return -2;
+        }
+        texture = nt_gfx_render_target_color(target);
+    }
+    NT_ASSERT(texture.id != 0);
+    const char *vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }";
+    const char *fs_source = "precision highp float; uniform sampler2D u_probe; out vec4 color; void main() { color = texture(u_probe, vec2(0.5)); }";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_begin_frame();
+    if (target.id != 0) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
+        nt_gfx_end_pass();
+    }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture};
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_vertex_input(input);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    if (target.id != 0) {
+        nt_gfx_destroy_render_target(target);
+    } else {
+        nt_gfx_destroy_texture(texture);
+    }
+    return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
+}
+EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
+    const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
+    NT_ASSERT(segment >= 0 && segment < 3);
+    switch (operation) {
+    case 0:
+        nt_gfx_begin_segment(names[segment]);
+        break;
+    case 1:
+        nt_gfx_end_segment();
+        break;
+    case 2:
+        nt_gfx_set_gpu_timing_enabled(false);
+        break;
+    case 3:
+        nt_gfx_set_gpu_timing_enabled(true);
+        break;
+    case 4:
+        nt_gfx_begin_frame();
+        nt_gfx_end_frame();
+        break;
+    case 5: {
+        uint64_t ns = 0;
+        return nt_gfx_poll_segment_time_ns(names[segment], &ns) ? (double)ns : -1.0;
+    }
+    default:
+        NT_ASSERT(false);
+        break;
+    }
+    return 0.0;
+}
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
@@ -361,6 +452,13 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
         'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
         'float_texture_linear': function() { return _nt_test_float_texture_linear() !== 0; },
+        'diagnostics_config': function() {
+            return { 'preset': UTF8ToString(_nt_test_diagnostics_preset()), 'log': _nt_test_diagnostics_config(0),
+                'ui': _nt_test_diagnostics_config(1), 'gpu': _nt_test_diagnostics_config(2), 'metrics': _nt_test_diagnostics_config(3) };
+        },
+        'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
+        'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
+        'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
         'field_css': function() {

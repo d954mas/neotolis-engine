@@ -258,6 +258,7 @@ static void spawn_n_defold(uint32_t n) {
 /* ---- Frame callback ---- */
 
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
 static float bunnymark_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
     bool ready = false;
@@ -266,15 +267,18 @@ static float bunnymark_poll_gpu_ms(void) {
     }
     return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
 }
+#endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
+#if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
     double now = nt_time_now();
     float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
     s_last_begin = now;
     double cpu_begin = now;
+#endif
 
     nt_window_poll();
     nt_input_poll();
@@ -324,12 +328,14 @@ static void frame(void) {
         toggle_atlas_quality();
     }
     /* T toggles GPU timer queries. Shows current support state in the log. */
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     if (nt_input_key_is_pressed(NT_KEY_T)) {
         static bool s_gpu_timing_on = true;
         s_gpu_timing_on = !s_gpu_timing_on;
         nt_gfx_set_gpu_timing_enabled(s_gpu_timing_on);
         nt_log_info("Bunnymark: GPU timing %s (supported=%d)", s_gpu_timing_on ? "ON" : "OFF", (int)nt_gfx_is_gpu_timing_supported());
     }
+#endif
     if (!consumed) {
         if (p->buttons[NT_BUTTON_LEFT].is_pressed) {
             spawn_n_defold(BUNNY_CLICK_SPAWN_COUNT);
@@ -401,7 +407,9 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
+#endif
 
     if (g_nt_gfx.context_restored) {
         /* WebGL context loss recovery. The program in mat_info and the
@@ -471,8 +479,10 @@ static void frame(void) {
      * relinks only after a later nt_resource_step republishes the shader code; the
      * font handles refresh in nt_font_step. */
     /* Publish demo counters into nt_metrics before the HUD reads them back via format_lines. */
+#if NT_METRICS_ENABLED
     nt_metrics_count("bunnies", (uint64_t)s_bunny_count);
     nt_metrics_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
+#endif
 
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     if (!g_nt_gfx.context_restored && text_info && nt_gfx_program_ready(text_info->program)) {
@@ -507,9 +517,12 @@ static void frame(void) {
     // #endregion
 
     nt_gfx_end_pass();
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
+#endif
     nt_gfx_end_frame();
 
+#if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
@@ -521,14 +534,20 @@ static void frame(void) {
     nt_metrics_frame_t mf = {
         .frame_ms = frame_ms,
         .cpu_ms = cpu_ms,
+#if NT_GFX_GPU_TIMING_ENABLED
         .gpu_ms = bunnymark_poll_gpu_ms(),
+#else
+        .gpu_ms = -1.0F,
+#endif
         .draw_calls = nt_gfx_get_frame_draw_calls(),
         .mem_used = s_mem_used,
     };
     nt_metrics_sample(&mf);
+#endif
 
     /* Throughput log — bunnymark owns its own format, reading the metrics it just pushed:
      * demo-specific fields (bunny count, atlas quality) come from local state. */
+#if NT_METRICS_ENABLED && NT_LOG_MIN_LEVEL == 0
     static uint32_t s_log_frame_counter;
     if ((++s_log_frame_counter % 60U) == 0U) {
         nt_metrics_frame_t last;
@@ -540,6 +559,7 @@ static void frame(void) {
             nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_metrics_fps(), (double)last.cpu_ms, (double)last.gpu_ms, last.draw_calls, s_bunny_count, atlas_str);
         }
     }
+#endif
 
     nt_window_swap_buffers();
 }
@@ -674,11 +694,9 @@ int main(void) {
      *   "Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=N initial=I click=C hold_rate=R bunny_max=M hd_available=0|1 gpu=..."
      * GPU detection is browser/driver-side and the engine doesn't yet expose a
      * caps query — gpu=unknown until that ships (documented in README). */
-    const char *atlas_q = s_hd_active ? "HD" : "SD";
-    const char *blend_str = "premultiplied";
-    const char *gpu_str = "unknown";
     nt_log_info("Bunnymark conditions: viewport=%ux%u sprite_size=~26x37 px blend=%s atlas=%s pages=1 initial=%d click=%d hold_rate=%d bunny_max=%u hd_available=%d gpu=%s", (unsigned)s_canvas_w(),
-                (unsigned)s_canvas_h(), blend_str, atlas_q, BUNNY_INITIAL_COUNT, BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, s_hd_available ? 1 : 0, gpu_str);
+                (unsigned)s_canvas_h(), "premultiplied", s_hd_active ? "HD" : "SD", BUNNY_INITIAL_COUNT, BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, s_hd_available ? 1 : 0,
+                "unknown");
 
     nt_app_run(frame);
 

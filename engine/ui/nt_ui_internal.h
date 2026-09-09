@@ -383,9 +383,11 @@ struct nt_ui_context {
     /* Per-walk metrics. */
     uint32_t last_walk_draw_call_delta;
     uint32_t last_walk_command_count;
+#if NT_UI_TIMING_ENABLED
     float last_layout_ms;
     float last_build_tree_ms;
     float last_walk_ms;
+#endif
     uint32_t last_walk_rect_command_count;
     uint32_t last_walk_image_command_count;
     uint32_t last_walk_text_command_count;

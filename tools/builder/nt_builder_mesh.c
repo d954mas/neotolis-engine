@@ -20,25 +20,24 @@ static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s,
         NT_LOG_ERROR("%s: stream[%u] '%s': gltf_name is NULL", label, s, st->engine_name);
         return NT_BUILD_ERR_VALIDATION;
     }
-    const char *name = st->engine_name;
     if (st->count < 1 || st->count > 4) {
         NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, st->count);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (nt_stream_type_size((uint8_t)st->type) == 0) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, name, (int)st->type);
+        NT_LOG_ERROR("%s: stream[%u] '%s': invalid stream type %d", label, s, st->engine_name, (int)st->type);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->source_components > 4) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': source_components %u out of range [0, 4]", label, s, name, (uint32_t)st->source_components);
+        NT_LOG_ERROR("%s: stream[%u] '%s': source_components %u out of range [0, 4]", label, s, st->engine_name, (uint32_t)st->source_components);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->source_components != 0 && st->count > st->source_components) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': count %u exceeds source_components %u (widening is not supported)", label, s, name, (uint32_t)st->count, (uint32_t)st->source_components);
+        NT_LOG_ERROR("%s: stream[%u] '%s': count %u exceeds source_components %u (widening is not supported)", label, s, st->engine_name, (uint32_t)st->count, (uint32_t)st->source_components);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (st->normalized && (st->type == NT_STREAM_FLOAT32 || st->type == NT_STREAM_FLOAT16)) {
-        NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, name);
+        NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", label, s, st->engine_name);
         return NT_BUILD_ERR_VALIDATION;
     }
     return NT_BUILD_OK;

@@ -61,6 +61,19 @@ void tearDown(void) {
     nt_gfx_fake_reset();
 }
 
+static void test_gfx_timer_requires_name_and_output(void) {
+    uint64_t out = 0;
+    EXPECT_ASSERT(nt_gfx_begin_segment(NULL));
+    EXPECT_ASSERT(nt_gfx_poll_segment_time_ns(NULL, &out));
+    EXPECT_ASSERT(nt_gfx_poll_segment_time_ns("frame", NULL));
+}
+
+static void test_gfx_timer_requires_arguments_during_context_loss(void) {
+    g_nt_gfx.context_lost = true;
+    test_gfx_timer_requires_name_and_output();
+    g_nt_gfx.context_lost = false;
+}
+
 /* ---- Pool: alloc returns nonzero ---- */
 
 void test_gfx_pool_alloc_returns_nonzero(void) {
@@ -2969,5 +2982,7 @@ int main(void) {
     RUN_TEST(test_gfx_uniform_without_bound_pipeline_traps);
     RUN_TEST(test_gfx_binds_outside_a_pass_trap);
     RUN_TEST(test_gfx_begin_pass_discards_bound_state);
+    RUN_TEST(test_gfx_timer_requires_name_and_output);
+    RUN_TEST(test_gfx_timer_requires_arguments_during_context_loss);
     return UNITY_END();
 }

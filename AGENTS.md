@@ -29,6 +29,26 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
   `bench_shapes`, `atlas_bench`) and the release `builder` carry no probe state or probe bookkeeping,
   the way wasm always has (`tests/` has always been `if(NOT EMSCRIPTEN)`). On a wasm preset the option
   gates only the ctest targets. Test TUs meet NDEBUG in `native-release-test`, a CI-only job.
+- **NT_LOG_MIN_LEVEL** (numeric CMake STRING): 0 INFO, 1 WARN, 2 ERROR, 3 NONE.
+  Plain CMake defaults to 0 regardless of build type. Debug presets and
+  `native-release-test` select 0; production Release presets select 1.
+  Configure the engine, not only the exe.
+  NONE uses the existing stub source through `nt_log`; `nt_log_stub` remains a link-time choice.
+  `scripts/atlas/{benchmark,autoresearch-bench,bench-vector}.sh` select INFO in
+  `build/_cmake/native-release-atlas-bench`; `--no-build` uses that build's executable.
+- **NT_UI_TIMING_ENABLED**, **NT_GFX_GPU_TIMING_ENABLED** (default OFF regardless
+  of build type; Debug presets and `native-release-test` ON, production Release
+  presets OFF): independent producers; neither requires metrics. UI getters return zero
+  with timing OFF; GPU poll reports unavailable. Metrics OFF also removes example host
+  measurement preparation. Validate with `python scripts/check_diagnostics_config.py`
+  and `python scripts/check_diagnostics_runtime.py` (serial; separate build directories;
+  both also run in `scripts/check.sh --push`).
+  The runtime matrix covers existing log/rich-parser consumers at all four floors
+  with FULL asserts, plus TRAP positive paths and inspector ON with UI timing OFF.
+  Browser diagnostics use `tests/browser/diagnostics.spec.ts`; set `NT_SHOWCASE_DIR`
+  to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`, `CI=1` to forbid
+  server reuse, and matching `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Both Debug
+  and Release default to timer values above 32 bits to verify the 64-bit bridge.
 - **NT_HYBRID_HPG** (CMake option, default ON): exe exports the NVIDIA/AMD hint symbols so hybrid-GPU Windows laptops run games on the discrete GPU. OFF for battery-friendly games/tools; the user's per-app Windows graphics preference always overrides the hint.
 - **NT_FONT_EMBOLDEN_ENABLED** (default OFF, debug included): opt in to synthetic font weight and outline. Real B/BI faces, oblique, shadow and line decorations work with OFF. Verify geometry changes in both configurations; the ON mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label`, and all `test_nt_ui_rich_*` suites.
 - **NT_UI_CLAY_DEBUG_VIEW** (default OFF): Clay's built-in view, independent of the Neotolis inspector (`NT_UI_DEBUG_TOOLS`). Enable explicitly and call `Clay_SetDebugModeEnabled(true)` after `nt_ui_begin`; requesting the disabled view asserts through the Clay error handler.
@@ -144,7 +164,7 @@ direct modes never mutate files; `format_and_check.sh` opts into the formatter b
 
 It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage, CRT-pin centralization), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`, `deps/curl`, `deps/zlib`) follow upstream style and are excluded; review patches to them separately.
 
-- Before `git push`: `bash scripts/check.sh --push` — additionally builds native-release (NDEBUG drops NT_ASSERT_FULL-only code, so `-Wunused` under `-Werror` fires where no debug build sees it), wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test.
+- Before `git push`: `bash scripts/check.sh --push` — additionally builds native-release (NDEBUG drops NT_ASSERT_FULL-only code, so `-Wunused` under `-Werror` fires where no debug build sees it), wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test plus the diagnostics configuration/runtime matrices.
 - Full sweep (CI lint equivalent): `bash scripts/check.sh --full` — whole-tree format + full tidy.
 
 If any check fails — fix before committing. Do not commit code that hasn't passed.

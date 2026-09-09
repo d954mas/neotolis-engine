@@ -7,7 +7,7 @@
 
 /* NT_METRICS_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. */
 #ifndef NT_METRICS_ENABLED
-#define NT_METRICS_ENABLED 1
+#error "NT_METRICS_ENABLED must be defined by the nt_metrics target (0 or 1)"
 #endif
 
 /* Window depth per channel ring. 256 keeps the BSS footprint small; note p99.9

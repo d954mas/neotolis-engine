@@ -326,7 +326,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+          sudo apt-get update && sudo apt-get install -y clang llvm ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev xvfb
 
@@ -411,6 +411,11 @@ jobs:
 
       - name: Run tests (release)
         run: xvfb-run ctest --preset native-release-test
+
+      - name: Check diagnostics configuration and runtime matrix
+        run: |
+          python3 scripts/check_diagnostics_config.py
+          python3 scripts/check_diagnostics_runtime.py
 
       - name: Test optional UI features under NDEBUG
         run: |
@@ -739,7 +744,17 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
+
+      - name: Check release diagnostics with independent UI and GPU timing
+        run: |
+          for timing in "0 0" "0 1" "1 0"; do
+            read -r ui gpu <<< "$timing"
+            name="diagnostics-web-ui-$ui-gpu-$gpu"
+            emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
+            cmake --build "build/_cmake/$name" --target browser_smoke
+            (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
+          done
 
   deploy:
     name: Deploy

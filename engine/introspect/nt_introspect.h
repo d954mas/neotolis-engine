@@ -11,13 +11,13 @@
 /* NT_INTROSPECT_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. Set
    build-wide so component describe()/registration see the same value without linking this module. */
 #ifndef NT_INTROSPECT_ENABLED
-#define NT_INTROSPECT_ENABLED 1
+#error "NT_INTROSPECT_ENABLED must be defined by the nt_core target (0 or 1)"
 #endif
 
 /* Write side (component apply / entity.set). Set OFF independently for a read-only deployment tier.
    Build-wide, like NT_INTROSPECT_ENABLED. */
 #ifndef NT_INTROSPECT_WRITE_ENABLED
-#define NT_INTROSPECT_WRITE_ENABLED NT_INTROSPECT_ENABLED
+#error "NT_INTROSPECT_WRITE_ENABLED must be defined by the nt_core target (0 or 1)"
 #endif
 
 /* Max sink container-NESTING depth (entity object = depth 1, each begin_group adds one). Bounds nesting

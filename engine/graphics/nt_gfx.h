@@ -1,6 +1,10 @@
 #ifndef NT_GFX_H
 #define NT_GFX_H
 
+#ifndef NT_GFX_GPU_TIMING_ENABLED
+#error "NT_GFX_GPU_TIMING_ENABLED must be defined by the nt_gfx_interface target"
+#endif
+
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -712,20 +716,18 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
-/* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
- * GL can only have one TIME_ELAPSED query active at a time). Game opens
- * the segments it wants to time; nt_debug_overlay polls "frame" by convention.
- *
- * Pass a stable string literal — the backend hashes for internal slot
- * lookup AND emits glPushDebugGroup so the name shows up in RenderDoc /
- * gDEBugger / Apitrace as a debug group around the timing query
- * (KHR_debug; no-op on WebGL2 where the extension is absent). */
+/* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
+ * name must be non-NULL in every configuration. Use a stable string literal
+ * for hashed lookup and native debug-group
+ * labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
+/* out_ns is required. Compile OFF or stub: false with zero output.
+ * GL timing ON: unsuccessful polls leave output unchanged. */
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
-/* Toggle GPU time-elapsed queries. Default = enabled. Disable for
- * RenderDoc / Spector captures or mobile drivers that stall on it. */
+/* Requires compiled support; the runtime choice starts enabled and survives context loss.
+ * Disable cancels active/pending samples. Supported reports capability. */
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 

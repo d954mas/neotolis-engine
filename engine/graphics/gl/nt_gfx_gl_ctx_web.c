@@ -22,6 +22,8 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     attrs.minorVersion = 0;
     attrs.premultipliedAlpha = desc->premultiplied_alpha;
     attrs.preserveDrawingBuffer = false;
+    /* Capability probes enable only the extensions this build uses. */
+    attrs.enableExtensionsByDefault = false;
 
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
     if (s_gl_context <= 0) {
@@ -83,6 +85,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     return caps;
 }
 
+#if NT_GFX_GPU_TIMING_ENABLED
 /* Enable EXT_disjoint_timer_query_webgl2. Calling getExtension both checks
  * support AND activates the extension's entry points + constants for the
  * current GL context. Returns 1 if available, 0 otherwise. */
@@ -100,10 +103,22 @@ EM_JS(int, nt_gfx_js_enable_timer_query, (void), {
 
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return nt_gfx_js_enable_timer_query() != 0; }
 
+/* Convert the JS number in C; the SDK's u64 heap writer overflows under SAFE_HEAP. */
+// clang-format off
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wextra-semi"
+EM_JS(double, nt_gfx_gl_ctx_query_result, (uint32_t query), {
+    return GL.currentContext.GLctx.getQueryParameter(GL.queries[query], 0x8866 /* GL_QUERY_RESULT */);
+});
+#pragma clang diagnostic pop
+// clang-format on
+
 /* WebGL2 has no KHR_debug equivalent in the spec; Spector.js intercepts at
  * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
  * — segment labeling becomes a no-op on web. */
 bool nt_gfx_gl_ctx_enable_debug_groups(void) { return false; }
+
+#endif
 
 /* WebGL2 has no KHR_debug / glDebugMessageCallback — GL errors surface via the browser console
  * (always on) and Emscripten GL_ASSERTIONS in debug builds. No-op here. */

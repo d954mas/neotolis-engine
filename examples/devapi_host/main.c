@@ -207,11 +207,13 @@ static void render_pattern(void) {
 
 static void frame(void) {
     /* Host owns measurement; nt_metrics only stores. */
+#if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
     double now = nt_time_now();
     float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
     s_last_begin = now;
     double cpu_begin = now;
+#endif
 
     nt_window_poll();
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
@@ -238,6 +240,7 @@ static void frame(void) {
         nt_window_swap_buffers();
     }
 
+#if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
 
     /* Seed a user int + float channel so perf.* has something to observe. The user counter is named
@@ -266,6 +269,7 @@ static void frame(void) {
         .scratch_used = (uint32_t)nt_mem_scratch_used(),
     };
     nt_metrics_sample(&mf);
+#endif
 
     /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
        timeouts catch a hung host). A frame-count cap would also kill long stability sims. */

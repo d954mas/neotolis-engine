@@ -59,13 +59,20 @@ option(NT_FONT_EMBOLDEN_ENABLED "Build synthetic font weight and outline support
 option(NT_UI_CLAY_DEBUG_VIEW "Build the upstream Clay debug view." OFF)
 
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
+set(NT_LOG_MIN_LEVEL "0" CACHE STRING "Compiled log floor: 0=INFO, 1=WARN, 2=ERROR, 3=NONE.")
+set_property(CACHE NT_LOG_MIN_LEVEL PROPERTY STRINGS 0 1 2 3)
+if(NOT NT_LOG_MIN_LEVEL MATCHES "^[0-3]$")
+    message(FATAL_ERROR "NT_LOG_MIN_LEVEL must be 0 (INFO), 1 (WARN), 2 (ERROR), or 3 (NONE).")
+endif()
+option(NT_UI_TIMING_ENABLED "Measure UI layout, tree building and walking." OFF)
+option(NT_GFX_GPU_TIMING_ENABLED "Build optional GPU timer queries and segment labels." OFF)
 # OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
 # Independent of NT_DEVAPI_ENABLED. OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror.
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
-# OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror. Set build-wide below so component describe()/registration agree without linking the module.
+# Published by nt_core so component describe()/registration agree without linking introspect.
 option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
-# Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Build-wide below so component apply()/registration agree without linking introspect.
+# Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Published by nt_core so component apply()/registration agree without linking introspect.
 option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
 # OFF skips tests/ entirely, which is also how a build ends up without the NT_TEST_ACCESS compile
 # define: tests/ is what hands that define to the engine libraries it links. A release measurement
@@ -93,26 +100,10 @@ option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write
 # Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
 option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
 
-# Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
-if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS ENTITY_WRITE CAPTURE)
-        if(NT_DEVAPI_GROUP_${_grp})
-            message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
-                "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "
-                "build the devapi groups.")
-        endif()
-    endforeach()
-endif()
-
 set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off (unsupported), 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
-
-# Build-wide so a component's gated describe()/registration and the nt_introspect TU agree on the value
-# without the component linking the module (it calls the sink only through the passed vtable pointer).
-add_compile_definitions(NT_INTROSPECT_ENABLED=$<BOOL:${NT_INTROSPECT_ENABLED}>)
-add_compile_definitions(NT_INTROSPECT_WRITE_ENABLED=$<BOOL:${NT_INTROSPECT_WRITE_ENABLED}>)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

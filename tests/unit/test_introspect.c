@@ -12,6 +12,7 @@
 #define CAP 9
 static bool s_alpha[CAP];
 static bool s_beta[CAP];
+static unsigned s_describe_calls;
 
 static bool alpha_has(nt_entity_t e) {
     uint16_t i = nt_entity_index(e);
@@ -25,6 +26,7 @@ static void noop_destroy(nt_entity_t e) { (void)e; }
 
 /* alpha exercises the whole sink vocabulary: scalars, bool, floats, str, enum, ref, nested group. */
 static void alpha_describe(nt_entity_t e, nt_introspect_sink *s) {
+    s_describe_calls++;
     (void)e;
     s->field_u64(s, "u", 42);
     s->field_i64(s, "i", -7);
@@ -73,6 +75,7 @@ static bool alpha_apply(nt_entity_t e, const char *key, const nt_write_value *v,
 #endif
 
 void setUp(void) {
+    s_describe_calls = 0;
     nt_entity_init(&(nt_entity_desc_t){.max_entities = CAP - 1});
     memset(s_alpha, 0, sizeof(s_alpha));
     memset(s_beta, 0, sizeof(s_beta));
@@ -169,8 +172,16 @@ void test_introspect_truncation_safe(void) {
 void test_introspect_log_entity_smoke(void) {
     nt_entity_t e = nt_entity_create();
     s_alpha[nt_entity_index(e)] = true;
-    /* Routes the text repr to the log sink (nt_log_stub) without crashing. */
-    nt_log_entity(NT_LOG_LEVEL_INFO, e);
+    for (int level = NT_LOG_LEVEL_INFO; level <= NT_LOG_LEVEL_NONE; level++) {
+        s_describe_calls = 0;
+        nt_log_entity((nt_log_level_t)level, e);
+        TEST_ASSERT_EQUAL_UINT(level >= NT_LOG_MIN_LEVEL && level < NT_LOG_LEVEL_NONE ? 1U : 0U, s_describe_calls);
+    }
+    char buf[256];
+    s_describe_calls = 0;
+    nt_entity_to_string(e, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_UINT(1, s_describe_calls);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "alpha{"));
 }
 
 #if NT_INTROSPECT_WRITE_ENABLED

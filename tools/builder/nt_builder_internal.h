@@ -237,7 +237,6 @@ struct NtBuilderContext {
     char *cache_dir;           /* NULL = caching disabled, set by nt_builder_set_cache_dir */
     uint32_t cache_hit_count;  /* per-build hit stats */
     uint32_t cache_miss_count; /* per-build miss stats */
-    double cache_restore_secs; /* total time reading cache files */
 
     /* Parallel encoding: thread count (0 = single-threaded) */
     uint32_t thread_count;

@@ -486,25 +486,33 @@ static void frame(void) {
     uint32_t item_count = 0;
 
     if (s_scene_loaded) {
+#if NT_LOG_MIN_LEVEL == 0
         static bool s_diag_logged;
         uint32_t skip_vis = 0;
         uint32_t skip_mat = 0;
         uint32_t skip_mesh = 0;
+#endif
 
         for (uint32_t i = 0; i < s_entity_count; i++) {
             if (!nt_render_is_visible(s_entities[i])) {
+#if NT_LOG_MIN_LEVEL == 0
                 skip_vis++;
+#endif
                 continue;
             }
 
             const nt_material_info_t *mat_info = nt_material_get_info(s_materials[i]);
             if (!mat_info || !nt_gfx_program_ready(mat_info->program)) {
+#if NT_LOG_MIN_LEVEL == 0
                 skip_mat++;
+#endif
                 continue;
             }
 
             if (!nt_resource_is_ready(s_mesh_handles[i])) {
+#if NT_LOG_MIN_LEVEL == 0
                 skip_mesh++;
+#endif
                 continue;
             }
 
@@ -518,10 +526,12 @@ static void frame(void) {
             item_count++;
         }
 
+#if NT_LOG_MIN_LEVEL == 0
         if (!s_diag_logged && item_count > 0 && item_count < s_entity_count) {
             nt_log_info(">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u", item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
             s_diag_logged = true;
         }
+#endif
 
         /* Sort items by sort_key */
         nt_sort_by_key(items, item_count, s_sort_scratch);
@@ -582,6 +592,7 @@ static void frame(void) {
         /* Draw all render items */
         nt_mesh_renderer_draw_list(items, item_count);
 
+#if NT_LOG_MIN_LEVEL == 0
         /* Per-second FPS + render stats */
         {
             static double s_stats_accum;
@@ -602,6 +613,7 @@ static void frame(void) {
                 s_stats_max_dt = 0.0F;
             }
         }
+#endif
     }
 
     nt_gfx_end_pass();

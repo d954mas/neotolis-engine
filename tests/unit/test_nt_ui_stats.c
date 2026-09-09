@@ -256,30 +256,6 @@ static void test_counters_reset_each_walk(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
 }
 
-/* walk_ms is non-negative after a real walk and reset to 0.0F on the
- * zero-viewport early-return. Scope: dispatch only (entry flush excluded). */
-static void test_walk_ms_set_then_reset_on_early_return(void) {
-    for (int i = 0; i < 3; ++i) {
-        Clay_RenderCommand *c = &s_test_cmds[i];
-        c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-        c->boundingBox = (Clay_BoundingBox){.x = (float)(i * 20), .y = 0.0F, .width = 10.0F, .height = 10.0F};
-        c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F};
-    }
-    inject_frozen_cmds(3);
-
-    /* Sentinel: a missing walk-exit write leaves -1.0F and trips the assert. */
-    s_fx.ctx->last_walk_ms = -1.0F;
-    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_TRUE(nt_ui_get_last_walk_ms(s_fx.ctx) >= 0.0F);
-
-    /* Zero-width viewport hits the early return, which must zero walk_ms.
-     * Value is non-negative, so "not positive" pins it to exactly 0 without a
-     * float-equality compare. */
-    nt_ui_target_t zero_target = {.viewport = {0.0F, 0.0F, 0.0F, 0.0F}};
-    nt_ui_walk(s_fx.ctx, &zero_target);
-    TEST_ASSERT_FALSE(nt_ui_get_last_walk_ms(s_fx.ctx) > 0.0F);
-}
 // #endregion
 
 int main(void) {
@@ -294,6 +270,5 @@ int main(void) {
     RUN_TEST(test_per_type_mixed_commands);
     RUN_TEST(test_scissor_command_count_and_depth);
     RUN_TEST(test_counters_reset_each_walk);
-    RUN_TEST(test_walk_ms_set_then_reset_on_early_return);
     return UNITY_END();
 }

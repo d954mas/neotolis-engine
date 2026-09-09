@@ -216,6 +216,14 @@ widening this contract.
 
 **Build summary** reports per-asset cache status (cached / miss-new / miss-opts) and aggregate hit/miss counts.
 
+Builder progress, pack dumps and `BENCH` lines use INFO and follow
+`NT_LOG_MIN_LEVEL`. Configure `-DNT_LOG_MIN_LEVEL=0` for tools/scripts that consume
+those reports. The three `scripts/atlas/` benchmarks select INFO in the isolated
+`native-release-atlas-bench` build, preserving their `BENCH` output without changing
+the game's release configuration. Higher floors omit report preparation;
+packing, public atlas statistics and validation remain active. Direct CLI output
+is independent of the logger.
+
 ## Atlas builder
 
 The atlas builder packs a set of sprite images into one or more atlas pages and emits compact runtime metadata (`NT_ASSET_ATLAS`, see [Resource System — asset types](../assets/resource.md)). It is the only "grouping" producer in the builder — every other importer is single-asset.

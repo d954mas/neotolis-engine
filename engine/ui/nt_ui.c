@@ -55,12 +55,16 @@ _Static_assert(sizeof(s_default_element_data) == 256 * sizeof(nt_ui_element_data
 // #region clay_error_handler
 /* All Clay errors are fatal; assert compiles out in NT_ASSERT_OFF builds. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
+#if NT_LOG_MIN_LEVEL < 3
     /* errorText is .length + .chars, NOT NUL-terminated. */
     const int len = err.errorText.length;
     const char *const chars = (err.errorText.chars != NULL && len > 0) ? err.errorText.chars : "(no text)";
     const int safe_len = (err.errorText.chars != NULL && len > 0) ? len : 9;
     const int type = (int)err.errorType;
     NT_LOG_ERROR("clay error type=%d: %.*s", type, safe_len, chars);
+#else
+    (void)err;
+#endif
     NT_ASSERT(false && "nt_ui: Clay reported a contract violation (see preceding log line)");
 }
 // #endregion
@@ -582,13 +586,18 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 #endif
 
     /* Times the Clay layout solve only, not the begin->end span. */
+#if NT_UI_TIMING_ENABLED
     const double layout_t0 = nt_time_now();
+#endif
     ctx->frozen_cmds = Clay_EndLayout();
+#if NT_UI_TIMING_ENABLED
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
-
     const double build_t0 = nt_time_now();
+#endif
     nt_ui_internal_build_tree(ctx);
+#if NT_UI_TIMING_ENABLED
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
+#endif
 
     /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
     nt_ui_internal_resolve_wheel_owners(ctx);
@@ -1841,7 +1850,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         if (update_metrics) {
             ctx->last_walk_draw_call_delta = 0;
             ctx->last_walk_command_count = 0;
+#if NT_UI_TIMING_ENABLED
             ctx->last_walk_ms = 0.0F;
+#endif
             ctx->last_walk_rect_command_count = 0;
             ctx->last_walk_image_command_count = 0;
             ctx->last_walk_text_command_count = 0;
@@ -1868,7 +1879,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         if (update_metrics) {
             ctx->last_walk_draw_call_delta = 0;
             ctx->last_walk_command_count = 0;
+#if NT_UI_TIMING_ENABLED
             ctx->last_walk_ms = 0.0F;
+#endif
             ctx->last_walk_rect_command_count = 0;
             ctx->last_walk_image_command_count = 0;
             ctx->last_walk_text_command_count = 0;
@@ -1888,7 +1901,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     // #region walker-state-init
     /* After entry flush so walk_ms excludes draining the caller's pending geometry. */
+#if NT_UI_TIMING_ENABLED
     const double walk_t0 = nt_time_now();
+#endif
 
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
     int depth = 0;
@@ -2057,7 +2072,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         ctx->last_walk_border_command_count = counters.border_command_count;
         ctx->last_walk_scissor_command_count = counters.scissor_command_count;
         ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
+#if NT_UI_TIMING_ENABLED
         ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
+#endif
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = unlayered_count;
 #endif
@@ -3158,17 +3175,32 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx) {
 
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_layout_ms: ctx must be non-NULL");
+#if NT_UI_TIMING_ENABLED
     return ctx->last_layout_ms;
+#else
+    (void)ctx;
+    return 0.0F;
+#endif
 }
 
 float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_build_tree_ms: ctx must be non-NULL");
+#if NT_UI_TIMING_ENABLED
     return ctx->last_build_tree_ms;
+#else
+    (void)ctx;
+    return 0.0F;
+#endif
 }
 
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_ms: ctx must be non-NULL");
+#if NT_UI_TIMING_ENABLED
     return ctx->last_walk_ms;
+#else
+    (void)ctx;
+    return 0.0F;
+#endif
 }
 
 uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx) {
