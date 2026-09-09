@@ -70,7 +70,7 @@ option(NT_GFX_GPU_TIMING_ENABLED "Build optional GPU timer queries and segment l
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
 # Independent of NT_DEVAPI_ENABLED. OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror.
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
-# OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror. Set build-wide below so component describe()/registration agree without linking the module.
+# Published by nt_core so component describe()/registration agree without linking introspect.
 option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
 # Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Published by nt_core so component apply()/registration agree without linking introspect.
 option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})

@@ -30,12 +30,15 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
   the way wasm always has (`tests/` has always been `if(NOT EMSCRIPTEN)`). On a wasm preset the option
   gates only the ctest targets. Test TUs meet NDEBUG in `native-release-test`, a CI-only job.
 - **NT_LOG_MIN_LEVEL** (numeric CMake STRING): 0 INFO, 1 WARN, 2 ERROR, 3 NONE.
-  Plain CMake/Debug use 0; Release uses 1. Configure the engine, not only the exe.
+  Plain CMake defaults to 0 regardless of build type. Debug presets and
+  `native-release-test` select 0; production Release presets select 1.
+  Configure the engine, not only the exe.
   NONE uses the existing stub source through `nt_log`; `nt_log_stub` remains a link-time choice.
   `scripts/atlas/{benchmark,autoresearch-bench,bench-vector}.sh` select INFO in
   `build/_cmake/native-release-atlas-bench`; `--no-build` uses that build's executable.
-- **NT_UI_TIMING_ENABLED**, **NT_GFX_GPU_TIMING_ENABLED** (default OFF, Debug ON,
-  Release OFF): independent producers; neither requires metrics. UI getters return zero
+- **NT_UI_TIMING_ENABLED**, **NT_GFX_GPU_TIMING_ENABLED** (default OFF regardless
+  of build type; Debug presets and `native-release-test` ON, production Release
+  presets OFF): independent producers; neither requires metrics. UI getters return zero
   with timing OFF; GPU poll reports unavailable. Metrics OFF also removes example host
   measurement preparation. Validate with `python scripts/check_diagnostics_config.py`
   and `python scripts/check_diagnostics_runtime.py` (serial; separate build directories;

@@ -726,12 +726,12 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
  * (KHR_debug; no-op on WebGL2 where the extension is absent). */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
+/* Compile OFF or stub: false with zero output when non-NULL.
+ * GL timing ON: unsuccessful polls leave output unchanged. */
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
-/* Requires NT_GFX_GPU_TIMING_ENABLED. Runtime disable cancels active/pending
- * samples; the choice survives context loss. Supported reports capability.
- * Compile OFF: calls are inert, poll returns
- * false and zeroes non-NULL output. */
+/* Requires compiled support; the runtime choice starts enabled and survives context loss.
+ * Disable cancels active/pending samples. Supported reports capability. */
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 

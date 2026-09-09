@@ -11,10 +11,11 @@ Related: [Module Layout](../core/module-layout.md), [Input](../io/input.md), [Re
 ## Logging levels
 
 `NT_LOG_MIN_LEVEL` selects the compile-time floor: numeric `0` INFO, `1` WARN,
-`2` ERROR, `3` NONE. Plain CMake defaults to INFO; Debug presets select INFO and
-Release presets WARN. Set the cache value when building the engine, not only a
-define on the final executable. `nt_log_interface` publishes the value to its
-consumers. Asserts are a separate policy, below.
+`2` ERROR, `3` NONE. Plain CMake defaults to INFO regardless of build type.
+Debug presets and `native-release-test` select INFO; production Release presets
+select WARN. Set the cache value when building the engine, not only a define on
+the final executable. `nt_log_interface` publishes the value to its consumers.
+Asserts are a separate policy, below.
 
 Below-floor ordinary, domain, ONCE and UNIQUE macros retain no arguments,
 format strings or ONCE latch. Disabled UNIQUE is a boolean `false` expression.
@@ -32,7 +33,8 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 ## Optional measurements
 
 `NT_UI_TIMING_ENABLED` and `NT_GFX_GPU_TIMING_ENABLED` are independent CMake
-options, both OFF by default, ON in Debug presets and OFF in Release presets.
+options, both OFF by default regardless of build type. Debug presets and
+`native-release-test` select ON; production Release presets select OFF.
 Their existing interfaces publish numeric 0/1 values. Neither producer depends
 on `NT_METRICS_ENABLED`: the game may consume measurements directly.
 
@@ -44,11 +46,13 @@ only the walk result.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
 Segment/toggle calls are inert; supported returns false and poll returns false
-with a zero output when non-NULL. With timing compiled ON, an unsuccessful poll
-leaves its output unchanged. Runtime disable closes an active segment and its
-native debug group, cancels pending samples, and retains query objects until
-shutdown. Re-enable starts fresh samples. The runtime choice survives context
-loss; dead-context cleanup performs no GL calls. Support reports capability,
+with a zero output when non-NULL. With timing compiled ON, the GL implementation
+leaves output unchanged on an unsuccessful poll. `nt_gfx_stub` always returns
+false and zeroes non-NULL output, regardless of the timing flag.
+The runtime choice starts enabled and survives context loss. Runtime disable
+closes an active segment and its native debug group, cancels pending samples,
+and retains query objects until shutdown. Re-enable starts fresh samples.
+Dead-context cleanup performs no GL calls. Support reports capability,
 independently of the runtime choice.
 
 WebGL disjoint status is read once at begin-frame only while timing is enabled
