@@ -649,7 +649,7 @@ static int8_t segment_find(nt_hash32_t name_hash) {
 }
 
 void nt_gfx_backend_begin_segment(const char *name) {
-    if (!s_timer_enabled || !s_timer_user_enabled || name == NULL) {
+    if (!s_timer_enabled || !s_timer_user_enabled) {
         return;
     }
     nt_hash32_t name_hash = nt_hash32_str(name);
@@ -748,7 +748,7 @@ void nt_gfx_backend_end_frame(void) {
 // #region GPU timer segments — poll/lifecycle
 #if NT_GFX_GPU_TIMING_ENABLED
 bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
-    if (!s_timer_enabled || !s_timer_user_enabled || name == NULL || out_ns == NULL) {
+    if (!s_timer_enabled || !s_timer_user_enabled) {
         return false;
     }
     nt_hash32_t name_hash = nt_hash32_str(name);
@@ -817,9 +817,7 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
 #else
 bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     (void)name;
-    if (out_ns != NULL) {
-        *out_ns = 0;
-    }
+    *out_ns = 0;
     return false;
 }
 void nt_gfx_backend_drop_timer_segments(void) {}

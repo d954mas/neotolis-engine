@@ -716,17 +716,13 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
-/* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
- * GL can only have one TIME_ELAPSED query active at a time). Game opens
- * the segments it wants to time and polls their results.
- *
- * Pass a stable string literal — the backend hashes for internal slot
- * lookup AND emits glPushDebugGroup so the name shows up in RenderDoc /
- * gDEBugger / Apitrace as a debug group around the timing query
- * (KHR_debug; no-op on WebGL2 where the extension is absent). */
+/* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
+ * name must be non-NULL in every configuration. Use a stable string literal
+ * for hashed lookup and native debug-group
+ * labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
-/* Compile OFF or stub: false with zero output when non-NULL.
+/* out_ns is required. Compile OFF or stub: false with zero output.
  * GL timing ON: unsuccessful polls leave output unchanged. */
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 

@@ -46,9 +46,11 @@ only the walk result.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
 Segment/toggle calls are inert; supported returns false and poll returns false
-with a zero output when non-NULL. With timing compiled ON, the GL implementation
-leaves output unchanged on an unsuccessful poll. `nt_gfx_stub` always returns
-false and zeroes non-NULL output, regardless of the timing flag.
+with a zero output. Segment names and poll output pointers must be non-NULL;
+violations assert even with timing OFF, the stub, or a lost context.
+With timing compiled ON, the GL implementation leaves output unchanged on an
+unsuccessful poll. `nt_gfx_stub` always returns
+false and zeroes output, regardless of the timing flag.
 The runtime choice starts enabled and survives context loss. Runtime disable
 closes an active segment and its native debug group, cancels pending samples,
 and retains query objects until shutdown. Re-enable starts fresh samples.

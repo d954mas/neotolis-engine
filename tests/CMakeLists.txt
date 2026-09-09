@@ -265,7 +265,8 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input_char COMMAND test_input_char)
 
-    add_executable(test_gfx_stub unit/test_gfx_stub.c)
+    add_executable(test_gfx_stub unit/test_gfx_stub.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_gfx_stub PRIVATE unit)
     target_link_libraries(test_gfx_stub PRIVATE nt_gfx_stub unity)
     nt_setup_test_target(test_gfx_stub)
 

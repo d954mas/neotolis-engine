@@ -1422,9 +1422,6 @@ bool nt_gfx_texture_ready(nt_texture_t tex) {
 
 bool nt_gfx_texture_size(nt_texture_t tex, uint16_t *out_width, uint16_t *out_height) {
     NT_ASSERT(out_width != NULL && out_height != NULL);
-    if (out_width == NULL || out_height == NULL) {
-        return false;
-    }
     *out_width = 0;
     *out_height = 0;
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
@@ -2112,7 +2109,8 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
 }
 
 void nt_gfx_begin_segment(const char *name) {
-    if (g_nt_gfx.context_lost || name == NULL) {
+    NT_ASSERT(name != NULL);
+    if (g_nt_gfx.context_lost) {
         return;
     }
     nt_gfx_backend_begin_segment(name);
@@ -2126,8 +2124,9 @@ void nt_gfx_end_segment(void) {
 }
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    NT_ASSERT(name != NULL && out_ns != NULL);
 #if NT_GFX_GPU_TIMING_ENABLED
-    if (g_nt_gfx.context_lost || name == NULL || out_ns == NULL) {
+    if (g_nt_gfx.context_lost) {
         return false;
     }
 #endif

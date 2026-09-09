@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ("test_log_floor", "test_log_api", "test_log_api_stub", "test_log_ring",
-           "test_introspect", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
+           "test_introspect", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native", "test_gfx_stub")
 
 
 def run(command, log):
@@ -38,7 +38,7 @@ def main():
             build = args.output / name
             # Existing consumer contract tests catch assertions through the FULL handler.
             targets = TARGETS + (("test_nt_ui_rich_parse", "test_font", "test_text_renderer",
-                                  "test_mesh_renderer") if asserts == 2 else ())
+                                  "test_mesh_renderer", "test_gfx") if asserts == 2 else ())
             ui_debug = "ON" if floor == 1 else "OFF"
             obs = "ON" if metrics == "ON" else "OFF"
             if obs == "ON":
