@@ -409,13 +409,13 @@ jobs:
       - name: Build native release tests
         run: cmake --build --preset native-release-test
 
-        - name: Run tests (release)
-          run: xvfb-run ctest --preset native-release-test
+      - name: Run tests (release)
+        run: xvfb-run ctest --preset native-release-test
 
-        - name: Check diagnostics configuration and runtime matrix
-          run: |
-            python3 scripts/check_diagnostics_config.py
-            python3 scripts/check_diagnostics_runtime.py
+      - name: Check diagnostics configuration and runtime matrix
+        run: |
+          python3 scripts/check_diagnostics_config.py
+          python3 scripts/check_diagnostics_runtime.py
 
       - name: Test optional UI features under NDEBUG
         run: |

@@ -131,14 +131,14 @@ static void test_discovery_lists_obs_commands(void) {
 #if NT_LOG_RING_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_log_tail_shape_and_n_cap(void) {
-    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "first");
-    nt_log_write(NT_LOG_LEVEL_WARN, "obs", "second");
-    nt_log_write(NT_LOG_LEVEL_ERROR, "obs", "third");
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "obs", "first", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_WARN, "obs", "second", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_ERROR, "obs", "third", NULL);
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":2}}"));
     cJSON *entries = cJSON_GetObjectItemCaseSensitive(result_of(root), "entries");
     TEST_ASSERT_TRUE(cJSON_IsArray(entries));
-    TEST_ASSERT_TRUE(cJSON_GetArraySize(entries) <= 2);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(entries));
     cJSON *e0 = cJSON_GetArrayItem(entries, 0);
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(e0, "level")));
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(e0, "domain")));
@@ -149,11 +149,12 @@ static void test_log_tail_shape_and_n_cap(void) {
 }
 
 static void test_log_tail_level_filter(void) {
-    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "info-line");
-    nt_log_write(NT_LOG_LEVEL_ERROR, "obs", "err-line");
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "obs", "info-line", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_ERROR, "obs", "err-line", NULL);
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"level\":\"error\"}}"));
     cJSON *entries = cJSON_GetObjectItemCaseSensitive(result_of(root), "entries");
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(entries));
     cJSON *e = NULL;
     cJSON_ArrayForEach(e, entries) {
         /* every returned entry is >= error (only the error token survives the filter). */
@@ -671,17 +672,17 @@ static void test_log_sink_idempotent_add_and_remove(void) {
     /* setUp already attached nt_log_ring_sink once; a redundant add must NOT create a second slot. */
     nt_log_add_sink(nt_log_ring_sink, NULL);
     nt_log_ring_clear();
-    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "dedup-line");
+    nt_log_write(NT_LOG_LEVEL_ERROR, "obs", "dedup-line");
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":16}}"));
     cJSON *entries = cJSON_GetObjectItemCaseSensitive(result_of(root), "entries");
     /* one sink -> exactly one ring entry for the single write (a duplicate slot would double it). */
-    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(entries));
+    TEST_ASSERT_EQUAL_INT(NT_LOG_MIN_LEVEL < 3 ? 1 : 0, cJSON_GetArraySize(entries));
     cJSON_Delete(root);
 
     /* remove -> the sink stops capturing; re-add for the next test (tearDown doesn't touch sinks). */
     nt_log_remove_sink(nt_log_ring_sink, NULL);
     nt_log_ring_clear();
-    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "after-remove");
+    nt_log_write(NT_LOG_LEVEL_ERROR, "obs", "after-remove");
     cJSON *root2 = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":16}}"));
     cJSON *entries2 = cJSON_GetObjectItemCaseSensitive(result_of(root2), "entries");
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(entries2));

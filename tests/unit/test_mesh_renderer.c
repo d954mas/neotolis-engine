@@ -357,19 +357,19 @@ void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
     nt_mesh_renderer_draw_list(&item, 1);
     nt_mesh_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
     nt_program_t program = create_test_program();
     nt_material_set_program(mat, program);
     nt_mesh_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, s_program_warnings);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
     nt_gfx_destroy_program(program);
     nt_mesh_renderer_draw_list(&item, 1);
     nt_mesh_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(2, s_program_warnings);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
 }
 
 void test_batch_key_packs_material_and_mesh_slots(void) {

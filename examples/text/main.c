@@ -85,6 +85,7 @@ static uint32_t s_prev_fb_h;
 
 /* ---- Profiling ---- */
 
+#if NT_LOG_MIN_LEVEL == 0
 #define PROF_REPORT_DELAY 5.0 /* seconds after reset before reporting */
 
 static double s_prof_draw_sum;
@@ -97,6 +98,7 @@ static uint32_t s_prof_frames;
 static double s_prof_reset_time; /* time when counters were last reset */
 static bool s_prof_reported;     /* true after report printed for current period */
 static bool s_prof_cjk_reset;    /* true after CJK load triggered a reset */
+#endif
 
 /* ---- Trackball: compose yaw/pitch into camera view ---- */
 
@@ -323,17 +325,23 @@ static void frame(void) {
     }
 
     /* Step font system -- resolves pending resources, uploads GPU data */
+#if NT_LOG_MIN_LEVEL == 0
     double t_font_step = nt_time_now();
+#endif
     nt_font_step();
+#if NT_LOG_MIN_LEVEL == 0
     t_font_step = (nt_time_now() - t_font_step) * 1000.0;
+#endif
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.05F, 0.05F, 0.1F, 1.0F},
         .clear_depth = 1.0F,
     });
 
+#if NT_LOG_MIN_LEVEL == 0
     double t_draw = 0.0;
     double t_flush = 0.0;
+#endif
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
@@ -341,13 +349,19 @@ static void frame(void) {
         nt_text_renderer_set_material(s_text_material);
         nt_text_renderer_set_font(s_font);
 
+#if NT_LOG_MIN_LEVEL == 0
         t_draw = nt_time_now();
+#endif
         draw_text_scene();
+#if NT_LOG_MIN_LEVEL == 0
         t_draw = (nt_time_now() - t_draw) * 1000.0;
 
         t_flush = nt_time_now();
+#endif
         nt_text_renderer_flush();
+#if NT_LOG_MIN_LEVEL == 0
         t_flush = (nt_time_now() - t_flush) * 1000.0;
+#endif
     }
 
     /* Track resize for trackball skip */
@@ -361,6 +375,7 @@ static void frame(void) {
 
     nt_window_swap_buffers();
 
+#if NT_LOG_MIN_LEVEL == 0
     // #region Profiling — accumulate
     s_prof_draw_sum += t_draw;
     s_prof_flush_sum += t_flush;
@@ -397,7 +412,6 @@ static void frame(void) {
     if (!s_prof_reported && s_prof_frames > 0) {
         double now = nt_time_now();
         if (now - s_prof_reset_time >= PROF_REPORT_DELAY) {
-#if NT_LOG_MIN_LEVEL == 0
             double inv = 1.0 / (double)s_prof_frames;
             nt_font_stats_t fs = nt_font_get_stats(s_font);
             const char *label = s_prof_cjk_reset ? "after CJK" : "base";
@@ -409,11 +423,11 @@ static void frame(void) {
             nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)  band %u/%u texels (%.0f%%)", fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
                         fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0, fs.band_texels_used, fs.band_texels_total,
                         fs.band_texels_total > 0 ? 100.0 * fs.band_texels_used / fs.band_texels_total : 0.0);
-#endif
             s_prof_reported = true;
         }
     }
     // #endregion
+#endif
 }
 
 int main(void) {

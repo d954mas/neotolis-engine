@@ -65,17 +65,16 @@ void test_log_set_level_none_filters_all(void) {
 }
 
 /* Content-dedup: same message logs once, repeat is suppressed.
- * Real impl asserts the dedup; the stub build (returns false) smoke-runs the calls. */
+ * Below the floor and in the stub both calls return false. */
 void test_log_unique_dedups_same_message(void) {
     bool first = nt_log_warn_unique("unique-dedup-A id=%d", 7);
     bool again = nt_log_warn_unique("unique-dedup-A id=%d", 7);
-#ifdef NT_LOG_REAL_IMPL
+#if defined(NT_LOG_REAL_IMPL) && NT_LOG_MIN_LEVEL <= 1
     TEST_ASSERT_TRUE(first);  /* first occurrence logs */
     TEST_ASSERT_FALSE(again); /* identical content deduped */
 #else
-    (void)first;
-    (void)again;
-    TEST_PASS();
+    TEST_ASSERT_FALSE(first);
+    TEST_ASSERT_FALSE(again);
 #endif
 }
 
@@ -83,13 +82,12 @@ void test_log_unique_dedups_same_message(void) {
 void test_log_unique_distinct_messages_each_log(void) {
     bool a = nt_log_warn_unique("unique-dedup-B id=%d", 1);
     bool b = nt_log_warn_unique("unique-dedup-B id=%d", 2);
-#ifdef NT_LOG_REAL_IMPL
+#if defined(NT_LOG_REAL_IMPL) && NT_LOG_MIN_LEVEL <= 1
     TEST_ASSERT_TRUE(a);
     TEST_ASSERT_TRUE(b);
 #else
-    (void)a;
-    (void)b;
-    TEST_PASS();
+    TEST_ASSERT_FALSE(a);
+    TEST_ASSERT_FALSE(b);
 #endif
 }
 

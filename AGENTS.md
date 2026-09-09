@@ -39,6 +39,8 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
   with timing OFF; GPU poll reports unavailable. Metrics OFF also removes example host
   measurement preparation. Validate with `python scripts/check_diagnostics_config.py`
   and `python scripts/check_diagnostics_runtime.py` (serial; separate build directories).
+  The runtime matrix covers existing log/rich-parser consumers at all four floors
+  with FULL asserts, plus TRAP positive paths and inspector ON with UI timing OFF.
   Browser diagnostics use `tests/browser/diagnostics.spec.ts`; set `NT_SHOWCASE_DIR`
   to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`, `CI=1` to forbid
   server reuse, and matching `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Release runs

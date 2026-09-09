@@ -611,9 +611,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
 #if NT_LOG_MIN_LEVEL == 0
     double t_encode_start = nt_time_now();
-#endif
     nt_cache_status_t *cache_status = (nt_cache_status_t *)calloc(ctx->pending_count, sizeof(nt_cache_status_t));
     NT_BUILD_ASSERT(cache_status && "finish_pack: alloc failed");
+#endif
     double cache_restore_secs = 0.0;
 
     /* Phase 0: Early dedup on hash + size + opts */
@@ -740,7 +740,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 results[i].format_version = NT_SHADER_CODE_VERSION;
                 results[i].from_cache = true;
                 results[i].encode_secs = 0.0;
+#if NT_LOG_MIN_LEVEL == 0
                 cache_status[i] = NT_CACHE_HIT;
+#endif
                 ctx->cache_hit_count++;
 
 #if NT_LOG_MIN_LEVEL == 0
@@ -750,7 +752,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 (void)fflush(stdout);
                 continue;
             }
+#if NT_LOG_MIN_LEVEL == 0
             cache_status[i] = status;
+#endif
             ctx->cache_miss_count++;
         }
 
@@ -799,14 +803,16 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             results[i].from_cache = true;
 #if NT_LOG_MIN_LEVEL == 0
             cache_restore_secs += nt_time_now() - t_restore_start;
-#endif
             cache_status[i] = NT_CACHE_HIT;
+#endif
             ctx->cache_hit_count++;
             results[i].encode_secs = 0.0;
             NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
             (void)fflush(stdout);
         } else {
+#if NT_LOG_MIN_LEVEL == 0
             cache_status[i] = status;
+#endif
             ctx->cache_miss_count++;
         }
     }
@@ -1303,9 +1309,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     free(results);
     free(opts_hashes);
-    free(cache_status);
     free(work_indices);
 #if NT_LOG_MIN_LEVEL == 0
+    free(cache_status);
     free(gz_sizes);
 #endif
     return NT_BUILD_OK;

@@ -1,6 +1,4 @@
-/* L1 CTest for the nt_log sink hook + nt_log_ring, no devapi.
- * Drives the REAL nt_log impl: attach nt_log_ring_sink via nt_log_add_sink,
- * call nt_log_write, then read the ring back via nt_log_ring_tail. */
+/* Ring storage is independent of the logger floor; integration uses the configured logger. */
 
 #include <setjmp.h>
 #include <stdio.h>
@@ -20,6 +18,7 @@
 
 #if NT_LOG_RING_ENABLED
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL && NT_LOG_MIN_LEVEL < 3
 /* ---- Assert catching (setjmp/longjmp via hookable handler) ---- */
 
 static jmp_buf s_assert_jmp;
@@ -43,6 +42,8 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
         nt_assert_handler = NULL;                                                              \
     } while (0)
 /* clang-format on */
+
+#endif
 
 /* The sink registry has no reset API (sinks live for the program). Register the
  * ring sink exactly once, then each test clears the ring in setUp. */
@@ -68,20 +69,15 @@ static void test_ring_captures_writes(void) {
 
     nt_log_ring_entry_t out[8];
     uint16_t got = nt_log_ring_tail(8, NT_LOG_LEVEL_INFO, out);
-    TEST_ASSERT_EQUAL_UINT16(3, got);
+    TEST_ASSERT_EQUAL_UINT16(3 - NT_LOG_MIN_LEVEL, got);
 
-    /* Newest first. */
-    TEST_ASSERT_EQUAL_INT(NT_LOG_LEVEL_ERROR, out[0].level);
-    TEST_ASSERT_EQUAL_STRING("", out[0].domain); /* NULL domain stored as "" */
-    TEST_ASSERT_EQUAL_STRING("third", out[0].msg);
-
-    TEST_ASSERT_EQUAL_INT(NT_LOG_LEVEL_WARN, out[1].level);
-    TEST_ASSERT_EQUAL_STRING("gfx", out[1].domain);
-    TEST_ASSERT_EQUAL_STRING("second", out[1].msg);
-
-    TEST_ASSERT_EQUAL_INT(NT_LOG_LEVEL_INFO, out[2].level);
-    TEST_ASSERT_EQUAL_STRING("net", out[2].domain);
-    TEST_ASSERT_EQUAL_STRING("hello 1", out[2].msg);
+    const char *domains[] = {"", "gfx", "net"};
+    const char *messages[] = {"third", "second", "hello 1"};
+    for (uint16_t i = 0; i < got && i < sizeof(domains) / sizeof(domains[0]); i++) {
+        TEST_ASSERT_EQUAL_INT(NT_LOG_LEVEL_ERROR - i, out[i].level);
+        TEST_ASSERT_EQUAL_STRING(domains[i], out[i].domain);
+        TEST_ASSERT_EQUAL_STRING(messages[i], out[i].msg);
+    }
 }
 
 /* ---- Test 2: domain AND msg are COPIED (survive a later reuse of the buffers) ---- */
@@ -91,12 +87,12 @@ static void test_ring_copies_domain_and_msg(void) {
     char text[64];
     (void)snprintf(domain, sizeof(domain), "dom_first");
     (void)snprintf(text, sizeof(text), "first message");
-    nt_log_write(NT_LOG_LEVEL_INFO, domain, "%s", text);
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, domain, text, NULL);
 
-    /* Overwrite the source buffers, then write again (reuses nt_log's internal msg[]). */
+    /* Reusing the input buffers must not change a stored entry. */
     (void)snprintf(domain, sizeof(domain), "dom_second");
     (void)snprintf(text, sizeof(text), "second message");
-    nt_log_write(NT_LOG_LEVEL_INFO, domain, "%s", text);
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, domain, text, NULL);
 
     nt_log_ring_entry_t out[4];
     uint16_t got = nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out);
@@ -114,7 +110,9 @@ static void test_ring_copies_domain_and_msg(void) {
 static void test_ring_overflow_caps(void) {
     const int total = NT_LOG_RING_DEPTH + 5;
     for (int i = 0; i < total; i++) {
-        nt_log_write(NT_LOG_LEVEL_INFO, "d", "entry %d", i);
+        char text[32];
+        (void)snprintf(text, sizeof(text), "entry %d", i);
+        nt_log_ring_sink(NT_LOG_LEVEL_INFO, "d", text, NULL);
     }
 
     /* Ask for more than depth — capped at stored count (== depth). */
@@ -134,7 +132,7 @@ static void test_ring_overflow_caps(void) {
 /* ---- Test 4: tail(n) with n > stored returns only stored; n capped at depth ---- */
 
 static void test_ring_tail_caps_n(void) {
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "only");
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "d", "only", NULL);
     nt_log_ring_entry_t out[8];
 
     /* n larger than stored count. */
@@ -150,10 +148,10 @@ static void test_ring_tail_caps_n(void) {
 /* ---- Test 5: level filter returns only entries >= min_level, newest-first ---- */
 
 static void test_ring_level_filter(void) {
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "i0");
-    nt_log_write(NT_LOG_LEVEL_WARN, "d", "w0");
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "i1");
-    nt_log_write(NT_LOG_LEVEL_ERROR, "d", "e0");
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "d", "i0", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_WARN, "d", "w0", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "d", "i1", NULL);
+    nt_log_ring_sink(NT_LOG_LEVEL_ERROR, "d", "e0", NULL);
 
     nt_log_ring_entry_t out[8];
     uint16_t got = nt_log_ring_tail(8, NT_LOG_LEVEL_WARN, out);
@@ -170,12 +168,13 @@ static void test_ring_level_filter(void) {
 /* ---- Test 6: clear empties the ring ---- */
 
 static void test_ring_clear(void) {
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "x");
+    nt_log_ring_sink(NT_LOG_LEVEL_INFO, "d", "x", NULL);
     nt_log_ring_clear();
     nt_log_ring_entry_t out[4];
     TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out));
 }
 
+#if NT_LOG_MIN_LEVEL < 3
 /* ---- oversize message truncation lands on a UTF-8 codepoint boundary ----
    nt_log_write truncates a >NT_LOG_BUF_SIZE (512) message and appends "...". The stored ring line is
    serialized as a JSON string; cJSON rejects invalid UTF-8, so the marker must never orphan a split
@@ -217,7 +216,7 @@ static void test_truncation_marker_ascii(void) {
     char big[1024];
     memset(big, 'a', sizeof(big) - 1);
     big[sizeof(big) - 1] = '\0';
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "%s", big);
+    nt_log_write(NT_LOG_LEVEL_ERROR, "d", "%s", big);
 
     nt_log_ring_entry_t out[2];
     uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
@@ -238,7 +237,7 @@ static void test_truncation_marker_utf8_boundary(void) {
         big[w++] = (char)0xA9;
     }
     big[w] = '\0';
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "%s", big);
+    nt_log_write(NT_LOG_LEVEL_ERROR, "d", "%s", big);
 
     nt_log_ring_entry_t out[2];
     uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
@@ -262,7 +261,7 @@ static void test_unique_truncation_marker_utf8_boundary(void) {
         big[w++] = (char)0xA9;
     }
     big[w] = '\0';
-    TEST_ASSERT_TRUE(nt_log_write_unique(NT_LOG_LEVEL_INFO, "d", "%s", big)); /* first sight -> logs */
+    TEST_ASSERT_TRUE(nt_log_write_unique(NT_LOG_LEVEL_ERROR, "d", "%s", big)); /* first sight -> logs */
 
     nt_log_ring_entry_t out[2];
     uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
@@ -280,18 +279,21 @@ static void test_add_sink_idempotent_and_remove(void) {
     /* setUp already attached (nt_log_ring_sink, NULL); a redundant add must not duplicate it. */
     nt_log_add_sink(nt_log_ring_sink, NULL);
     nt_log_ring_clear();
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "once");
+    nt_log_write(NT_LOG_LEVEL_ERROR, "d", "once");
     nt_log_ring_entry_t out[4];
     TEST_ASSERT_EQUAL_UINT16(1, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out)); /* one sink -> one entry */
 
     nt_log_remove_sink(nt_log_ring_sink, NULL);
     nt_log_ring_clear();
-    nt_log_write(NT_LOG_LEVEL_INFO, "d", "after-remove");
+    nt_log_write(NT_LOG_LEVEL_ERROR, "d", "after-remove");
     TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out)); /* removed -> nothing */
 
     nt_log_add_sink(nt_log_ring_sink, NULL); /* restore for subsequent tests */
 }
 
+#endif
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL && NT_LOG_MIN_LEVEL < 3
 /* ---- Test 7: nt_log_add_sink overflow is a host-call assert (4-sink boundary) ----
  * The ring sink already consumed one slot; fill the rest with distinct pairs, then a final add asserts. */
 
@@ -315,6 +317,8 @@ static void test_add_sink_overflow_asserts(void) {
     EXPECT_ASSERT(nt_log_add_sink(noop_sink, &s_sink_user_tags[NT_LOG_MAX_SINKS]));
 }
 
+#endif
+
 int main(void) {
     (void)setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
@@ -324,11 +328,15 @@ int main(void) {
     RUN_TEST(test_ring_tail_caps_n);
     RUN_TEST(test_ring_level_filter);
     RUN_TEST(test_ring_clear);
+#if NT_LOG_MIN_LEVEL < 3
     RUN_TEST(test_truncation_marker_ascii);
     RUN_TEST(test_truncation_marker_utf8_boundary);
     RUN_TEST(test_unique_truncation_marker_utf8_boundary);
     RUN_TEST(test_add_sink_idempotent_and_remove);
+#endif
+#if NT_ASSERT_MODE == NT_ASSERT_FULL && NT_LOG_MIN_LEVEL < 3
     RUN_TEST(test_add_sink_overflow_asserts); /* keep LAST: permanently fills the sink registry */
+#endif
     return UNITY_END();
 }
 

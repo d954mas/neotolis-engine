@@ -350,7 +350,11 @@ void test_font_unready_pair_keeps_cpu_queries_gpu_free(void) {
         s_error_count = 0;
         nt_gfx_fake_fail_texture_creates(mask);
         nt_font_t font = nt_font_create(&desc);
+#if NT_LOG_MIN_LEVEL < 3
         TEST_ASSERT_GREATER_THAN_UINT32(0U, s_error_count);
+#else
+        TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
+#endif
         const nt_texture_t original_curve = nt_font_get_curve_texture(font);
         const nt_texture_t original_band = nt_font_get_band_texture(font);
         TEST_ASSERT_EQUAL((mask & 1U) == 0U, nt_gfx_texture_ready(original_curve));
