@@ -133,6 +133,7 @@ static void test_disable_active_balances_query_and_debug_group(void) {
         TEST_ASSERT_FALSE(nt_gfx_backend_poll_segment_time_ns("active", &out));
     }
     TEST_ASSERT_EQUAL_UINT(allocated, s_gen_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_delete_count);
     TEST_ASSERT_EQUAL_UINT(1, s_begin_count);
     TEST_ASSERT_EQUAL_UINT(1, s_end_count);
     TEST_ASSERT_EQUAL_UINT(1, s_pop_count);

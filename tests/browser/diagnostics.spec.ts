@@ -323,6 +323,7 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
       window.__ntTimerLoss = extension;
       control.supported = supported;
       control.reset();
+      control.extensions.length = 0;
       extension.loseContext();
       api.gpu_command(2);
       return control.calls;
@@ -359,7 +360,7 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
     expect(restored.whileOff).toEqual(zero);
     expect(restored.old).toBe(-1);
     expect(restored.resumed).toEqual(supported ? { ...zero, create: 8, begin: 1, end: 1 } : zero);
-    expect(restored.timerExtensions).toBe(expected.gpu ? (supportedAfterRestore ? 3 : 2) : 0);
+    expect(restored.timerExtensions).toBe(expected.gpu ? 1 : 0);
     const pixels = await page.evaluate(() => {
       const api = (window as unknown as { __nt: DiagnosticsHooks }).__nt;
       return [api.float_probe(0), api.float_probe(1)];

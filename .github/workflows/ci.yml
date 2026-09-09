@@ -746,13 +746,14 @@ jobs:
       - name: Run browser smoke test
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
 
-      - name: Check release diagnostics with and without GPU timing
+      - name: Check release diagnostics with independent UI and GPU timing
         run: |
-          for gpu in 0 1; do
-            name="diagnostics-web-$gpu"
-            emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
+          for timing in "0 0" "0 1" "1 0"; do
+            read -r ui gpu <<< "$timing"
+            name="diagnostics-web-ui-$ui-gpu-$gpu"
+            emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
             cmake --build "build/_cmake/$name" --target browser_smoke
-            (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI=0 NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
+            (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
           done
 
   deploy:
