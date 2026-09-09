@@ -28,6 +28,10 @@ bool nt_gfx_gl_ctx_enable_timer_query(void);
  * / Apitrace / gDEBugger show segment names as debug groups. */
 bool nt_gfx_gl_ctx_enable_debug_groups(void);
 
+#ifdef NT_PLATFORM_WEB
+double nt_gfx_gl_ctx_query_result(uint32_t query);
+#endif
+
 #endif
 
 /* Install a KHR_debug message callback that routes GL errors to NT_LOG_ERROR + assert, synchronously

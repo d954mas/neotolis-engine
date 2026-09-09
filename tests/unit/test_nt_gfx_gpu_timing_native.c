@@ -183,6 +183,23 @@ static void test_lost_setter_and_drop_do_not_touch_dead_names(void) {
     nt_gfx_backend_end_segment();
 }
 
+static void test_full_ready_ring_reuses_oldest_without_reading_discarded_result(void) {
+    for (unsigned int i = 0; i < NT_GFX_TIMER_RING; i++) {
+        nt_gfx_backend_begin_segment("full");
+        nt_gfx_backend_end_segment();
+    }
+    s_fixture_available = true;
+    nt_gfx_backend_begin_segment("full");
+    nt_gfx_backend_end_segment();
+    TEST_ASSERT_EQUAL_UINT(1, s_available_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_result_count);
+    TEST_ASSERT_EQUAL_UINT(NT_GFX_TIMER_RING, s_gen_count);
+    uint64_t out = 0;
+    TEST_ASSERT_TRUE(nt_gfx_backend_poll_segment_time_ns("full", &out));
+    TEST_ASSERT_EQUAL_UINT64(s_fixture_result, out);
+    TEST_ASSERT_EQUAL_UINT(1, s_result_count);
+}
+
 static void test_shutdown_closes_active_then_deletes_retained_queries(void) {
     nt_gfx_backend_begin_segment("shutdown");
     unsigned int allocated = s_gen_count;
@@ -232,6 +249,7 @@ int main(void) {
     RUN_TEST(test_disable_active_balances_query_and_debug_group);
     RUN_TEST(test_pending_cancelled_and_reenable_returns_only_new_result);
     RUN_TEST(test_lost_setter_and_drop_do_not_touch_dead_names);
+    RUN_TEST(test_full_ready_ring_reuses_oldest_without_reading_discarded_result);
     RUN_TEST(test_shutdown_closes_active_then_deletes_retained_queries);
     RUN_TEST(test_lost_shutdown_does_not_delete_queries);
 #endif

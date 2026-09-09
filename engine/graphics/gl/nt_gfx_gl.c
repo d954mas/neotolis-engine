@@ -57,14 +57,6 @@
 #define GL_DEBUG_SOURCE_APPLICATION 0x824A
 #endif
 
-#ifdef NT_PLATFORM_WEB
-/* EXT_disjoint_timer_query_webgl2 — only the 64-bit getter needs the EXT suffix. */
-extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
-#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64vEXT((id), (pname), (out))
-#else
-#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64v((id), (pname), (out))
-#endif
-
 #endif
 
 /* ---- Pipeline backend data ---- */
@@ -179,7 +171,6 @@ typedef struct {
     bool in_flight[NT_GFX_TIMER_RING];
     uint8_t head;
     uint8_t tail;
-    uint64_t last_result_ns; /* most recent successful poll value */
 } nt_gfx_segment_state_t;
 
 static bool s_timer_enabled;             /* extension/core entry points present */
@@ -645,7 +636,6 @@ static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
     memset(seg->in_flight, 0, sizeof(seg->in_flight));
     seg->head = 0;
     seg->tail = 0;
-    seg->last_result_ns = 0;
     return (int8_t)(s_segment_count++);
 }
 
@@ -674,9 +664,6 @@ void nt_gfx_backend_begin_segment(const char *name) {
         GLuint avail = 0;
         glGetQueryObjectuiv(q_old, GL_QUERY_RESULT_AVAILABLE, &avail);
         if (avail) {
-            GLuint64 result = 0;
-            nt_gl_get_query_u64(q_old, GL_QUERY_RESULT, &result);
-            seg->last_result_ns = (uint64_t)result;
             seg->in_flight[seg->tail] = false;
             seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
         } else {
@@ -785,10 +772,13 @@ bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
         return false;
     }
 
+#ifdef NT_PLATFORM_WEB
+    *out_ns = (uint64_t)nt_gfx_gl_ctx_query_result(q);
+#else
     GLuint64 result = 0;
-    nt_gl_get_query_u64(q, GL_QUERY_RESULT, &result);
+    glGetQueryObjectui64v(q, GL_QUERY_RESULT, &result);
     *out_ns = (uint64_t)result;
-    seg->last_result_ns = (uint64_t)result;
+#endif
     seg->in_flight[seg->tail] = false;
     seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
     /* Re-arm ring-full warning: a successful drain means the system recovered.

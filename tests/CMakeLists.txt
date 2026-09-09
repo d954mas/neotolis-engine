@@ -844,6 +844,11 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    add_executable(test_builder_codegen unit/test_builder_codegen.c)
+    target_link_libraries(test_builder_codegen PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_compile_definitions(test_builder_codegen PRIVATE NT_LOG_DOMAIN="builder_codegen_test" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_codegen)
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
     set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 

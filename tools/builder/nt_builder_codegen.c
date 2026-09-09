@@ -156,9 +156,7 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
      * rearranges entries (the per-index init loop below would otherwise let
      * the analyzer mark post-qsort reads as reading garbage). */
     CodegenCollisionEntry *sorted = (CodegenCollisionEntry *)calloc(count, sizeof(CodegenCollisionEntry));
-    if (!sorted) {
-        return;
-    }
+    NT_BUILD_ASSERT(sorted && "codegen: collision check alloc failed");
 
     for (uint32_t i = 0; i < count; i++) {
         sorted[i].index = i;

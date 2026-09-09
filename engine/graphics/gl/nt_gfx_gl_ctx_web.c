@@ -103,6 +103,16 @@ EM_JS(int, nt_gfx_js_enable_timer_query, (void), {
 
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return nt_gfx_js_enable_timer_query() != 0; }
 
+/* Convert the JS number in C; the SDK's u64 heap writer overflows under SAFE_HEAP. */
+// clang-format off
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wextra-semi"
+EM_JS(double, nt_gfx_gl_ctx_query_result, (uint32_t query), {
+    return GL.currentContext.GLctx.getQueryParameter(GL.queries[query], 0x8866 /* GL_QUERY_RESULT */);
+});
+#pragma clang diagnostic pop
+// clang-format on
+
 /* WebGL2 has no KHR_debug equivalent in the spec; Spector.js intercepts at
  * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
  * — segment labeling becomes a no-op on web. */

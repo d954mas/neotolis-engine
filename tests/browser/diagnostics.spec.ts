@@ -33,9 +33,7 @@ const expected = {
   metrics: Number(process.env.NT_DIAGNOSTICS_METRICS ?? 1),
 };
 const zero: TimerCalls = { create: 0, remove: 0, begin: 0, end: 0, available: 0, result: 0, disjoint: 0 };
-// Emscripten 4.0.19 SAFE_HEAP rejects the u64 helper's low-word assignment above 32 bits.
-// Release matrix selects a value above 32 bits to verify the full bridge separately.
-const timerBase = Number(process.env.NT_DIAGNOSTICS_TIMER_BASE ?? 1_000_000);
+const timerBase = Number(process.env.NT_DIAGNOSTICS_TIMER_BASE ?? 4_294_967_296);
 
 async function installTimers(page: Page, supported = true): Promise<void> {
   await page.addInitScript(({ supported, timerBase }) => {

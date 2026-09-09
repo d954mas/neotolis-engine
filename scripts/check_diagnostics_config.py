@@ -111,7 +111,8 @@ class Checks:
         print("PASS: missing configuration, invalid floors and missing domains fail for the intended diagnostics")
 
     def cmake(self):
-        source = self.output / "parent"
+        work = Path(tempfile.mkdtemp(prefix="cmake-", dir=self.output)).resolve()
+        source = work / "parent"
         shutil.copytree(FIXTURE, source)
         common = [self.args.cmake, "-S", str(source), "-G", self.args.generator,
                   f"-DENGINE_ROOT={ROOT.as_posix()}", f"-DCMAKE_C_COMPILER={self.args.cc}",
@@ -128,7 +129,7 @@ class Checks:
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }
         for name, settings in policies.items():
-            build = self.output / f"cmake-{name}"
+            build = work / name
             args = [f"-D{k}={v}" for k, v in settings.items()]
             output = self.command(f"configure-{name}", common + ["-B", str(build), f"-DNT_PRESET_NAME=diagnostics-{name}"] + args)
             for block in output.split("\n\n"):
@@ -161,12 +162,15 @@ class Checks:
                               "NT_INTROSPECT_WRITE_ENABLED": "OFF"}, r"NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED"),
         ]
         for name, settings, expected in invalid:
-            build = self.output / f"invalid-{name}"
+            build = work / f"invalid-{name}"
             self.command(f"configure-invalid-{name}", common + ["-B", str(build), "-DNT_DEVAPI_ENABLED=ON"]
                          + [f"-D{k}={v}" for k, v in settings.items()], expected)
         for value in ("-1", "4", "WARN", "1x"):
-            self.command(f"configure-floor-{value}", common + ["-B", str(self.output / f"invalid-floor-{value}"),
+            self.command(f"configure-floor-{value}", common + ["-B", str(work / f"invalid-floor-{value}"),
                          f"-DNT_LOG_MIN_LEVEL={value}"], r"NT_LOG_MIN_LEVEL must be 0")
+        if work.parent != self.output.resolve():
+            raise RuntimeError(f"refusing to remove build directory outside evidence: {work}")
+        shutil.rmtree(work)
         print("PASS: parent/sibling target propagation, real/stub linking, NONE archive, missing implementation and devapi guards")
 
 
