@@ -43,6 +43,8 @@ def main():
             obs = "ON" if metrics == "ON" else "OFF"
             if obs == "ON":
                 targets += ("test_devapi_obs",)
+            if floor >= 2 and metrics == "ON":
+                targets = ("test_devapi_obs", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                  f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",

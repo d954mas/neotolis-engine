@@ -326,7 +326,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+          sudo apt-get update && sudo apt-get install -y clang llvm ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev xvfb
 
