@@ -2664,5 +2664,47 @@
       "raw": 1305313,
       "gzip": 113369
     }
+  },
+  {
+    "commit": "37d7f11",
+    "date": "2026-09-10T17:36:01Z",
+    "files": {
+      "index.html": {
+        "raw": 2557,
+        "gzip": 1283
+      },
+      "index_simd.wasm": {
+        "raw": 216180,
+        "gzip": 86026
+      },
+      "index.wasm": {
+        "raw": 207188,
+        "gzip": 85426
+      },
+      "index_simd.js": {
+        "raw": 19624,
+        "gzip": 7941
+      },
+      "index.js": {
+        "raw": 19624,
+        "gzip": 7936
+      },
+      "assets/slice9_demo.ntpack": {
+        "raw": 1066952,
+        "gzip": 18119
+      }
+    },
+    "engine": {
+      "raw": 238361,
+      "gzip": 95250
+    },
+    "resources": {
+      "raw": 1066952,
+      "gzip": 18119
+    },
+    "total": {
+      "raw": 1305313,
+      "gzip": 113369
+    }
   }
 ]
