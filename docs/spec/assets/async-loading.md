@@ -40,28 +40,27 @@ typedef enum {
 ## Pack loading flow
 
 ```text
-game code: pack_request_load("world.pak")
-  → PackMeta.state = REQUESTED
-  → platform_web calls fetch() via JS bridge
+game code: nt_resource_mount(pack_id, priority)
+  → nt_resource_load_url(pack_id, url)
+  → HTTP wrapper starts fetch through its JS bridge
 
 ... N frames pass ...
 
-JS callback → WASM: platform_on_fetch_complete(request_id, blob_ptr, blob_size, success)
-  → PackMeta.state = LOADED
-  → PackMeta.blob = blob_ptr
+JS completion callback
+  → HTTP request stores the received WASM buffer and completion state
 
-Next resource_step():
-  → sees LOADED pack
-  → parses header/manifest (NTPACK format, direct struct read)
-  → registers AssetMeta entries (state = REGISTERED)
-  → PackMeta.state = READY
+Next nt_resource_step():
+  → polls the HTTP request and takes its completed buffer
+  → first load: parses the manifest and registers assets (BLOB owners are READY)
+  → reload after eviction: restores bytes for retained records without reparsing
+  → pack state = READY
 
-Asset activation (eager with rate-limit):
-  → resource_step() processes up to N assets per frame
+Asset activation (eager with a time budget):
+  → visits eligible canonical owners in pack-index, then asset-index order
   → reads data from blob by offset/size
   → parses runtime format
-  → creates GPU resources / decodes audio
-  → AssetState = READY
+  → calls the registered asset-type activator
+  → owner state = READY on a nonzero handle, FAILED otherwise
 
 Resolve/publication:
   → dirty slots run a resolve pass after activation / mount / unmount / priority change / invalidation
@@ -191,7 +190,14 @@ rejection).
 
 ## Asset activation strategy
 
-**Eager with a time budget**: when a pack becomes READY, `resource_step()` activates canonical owners in registry order. It guarantees at least one attempt per step when work is available; a zero budget is unlimited. Aliases consume no activation attempts and read owner state directly, regardless of registry order or which names the game requested. BLOB owners become READY during parse. Success and failure both dirty resolve; failure stays terminal until explicit invalidation/reload, without independent alias retries.
+**Eager with a time budget:** `nt_resource_step()` visits packs by registry index,
+then their canonical owners by asset index. Only READY packs with resident bytes
+and REGISTERED owners with an activator are eligible. At least one eligible
+activation is attempted per step; a zero budget is unlimited. Aliases consume no
+activation attempts and read owner state directly, regardless of which names
+the game requested. BLOB owners become READY during parse. Success and failure
+both dirty resolve. Failed activation requires explicit type invalidation or
+unmount/remount to retry; restoring evicted bytes alone does not reset its state.
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

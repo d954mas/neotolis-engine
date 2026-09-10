@@ -654,10 +654,7 @@ void nt_resource_step(void) {
 
                 /* The retained size identifies parsed packs, including empty manifests. */
                 if (pack->blob_size != 0) {
-                    /* Re-download after blob eviction: restore blob, skip re-parse.
-                     * Assumes pack content is immutable -- same URL/path always returns
-                     * identical data. If hot-update is ever needed, validate CRC32 here
-                     * and fall through to full re-parse on mismatch. */
+                    /* Retained records require identical bytes; content replacement needs a remount. */
                     NT_ASSERT(loaded_size == pack->blob_size);
                     pack->blob = loaded_blob;
                     pack->blob_size = loaded_size;
@@ -798,7 +795,7 @@ void nt_resource_step(void) {
                     free((void *)pack->blob);
                 }
                 pack->blob = NULL;
-                /* Keep blob_size -- used to validate re-download returns same data */
+                /* Preserve the parsed-pack marker and expected reload size. */
             }
         }
     }

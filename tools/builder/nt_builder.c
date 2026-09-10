@@ -682,8 +682,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
     NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
-    /* PAR-03: Initialize global state before any encode (thread-safe prerequisite).
-     * Check if any pending non-deduped texture entry has compression. */
+    /* Basis global initialization must finish before encode workers start. */
     bool needs_basis = false;
     for (uint32_t i = 0; i < ctx->pending_count && !needs_basis; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
@@ -893,7 +892,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_BUILD_ASSERT(!atomic_load(&pctx.error_flag) && "parallel encode: one or more assets failed -- see errors above");
 
     } else if (work_count > 0) {
-        /* --- SINGLE-THREADED ENCODE (backward compatible) --- */
+        /* Single-threaded encode */
         for (uint32_t wi = 0; wi < work_count; wi++) {
             uint32_t i = work_indices[wi];
             NtBuildEntry *pe = &ctx->pending[i];

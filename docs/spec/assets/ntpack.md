@@ -46,10 +46,8 @@ Custom flat binary format instead of ZIP. Rationale:
 │   ...                                 │
 ╞══════════════════════════════════════╡
 │ [padding to 8-byte alignment]         │
-│ [asset 0 binary data]                 │
-│ [asset 1 binary data]                 │
-│ ...                                   │
-│ [asset N-1 binary data]               │
+│ [unique asset payloads + alignment]   │
+│ aliases share their owner's range    │
 ╞══════════════════════════════════════╡
 │ [meta section] (optional)             │
 │   NtMetaEntryHeader + payload ...     │
@@ -58,6 +56,11 @@ Custom flat binary format instead of ZIP. Rationale:
 ```
 
 Assets aligned to 4 bytes (NT_PACK_ASSET_ALIGN). Header/entries region aligned to 8 bytes (NT_PACK_DATA_ALIGN) before data start. Meta section appended after asset data, covered by CRC32. Resident copy made at parse time (survives blob eviction).
+
+Every entry stores its own file-relative `offset` and `size`, including aliases.
+The builder adds the final `header_size` to payload-buffer offsets when writing
+the manifest. `owner_entry` identifies shared runtime ownership; it is not needed
+to find the payload bytes.
 
 ## Version policy
 
@@ -75,7 +78,7 @@ NtMetaEntryHeader (20 bytes, packed):
     /* uint8_t data[size] follows immediately */
 ```
 
-Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — returns pointer to resident memory, NULL if absent.
+Query: `nt_resource_get_meta(handle, nt_hash64_str("tag"), &size)` — returns pointer to resident memory, NULL if absent.
 
 ## Runtime parsing
 
@@ -88,8 +91,9 @@ corrected pack can load into the same mount. Capacity exhaustion asserts.
 Each mount accepts one successful parse, including an empty pack. A later parse
 returns `NT_ERR_INVALID_ARG` even after blob eviction: eviction preserves the
 registered assets, metadata and original blob size. Resource-managed I/O restores
-evicted bytes through its existing reload path without parsing the manifest again.
-Unmount and mount again to replace the pack.
+evicted bytes without parsing the manifest again. The URL/path must return
+identical bytes for the mount's lifetime: reload asserts the size matches but
+does not recheck the CRC or manifest. Unmount and mount again to replace the pack.
 
 For direct parsing without resource-managed I/O, success retains the caller's
 blob pointer without copying or taking ownership. The caller keeps the bytes
@@ -129,13 +133,10 @@ The existing resident metadata copy remains separate and survives blob eviction.
 
 ## Asset data access
 
-```c
-const uint8_t *pack_get_asset_data(const PackMeta *pack, uint32_t offset, uint32_t size) {
-    return pack->blob_data + offset;
-}
-```
-
-Zero copy. Data is already in WASM heap.
+With the pack blob resident, a validated entry's payload begins at
+`blob + entry.offset` and spans `entry.size` bytes. Runtime activators borrow
+that range. `nt_resource_get_blob` returns the bytes after `NtBlobAssetHeader`
+for a published BLOB resource; its public contract defines the view's lifetime.
 
 ## Debugging
 

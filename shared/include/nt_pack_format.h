@@ -12,24 +12,8 @@
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
 #define NT_PACK_MAGIC 0x4B41504E
 #define NT_PACK_VERSION 3
-/*
- * Alignment constants for zero-copy access.
- *
- * When runtime loads a .ntpack blob it casts pointers directly into the data:
- *   const NtMeshAssetHeader* mesh = (NtMeshAssetHeader*)(blob + entry->offset);
- *
- * Unaligned offset would be UB on strict-alignment platforms and slower
- * everywhere else. WASM is tolerant to misalignment today, but we align
- * anyway for correctness, portability, and to match the spec
- * (docs/spec/assets/ntpack.md).
- *
- * NT_PACK_DATA_ALIGN (8) — padding between header/entries region and first
- *   asset data. Ensures data region starts at 8-byte boundary.
- * NT_PACK_ASSET_ALIGN (4) — padding between individual assets inside the
- *   data region. 4 bytes covers our largest primitive (uint32_t).
- *
- * align must be a power of two.
- */
+/* Align payloads for direct runtime reads: individual assets to 4 bytes,
+ * the data region after the manifest to 8 bytes. Alignment must be a power of two. */
 #define NT_PACK_ASSET_ALIGN 4
 #define NT_PACK_DATA_ALIGN 8
 
@@ -45,15 +29,7 @@ typedef enum {
     NT_ASSET_ATLAS = 6,       /* atlas region metadata (polygon vertices + UVs + origin) */
 } nt_asset_type_t;
 
-/*
- * PackHeader: 32 bytes total (packed, 8-byte aligned for NtAssetEntry that follows).
- * magic(4) + meta_count(4) + version(2) + asset_count(2) +
- * header_size(4) + total_size(4) + checksum(4) + meta_offset(4) + _pad(4) = 32
- *
- * Fields ordered so every field sits on its natural alignment boundary
- * (uint32 at 4-byte, uint16 at 2-byte). This avoids slow unaligned
- * access when casting directly from a loaded blob pointer.
- */
+/* PackHeader: 32 bytes; field offsets preserve natural alignment in an aligned blob. */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;       /* 0:  NT_PACK_MAGIC ("NPAK") */
@@ -64,7 +40,7 @@ typedef struct {
     uint32_t total_size;  /* 16: total file size in bytes */
     uint32_t checksum;    /* 20: CRC32 of data after header */
     uint32_t meta_offset; /* 24: byte offset from file start to meta section (0 = no meta) */
-    uint32_t _pad;        /* 28: align to 32 bytes (NtAssetEntry requires 8-byte alignment) */
+    uint32_t _pad;        /* 28: keep manifest start at byte 32 */
 } NtPackHeader;
 #pragma pack(pop)
 

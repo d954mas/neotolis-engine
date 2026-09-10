@@ -96,10 +96,9 @@ was itself deduplicated later. Metadata is assigned per resource ID after both
 paths. Sharing is local to one pack; the runtime does not infer ownership from
 equal ranges. Pack dumps use the same authored links for duplicate statistics.
 
-NTPACK v3 replaces the redundant per-entry format version with this ordinal while
-keeping the 24-byte entry layout. Actual payload-header versions and raw encoded
-cache contents are unchanged; a manifest-only migration does not invalidate the
-payload cache.
+The manifest stores ownership and byte ranges; each asset's payload header
+stores its format version. The encode cache stores payload bytes without the
+pack manifest; encoder changes invalidate it through `NT_BUILDER_VERSION`.
 
 ## Builder validation
 
@@ -220,7 +219,10 @@ redo that work regardless of the cache. Mesh wire encode is milliseconds per
 mesh; if it ever grows expensive, the fix is moving it behind the cache, not
 widening this contract.
 
-**Pipeline order:** early dedup → cache lookup → encode → cache store. Dedup runs first so duplicates never hit cache. Cache stores only unique encoded results.
+**Pipeline order:** early dedup → cache lookup → encode → pack assembly with
+encoded-byte dedup → cache store. Early duplicates skip lookup and encoding.
+Entries that match only after encoding can retain separate cache keys while
+sharing one payload in the pack.
 
 **Invalidation:**
 - Source data changes → different `decoded_hash` → automatic miss.

@@ -146,29 +146,16 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 nt_resource_t nt_resource_find(nt_hash64_t resource_id);
 
 uint32_t nt_resource_get(nt_resource_t handle);
-/* READY means the currently published winner is fully usable.
- * For simple runtime-handle assets this matches the old behavior.
- * For aux-backed assets (atlas, future similar types) READY additionally
- * requires user_data to be synchronized with the published winner. */
+/* READY means the published winner is usable, including synchronized auxiliary data. */
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 /* Returns the asset type (NT_ASSET_*) the slot was created for. Returns 0
  * for invalid or stale handles. Useful for runtime type checks at API
  * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
 uint8_t nt_resource_get_asset_type(nt_resource_t handle);
-/* Monotonic counter that changes whenever the published view of any slot
- * changes (winner, visible state, or aux-backed published payload refresh).
- *
- * Invariant: the epoch bumps from exactly one place — resource_resolve_pass().
- * All public APIs that can affect slot publication (register, unregister,
- * unmount, set_priority, parse_pack, placeholder change, unload) set a
- * needs_resolve flag; nt_resource_step() drains it by running resolve_pass,
- * which diffs per-slot and bumps the epoch when the published view differs.
- *
- * Outside resolve, slot allocation initializes unpublished state; release
- * invalidates winner/aux indices before asset reuse, and unmount severs
- * zero-copy providers before freeing their blob. Publication and epoch
- * changes still go through resolve_pass. */
+/* Advances only during resolve when a published winner, state or auxiliary payload changes.
+ * Release invalidates source indices and unmount severs zero-copy views immediately;
+ * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
