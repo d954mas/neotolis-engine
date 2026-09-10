@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
     atlas_opts.margin = 2;
     atlas_opts.extrude = 1;
     atlas_opts.premultiplied = true;
-    atlas_opts.compress = NULL;
+    atlas_opts.compress = (nt_basisu_encode_opts_t){0};
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;

@@ -243,10 +243,8 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
  * collapses whitespace, validates, and returns contiguous buffer. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type) {
-    if (!resolved_text || text_len == 0) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+void nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size) {
+    NT_BUILD_ASSERT(resolved_text && text_len > 0 && "shader encode: empty source");
 
     char *stripped = (char *)malloc((size_t)text_len + 1);
     NT_BUILD_ASSERT(stripped && "shader encode: malloc failed");
@@ -294,28 +292,4 @@ nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, 
 
     *out_data = buf;
     *out_size = total_asset_size;
-    *out_type = NT_ASSET_SHADER_CODE;
-    return NT_BUILD_OK;
-}
-
-/* --- Original shader encode wrapper (calls _to_buf + append + register) --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id) {
-    if (!ctx) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    uint8_t *buf = NULL;
-    uint32_t buf_size = 0;
-    nt_asset_type_t type;
-    nt_build_result_t ret = nt_builder_encode_shader_to_buf(resolved_text, text_len, stage, &buf, &buf_size, &type);
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-    ret = nt_builder_append_data(ctx, buf, buf_size);
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_register_asset(ctx, resource_id, type, buf_size);
-    }
-    free(buf);
-    return ret;
 }

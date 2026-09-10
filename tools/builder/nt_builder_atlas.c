@@ -540,7 +540,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
-    /* Serialize opts fields (excluding compress pointer) */
+    /* Page encoding options belong to the texture cache key. */
     /* Slack: the size enum and the write run below are hand-maintained lists, so a
      * field added to one and not the other must not smash the stack before the
      * post-write assert can report the drift. */
@@ -855,6 +855,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
     // #endregion
     nt_tex_opts_t texture_opts = {
         .format = opts->format,
+        .compress = opts->compress,
         .premultiplied = opts->premultiplied,
         .filter_min = opts->filter_min,
         .filter_mag = opts->filter_mag,
@@ -862,7 +863,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
         .wrap_v = opts->wrap_v,
         .gen_mipmaps = opts->gen_mipmaps,
     };
-    return nt_builder_assert_texture_opts(&texture_opts, opts->compress);
+    return nt_builder_assert_texture_opts(&texture_opts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -876,9 +877,6 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     if (resolved.max_added_area_percent == 0.0F) {
         resolved.max_added_area_percent = 0.0F;
     }
-    if (resolved.compress) {
-        resolved.gen_mipmaps = true;
-    }
     NtAtlasBuild *state = (NtAtlasBuild *)calloc(1, sizeof(NtAtlasBuild));
     NT_BUILD_ASSERT(state && "nt_atlas_begin: alloc failed");
 
@@ -891,14 +889,6 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     NT_BUILD_ASSERT(state->name && "nt_atlas_begin: strdup failed");
 
     state->opts = resolved;
-    if (resolved.compress) {
-        state->compress = *resolved.compress;
-        if (state->compress.mode == NT_TEX_COMPRESS_UASTC) {
-            state->compress.selector_rdo_quality = 0.0F;
-        }
-        state->has_compress = true;
-    }
-    state->opts.compress = NULL; /* zeroed -- use has_compress flag */
 
     /* Initialize sprite array */
     state->sprite_capacity = 64;
@@ -3846,7 +3836,7 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         td->height = p->page_h[pg];
         td->opts.format = p->opts->format;
         td->opts.max_size = 0;
-        td->opts.compress = NULL;
+        td->opts.compress = p->opts->compress;
         td->opts.premultiplied = p->opts->premultiplied;
         /* Propagate atlas-level sampler defaults to the page texture header so
          * the activator creates the right sampler for this atlas page. */
@@ -3855,10 +3845,6 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         td->opts.wrap_u = p->opts->wrap_u;
         td->opts.wrap_v = p->opts->wrap_v;
         td->opts.gen_mipmaps = p->opts->gen_mipmaps;
-        if (p->state->has_compress) {
-            td->compress = p->state->compress;
-            td->has_compress = true;
-        }
         nt_builder_add_entry(ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], (uint32_t)pixel_bytes, tex_hash);
         p->page_pixels[pg] = NULL;
         free(tex_path);

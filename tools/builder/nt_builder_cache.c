@@ -18,6 +18,7 @@
 
 /* --- opts_version_hash: serialize kind + type-specific fields + builder version --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     uint8_t buf[128];
     uint32_t pos = 0;
@@ -51,18 +52,12 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         memcpy(buf + pos, &premul, sizeof(premul));
         pos += (uint32_t)sizeof(premul);
 
-        /* Sampler defaults are baked into the V3 NtTextureAssetHeader so they
-         * MUST invalidate the texture cache — otherwise changing
-         * atlas_opts.filter_min/wrap from LINEAR to LINEAR_MIPMAP_LINEAR (or
-         * vice versa) reuses the cached encoded blob with stale header bytes,
-         * and the runtime activator creates the wrong sampler. Caught when
-         * the bunnymark HD pack kept its old filter even after re-running
-         * build_packs. */
+        /* Sampler defaults change the encoded header and must invalidate the cache. */
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
         uint8_t wv = (uint8_t)td->opts.wrap_v;
-        uint8_t gen_mips = td->opts.gen_mipmaps ? 1 : 0;
+        uint8_t gen_mips = (td->opts.compress.codec != NT_BASISU_CODEC_NONE || td->opts.gen_mipmaps) ? 1 : 0;
         buf[pos++] = fmin;
         buf[pos++] = fmag;
         buf[pos++] = wu;
@@ -70,26 +65,37 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = gen_mips;
 
         /* compression path */
-        uint8_t has_compress = td->has_compress ? 1 : 0;
+        uint8_t has_compress = td->opts.compress.codec != NT_BASISU_CODEC_NONE ? 1 : 0;
         memcpy(buf + pos, &has_compress, sizeof(has_compress));
         pos += (uint32_t)sizeof(has_compress);
 
-        if (td->has_compress) {
-            uint32_t mode = (uint32_t)td->compress.mode;
-            memcpy(buf + pos, &mode, sizeof(mode));
-            pos += (uint32_t)sizeof(mode);
+        if (td->opts.compress.codec != NT_BASISU_CODEC_NONE) {
+            uint32_t codec = (uint32_t)td->opts.compress.codec;
+            memcpy(buf + pos, &codec, sizeof(codec));
+            pos += (uint32_t)sizeof(codec);
 
-            uint32_t quality = td->compress.quality;
-            memcpy(buf + pos, &quality, sizeof(quality));
-            pos += (uint32_t)sizeof(quality);
-
-            float endpoint_rdo = td->compress.endpoint_rdo_quality;
-            memcpy(buf + pos, &endpoint_rdo, sizeof(endpoint_rdo));
-            pos += (uint32_t)sizeof(endpoint_rdo);
-
-            float selector_rdo = td->compress.selector_rdo_quality;
-            memcpy(buf + pos, &selector_rdo, sizeof(selector_rdo));
-            pos += (uint32_t)sizeof(selector_rdo);
+            if (td->opts.compress.codec == NT_BASISU_CODEC_ETC1S) {
+                uint32_t quality = td->opts.compress.etc1s.quality;
+                float endpoint = td->opts.compress.etc1s.endpoint_rdo_threshold;
+                float selector = td->opts.compress.etc1s.selector_rdo_threshold;
+                /* Equality treats signed zeros identically. */
+                endpoint = endpoint == 0.0F ? 0.0F : endpoint;
+                selector = selector == 0.0F ? 0.0F : selector;
+                memcpy(buf + pos, &quality, sizeof(quality));
+                pos += (uint32_t)sizeof(quality);
+                memcpy(buf + pos, &endpoint, sizeof(endpoint));
+                pos += (uint32_t)sizeof(endpoint);
+                memcpy(buf + pos, &selector, sizeof(selector));
+                pos += (uint32_t)sizeof(selector);
+            } else {
+                uint32_t pack_level = td->opts.compress.uastc.pack_level;
+                float lambda = td->opts.compress.uastc.rdo_lambda;
+                lambda = lambda == 0.0F ? 0.0F : lambda;
+                memcpy(buf + pos, &pack_level, sizeof(pack_level));
+                pos += (uint32_t)sizeof(pack_level);
+                memcpy(buf + pos, &lambda, sizeof(lambda));
+                pos += (uint32_t)sizeof(lambda);
+            }
         }
         break;
     }

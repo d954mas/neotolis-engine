@@ -15,7 +15,7 @@
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts) {
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts) {
     nt_tex_opts_t resolved = opts ? *opts : nt_tex_opts_defaults();
     nt_texture_pixel_format_t format = resolved.format ? resolved.format : NT_TEXTURE_FORMAT_RGBA8;
 
@@ -26,23 +26,25 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     NT_BUILD_ASSERT((unsigned)resolved.wrap_u <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_u out of range");
     NT_BUILD_ASSERT((unsigned)resolved.wrap_v <= (unsigned)NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT && "texture opts: wrap_v out of range");
 
+    const nt_basisu_encode_opts_t *compress_opts = &resolved.compress;
+    bool compressed = compress_opts->codec != NT_BASISU_CODEC_NONE;
     bool filter_min_uses_mips = resolved.filter_min >= NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST;
-    NT_BUILD_ASSERT((compress_opts || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: RAW mipmap filter requires gen_mipmaps=true");
+    NT_BUILD_ASSERT((compressed || !filter_min_uses_mips || resolved.gen_mipmaps) && "texture opts: RAW mipmap filter requires gen_mipmaps=true");
 
-    if (compress_opts) {
+    if (compressed) {
         NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8) && "texture opts: Basis compression requires RGBA8 or RGB8");
-        NT_BUILD_ASSERT((compress_opts->mode == NT_TEX_COMPRESS_ETC1S || compress_opts->mode == NT_TEX_COMPRESS_UASTC) && "texture opts: compression mode out of range");
-        if (compress_opts->mode == NT_TEX_COMPRESS_ETC1S) {
-            NT_BUILD_ASSERT((compress_opts->quality >= 1 && compress_opts->quality <= 255) && "texture opts: ETC1S quality must be 1..255");
-            NT_BUILD_ASSERT((isfinite(compress_opts->selector_rdo_quality) && compress_opts->selector_rdo_quality >= 0.0F && compress_opts->selector_rdo_quality <= 1.0e10F) &&
+        NT_BUILD_ASSERT((compress_opts->codec == NT_BASISU_CODEC_ETC1S || compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR) && "texture opts: compression mode out of range");
+        if (compress_opts->codec == NT_BASISU_CODEC_ETC1S) {
+            NT_BUILD_ASSERT((compress_opts->etc1s.quality >= 1 && compress_opts->etc1s.quality <= 255) && "texture opts: ETC1S quality must be 1..255");
+            NT_BUILD_ASSERT((isfinite(compress_opts->etc1s.selector_rdo_threshold) && compress_opts->etc1s.selector_rdo_threshold >= 0.0F && compress_opts->etc1s.selector_rdo_threshold <= 1.0e10F) &&
                             "texture opts: ETC1S selector RDO must be finite and in 0..1e10");
-            NT_BUILD_ASSERT((isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.0F && compress_opts->endpoint_rdo_quality <= 1.0e10F) &&
+            NT_BUILD_ASSERT((isfinite(compress_opts->etc1s.endpoint_rdo_threshold) && compress_opts->etc1s.endpoint_rdo_threshold >= 0.0F && compress_opts->etc1s.endpoint_rdo_threshold <= 1.0e10F) &&
                             "texture opts: ETC1S endpoint RDO must be finite and in 0..1e10");
         } else {
-            NT_BUILD_ASSERT(compress_opts->quality <= 4 && "texture opts: UASTC quality must be 0..4");
-            NT_BUILD_ASSERT((compress_opts->endpoint_rdo_quality == 0.0F ||
-                             (isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.001F && compress_opts->endpoint_rdo_quality <= 50.0F)) &&
-                            "texture opts: UASTC endpoint RDO must be 0 or in 0.001..50");
+            NT_BUILD_ASSERT(compress_opts->uastc.pack_level <= 4 && "texture opts: UASTC pack level must be 0..4");
+            NT_BUILD_ASSERT(
+                (compress_opts->uastc.rdo_lambda == 0.0F || (isfinite(compress_opts->uastc.rdo_lambda) && compress_opts->uastc.rdo_lambda >= 0.001F && compress_opts->uastc.rdo_lambda <= 50.0F)) &&
+                "texture opts: UASTC RDO lambda must be 0 or in 0.001..50");
         }
     }
 
@@ -202,183 +204,68 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
 /* --- Encode: RGBA pixels -> independent buffer (thread-safe, no shared state) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
-                                                   nt_asset_type_t *out_type) {
-    nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, NULL);
+void nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size) {
     uint32_t pixel_count = width * height;
-    uint32_t bpp = nt_texture_bpp(fmt);
-
-    /* Premultiply RGB * A before strip. Only RGBA8 has a meaningful alpha
-     * channel; for other formats premultiplied=true is a caller bug. */
-    bool premul = opts && opts->premultiplied;
+    uint32_t bpp = nt_texture_bpp(opts->format);
+    bool compressed = opts->compress.codec != NT_BASISU_CODEC_NONE;
 
     uint8_t *premul_buf = NULL;
     const uint8_t *source = rgba_pixels;
-    if (premul) {
+    if (opts->premultiplied) {
         premul_buf = premultiply_rgba_copy(rgba_pixels, pixel_count);
         NT_BUILD_ASSERT(premul_buf && "texture encode: premultiply alloc failed");
         source = premul_buf;
     }
 
-    /* Strip channels if needed */
+    const uint8_t *payload = source;
+    uint32_t data_size = pixel_count * bpp;
+    uint16_t mip_count = 1;
     uint8_t *stripped = NULL;
-    const uint8_t *final_data;
-    if (bpp < 4) {
+    nt_basisu_encode_result_t enc = {0};
+    if (compressed) {
+        enc = nt_basisu_encode(encode_threads, source, width, height, opts->format == NT_TEXTURE_FORMAT_RGBA8, &opts->compress);
+        NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
+        uint32_t full_mip_count = 1;
+        for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
+            full_mip_count++;
+        }
+        NT_BUILD_ASSERT(enc.mip_count == full_mip_count && "texture encode: Basis requires a full mip chain");
+        payload = enc.data;
+        data_size = enc.size;
+        mip_count = (uint16_t)enc.mip_count;
+    } else if (bpp < 4) {
         stripped = strip_channels(source, pixel_count, bpp);
         NT_BUILD_ASSERT(stripped && "texture encode: strip_channels alloc failed");
-        final_data = stripped;
-    } else {
-        final_data = source;
+        payload = stripped;
     }
 
-    /* Build V3 header (RAW compression -- uncompressed pixel data) */
-    uint32_t data_size = pixel_count * bpp;
-    NtTextureAssetHeaderV2 tex_hdr;
-    memset(&tex_hdr, 0, sizeof(tex_hdr));
+    NtTextureAssetHeaderV2 tex_hdr = {0};
     tex_hdr.magic = NT_TEXTURE_MAGIC;
     tex_hdr.version = NT_TEXTURE_VERSION_V2;
-    tex_hdr.format = (uint16_t)fmt;
+    tex_hdr.format = (uint16_t)opts->format;
     tex_hdr.width = width;
     tex_hdr.height = height;
-    tex_hdr.mip_count = 1;
-    tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
-    uint8_t hdr_flags = 0;
-    if (premul) {
-        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED;
+    tex_hdr.mip_count = mip_count;
+    tex_hdr.compression = (uint8_t)(compressed ? NT_TEXTURE_COMPRESSION_BASIS : NT_TEXTURE_COMPRESSION_RAW);
+    tex_hdr.flags = opts->premultiplied ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
+    if (!compressed && opts->gen_mipmaps) {
+        tex_hdr.flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
     }
-    if (opts && opts->gen_mipmaps) {
-        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
-    }
-    tex_hdr.flags = hdr_flags;
-    /* Sampler defaults from opts (caller controls per-texture / per-atlas). */
-    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
-    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
-    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
-    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
+    tex_hdr.default_min_filter = (uint8_t)opts->filter_min;
+    tex_hdr.default_mag_filter = (uint8_t)opts->filter_mag;
+    tex_hdr.default_wrap_u = (uint8_t)opts->wrap_u;
+    tex_hdr.default_wrap_v = (uint8_t)opts->wrap_v;
     tex_hdr.data_size = data_size;
 
-    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
+    uint32_t total_asset_size = (uint32_t)sizeof(tex_hdr) + data_size;
     uint8_t *buf = (uint8_t *)malloc(total_asset_size);
     NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
-
-    memcpy(buf, &tex_hdr, sizeof(NtTextureAssetHeaderV2));
-    memcpy(buf + sizeof(NtTextureAssetHeaderV2), final_data, data_size);
-
-    free(stripped);
-    free(premul_buf);
-
-    *out_data = buf;
-    *out_size = total_asset_size;
-    *out_type = NT_ASSET_TEXTURE;
-    return NT_BUILD_OK;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
-                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type) {
-    NT_BUILD_ASSERT(compress_opts && "texture encode: compression opts are NULL");
-    nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, compress_opts);
-
-    /* Determine alpha from format */
-    bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
-
-    /* Premultiply before Basis encode: block compression is lossy and perceptually
-     * optimized, so feeding it the correct data (with RGB zeroed in transparent
-     * pixels) avoids wasting bits on "invisible" RGB and prevents dark fringes
-     * after decode. Only meaningful when format has an alpha channel. */
-    bool premul = opts && opts->premultiplied;
-
-    uint8_t *premul_buf = NULL;
-    const uint8_t *source = rgba_pixels;
-    if (premul) {
-        premul_buf = premultiply_rgba_copy(rgba_pixels, width * height);
-        NT_BUILD_ASSERT(premul_buf && "texture encode: premultiply alloc failed");
-        source = premul_buf;
-    }
-
-    /* Encode via Basis Universal -- adaptive pool size per worker */
-    bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
-    uint32_t bt = (encode_threads > 0) ? encode_threads : 1;
-    nt_basisu_encode_result_t enc =
-        nt_basisu_encode(bt, source, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
-
-    free(premul_buf);
-
-    NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
-
-    /* Mipmap filters need a mipmap chain. BASIS textures upload exactly the
-     * mips the encoder produced — runtime cannot fix this up like RAW does
-     * via glGenerateMipmap. Asserting at builder time prevents shipping
-     * broken sampling (incomplete mip chain → undefined / black). */
-    nt_texture_default_filter_t fmin = opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
-    bool wants_mips = (fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_LINEAR ||
-                       fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
-    NT_BUILD_ASSERT((!wants_mips || enc.mip_count > 1) && "texture encode: filter_min selects a mipmap variant but Basis produced a single-level chain");
-
-    /* Build V3 header */
-    NtTextureAssetHeaderV2 tex_hdr;
-    memset(&tex_hdr, 0, sizeof(tex_hdr));
-    tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION_V2;
-    tex_hdr.format = (uint16_t)fmt;
-    tex_hdr.width = width;
-    tex_hdr.height = height;
-    tex_hdr.mip_count = (uint16_t)enc.mip_count;
-    tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_BASIS;
-    tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    /* Sampler defaults from opts (BASIS path mirrors RAW). */
-    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
-    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
-    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
-    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
-    tex_hdr.data_size = enc.size;
-
-    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + enc.size;
-    uint8_t *buf = (uint8_t *)malloc(total_asset_size);
-    NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
-
-    memcpy(buf, &tex_hdr, sizeof(NtTextureAssetHeaderV2));
-    memcpy(buf + sizeof(NtTextureAssetHeaderV2), enc.data, enc.size);
+    memcpy(buf, &tex_hdr, sizeof(tex_hdr));
+    memcpy(buf + sizeof(tex_hdr), payload, data_size);
 
     nt_basisu_encode_free(&enc);
-
+    free(stripped);
+    free(premul_buf);
     *out_data = buf;
     *out_size = total_asset_size;
-    *out_type = NT_ASSET_TEXTURE;
-    return NT_BUILD_OK;
-}
-
-/* --- Original encode wrappers (thin wrappers calling _to_buf + append + register) --- */
-
-nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
-    uint8_t *buf = NULL;
-    uint32_t buf_size = 0;
-    nt_asset_type_t type;
-    nt_build_result_t ret = nt_builder_encode_texture_to_buf(rgba_pixels, width, height, opts, &buf, &buf_size, &type);
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-    ret = nt_builder_append_data(ctx, buf, buf_size);
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_register_asset(ctx, resource_id, type, buf_size);
-    }
-    free(buf);
-    return ret;
-}
-
-nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                       const nt_tex_compress_opts_t *compress_opts) {
-    uint8_t *buf = NULL;
-    uint32_t buf_size = 0;
-    nt_asset_type_t type;
-    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, 1, &buf, &buf_size, &type);
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-    ret = nt_builder_append_data(ctx, buf, buf_size);
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_register_asset(ctx, resource_id, type, buf_size);
-    }
-    free(buf);
-    return ret;
 }

@@ -423,52 +423,63 @@ void test_texture_invalid_compress_mode_asserts_at_add(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/invalid_compress_mode.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_tex_opts_t opts = nt_tex_opts_defaults();
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
-    compress.mode = (nt_tex_compress_mode_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
-    opts.compress = &compress;
+    nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.codec = (nt_basisu_codec_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    opts.compress = compress;
 
     EXPECT_BUILD_ASSERT(ctx, nt_builder_add_texture(ctx, png_path, &opts));
 }
 
-static void expect_texture_compress_opts_assert(nt_tex_compress_opts_t compress) {
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/invalid_compress_opts.ntpack");
-    TEST_ASSERT_NOT_NULL(ctx);
+static void expect_texture_compress_opts_assert(nt_basisu_encode_opts_t compress) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
-    opts.compress = &compress;
-    EXPECT_BUILD_ASSERT(ctx, (void)nt_builder_assert_texture_opts(&opts, &compress));
+    opts.compress = compress;
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_assert_texture_opts(&opts));
 }
 
 void test_texture_compress_rdo_boundaries(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
-    opts.compress = &compress;
+    opts.compress = nt_tex_compress_etc1s_default();
 
-    compress.endpoint_rdo_quality = 0.0F;
-    compress.selector_rdo_quality = 1.0e10F;
-    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
-    compress.endpoint_rdo_quality = 1.0e10F;
-    compress.selector_rdo_quality = 0.0F;
-    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+    opts.compress.etc1s.endpoint_rdo_threshold = 0.0F;
+    opts.compress.etc1s.selector_rdo_threshold = 1.0e10F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
+    opts.compress.etc1s.endpoint_rdo_threshold = 1.0e10F;
+    opts.compress.etc1s.selector_rdo_threshold = 0.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
 
-    compress.endpoint_rdo_quality = 2.0e10F;
-    expect_texture_compress_opts_assert(compress);
-    compress = nt_tex_compress_etc1s_default();
-    compress.selector_rdo_quality = 2.0e10F;
-    expect_texture_compress_opts_assert(compress);
+    opts.compress.etc1s.endpoint_rdo_threshold = 2.0e10F;
+    expect_texture_compress_opts_assert(opts.compress);
+    opts.compress = nt_tex_compress_etc1s_default();
+    opts.compress.etc1s.selector_rdo_threshold = 2.0e10F;
+    expect_texture_compress_opts_assert(opts.compress);
 
-    compress = nt_tex_compress_uastc_default();
-    opts.compress = &compress;
-    compress.endpoint_rdo_quality = 0.0F;
-    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
-    compress.endpoint_rdo_quality = 0.001F;
-    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
-    compress.endpoint_rdo_quality = 50.0F;
-    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts, &compress));
+    opts.compress = nt_tex_compress_uastc_default();
+    opts.compress.uastc.rdo_lambda = 0.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
+    opts.compress.uastc.rdo_lambda = 0.001F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
+    opts.compress.uastc.rdo_lambda = 50.0F;
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
 
-    compress.endpoint_rdo_quality = 0.0001F;
-    expect_texture_compress_opts_assert(compress);
-    compress.endpoint_rdo_quality = 50.001F;
-    expect_texture_compress_opts_assert(compress);
+    opts.compress.uastc.rdo_lambda = 0.0001F;
+    expect_texture_compress_opts_assert(opts.compress);
+    opts.compress.uastc.rdo_lambda = 50.001F;
+    expect_texture_compress_opts_assert(opts.compress);
+    const float invalid[] = {-1.0F, NAN, INFINITY};
+    for (uint32_t i = 0; i < 3; i++) {
+        opts.compress = nt_tex_compress_etc1s_default();
+        opts.compress.etc1s.endpoint_rdo_threshold = invalid[i];
+        expect_texture_compress_opts_assert(opts.compress);
+        opts.compress = nt_tex_compress_etc1s_default();
+        opts.compress.etc1s.selector_rdo_threshold = invalid[i];
+        expect_texture_compress_opts_assert(opts.compress);
+        opts.compress = nt_tex_compress_uastc_default();
+        opts.compress.uastc.rdo_lambda = invalid[i];
+        expect_texture_compress_opts_assert(opts.compress);
+    }
+    opts.compress = nt_tex_compress_etc1s_default();
+    opts.compress.etc1s.quality = 256;
+    expect_texture_compress_opts_assert(opts.compress);
 }
 
 void test_texture_option_aliases_are_canonicalized(void) {
@@ -476,29 +487,26 @@ void test_texture_option_aliases_are_canonicalized(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/texture_format_canonical.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_tex_opts_t opts = nt_tex_opts_defaults();
-    nt_tex_compress_opts_t compress = nt_tex_compress_uastc_default();
-    compress.selector_rdo_quality = 7.0F;
+    nt_basisu_encode_opts_t compress = nt_tex_compress_uastc_default();
     opts.format = 0;
     opts.gen_mipmaps = false;
-    opts.compress = &compress;
+    opts.compress = compress;
     nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
 
     TEST_ASSERT_EQUAL_UINT32(1, ctx->pending_count);
     const NtBuildTextureData *td = (const NtBuildTextureData *)ctx->pending[0].data;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, td->opts.format);
-    TEST_ASSERT_TRUE(td->compress.selector_rdo_quality == 0.0F);
-    TEST_ASSERT_TRUE(td->opts.gen_mipmaps);
     nt_builder_free_pack(ctx);
 }
 
 void test_atlas_texture_option_aliases_are_canonicalized(void) {
     uint8_t pixel[4] = {255, 255, 255, 255};
-    nt_tex_compress_opts_t compress = nt_tex_compress_uastc_default();
+    nt_basisu_encode_opts_t compress = nt_tex_compress_uastc_default();
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_format_canonical.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.format = 0;
-    atlas_opts.compress = &compress;
+    atlas_opts.compress = compress;
     atlas_opts.gen_mipmaps = false;
     NtAtlasBuild *atlas_build_453 = nt_atlas_begin(ctx, "atlas", &atlas_opts);
     nt_atlas_add_raw(atlas_build_453, pixel, 1, 1, &(nt_atlas_sprite_opts_t){.name = "pixel.png", .origin_x = 0.5F, .origin_y = 0.5F});
@@ -510,7 +518,6 @@ void test_atlas_texture_option_aliases_are_canonicalized(void) {
         if (ctx->pending[i].kind == NT_BUILD_ASSET_TEXTURE) {
             td = (const NtBuildTextureData *)ctx->pending[i].data;
             TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, td->opts.format);
-            TEST_ASSERT_TRUE(td->opts.gen_mipmaps);
             found_page = true;
         }
     }
@@ -4130,6 +4137,72 @@ void test_cache_version_in_opts_hash(void) {
     TEST_ASSERT_TRUE(hash3 != hash1);
 }
 
+void test_basis_effective_cache_and_dedup_identity(void) {
+    const char *cache = TMP_DIR "/basis_identity_cache";
+    MKDIR(cache);
+    clean_cache_dir(cache);
+    nt_basisu_encode_opts_t variants[9];
+    for (uint32_t i = 0; i < 4; i++) {
+        variants[i] = nt_tex_compress_etc1s_default();
+    }
+    variants[1].etc1s.quality++;
+    variants[2].etc1s.endpoint_rdo_threshold = 2.0F;
+    variants[3].etc1s.selector_rdo_threshold = 2.0F;
+    for (uint32_t i = 4; i < 7; i++) {
+        variants[i] = nt_tex_compress_uastc_default();
+    }
+    variants[5].uastc.pack_level++;
+    variants[6].uastc.rdo_lambda = 2.0F;
+    variants[7] = nt_tex_compress_etc1s_highest();
+    variants[8] = nt_tex_compress_uastc_highest();
+    const uint8_t pixel[4] = {70, 120, 190, 180};
+    for (uint32_t warm = 0; warm < 2; warm++) {
+        NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_identity.ntpack");
+        nt_builder_set_cache_dir(ctx, cache);
+        nt_builder_set_threads(ctx, 2);
+        uint64_t hashes[9];
+        for (uint32_t i = 0; i < 9; i++) {
+            nt_tex_opts_t opts = nt_tex_opts_defaults();
+            opts.compress = variants[i];
+            char name[32];
+            (void)snprintf(name, sizeof(name), "basis_%u", i);
+            /* Poison all storage, then initialize only the selected fields. */
+            nt_basisu_encode_opts_t alias;
+            memset(&alias, 0xA5, sizeof(alias));
+            alias.codec = variants[i].codec;
+            if (alias.codec == NT_BASISU_CODEC_ETC1S) {
+                alias.etc1s.quality = variants[i].etc1s.quality;
+                alias.etc1s.endpoint_rdo_threshold = variants[i].etc1s.endpoint_rdo_threshold;
+                alias.etc1s.selector_rdo_threshold = variants[i].etc1s.selector_rdo_threshold;
+                if (i == 7) {
+                    alias.etc1s.endpoint_rdo_threshold = -0.0F;
+                    alias.etc1s.selector_rdo_threshold = -0.0F;
+                }
+            } else {
+                alias.uastc.pack_level = variants[i].uastc.pack_level;
+                alias.uastc.rdo_lambda = i == 8 ? -0.0F : variants[i].uastc.rdo_lambda;
+            }
+            opts.compress = alias;
+            nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
+            hashes[i] = nt_builder_compute_opts_hash(&ctx->pending[2 * (size_t)i]);
+            for (uint32_t j = 0; j < i; j++) {
+                TEST_ASSERT_TRUE(hashes[j] != hashes[i]);
+            }
+            opts.compress = variants[i];
+            opts.gen_mipmaps = false;
+            (void)snprintf(name, sizeof(name), "alias_%u", i);
+            nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
+            TEST_ASSERT_EQUAL_UINT64(hashes[i], nt_builder_compute_opts_hash(&ctx->pending[(2 * i) + 1]));
+        }
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+        TEST_ASSERT_EQUAL_UINT32(9, ctx->early_dedup_count);
+        TEST_ASSERT_EQUAL_UINT32(warm ? 9 : 0, ctx->cache_hit_count);
+        TEST_ASSERT_EQUAL_UINT32(warm ? 0 : 9, ctx->cache_miss_count);
+        nt_builder_free_pack(ctx);
+        TEST_ASSERT_EQUAL_UINT32(9, count_bin_files(cache));
+    }
+}
+
 /* CACHE-02b: Sampler defaults (filter/wrap) participate in the texture
  * opts hash. Regression for the bug where SD/HD packs with different
  * filter_min produced identical cache entries because compute_opts_hash
@@ -6471,8 +6544,8 @@ void test_atlas_begin_compress_bad_format_asserts_after_failed_pack(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     atlas_fail_pack(ctx);
     nt_atlas_opts_t bad = nt_atlas_opts_defaults();
-    nt_tex_compress_opts_t comp = nt_tex_compress_etc1s_lowest();
-    bad.compress = &comp;
+    nt_basisu_encode_opts_t comp = nt_tex_compress_etc1s_lowest();
+    bad.compress = comp;
     bad.premultiplied = false;         /* let the compress+format check fire, not premultiplied */
     bad.format = NT_TEXTURE_FORMAT_R8; /* R8 has no Basis equivalent */
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
@@ -6483,9 +6556,9 @@ void test_atlas_begin_bad_compress_mode_asserts_after_failed_pack(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     atlas_fail_pack(ctx);
     nt_atlas_opts_t bad = nt_atlas_opts_defaults();
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
-    compress.mode = (nt_tex_compress_mode_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
-    bad.compress = &compress;
+    nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.codec = (nt_basisu_codec_t)99; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enum is the subject under test
+    bad.compress = compress;
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
 }
 
@@ -6494,18 +6567,18 @@ void test_atlas_begin_bad_compress_quality_asserts_after_failed_pack(void) {
     TEST_ASSERT_NOT_NULL(etc_ctx);
     atlas_fail_pack(etc_ctx);
     nt_atlas_opts_t etc_bad = nt_atlas_opts_defaults();
-    nt_tex_compress_opts_t etc = nt_tex_compress_etc1s_default();
-    etc.quality = 0;
-    etc_bad.compress = &etc;
+    nt_basisu_encode_opts_t etc = nt_tex_compress_etc1s_default();
+    etc.etc1s.quality = 0;
+    etc_bad.compress = etc;
     EXPECT_BUILD_ASSERT(etc_ctx, (void)nt_atlas_begin(etc_ctx, "next", &etc_bad));
 
     NtBuilderContext *uastc_ctx = nt_builder_start_pack(TMP_DIR "/atlas_poison_uastc_quality.ntpack");
     TEST_ASSERT_NOT_NULL(uastc_ctx);
     atlas_fail_pack(uastc_ctx);
     nt_atlas_opts_t uastc_bad = nt_atlas_opts_defaults();
-    nt_tex_compress_opts_t uastc = nt_tex_compress_uastc_default();
-    uastc.quality = 5;
-    uastc_bad.compress = &uastc;
+    nt_basisu_encode_opts_t uastc = nt_tex_compress_uastc_default();
+    uastc.uastc.pack_level = 5;
+    uastc_bad.compress = uastc;
     EXPECT_BUILD_ASSERT(uastc_ctx, (void)nt_atlas_begin(uastc_ctx, "next", &uastc_bad));
 }
 
@@ -6514,9 +6587,9 @@ void test_atlas_begin_bad_compress_rdo_asserts_after_failed_pack(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     atlas_fail_pack(ctx);
     nt_atlas_opts_t bad = nt_atlas_opts_defaults();
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_default();
-    compress.endpoint_rdo_quality = NAN;
-    bad.compress = &compress;
+    nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
+    compress.etc1s.endpoint_rdo_threshold = NAN;
+    bad.compress = compress;
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
 }
 
@@ -7182,7 +7255,7 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_TRUE(opts.power_of_two);
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
-    TEST_ASSERT_NULL(opts.compress);
+    TEST_ASSERT_EQUAL(NT_BASISU_CODEC_NONE, opts.compress.codec);
     /* Default pixels_per_unit is 1.0 */
     TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
 
@@ -9401,6 +9474,7 @@ int main(void) {
     RUN_TEST(test_cache_hit_skips_encode);
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
+    RUN_TEST(test_basis_effective_cache_and_dedup_identity);
     RUN_TEST(test_cache_filter_wrap_in_opts_hash);
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);

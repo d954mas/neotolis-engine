@@ -107,7 +107,7 @@ lifetime, and naming vocabulary.
 | `engine/meshwire` | [assets/runtime-formats.md](assets/runtime-formats.md) (mesh wire decode), [core/module-layout.md](core/module-layout.md) (swappable pair) |
 | `engine/basisu`, `engine/fpng` | [builder/builder.md](builder/builder.md) (texture encode), [core/module-layout.md](core/module-layout.md) (swappable transcoder), [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) (frame capture) |
 | `engine/math`, `engine/color`, `engine/utf8`, `engine/base64` | small utility modules — no dedicated chapter |
-| `shared/include` | binary formats shared by builder + runtime (`nt_*_format.h`) → [assets/ntpack.md](assets/ntpack.md), [assets/runtime-formats.md](assets/runtime-formats.md), [assets/resource.md](assets/resource.md) |
+| `shared/include` | binary formats shared by builder + runtime (`nt_*_format.h`) → [assets/ntpack.md](assets/ntpack.md), [assets/runtime-formats.md](assets/runtime-formats.md), [assets/resource.md](assets/resource.md); Basis codec and encode descriptor → [builder/builder.md](builder/builder.md) |
 | `tools/builder` | [builder/builder.md](builder/builder.md) |
 
 Dir names that do not predict their prefix: `engine/graphics` → `nt_gfx_*`,

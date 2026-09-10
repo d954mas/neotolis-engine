@@ -1021,6 +1021,7 @@ if(NOT EMSCRIPTEN)
     # must resolve against a single shared basisu TU. Do not reorder.
     add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
     target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
+    target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
 
     # --- basisu stub loud-fail contract: every entry point asserts ---

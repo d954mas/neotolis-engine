@@ -78,6 +78,59 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 
 **Font UPM normalization.** `nt_font_opts_t.target_units_per_em` rescales a font's metrics, glyph contours, and kern offsets to a target units-per-em value offline (0 = keep the source UPM). This is the contract that lets fallback fonts of different native UPM be mixed in one font: set every member of a fallback set to the same `target_units_per_em` (the max member UPM) so their metrics share one coordinate space and merge without tripping the runtime shared-metrics assert. Normalization is done in the builder so the runtime stays a simple safety net.
 
+## Basis encoding options
+
+`nt_basisu_codec_t` and `nt_basisu_encode_opts_t` are shared by the public
+builder and encoder in `shared/include/nt_basisu_codec.h`. The descriptor tags
+an active branch when compressed: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
+`NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes.
+
+| Active field | Valid range | Meaning |
+|---|---|---|
+| `etc1s.quality` | 1..255 | ETC1S encode quality |
+| `etc1s.endpoint_rdo_threshold` | finite 0..1e10 | Endpoint RDO threshold; 0 disables endpoint RDO |
+| `etc1s.selector_rdo_threshold` | finite 0..1e10 | Selector RDO threshold; 0 disables selector RDO |
+| `uastc.pack_level` | 0..4 | UASTC LDR pack effort |
+| `uastc.rdo_lambda` | 0, or finite 0.001..50 | UASTC RDO lambda; 0 disables RDO |
+
+From `lowest` through `low`, `default`, `high`, and `highest`,
+`nt_tex_compress_etc1s_*()` presets use qualities 1/64/128/200/255,
+endpoint thresholds 1.5/1.5/1.5/1.5/0 and selector thresholds
+1.25/1.25/1.25/1.25/0. `nt_tex_compress_uastc_*()` presets use pack levels
+0/1/2/3/4 and lambdas 2/1.5/1/0.5/0. The UASTC RDO dictionary is 32768
+bytes. ETC1S zero thresholds explicitly disable RDO; they do not select
+upstream defaults.
+
+```c
+nt_basisu_encode_opts_t compression = nt_tex_compress_uastc_default();
+compression.uastc.pack_level = 3;
+compression.uastc.rdo_lambda = 0.5F;
+nt_tex_opts_t texture = nt_tex_opts_defaults();
+texture.compress = compression;
+nt_builder_add_texture(ctx, "assets/normal.png", &texture);
+```
+
+Texture add calls and `nt_atlas_begin` validate the codec and active ranges
+before cache access, including on a previously failed pack. Violations are
+`NT_BUILD_ASSERT`. They copy the descriptor; the caller may release or mutate
+the options after the call returns. Inactive union bytes and padding have no
+meaning and are never used by validation, cache hashing, dedup equality or the encoder.
+Signed zero has the same identity as positive zero.
+
+`compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
+(the zero initializer) selects RAW. NONE denotes absence of Basis compression
+in builder options, not a Basis file codec. File/memory textures decode and
+resize at add time to establish pixel identity. Early dedup re-decodes them
+when a hash match needs byte verification; encoding re-decodes on a cache miss.
+File inputs retain a copied path for re-reading; memory inputs retain a copy
+of the encoded bytes. Raw-pixel inputs retain copied, resized pixels. Atlas
+pages use the same texture encoder. Premultiplication runs after resize and
+before encoding.
+
+Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
+controls RAW runtime mip generation). The builder asserts exactly
+`1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
+
 ## Builder stages
 
 1. source assets
@@ -223,6 +276,13 @@ widening this contract.
 encoded-byte dedup → cache store. Early duplicates skip lookup and encoding.
 Entries that match only after encoding can retain separate cache keys while
 sharing one payload in the pack.
+
+Texture cache and early dedup compare the same effective settings: resized
+dimensions, resolved pixel format, premultiplication, sampler defaults, RAW
+mip-generation flag, compression presence, codec and its active fields above.
+Basis ignores the RAW mip-generation flag. Names, source locations, resize
+limits after resizing, threading, descriptor padding and inactive union bytes
+are not encode identity.
 
 **Invalidation:**
 - Source data changes → different `decoded_hash` → automatic miss.

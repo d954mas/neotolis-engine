@@ -44,7 +44,8 @@ target_include_directories(nt_basisu_encoder PRIVATE
 )
 # Transcoder TU comes from the shared runtime target (one copy per exe); the config
 # target keeps the encoder's header defines identical to that TU (ODR).
-target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder nt_basisu_transcoder_config)
+target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder nt_basisu_transcoder_config
+    PUBLIC nt_shared)
 target_compile_definitions(nt_basisu_encoder PRIVATE _CRT_SECURE_NO_WARNINGS)
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
