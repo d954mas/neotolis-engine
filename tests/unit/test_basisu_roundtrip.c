@@ -21,17 +21,13 @@ static void fill_pixels(uint8_t *src, uint32_t width, uint32_t height, bool alph
 }
 
 static void check_pixels(const uint8_t *src, const uint8_t *out, uint32_t bytes) {
-    if (bytes < 4U) {
-        TEST_FAIL_MESSAGE("RGBA output contains no pixels");
-        return;
-    }
     for (uint32_t c = 0; c < 4; c++) {
         uint32_t error = 0;
         for (uint32_t i = c; i < bytes; i += 4) {
             int delta = (int)out[i] - (int)src[i];
             error += (uint32_t)(delta < 0 ? -delta : delta);
         }
-        TEST_ASSERT_LESS_THAN_UINT32(24U, error / (bytes / 4U));
+        TEST_ASSERT_LESS_THAN_UINT32(24U * (bytes / 4U), error);
     }
 }
 
@@ -90,6 +86,27 @@ void test_etc1s_alpha(void) { codec_cases(false, true); }
 void test_uastc_rgb(void) { codec_cases(true, false); }
 void test_uastc_alpha(void) { codec_cases(true, true); }
 
+void test_encode_without_mipmaps(void) {
+    uint8_t pixels[16 * 8 * 4];
+    fill_pixels(pixels, 16, 8, false);
+    for (uint32_t codec = 0; codec < 2; codec++) {
+        bool uastc = codec != 0;
+        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, false, uastc, uastc ? 2U : 200U, 0.0F, 0.0F, false);
+        TEST_ASSERT_NOT_NULL(enc.data);
+        uint32_t mip_count = enc.mip_count;
+        uint32_t levels = nt_basisu_get_level_count(enc.data, enc.size);
+        nt_basisu_encode_free(&enc);
+        TEST_ASSERT_EQUAL_UINT32(1, mip_count);
+        TEST_ASSERT_EQUAL_UINT32(1, levels);
+    }
+}
+
+void test_reject_non_basis_header(void) {
+    uint8_t pixels[16 * 8 * 4];
+    fill_pixels(pixels, 16, 8, false);
+    TEST_ASSERT_FALSE(nt_basisu_validate_header(pixels, sizeof(pixels)));
+}
+
 static void check_premultiplied_mip(bool uastc) {
     uint8_t pixels[8 * 8 * 4];
     for (uint32_t y = 0; y < 8; y++) {
@@ -119,13 +136,14 @@ void test_uastc_premultiplied_mip(void) { check_premultiplied_mip(true); }
 
 int main(void) {
     UNITY_BEGIN();
-    /* Runtime init must work without the encoder's implicit transcoder init. */
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
     RUN_TEST(test_etc1s_rgb);
     RUN_TEST(test_etc1s_alpha);
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
+    RUN_TEST(test_encode_without_mipmaps);
+    RUN_TEST(test_reject_non_basis_header);
     RUN_TEST(test_etc1s_premultiplied_mip);
     RUN_TEST(test_uastc_premultiplied_mip);
     return UNITY_END();

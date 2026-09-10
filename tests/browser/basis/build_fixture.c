@@ -3,12 +3,11 @@
 #include <stdio.h>
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        (void)fprintf(stderr, "Usage: build_basis_fixture <pack-path> <cache-dir>\n");
+    if (argc != 2) {
+        (void)fprintf(stderr, "Usage: build_basis_fixture <pack-path>\n");
         return 1;
     }
     NtBuilderContext *ctx = nt_builder_start_pack(argv[1]);
-    nt_builder_set_cache_dir(ctx, argv[2]);
     nt_builder_set_threads(ctx, 1);
     const char *names[] = {"etc1s_rgb", "etc1s_alpha", "uastc_rgb", "uastc_alpha"};
     for (uint32_t i = 0; i < 4; i++) {
@@ -34,6 +33,5 @@ int main(int argc, char **argv) {
     }
     const nt_build_result_t result = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
-    (void)printf("BASIS_FIXTURE builder_version=%u result=%d\n", NT_BUILDER_VERSION, (int)result);
     return result == NT_BUILD_OK ? 0 : 1;
 }

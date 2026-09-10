@@ -8,8 +8,8 @@ if(NOT EMSCRIPTEN)
     nt_set_sanitizer_flags(build_basis_fixture)
     set_target_properties(build_basis_fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BASIS_FIXTURE_DIR}/${NT_PRESET_NAME}")
     add_custom_target(basis_fixture_packs
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${BASIS_FIXTURE_DIR}/cache"
-        COMMAND $<TARGET_FILE:build_basis_fixture> "${BASIS_FIXTURE_DIR}/fixture.ntpack" "${BASIS_FIXTURE_DIR}/cache"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BASIS_FIXTURE_DIR}"
+        COMMAND $<TARGET_FILE:build_basis_fixture> "${BASIS_FIXTURE_DIR}/fixture.ntpack"
         DEPENDS build_basis_fixture
         VERBATIM
     )

@@ -12,9 +12,8 @@ Related: [Pack Format](../assets/ntpack.md), [Runtime Formats](../assets/runtime
 
 Builder is a standalone native binary (C17, with vendored C++ for Basis Universal encoder behind extern "C"). Rules are written in code.
 
-Basis Universal is pinned to 2.50; [vendor provenance](../../../deps/basisu/README.md)
-records the exact commit, archive hash, licenses and source subset. The
-[upgrade evidence](../../basisu-2.50.md) records effective flags and LDR validation.
+Basis Universal [vendor provenance](../../../deps/basisu/README.md) records the
+exact commit, archive hash, licenses and source subset.
 
 ```c
 NtBuilderContext *ctx = nt_builder_start_pack("build/base.ntpack");
