@@ -3,4 +3,5 @@ nt_add_module(nt_resource LOG_DOMAIN "resource"
     nt_resource.h
 )
 target_link_libraries(nt_resource PUBLIC nt_core nt_shared nt_log_interface nt_http_interface nt_fs_interface nt_time nt_hash)
+target_compile_definitions(nt_resource PUBLIC NT_RESOURCE_TIMING_ENABLED=$<BOOL:${NT_RESOURCE_TIMING_ENABLED}>)
 target_compile_definitions(nt_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)

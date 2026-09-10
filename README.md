@@ -34,6 +34,9 @@ source emsdk/emsdk_env.sh
 
 ## Build
 
+For setup from a clean clone, common flags, required checks and CI troubleshooting,
+see [Building and checks](docs/build.md).
+
 Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release` (the full list, including the `*-test` variants, is `CMakePresets.json`).
 
 `*-debug` presets pin the dev tooling ON (`NT_UI_DEBUG_TOOLS` and its dependents), `*-release` presets pin it OFF; a `-D` on the command line overrides the preset (e.g. `-DNT_METRICS_ENABLED=ON` to profile a release build).

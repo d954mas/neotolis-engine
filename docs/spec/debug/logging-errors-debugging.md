@@ -32,10 +32,12 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 
 ## Optional measurements
 
-`NT_UI_TIMING_ENABLED` and `NT_GFX_GPU_TIMING_ENABLED` are independent CMake
-options, both OFF by default regardless of build type. Debug presets and
+`NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED` and
+`NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
 `native-release-test` select ON; production Release presets select OFF.
-Their existing interfaces publish numeric 0/1 values. Neither producer depends
+UI/GPU interfaces and the `nt_resource` target publish numeric 0/1 values.
+The resource header does not require the flag; only its implementation checks it.
+No producer depends
 on `NT_METRICS_ENABLED`: the game may consume measurements directly.
 
 UI timing OFF removes the layout/build/walk clock reads and three private
@@ -43,6 +45,12 @@ results. The existing getters require a non-NULL context and return zero.
 ON measures Clay finalization, tree building and the main walk; a separate
 inspector walk does not replace the main result. Main-walk early-outs reset
 only the walk result.
+
+Resource timing OFF removes parse/CRC/activation/step results and extra clocks;
+its getters return zero. Budget, retry and eviction still read operational time.
+Resident pack bytes are queried from existing state even with timing OFF. See
+[resource measurements](../assets/resource.md#optional-measurements-and-resident-bytes)
+for last-call semantics and nested duration boundaries.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
 Segment/toggle calls are inert; supported returns false and poll returns false
@@ -276,7 +284,10 @@ A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it �
 
 ## Override-able compile-time options
 
-The engine follows "use only what you need" — most subsystems are gated by a CMake `option(...)` or a `-D` override with a sane default, so a build pulls in only the code it asks for. This section is the **seed** of that catalogue, listing the **devapi** flags; other engine `-D` defaults fold in here over time (it is not yet an exhaustive index of every define).
+The engine follows "use only what you need" — subsystems use CMake options or
+`-D` overrides so builds pull in only requested code. This section owns DevAPI
+group gates and tunables. Common engine flags, preset overrides and validation
+commands live in [Building and checks](../../build.md#build-options).
 
 **devapi build gates** (CMake `option(...)`, set at configure time):
 

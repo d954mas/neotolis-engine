@@ -1075,6 +1075,43 @@ static void write_test_pack_file(const char *path, uint64_t rid, uint8_t atype) 
 
 /* ---- Pack loading tests ---- */
 
+void test_parse_invalid_later_entry_allows_corrected_load(void) {
+    const char *path = "build/test_parse_corrected.ntpack";
+    nt_hash32_t pid = nt_hash32_str("parse_corrected_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_pack(2, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    size_t written = fwrite(blob, 1, blob_size, file);
+    int closed = fclose(file);
+
+    NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    entries[1].offset = blob_size;
+    nt_result_t result = nt_resource_parse_pack(pid, blob, blob_size);
+    free(blob);
+
+    TEST_ASSERT_EQUAL_UINT32(blob_size, (uint32_t)written);
+    TEST_ASSERT_EQUAL_INT(0, closed);
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, result);
+    TEST_ASSERT_EQUAL_UINT16(0, nt_resource_asset_count());
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, NULL);
+    nt_resource_t resource = nt_resource_request(nt_hash64_str("asset0"), NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
+    nt_resource_step();
+    (void)remove(path);
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    TEST_ASSERT_EQUAL_UINT16(2, nt_resource_asset_count());
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(resource));
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_load_file_transitions_state(void) {
     nt_hash32_t pid = nt_hash32_str("load_file_pack");
@@ -2921,6 +2958,7 @@ int main(void) {
     RUN_TEST(test_asset_slot_reuse);
 
     /* Pack loading tests */
+    RUN_TEST(test_parse_invalid_later_entry_allows_corrected_load);
     RUN_TEST(test_load_file_transitions_state);
     RUN_TEST(test_load_file_empty_pack_fails);
     RUN_TEST(test_load_file_nonexistent);

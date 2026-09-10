@@ -20,6 +20,10 @@
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
 
+#ifndef NT_RESOURCE_TIMING_ENABLED
+#error "NT_RESOURCE_TIMING_ENABLED must be defined by the build (0 or 1)"
+#endif
+
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
 #define NT_SLOT_MAP_SIZE (NT_RESOURCE_MAX_SLOTS * 2)
@@ -46,7 +50,61 @@ static struct {
     uint32_t retry_max_delay_ms;
     bool needs_resolve;
     bool initialized;
+#if NT_RESOURCE_TIMING_ENABLED
+    float parse_ms;
+    float crc_ms;
+    float activate_ms;
+    float step_ms;
+#endif
 } s_resource;
+
+/* ---- Diagnostics ---- */
+
+float nt_resource_get_last_parse_ms(void) {
+#if NT_RESOURCE_TIMING_ENABLED
+    return s_resource.parse_ms;
+#else
+    return 0.0F;
+#endif
+}
+
+float nt_resource_get_last_crc_ms(void) {
+#if NT_RESOURCE_TIMING_ENABLED
+    return s_resource.crc_ms;
+#else
+    return 0.0F;
+#endif
+}
+
+float nt_resource_get_last_activate_ms(void) {
+#if NT_RESOURCE_TIMING_ENABLED
+    return s_resource.activate_ms;
+#else
+    return 0.0F;
+#endif
+}
+
+float nt_resource_get_last_step_ms(void) {
+#if NT_RESOURCE_TIMING_ENABLED
+    return s_resource.step_ms;
+#else
+    return 0.0F;
+#endif
+}
+
+nt_resource_resident_bytes_t nt_resource_get_resident_bytes(void) {
+    nt_resource_resident_bytes_t bytes = {0};
+    for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+        const NtPackMeta *pack = &s_resource.packs[pi];
+        if (pack->blob != NULL) {
+            bytes.blob_bytes += pack->blob_size;
+        }
+        if (pack->meta_data != NULL) {
+            bytes.metadata_bytes += pack->meta_size;
+        }
+    }
+    return bytes;
+}
 
 /* ---- Pack lookup ---- */
 
@@ -480,6 +538,10 @@ void nt_resource_step(void) {
         return;
     }
 
+#if NT_RESOURCE_TIMING_ENABLED
+    double step_start = nt_time_now();
+#endif
+
     /* Native http transfers advance only when pumped (no-op on web/stub) */
     nt_http_update();
 
@@ -683,10 +745,16 @@ void nt_resource_step(void) {
             }
         }
     budget_exhausted:;
+#if NT_RESOURCE_TIMING_ENABLED
+        s_resource.activate_ms = (float)((nt_time_now() - t_start) * 1000.0);
+#endif
 #if NT_LOG_MIN_LEVEL == 0
         if (activated_count > 0) {
-            double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
-            NT_LOG_INFO("activated %u assets (%.1fms / %.1fms budget)", activated_count, elapsed_ms, (double)budget_ms);
+#if NT_RESOURCE_TIMING_ENABLED
+            NT_LOG_INFO("activated %u assets (%.1fms / %.1fms budget)", activated_count, (double)s_resource.activate_ms, (double)budget_ms);
+#else
+            NT_LOG_INFO("activated %u assets", activated_count);
+#endif
         }
 #endif
     }
@@ -737,7 +805,7 @@ void nt_resource_step(void) {
      * =================================================== */
 
     if (!s_resource.needs_resolve) {
-        return; /* O(1) fast path when nothing changed */
+        goto step_done; /* O(1) fast path when nothing changed */
     }
 
     for (uint32_t pass = 0; pass < NT_RESOURCE_MAX_RESOLVE_PASSES; pass++) {
@@ -749,6 +817,10 @@ void nt_resource_step(void) {
     }
 
     NT_ASSERT(!s_resource.needs_resolve && "resource resolve pass limit exceeded");
+step_done:;
+#if NT_RESOURCE_TIMING_ENABLED
+    s_resource.step_ms = (float)((nt_time_now() - step_start) * 1000.0);
+#endif
 }
 
 /* ---- Slot allocation helpers ---- */
@@ -917,25 +989,30 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority) 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
+#if NT_RESOURCE_TIMING_ENABLED
+    double parse_start = nt_time_now();
+    float crc_ms = 0.0F;
+#endif
+    nt_result_t result = NT_ERR_INVALID_ARG;
     if (!s_resource.initialized) {
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         NT_LOG_ERROR("parse_pack not mounted");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     if (s_resource.packs[pack_idx].blob != NULL) {
         NT_LOG_ERROR("pack already parsed");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Validate blob size */
     if (blob_size < sizeof(NtPackHeader)) {
         NT_LOG_ERROR("blob too small");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     const NtPackHeader *h = (const NtPackHeader *)blob;
@@ -943,7 +1020,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Validate magic */
     if (h->magic != NT_PACK_MAGIC) {
         NT_LOG_ERROR("bad magic");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Validate version -- no backwards compat, packs must match exactly */
@@ -952,28 +1029,34 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Validate header_size */
     if (h->header_size > blob_size) {
         NT_LOG_ERROR("header_size exceeds blob");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Validate total_size */
     if (h->total_size != blob_size) {
         NT_LOG_ERROR("total_size mismatch");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Validate asset entries fit in header region */
     uint32_t entries_end = (uint32_t)sizeof(NtPackHeader) + ((uint32_t)h->asset_count * (uint32_t)sizeof(NtAssetEntry));
     if (entries_end > h->header_size) {
         NT_LOG_ERROR("entries overflow header region");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Validate CRC32 */
     uint32_t data_size = blob_size - h->header_size;
+#if NT_RESOURCE_TIMING_ENABLED
+    double crc_start = nt_time_now();
+#endif
     uint32_t computed = nt_crc32(blob + h->header_size, data_size);
+#if NT_RESOURCE_TIMING_ENABLED
+    crc_ms = (float)((nt_time_now() - crc_start) * 1000.0);
+#endif
     if (computed != h->checksum) {
         NT_LOG_ERROR("CRC32 mismatch");
-        return NT_ERR_INVALID_ARG;
+        goto parse_done;
     }
 
     /* Parse asset entries */
@@ -982,13 +1065,15 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Meta section start from header (no scan needed) */
     uint32_t meta_section_start = h->meta_offset;
 
+    /* Reject the whole pack before registering any assets. */
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        /* Validate entry offset is in data region and data fits within blob */
         if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
             NT_LOG_ERROR("entry data outside data region");
-            return NT_ERR_INVALID_ARG;
+            goto parse_done;
         }
+    }
 
+    for (uint16_t i = 0; i < h->asset_count; i++) {
         uint32_t idx = asset_alloc();
         NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
 
@@ -1046,7 +1131,13 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 
     s_resource.needs_resolve = true;
 
-    return NT_OK;
+    result = NT_OK;
+parse_done:
+#if NT_RESOURCE_TIMING_ENABLED
+    s_resource.parse_ms = (float)((nt_time_now() - parse_start) * 1000.0);
+    s_resource.crc_ms = crc_ms;
+#endif
+    return result;
 }
 
 /* ---- Resource access ---- */

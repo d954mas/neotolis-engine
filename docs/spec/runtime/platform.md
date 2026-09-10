@@ -67,6 +67,13 @@ Platform does **not** handle:
 - material logic
 - resource manifests
 
+## WASM bridge allocation
+
+EM_JS code allocating into the WASM heap uses `wasmExports['malloc']`.
+`Module['_malloc']` does not work with the engine's emmalloc configuration, and
+bare `_malloc` fails Closure compilation. Declare the referenced runtime helpers
+and malloc export in `EM_JS_DEPS`; follow `engine/http/web/nt_http_web.c`.
+
 ## Canvas, DPR, and Viewport
 
 Platform layer must handle:

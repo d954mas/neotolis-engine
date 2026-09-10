@@ -48,7 +48,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: ['**/devapi.spec.ts', '**/basis.spec.ts'],
+      testIgnore: '**/devapi.spec.ts',
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: chromiumGl,

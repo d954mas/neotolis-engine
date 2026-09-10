@@ -78,6 +78,7 @@ class Checks:
         print("PASS: all 18 macro forms at floors 0..3; exact marker/latch/reference presence")
 
     def headers(self):
+        self.compile("resource-header-without-timing", '#include "resource/nt_resource.h"\n', DEFINES)
         headers = {
             "NT_LOG_MIN_LEVEL": "log/nt_log.h",
             "NT_METRICS_ENABLED": "metrics/nt_metrics.h",
@@ -121,10 +122,10 @@ class Checks:
                   "-DNT_DEVAPI_ENABLED=OFF", "-DNT_UI_DEBUG_TOOLS=OFF",
                   "-DNT_DEVAPI_GROUP_UI=ON", "-DNT_DEVAPI_GROUP_OBS=ON", "-DNT_DEVAPI_GROUP_ENTITY_WRITE=ON"]
         policies = {
-            "off": {"NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+            "off": {"NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
                     "NT_INTROSPECT_ENABLED": "ON", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                     "NT_METRICS_ENABLED": "OFF", "NT_LOG_RING_ENABLED": "OFF"},
-            "on": {"NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
+            "on": {"NT_RESOURCE_TIMING_ENABLED": "ON", "NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
                    "NT_INTROSPECT_ENABLED": "OFF", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }

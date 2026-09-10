@@ -8,6 +8,51 @@ NT_ASSET_ATLAS binary formats, placeholder policy, and `nt_hash` identity hashin
 
 Related: [Async Loading](async-loading.md), [Pack Format](ntpack.md), [Builder Architecture](../builder/builder.md)
 
+## Optional measurements and resident bytes
+
+`NT_RESOURCE_TIMING_ENABLED` is independent of metrics, DevAPI and UI. CMake
+uses OFF by default, Debug presets and `native-release-test` use ON, and
+production Release presets use OFF. For performance comparisons use Release
+with this flag explicitly ON. The `nt_resource` target publishes the numeric
+0/1 definition. The public header and API are independent of it; only the
+implementation requires the flag to be defined.
+
+| Getter | Last completed work, in milliseconds |
+| --- | --- |
+| `nt_resource_get_last_parse_ms()` | One `nt_resource_parse_pack()` call, including validation, CRC, registration, dedup and metadata copying |
+| `nt_resource_get_last_crc_ms()` | CRC inside that same parse; zero if the call did not reach CRC |
+| `nt_resource_get_last_activate_ms()` | The activation phase of the last initialized step, including scans, dedup lookup and CPU activator calls |
+| `nt_resource_get_last_step_ms()` | The last initialized `nt_resource_step()` through resolve completion |
+
+Direct parse calls and recoverable failures replace parse/CRC results. Multiple
+parses in one step retain the last result, not a sum. A step without parsing,
+including a blob re-download that reuses registered assets, preserves it.
+Step/activation results update even on passes without activations. An inactive
+step remains a no-op. Results start at zero and reset at shutdown/init.
+CRC is nested in parse; activation and any parses performed by a step are
+nested in step. Do not add nested durations. Step excludes network waiting and
+separately executing Web callbacks; activation does not measure GPU completion.
+
+OFF removes the four diagnostic result fields and additional clock reads,
+including the activation duration used by the INFO log; timing getters return
+zero. Budget, retry and eviction clocks retain their operational purpose.
+There is no measurement history, per-asset timer or diagnostic allocation.
+The host may forward values to its existing metrics collector; the last parse
+must not be reported as the cost of every frame. JS memory peaks and JS-to-WASM
+copy time belong to an external benchmark, not this producer.
+
+`nt_resource_get_resident_bytes()` returns `blob_bytes` and `metadata_bytes`
+as `uint64_t` values, available even with timing OFF. It scans existing pack
+state on demand: each non-NULL blob contributes its size once per pack,
+including caller-owned blobs; each non-NULL metadata copy contributes its
+size separately. The blob already contains the original metadata bytes, while
+the metadata count describes the separate resident copy. After blob eviction,
+its preserved size contributes nothing, but its metadata copy remains counted.
+Unmount/shutdown remove the corresponding bytes. Virtual packs without data
+contribute zero. This is resident pack data, not registry storage, I/O buffers,
+runtime GPU assets or total process memory; there is no mirrored allocation
+accounting.
+
 ## Core concepts
 
 - `publication_epoch`: monotonic counter that changes when the published view of any slot changes
