@@ -93,10 +93,11 @@ an active branch when compressed: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
 | `uastc.pack_level` | 0..4 | UASTC LDR pack effort |
 | `uastc.rdo_lambda` | 0, or finite 0.001..50 | UASTC RDO lambda; 0 disables RDO |
 
-`nt_tex_compress_etc1s_*()` presets retain qualities 1/64/128/200/255,
+From `lowest` through `low`, `default`, `high`, and `highest`,
+`nt_tex_compress_etc1s_*()` presets use qualities 1/64/128/200/255,
 endpoint thresholds 1.5/1.5/1.5/1.5/0 and selector thresholds
-1.25/1.25/1.25/1.25/0. `nt_tex_compress_uastc_*()` presets retain pack levels
-0/1/2/3/4 and lambdas 2/1.5/1/0.5/0. The UASTC RDO dictionary remains 32768
+1.25/1.25/1.25/1.25/0. `nt_tex_compress_uastc_*()` presets use pack levels
+0/1/2/3/4 and lambdas 2/1.5/1/0.5/0. The UASTC RDO dictionary is 32768
 bytes. ETC1S zero thresholds explicitly disable RDO; they do not select
 upstream defaults.
 
@@ -111,25 +112,24 @@ nt_builder_add_texture(ctx, "assets/normal.png", &texture);
 
 Texture add calls and `nt_atlas_begin` validate the codec and active ranges
 before cache access, including on a previously failed pack. Violations are
-`NT_BUILD_ASSERT`. They copy the descriptor; the caller's options may die or
-change after the call. Inactive union bytes and padding have no meaning and
-are never used by validation, cache hashing, dedup equality or the encoder.
+`NT_BUILD_ASSERT`. They copy the descriptor; the caller may release or mutate
+the options after the call returns. Inactive union bytes and padding have no
+meaning and are never used by validation, cache hashing, dedup equality or the encoder.
 Signed zero has the same identity as positive zero.
 
 `compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
-(the zero initializer) keeps the RAW path. NONE denotes absence of Basis
-compression in builder options, not a Basis file codec. File/memory textures
-still decode and resize at add time to establish pixel identity, then re-decode their retained
-source at encode time. Raw pixels are copied. Atlas pages pass through the
-same texture encoder. Premultiplication remains after resize, before encoding.
-Thread allocation and alpha detection are unchanged.
+(the zero initializer) selects RAW. NONE denotes absence of Basis compression
+in builder options, not a Basis file codec. File/memory textures decode and
+resize at add time to establish pixel identity. Early dedup re-decodes them
+when a hash match needs byte verification; encoding re-decodes on a cache miss.
+File inputs retain a copied path for re-reading; memory inputs retain a copy
+of the encoded bytes. Raw-pixel inputs retain copied, resized pixels. Atlas
+pages use the same texture encoder. Premultiplication runs after resize and
+before encoding.
 
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
-controls RAW runtime mip generation and is stored unchanged). The builder
-checks exactly
+controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
-The lower encoder always generates this chain. This C API change does not
-alter TTEX wire semantics or version.
 
 ## Builder stages
 
@@ -282,8 +282,7 @@ dimensions, resolved pixel format, premultiplication, sampler defaults, RAW
 mip-generation flag, compression presence, codec and its active fields above.
 Basis ignores the RAW mip-generation flag. Names, source locations, resize
 limits after resizing, threading, descriptor padding and inactive union bytes
-are not encode identity. `NT_BUILDER_VERSION` is 4 for the tagged descriptor
-and explicit ETC1S zero-threshold semantics; version 3 caches are misses.
+are not encode identity.
 
 **Invalidation:**
 - Source data changes → different `decoded_hash` → automatic miss.

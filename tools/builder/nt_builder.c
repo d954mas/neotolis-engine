@@ -596,7 +596,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double cache_restore_secs = 0.0;
 #endif
 
-    /* Phase 0: Early dedup on hash + size + opts */
+    // #region Early dedup
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0) {
@@ -660,7 +660,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             }
         }
     }
+    // #endregion
 
+    // #region Encode setup
     /* Per-asset encode results (heap-allocated to support large asset counts) */
     NtEncodeResult *results = (NtEncodeResult *)calloc(ctx->pending_count, sizeof(NtEncodeResult));
     NT_BUILD_ASSERT(results && "finish_pack: alloc failed");
@@ -685,9 +687,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         nt_basisu_encoder_init();
     }
 
-    /* Phase 1: Encode non-deduped entries (cache_check -> encode -> assembly) */
     NT_LOG_INFO("Encoding %u assets (%u early-deduped)...", ctx->pending_count, ctx->early_dedup_count);
+    // #endregion
 
+    // #region Shader encoding
     /* Pre-encode shaders (GL context is thread-bound, cannot parallelize).
      * Cache check happens here too — shaders are skipped by the main cache loop. */
 #if NT_LOG_MIN_LEVEL == 0
@@ -749,8 +752,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         (void)fflush(stdout);
 #endif
     }
+    // #endregion
 
-    /* Phase 1a: Cache check loop (sequential, fills NtEncodeResult for hits) */
+    // #region Cache lookup
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0) {
@@ -793,8 +797,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             ctx->cache_miss_count++;
         }
     }
+    // #endregion
 
-    /* Phase 1b: Encode (parallel if thread_count > 0, else single-threaded) */
+    // #region Asset encoding
     /* Build work queue: indices of entries needing encode (not cached, not deduped, not shader) */
     uint32_t *work_indices = (uint32_t *)malloc((size_t)ctx->pending_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(work_indices && "finish_pack: alloc failed");
@@ -885,8 +890,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 #endif
         }
     }
+    // #endregion
 
-    /* Phase 1c: Sequential assembly -- append in declaration order */
+    // #region Asset assembly
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0) {
@@ -969,9 +975,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 #if NT_LOG_MIN_LEVEL == 0
     double encode_secs = nt_time_now() - t_encode_start;
 #endif
+    // #endregion
 
-    /* Phase 1b: Write meta section to data_buf (appended after asset data).
-     * Meta entries grouped by resource_id, covered by CRC32. */
+    // #region Metadata assembly
+    /* Group metadata by resource_id after asset data so the pack CRC covers it. */
     uint32_t meta_section_start_databuf = 0; /* data_buf-relative, before header shift */
     if (ctx->meta_count > 0) {
         /* Sort meta_pending by resource_id (insertion sort -- count is small) */
@@ -1019,8 +1026,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             }
         }
     }
+    // #endregion
 
-    /* Phase 2: Compute layout and write pack file */
+    // #region Pack output
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
@@ -1127,6 +1135,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         (void)remove(ctx->output_path);
         NT_BUILD_ASSERT(0 && "finish_pack: failed to write or publish pack file");
     }
+    // #endregion
 
     /* Generate codegen header (.h with ASSET_* constants) */
     nt_build_result_t codegen_result = nt_builder_generate_header(ctx);

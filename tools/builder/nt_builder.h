@@ -248,24 +248,14 @@ typedef struct {
     nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
     uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
-    bool premultiplied;               /* true = RGB premultiplied by alpha before encoding.
-                                       * Default false for compatibility. Set true for UI/sprite
-                                       * textures rendered with bilinear filtering to avoid dark
-                                       * fringes at alpha edges. Only meaningful for RGBA8. */
-    /* Default sampler state baked into the V3 NtTextureAssetHeader so the
-     * activator creates the right sampler. Materials may override per
-     * binding. Default values match the historical hardcoded activator
-     * config (LINEAR_MIPMAP_LINEAR + REPEAT). Set NEAREST/no-mips for
-     * pixel-art atlases or LINEAR (no mips) for sharp 2D illustrations. */
+    bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
+    /* Baked sampler defaults; materials may override them per binding. */
     nt_texture_default_filter_t filter_min; /* default: LINEAR_MIPMAP_LINEAR */
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
-    /* Runtime mip generation for RAW textures. Use nt_tex_opts_defaults()
-     * for sane defaults (gen_mipmaps=true). Zero-init via {0} or partial
-     * field-init leaves this false; opt in explicitly if you want material
-     * sampler overrides to be able to use mipmap filtering. No effect on
-     * BASIS textures (their mip count is baked at encode time). */
+    /* RAW runtime mip generation: defaults true, zero-init false. Required for
+     * mipmap filtering, including material overrides. Ignored by BASIS. */
     bool gen_mipmaps;
 } nt_tex_opts_t;
 
@@ -282,8 +272,6 @@ static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
         .gen_mipmaps = true,
     };
 }
-
-/* --- Texture compression options (Basis Universal encoding) --- */
 
 /* --- Compression presets (5 levels: lowest → highest) --- */
 

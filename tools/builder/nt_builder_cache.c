@@ -52,13 +52,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         memcpy(buf + pos, &premul, sizeof(premul));
         pos += (uint32_t)sizeof(premul);
 
-        /* Sampler defaults are baked into the V3 NtTextureAssetHeader so they
-         * MUST invalidate the texture cache — otherwise changing
-         * atlas_opts.filter_min/wrap from LINEAR to LINEAR_MIPMAP_LINEAR (or
-         * vice versa) reuses the cached encoded blob with stale header bytes,
-         * and the runtime activator creates the wrong sampler. Caught when
-         * the bunnymark HD pack kept its old filter even after re-running
-         * build_packs. */
+        /* Sampler defaults change the encoded header and must invalidate the cache. */
         uint8_t fmin = (uint8_t)td->opts.filter_min;
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
