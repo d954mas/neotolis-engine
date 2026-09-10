@@ -9,7 +9,11 @@ identify version `02.50`, `BASISD_LIB_VERSION=250`.
 
 No engine feature defines changed. Both consumers use the existing shared native
 transcoder translation unit and matching interface compile definitions.
-The encoder source list follows the new upstream files; the C wrappers are unchanged.
+The encoder source list follows the new upstream files; the C API is unchanged.
+LDR mip generation explicitly sets `m_mip_srgb = false` in the encoder wrapper.
+Stored RGB and alpha values must use the same linear filter to preserve
+premultiplied data. Basis 2.50 defaults this parameter to true; accepting that
+default gamma-filters RGB while leaving alpha linear.
 
 Values below are equal before and after the upgrade. Names have the
 `BASISD_SUPPORT_` prefix. These are effective preprocessor values, including
@@ -61,11 +65,23 @@ five existing outputs. Checks cover dimensions, successful conversion, output
 canaries, and asymmetric base-level RGBA pixels with codec tolerance. Compressed
 conversion is CPU evidence; GPU sampling is measured separately below.
 
+Two additional Unity cases encode an 8x8 premultiplied opaque-white/transparent-black
+checker and verify its decoded 1x1 mip against an independent RGBA `(128,128,128,128)`
+reference with tolerance 8. Before the explicit linear-filter setting, ETC1S
+failed with RGB 187 and UASTC with RGB 188. The check frees the encoded data and
+closes the transcoder session before comparing pixels, including on failure.
+Both cases pass with the explicit linear filter in native-debug and
+native-release-test/NDEBUG.
+
 For cache invalidation, the identical four-texture producer at
 `cb107e8a` was run with the same cache directory: builder version 1 produced
 0 hits / 4 misses; version 2 produced 0 hits / 4 misses; its next run produced
-4 hits / 0 misses. `NT_BUILDER_VERSION` changes from 1 to 2; the existing cache
-key mechanism suffices. No cache registry or TTEX wire-version change is added.
+4 hits / 0 misses. The final `NT_BUILDER_VERSION` is 3, invalidating both the
+2.10 cache and the intermediate version-2 cache encoded with sRGB mip filtering.
+The existing cache key mechanism suffices. No cache registry or TTEX wire-version
+change is added.
+With the same final fixture source and its populated version-2 cache, version 3
+produced 0 hits / 4 misses; the next run produced 4 hits / 0 misses.
 The final fixture adds a blue checker pattern to make selecting the wrong mip
 observable; that source change is independent of the version-isolation test.
 
@@ -86,8 +102,9 @@ independent of engine assertions. Browser exceptions, console errors, HTTP
 failure, wrong preset/assert mode, and GL errors fail the Playwright test.
 
 A negative witness replaced every sampled LOD with zero in the Release fixture.
-The pixel check rejected texture 0, mip 1, blue channel (MAE 57 against the limit
-24). The mutation was restored before rebuilding the passing fixture.
+With linear mip filtering, the pixel check rejected texture 0, mip 1, blue
+channel (MAE 57 against the limit 24). The mutation was restored before rebuilding
+the passing fixture.
 
 | Browser configuration | Debug FULL / Release TRAP | Default GPU sampling |
 | --- | --- | --- |

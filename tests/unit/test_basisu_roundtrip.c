@@ -89,6 +89,34 @@ void test_etc1s_rgb(void) { codec_cases(false, false); }
 void test_etc1s_alpha(void) { codec_cases(false, true); }
 void test_uastc_rgb(void) { codec_cases(true, false); }
 void test_uastc_alpha(void) { codec_cases(true, true); }
+
+static void check_premultiplied_mip(bool uastc) {
+    uint8_t pixels[8 * 8 * 4];
+    for (uint32_t y = 0; y < 8; y++) {
+        for (uint32_t x = 0; x < 8; x++) {
+            uint8_t value = ((x + y) & 1U) ? 255 : 0;
+            memset(&pixels[(((size_t)y * 8) + x) * 4], value, 4);
+        }
+    }
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 8, 8, true, uastc, uastc ? 2U : 200U, 0.0F, 0.0F, true);
+    TEST_ASSERT_NOT_NULL(enc.data);
+    uint8_t mip[4] = {0};
+    bool started = nt_basisu_start_transcoding(enc.data, enc.size);
+    bool decoded = started && nt_basisu_transcode_level(enc.data, enc.size, 3, mip, 1, NT_BASISU_FORMAT_RGBA32);
+    if (started) {
+        nt_basisu_stop_transcoding();
+    }
+    nt_basisu_encode_free(&enc);
+    TEST_ASSERT_TRUE(decoded);
+    /* Equal opaque-white and transparent-black coverage averages every channel to 128. */
+    for (uint32_t c = 0; c < 4; c++) {
+        TEST_ASSERT_INT_WITHIN(8, 128, mip[c]);
+    }
+}
+
+void test_etc1s_premultiplied_mip(void) { check_premultiplied_mip(false); }
+void test_uastc_premultiplied_mip(void) { check_premultiplied_mip(true); }
+
 int main(void) {
     UNITY_BEGIN();
     /* Runtime init must work without the encoder's implicit transcoder init. */
@@ -98,5 +126,7 @@ int main(void) {
     RUN_TEST(test_etc1s_alpha);
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
+    RUN_TEST(test_etc1s_premultiplied_mip);
+    RUN_TEST(test_uastc_premultiplied_mip);
     return UNITY_END();
 }

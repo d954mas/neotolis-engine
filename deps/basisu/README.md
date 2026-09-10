@@ -21,7 +21,8 @@ The builder's encoder source list is explicit in
 Native encoder and runtime share the single upstream transcoder translation unit
 and `nt_basisu_transcoder_config` from
 [engine/basisu/CMakeLists.txt](../../engine/basisu/CMakeLists.txt).
-Existing wrapper calls need no compatibility shims for this version.
+The C API is unchanged. The encoder explicitly sets `m_mip_srgb = false` so RGB
+and alpha use the same linear mip filter, preserving premultiplied texture data.
 
 Engine input remains ETC1S/UASTC LDR `.basis`; outputs remain ETC1 RGB, ETC2 RGBA,
 BC7 RGBA, ASTC 4x4 RGBA, and RGBA32. Compiled upstream HDR/XUASTC helpers do not

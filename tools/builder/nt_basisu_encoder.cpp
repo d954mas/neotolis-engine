@@ -48,6 +48,8 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
 
     params.m_create_ktx2_file = false;
     params.m_mip_gen = gen_mipmaps;
+    /* Premultiplied RGB and alpha must use the same linear filter. */
+    params.m_mip_srgb = false;
     params.m_check_for_alpha = has_alpha;
     if (!has_alpha) {
         params.m_force_alpha = false;

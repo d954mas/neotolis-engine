@@ -414,6 +414,12 @@ Every frontier adopts the trim-rect candidate, so with `max_vertices >= 4` geome
 
 **Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; setting `premultiplied = true` with a non-RGBA8 `format` is a hard assert.
 
+**LDR mip filtering:** the Basis encoder filters stored RGB and alpha values linearly,
+without an sRGB transfer during downsampling (`m_mip_srgb = false`, set explicitly
+by the wrapper). This preserves the premultiplied relationship through the mip
+chain. A half-coverage opaque-white/transparent-black texture reduces to roughly
+RGBA `(128,128,128,128)`, subject to block-compression error.
+
 **Hard limits:**
 - `0 <= extrude <= max_size`; non-zero atlas extrude requires `NT_ATLAS_SHAPE_RECT`.
 - `max_added_area_percent` must be finite and non-negative at atlas and per-sprite boundaries. NaN, infinity, and negative values are caller bugs and assert; signed zero is canonicalized to positive zero.
