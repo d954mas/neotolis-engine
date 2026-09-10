@@ -307,6 +307,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endforeach()
     # Minimal standalone web smoke-test app (window.__nt hooks the browser specs drive).
     add_subdirectory(tests/browser/app)
+    add_subdirectory(tests/browser/basis)
     # devapi host links nt_devapi via the transport split: native nt_devapi_net (TCP) OR web
     # nt_devapi_web (the push/pull ccall bridge, no socket). Builds on BOTH native and EMSCRIPTEN now —
     # the web target is the Playwright web-smoke gate. Gate only on the layer being enabled.
