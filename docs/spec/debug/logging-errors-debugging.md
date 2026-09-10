@@ -282,7 +282,10 @@ A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it �
 
 ## Override-able compile-time options
 
-The engine follows "use only what you need" — most subsystems are gated by a CMake `option(...)` or a `-D` override with a sane default, so a build pulls in only the code it asks for. This section is the **seed** of that catalogue, listing the **devapi** flags; other engine `-D` defaults fold in here over time (it is not yet an exhaustive index of every define).
+The engine follows "use only what you need" — subsystems use CMake options or
+`-D` overrides so builds pull in only requested code. This section owns DevAPI
+group gates and tunables. Common engine flags, preset overrides and validation
+commands live in [Building and checks](../../build.md#build-options).
 
 **devapi build gates** (CMake `option(...)`, set at configure time):
 
