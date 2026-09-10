@@ -5,6 +5,10 @@
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 
+#ifndef NT_RESOURCE_TIMING_ENABLED
+#error "NT_RESOURCE_TIMING_ENABLED must be defined by the build (0 or 1)"
+#endif
+
 /* ---- Compile-time limits (overridable via -D) ---- */
 
 #ifndef NT_RESOURCE_MAX_PACKS
@@ -102,6 +106,26 @@ typedef struct {
 nt_result_t nt_resource_init(const nt_resource_desc_t *desc);
 void nt_resource_shutdown(void);
 void nt_resource_step(void);
+
+/* ---- Diagnostics ---- */
+
+/* Last completed parse, including direct API calls and recoverable failures.
+ * CRC is nested in parse and is zero when the call did not reach CRC. */
+float nt_resource_get_last_parse_ms(void);
+float nt_resource_get_last_crc_ms(void);
+/* Last initialized step; activation includes scans and CPU activator calls.
+ * Nested durations must not be added. All timings start at zero and return zero with timing OFF. */
+float nt_resource_get_last_activate_ms(void);
+float nt_resource_get_last_step_ms(void);
+
+typedef struct {
+    uint64_t blob_bytes;
+    uint64_t metadata_bytes;
+} nt_resource_resident_bytes_t;
+
+/* Current non-NULL pack blobs and separate metadata copies, once per pack.
+ * Available with timing OFF; excludes registry, I/O buffers and runtime assets. */
+nt_resource_resident_bytes_t nt_resource_get_resident_bytes(void);
 
 /* ---- Pack management ---- */
 

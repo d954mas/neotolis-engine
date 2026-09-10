@@ -41,6 +41,7 @@
                 "NT_INTROSPECT_WRITE_ENABLED": "ON",
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
+                "NT_RESOURCE_TIMING_ENABLED": "ON",
                 "NT_GFX_GPU_TIMING_ENABLED": "ON"
             }
         },
@@ -58,6 +59,7 @@
                 "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                 "NT_LOG_MIN_LEVEL": "1",
                 "NT_UI_TIMING_ENABLED": "OFF",
+                "NT_RESOURCE_TIMING_ENABLED": "OFF",
                 "NT_GFX_GPU_TIMING_ENABLED": "OFF"
             }
         },
@@ -111,6 +113,7 @@
                 "NT_INTROSPECT_WRITE_ENABLED": "ON",
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
+                "NT_RESOURCE_TIMING_ENABLED": "ON",
                 "NT_GFX_GPU_TIMING_ENABLED": "ON"
             }
         },
@@ -129,6 +132,7 @@
                 "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                 "NT_LOG_MIN_LEVEL": "1",
                 "NT_UI_TIMING_ENABLED": "OFF",
+                "NT_RESOURCE_TIMING_ENABLED": "OFF",
                 "NT_GFX_GPU_TIMING_ENABLED": "OFF"
             }
         },
@@ -156,6 +160,7 @@
                 "NT_INTROSPECT_WRITE_ENABLED": "ON",
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
+                "NT_RESOURCE_TIMING_ENABLED": "ON",
                 "NT_GFX_GPU_TIMING_ENABLED": "ON"
             }
         },

@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ("test_log_floor", "test_log_api", "test_log_api_stub", "test_log_ring",
-           "test_introspect", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native", "test_gfx_stub")
+           "test_introspect", "test_resource_timing", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native", "test_gfx_stub")
 
 
 def run(command, log):
@@ -26,12 +26,12 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     # Both independent combinations are exercised without a metrics collector.
-    cases = ((0, "ON", "ON", "ON", 2), (1, "OFF", "OFF", "ON", 2),
-             (2, "ON", "OFF", "OFF", 2), (3, "OFF", "ON", "OFF", 2),
-             (2, "ON", "OFF", "OFF", 1), (3, "OFF", "ON", "OFF", 1),
-             (2, "ON", "OFF", "ON", 2), (3, "OFF", "ON", "ON", 2))
+    cases = ((0, "ON", "ON", "ON", 2, "OFF"), (1, "OFF", "OFF", "ON", 2, "ON"),
+             (2, "ON", "OFF", "OFF", 2, "ON"), (3, "OFF", "ON", "OFF", 2, "OFF"),
+             (2, "ON", "OFF", "OFF", 1, "ON"), (3, "OFF", "ON", "OFF", 1, "OFF"),
+             (2, "ON", "OFF", "ON", 2, "ON"), (3, "OFF", "ON", "ON", 2, "OFF"))
     try:
-        for floor, ui, gpu, metrics, asserts in cases:
+        for floor, ui, gpu, metrics, asserts, resource in cases:
             name = f"diagnostics-floor-{floor}" + ("-trap" if asserts == 1 else "")
             if floor >= 2 and metrics == "ON":
                 name += "-obs"
@@ -44,10 +44,10 @@ def main():
             if obs == "ON":
                 targets += ("test_devapi_obs",)
             if floor >= 2 and metrics == "ON":
-                targets = ("test_devapi_obs", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
+                targets = ("test_devapi_obs", "test_resource_timing", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
-                 f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
+                 f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
                  f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}",
                  "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                  "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",
@@ -58,7 +58,7 @@ def main():
                           "-R", "^(" + "|".join(targets) + ")$"], args.output / f"{name}-test.log")
             if f"100% tests passed, 0 tests failed out of {len(targets)}" not in output:
                 raise RuntimeError(f"{name}: expected all {len(targets)} registered tests\n{output}")
-            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, metrics={metrics}, inspector={ui_debug}, asserts={asserts}; {len(targets)} tests", flush=True)
+            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, resource={resource}, metrics={metrics}, inspector={ui_debug}, asserts={asserts}; {len(targets)} tests", flush=True)
     except (OSError, RuntimeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

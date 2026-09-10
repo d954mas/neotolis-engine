@@ -514,6 +514,10 @@ if(NOT EMSCRIPTEN)
 
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
+    add_executable(test_resource_timing unit/test_resource_timing.c)
+    target_link_libraries(test_resource_timing PRIVATE nt_resource nt_http_stub nt_fs nt_log_stub unity)
+    target_compile_definitions(test_resource_timing PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_resource_timing)
     # Real nt_fs/nt_http: test_resource drives the real loader pipeline (native
     # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
     # so assets never activate and the activation/resolve callbacks never fire.

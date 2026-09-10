@@ -36,6 +36,10 @@ If code and spec diverge, flag it explicitly in the response. Do not silently "n
   NONE uses the existing stub source through `nt_log`; `nt_log_stub` remains a link-time choice.
   `scripts/atlas/{benchmark,autoresearch-bench,bench-vector}.sh` select INFO in
   `build/_cmake/native-release-atlas-bench`; `--no-build` uses that build's executable.
+- **NT_RESOURCE_TIMING_ENABLED** (default OFF; Debug presets and `native-release-test` ON, production
+  Release OFF): independent pack parse/CRC/activation/step producer. OFF removes diagnostic fields
+  and extra clocks; timing getters return zero. Budget/retry/eviction clocks and resident-byte
+  queries remain available. Covered by the diagnostics config/runtime scripts below.
 - **NT_UI_TIMING_ENABLED**, **NT_GFX_GPU_TIMING_ENABLED** (default OFF regardless
   of build type; Debug presets and `native-release-test` ON, production Release
   presets OFF): independent producers; neither requires metrics. UI getters return zero

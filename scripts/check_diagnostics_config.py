@@ -24,6 +24,7 @@ DEFINES = {
     "NT_INTROSPECT_WRITE_ENABLED": 0,
     "NT_UI_DEBUG_TOOLS": 0,
     "NT_UI_TIMING_ENABLED": 0,
+    "NT_RESOURCE_TIMING_ENABLED": 0,
     "NT_GFX_GPU_TIMING_ENABLED": 0,
 }
 
@@ -85,6 +86,7 @@ class Checks:
             "NT_INTROSPECT_ENABLED": "introspect/nt_introspect.h",
             "NT_INTROSPECT_WRITE_ENABLED": "introspect/nt_introspect.h",
             "NT_UI_TIMING_ENABLED": "ui/nt_ui.h",
+            "NT_RESOURCE_TIMING_ENABLED": "resource/nt_resource.h",
             "NT_GFX_GPU_TIMING_ENABLED": "graphics/nt_gfx.h",
         }
         for define, header in headers.items():
@@ -121,10 +123,10 @@ class Checks:
                   "-DNT_DEVAPI_ENABLED=OFF", "-DNT_UI_DEBUG_TOOLS=OFF",
                   "-DNT_DEVAPI_GROUP_UI=ON", "-DNT_DEVAPI_GROUP_OBS=ON", "-DNT_DEVAPI_GROUP_ENTITY_WRITE=ON"]
         policies = {
-            "off": {"NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+            "off": {"NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
                     "NT_INTROSPECT_ENABLED": "ON", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                     "NT_METRICS_ENABLED": "OFF", "NT_LOG_RING_ENABLED": "OFF"},
-            "on": {"NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
+            "on": {"NT_RESOURCE_TIMING_ENABLED": "ON", "NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
                    "NT_INTROSPECT_ENABLED": "OFF", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }
