@@ -79,6 +79,10 @@ Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — ret
 
 ## Runtime parsing
 
+All asset entry byte ranges are checked before any asset is registered. An invalid
+range rejects the pack without leaving partial asset records, so a corrected pack
+can be loaded into the same mount.
+
 ```c
 // Pseudocode — see nt_resource.c for actual implementation
 void parse_pack(const uint8_t *blob, uint32_t blob_size) {

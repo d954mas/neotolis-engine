@@ -1061,13 +1061,15 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Meta section start from header (no scan needed) */
     uint32_t meta_section_start = h->meta_offset;
 
+    /* Reject the whole pack before registering any assets. */
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        /* Validate entry offset is in data region and data fits within blob */
         if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
             NT_LOG_ERROR("entry data outside data region");
             goto parse_done;
         }
+    }
 
+    for (uint16_t i = 0; i < h->asset_count; i++) {
         uint32_t idx = asset_alloc();
         NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
 
