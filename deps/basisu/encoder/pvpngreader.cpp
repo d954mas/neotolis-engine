@@ -472,6 +472,10 @@ public:
 
 	bool m_scanned_flag;
 
+	// Set once png_decode_start() runs; guards against a second call (which would re-alloc the line buffers and
+	// re-init the inflator without freeing the first set). Debug-only assert; the public API never re-enters.
+	bool m_decode_started_flag;
+
 	int m_terminate_status;
 
 #define TEMP_BUF_SIZE (384)
@@ -484,7 +488,7 @@ public:
 	void* png_calloc(uint32_t i);
 	int block_read(void* buf, uint32_t len);
 	int64_t block_read_dword();
-	int fetch_next_chunk_data(uint8_t* buf, int bytes);
+	int64_t fetch_next_chunk_data(uint8_t* buf, uint32_t bytes);
 	int fetch_next_chunk_byte();
 	int fetch_next_chunk_word();
 	int64_t fetch_next_chunk_dword();
@@ -551,7 +555,11 @@ void* png_decoder::png_malloc(uint32_t len)
 			break;
 
 	if (j == PNG_MAX_ALLOC_BLOCKS)
+	{
+		// Tracking table full: free the block we just allocated rather than leaking it.
+		free(p);
 		return nullptr;
+	}
 
 	m_pMalloc_blocks[j] = p;
 
@@ -590,12 +598,12 @@ int64_t png_decoder::block_read_dword()
 	return (int64_t)v;
 }
 
-int png_decoder::fetch_next_chunk_data(uint8_t* buf, int bytes)
+int64_t png_decoder::fetch_next_chunk_data(uint8_t* buf, uint32_t bytes)
 {
 	if (!m_chunk_flag)
 		return 0;
 
-	bytes = minimum<int>(bytes, m_chunk_left);
+	bytes = minimum<uint32_t>(bytes, m_chunk_left);
 
 	int status = block_read(buf, bytes);
 	if (status != 0)
@@ -615,7 +623,7 @@ int png_decoder::fetch_next_chunk_data(uint8_t* buf, int bytes)
 	{
 		int64_t res = block_read_dword();
 		if (res < 0)
-			return (int)res;
+			return res;
 
 		if (check_crc32)
 		{
@@ -633,9 +641,9 @@ int png_decoder::fetch_next_chunk_byte()
 {
 	uint8_t buf[1];
 
-	int status = fetch_next_chunk_data(buf, 1);
+	int64_t status = fetch_next_chunk_data(buf, 1);
 	if (status < 0)
-		return status;
+		return (int)status;
 
 	if (status != 1)
 		return terminate(PNG_BAD_CHUNK_SIZE);
@@ -647,9 +655,9 @@ int png_decoder::fetch_next_chunk_word()
 {
 	uint8_t buf[2];
 
-	int status = fetch_next_chunk_data(buf, 2);
+	int64_t status = fetch_next_chunk_data(buf, 2);
 	if (status < 0)
-		return status;
+		return (int)status;
 
 	if (status != 2)
 		return terminate(PNG_BAD_CHUNK_SIZE);
@@ -661,12 +669,12 @@ int64_t png_decoder::fetch_next_chunk_dword()
 {
 	uint8_t buf[4];
 
-	int status = fetch_next_chunk_data(buf, 4);
+	int64_t status = fetch_next_chunk_data(buf, 4);
 	if (status < 0)
-		return status;
+		return (int)status;
 
 	if (status != 4)
-		terminate(PNG_BAD_CHUNK_SIZE);
+		return terminate(PNG_BAD_CHUNK_SIZE);
 
 	uint32_t v = buf[3] + ((uint32_t)buf[2] << 8) + ((uint32_t)buf[1] << 16) + ((uint32_t)buf[0] << 24);
 	return (int64_t)v;
@@ -676,9 +684,9 @@ int png_decoder::fetch_next_chunk_init()
 {
 	while (m_chunk_flag)
 	{
-		int status = fetch_next_chunk_data(m_temp_buf, TEMP_BUF_SIZE * 4);
-		if (status != 0)
-			return status;
+		int64_t status = fetch_next_chunk_data(m_temp_buf, TEMP_BUF_SIZE * 4);
+		if (status < 0)
+			return (int)status;
 	}
 
 	int64_t n = block_read_dword();
@@ -691,9 +699,12 @@ int png_decoder::fetch_next_chunk_init()
 	m_chunk_left = m_chunk_size + 4;
 	m_chunk_crc32 = 0;
 
-	int status = fetch_next_chunk_data(m_chunk_name, 4);
+	int64_t status = fetch_next_chunk_data(m_chunk_name, 4);
 	if (status < 0)
-		return status;
+		return (int)status;
+	
+	if (status != 4)
+		return terminate(PNG_BAD_CHUNK_SIZE);
 
 	return 0;
 }
@@ -727,9 +738,10 @@ int png_decoder::unchunk_data(uint8_t* buf, uint32_t bytes, uint32_t* ptr_bytes_
 			}
 		}
 
-		int res = fetch_next_chunk_data(buf + bytes_read, bytes - bytes_read);
+		int64_t res = fetch_next_chunk_data(buf + bytes_read, bytes - bytes_read);
 		if (res < 0)
-			return res;
+			return (int)res;
+		assert(res <= UINT32_MAX);
 
 		bytes_read += (uint32_t)res;
 	}
@@ -1155,7 +1167,7 @@ int png_decoder::adam7_pass_size(int size, int start, int step)
 int png_decoder::decompress_line(uint32_t* bytes_decoded)
 {
 	int status;
-	uint32_t temp, src_bytes_left, dst_bytes_left;
+	uint32_t temp = 0, src_bytes_left, dst_bytes_left;
 
 	m_inflate_dst_buf_ofs = 0;
 
@@ -1498,6 +1510,11 @@ void png_decoder::png_decode_end()
 
 int png_decoder::png_decode_start()
 {
+	// Must only be called once per decode: it allocates the line buffers and inits the inflator fresh, so a
+	// second call would leak the first set. The public API always uses a one-shot fresh decoder.
+	assert(!m_decode_started_flag);
+	m_decode_started_flag = true;
+
 	int status;
 
 	if (m_img_supported_flag != TRUE)
@@ -1645,7 +1662,14 @@ int png_decoder::png_decode_start()
 		m_adam7_pass_size_y[5] = adam7_pass_size(m_ihdr.m_height, 0, 2);
 		m_adam7_pass_size_y[6] = adam7_pass_size(m_ihdr.m_height, 1, 2);
 
-		m_adam7_image_buf.resize(m_dst_bytes_per_line * m_ihdr.m_height);
+		// Compute the de-interlace buffer size in 64-bit and bail if it's unreasonably large, to avoid a 32-bit
+		// multiply overflow (m_dst_bytes_per_line * m_height) that could wrap to a too-small allocation followed
+		// by out-of-bounds writes during de-interlacing. Cap at 16384*16384*4 bytes (1 GiB).
+		const uint64_t adam7_buf_size = (uint64_t)m_dst_bytes_per_line * (uint64_t)m_ihdr.m_height;
+		if (adam7_buf_size > (uint64_t)16384 * 16384 * 4)
+			return terminate(PNG_UNS_RESOLUTION);
+
+		m_adam7_image_buf.resize((size_t)adam7_buf_size);
 
 		m_adam7_pass_num = -1;
 
@@ -2158,6 +2182,7 @@ void png_decoder::clear()
 	m_adam7_decoded_flag = FALSE;
 
 	m_scanned_flag = false;
+	m_decode_started_flag = false;
 
 	m_terminate_status = 0;
 }
