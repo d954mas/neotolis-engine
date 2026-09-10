@@ -85,6 +85,18 @@ accept registrations only. Invalid ranges, zero resource IDs or malformed
 owner links reject the pack through the existing recoverable parse error; a
 corrected pack can load into the same mount. Capacity exhaustion asserts.
 
+Each mount accepts one successful parse, including an empty pack. A later parse
+returns `NT_ERR_INVALID_ARG` even after blob eviction: eviction preserves the
+registered assets, metadata and original blob size. Resource-managed I/O restores
+evicted bytes through its existing reload path without parsing the manifest again.
+Unmount and mount again to replace the pack.
+
+For direct parsing without resource-managed I/O, success retains the caller's
+blob pointer without copying or taking ownership. The caller keeps the bytes
+valid and unchanged until unmount or shutdown and frees them afterward. A rejected
+parse does not retain the supplied buffer. Resource-managed I/O owns its loaded
+buffer and frees it on eviction or unmount.
+
 NTPACK v3 uses the 16-bit `owner_entry` field in each 24-byte entry:
 
 - Entry i owns its runtime object when owner_entry equals i.

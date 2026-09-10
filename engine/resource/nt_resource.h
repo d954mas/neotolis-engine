@@ -131,7 +131,9 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 
 /* ---- Pack parsing ---- */
 
-/* Requires a file pack created by mount; virtual packs accept register only. */
+/* Requires a file mount not yet successfully parsed; repeat parses return NT_ERR_INVALID_ARG.
+ * Without resource-managed I/O, stores caller-owned blob without copying or freeing it;
+ * keep it valid and unchanged until unmount/shutdown. Remount to replace parsed data. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */

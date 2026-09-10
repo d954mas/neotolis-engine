@@ -652,18 +652,8 @@ void nt_resource_step(void) {
             if (io_done) {
                 NT_LOG_INFO("pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
 
-                /* Check if asset entries already exist (re-download after blob eviction).
-                 * If so, skip parse_pack -- entries have correct offsets/sizes already.
-                 * Just restore the blob pointer and let the activation loop re-activate. */
-                bool has_existing_assets = false;
-                for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
-                    if (s_resource.assets[ai].pack_index == pi && s_resource.assets[ai].resource_id != 0) {
-                        has_existing_assets = true;
-                        break;
-                    }
-                }
-
-                if (has_existing_assets) {
+                /* The retained size identifies parsed packs, including empty manifests. */
+                if (pack->blob_size != 0) {
                     /* Re-download after blob eviction: restore blob, skip re-parse.
                      * Assumes pack content is immutable -- same URL/path always returns
                      * identical data. If hot-update is ever needed, validate CRC32 here
@@ -1021,7 +1011,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         goto parse_done;
     }
 
-    if (s_resource.packs[pack_idx].blob != NULL) {
+    if (s_resource.packs[pack_idx].blob_size != 0) {
         NT_LOG_ERROR("pack already parsed");
         goto parse_done;
     }

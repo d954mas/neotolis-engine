@@ -2134,6 +2134,37 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     (void)remove("build/test_inv_redl.ntpack");
 }
 
+void test_evicted_empty_pack_reloads_without_reparse(void) {
+    const char *path = "build/test_empty_pack_reload.ntpack";
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_pack(0, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    size_t written = fwrite(blob, 1, blob_size, file);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    free(blob);
+    TEST_ASSERT_EQUAL_UINT32(blob_size, written);
+
+    nt_hash32_t pid = nt_hash32_str("empty_pack_reload");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
+    nt_time_sleep(0.005);
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+
+    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    TEST_ASSERT_TRUE(nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL_UINT16(0, nt_resource_asset_count());
+    nt_resource_unmount(pid);
+    (void)remove(path);
+}
+
 /* ---- Unmount with deactivation test ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2397,6 +2428,51 @@ static uint8_t *build_meta_pack(uint64_t rid, uint64_t kind, const void *payload
 }
 
 /* ---- Metadata query tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_parse_after_eviction_rejected_until_remount(void) {
+    nt_hash32_t pid = nt_hash32_str("reparse_evicted");
+    nt_hash64_t rid = nt_hash64_str("reparse_mesh");
+    nt_hash64_t kind = nt_hash64_str("reparse_meta");
+    uint32_t payload = 42;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    for (uint32_t asset_count = 0; asset_count <= 1; asset_count++) {
+        uint32_t blob_size = 0;
+        uint8_t *blob = asset_count == 0 ? build_test_pack(0, &blob_size) : build_meta_pack(rid.value, kind.value, &payload, sizeof(payload), &blob_size);
+        TEST_ASSERT_NOT_NULL(blob);
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+        nt_resource_t resource = asset_count == 0 ? NT_RESOURCE_INVALID : nt_resource_request(rid, NT_ASSET_MESH);
+        nt_resource_step();
+        uint32_t meta_size = 0;
+        const void *metadata = nt_resource_get_meta(resource, kind, &meta_size);
+        if (asset_count != 0) {
+            TEST_ASSERT_NOT_NULL(metadata);
+            TEST_ASSERT_EQUAL_UINT32(sizeof(payload), meta_size);
+        }
+
+        nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
+        nt_time_sleep(0.005);
+        nt_resource_step();
+        TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+
+        TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_parse_pack(pid, blob, blob_size));
+        TEST_ASSERT_EQUAL_UINT16(asset_count, nt_resource_asset_count());
+        TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
+        TEST_ASSERT_EQUAL_PTR(metadata, nt_resource_get_meta(resource, kind, &meta_size));
+        if (asset_count != 0) {
+            TEST_ASSERT_EQUAL_MEMORY(&payload, metadata, sizeof(payload));
+        }
+
+        nt_resource_unmount(pid);
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+        TEST_ASSERT_EQUAL_UINT16(asset_count, nt_resource_asset_count());
+        nt_resource_unmount(pid);
+        free(blob);
+    }
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_resource_get_meta_aabb(void) {
@@ -3424,6 +3500,7 @@ int main(void) {
     RUN_TEST(test_parse_total_size_mismatch);
     RUN_TEST(test_parse_bad_crc);
     RUN_TEST(test_parse_entries_overflow);
+    RUN_TEST(test_parse_after_eviction_rejected_until_remount);
 
     /* Parser acceptance tests */
     RUN_TEST(test_parse_valid_empty);
@@ -3526,6 +3603,7 @@ int main(void) {
     RUN_TEST(test_invalidate_calls_deactivator);
     RUN_TEST(test_invalidate_skips_virtual);
     RUN_TEST(test_invalidate_triggers_redownload_on_evicted_blob);
+    RUN_TEST(test_evicted_empty_pack_reloads_without_reparse);
 
     /* Unmount with deactivation */
     RUN_TEST(test_unmount_deactivates_assets);
