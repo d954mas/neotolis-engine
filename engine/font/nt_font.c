@@ -2570,7 +2570,7 @@ static uint8_t *font_test_build_pack(uint64_t rid, const uint8_t *data, uint32_t
 
     NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
     entry->resource_id = rid;
-    entry->format_version = 1;
+    entry->owner_entry = 0;
     entry->asset_type = NT_ASSET_FONT;
     entry->_pad = 0;
     entry->meta_offset = 0;

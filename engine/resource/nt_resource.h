@@ -131,6 +131,9 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 
 /* ---- Pack parsing ---- */
 
+/* Requires a file mount not yet successfully parsed; repeat parses return NT_ERR_INVALID_ARG.
+ * Without resource-managed I/O, stores caller-owned blob without copying or freeing it;
+ * keep it valid and unchanged until unmount/shutdown. Remount to replace parsed data. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
@@ -143,29 +146,16 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 nt_resource_t nt_resource_find(nt_hash64_t resource_id);
 
 uint32_t nt_resource_get(nt_resource_t handle);
-/* READY means the currently published winner is fully usable.
- * For simple runtime-handle assets this matches the old behavior.
- * For aux-backed assets (atlas, future similar types) READY additionally
- * requires user_data to be synchronized with the published winner. */
+/* READY means the published winner is usable, including synchronized auxiliary data. */
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 /* Returns the asset type (NT_ASSET_*) the slot was created for. Returns 0
  * for invalid or stale handles. Useful for runtime type checks at API
  * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
 uint8_t nt_resource_get_asset_type(nt_resource_t handle);
-/* Monotonic counter that changes whenever the published view of any slot
- * changes (winner, visible state, or aux-backed published payload refresh).
- *
- * Invariant: the epoch bumps from exactly one place — resource_resolve_pass().
- * All public APIs that can affect slot publication (register, unregister,
- * unmount, set_priority, parse_pack, placeholder change, unload) set a
- * needs_resolve flag; nt_resource_step() drains it by running resolve_pass,
- * which diffs per-slot and bumps the epoch when the published view differs.
- *
- * slot_alloc() is the only path that writes slot->* outside resolve_pass,
- * but it only initializes a freshly created slot (state=REGISTERED, handle=0)
- * that no observer has seen yet — the slot's first real publication still
- * goes through resolve_pass and bumps the epoch normally. */
+/* Advances only during resolve when a published winner, state or auxiliary payload changes.
+ * Release invalidates source indices and unmount severs zero-copy views immediately;
+ * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
@@ -185,7 +175,8 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 /* Virtual packs publish caller-created runtime handles. The resource system stores the
  * handle value but does not own/destroy the runtime object; virtual unregister/unmount
  * never call the asset deactivator. Resolve cleanup callbacks may still release
- * per-slot user_data. */
+ * per-slot user_data. Register/unregister require a nonzero resource_id.
+ * Unregister is virtual-only; file assets are removed by whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);

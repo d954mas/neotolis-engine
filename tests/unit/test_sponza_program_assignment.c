@@ -45,7 +45,7 @@ static void count_material_assignment(nt_material_t material, nt_program_t progr
     nt_material_set_program(material, program);
 }
 
-static void load_asset(nt_hash64_t rid, uint8_t type, uint16_t version, const void *data, uint32_t size) {
+static void load_asset(nt_hash64_t rid, uint8_t type, const void *data, uint32_t size) {
     const uint32_t header_size = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t total_size = header_size + size;
     TEST_ASSERT_LESS_THAN_UINT32(TEST_PACK_COUNT, s_test_pack_count);
@@ -61,7 +61,7 @@ static void load_asset(nt_hash64_t rid, uint8_t type, uint16_t version, const vo
         .total_size = total_size,
     };
     NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
-    *entry = (NtAssetEntry){.resource_id = rid.value, .offset = header_size, .size = size, .format_version = version, .asset_type = type};
+    *entry = (NtAssetEntry){.resource_id = rid.value, .offset = header_size, .size = size, .owner_entry = 0, .asset_type = type};
     memcpy(blob + header_size, data, size);
     header->checksum = nt_crc32(blob + header_size, size);
 
@@ -84,7 +84,7 @@ static void load_manifest(void) {
         node.transform[15] = 1.0F;
         memcpy(bytes + sizeof(blob_header) + sizeof(manifest_header) + (i * sizeof(node)), &node, sizeof(node));
     }
-    load_asset(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB, NT_BLOB_VERSION, bytes, sizeof(bytes));
+    load_asset(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB, bytes, sizeof(bytes));
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(s_manifest_handle));
     load_scene_from_manifest();
@@ -98,7 +98,7 @@ static void load_stage(uint32_t type, nt_shader_stage_t stage) {
     const NtShaderCodeHeader header = {.magic = NT_SHADER_CODE_MAGIC, .version = NT_SHADER_CODE_VERSION, .stage = (uint8_t)stage, .code_size = sizeof(source)};
     memcpy(bytes, &header, sizeof(header));
     memcpy(bytes + sizeof(header), source, sizeof(source));
-    load_asset(stage == NT_SHADER_STAGE_VERTEX ? s_vertex_ids[type] : s_fragment_ids[type], NT_ASSET_SHADER_CODE, NT_SHADER_CODE_VERSION, bytes, sizeof(bytes));
+    load_asset(stage == NT_SHADER_STAGE_VERTEX ? s_vertex_ids[type] : s_fragment_ids[type], NT_ASSET_SHADER_CODE, bytes, sizeof(bytes));
 }
 
 static void load_all_stages(void) {

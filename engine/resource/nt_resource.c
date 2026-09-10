@@ -36,6 +36,8 @@ static struct {
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
     NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1]; /* index 0 reserved */
     NtActivatorEntry activators[NT_RESOURCE_MAX_ASSET_TYPES];
+    uint16_t free_assets[NT_RESOURCE_MAX_ASSETS];
+    uint32_t free_asset_count;
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
@@ -145,18 +147,34 @@ static void slot_map_insert(uint64_t resource_id, uint16_t slot_index) {
     }
 }
 
-/* ---- Asset slot allocation (reuses holes before appending) ---- */
+/* ---- Asset slot lifetime ---- */
 
-static uint32_t asset_alloc(void) {
-    for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-        if (s_resource.assets[i].resource_id == 0) {
-            return i;
+static uint16_t asset_alloc(void) {
+    NT_ASSERT(s_resource.free_asset_count > 0);
+    uint16_t idx = s_resource.free_assets[--s_resource.free_asset_count];
+    if (idx >= s_resource.asset_hwm) {
+        s_resource.asset_hwm = (uint32_t)idx + 1;
+    }
+    return idx;
+}
+
+static void asset_free(uint16_t idx) {
+    NtAssetMeta *meta = &s_resource.assets[idx];
+    NT_ASSERT(meta->resource_id != 0);
+    uint16_t si = slot_map_find(meta->resource_id);
+    if (si != 0) {
+        NtResourceSlot *slot = &s_resource.slots[si];
+        /* Reuse can preserve both index and handle; invalidate the old identity first. */
+        if (slot->resolve_asset_idx == idx) {
+            slot->resolve_asset_idx = UINT16_MAX;
+        }
+        if (slot->user_data_asset_idx == idx) {
+            slot->user_data_asset_idx = UINT16_MAX;
         }
     }
-    if (s_resource.asset_hwm >= NT_RESOURCE_MAX_ASSETS) {
-        return UINT32_MAX;
-    }
-    return s_resource.asset_hwm++;
+    meta->resource_id = 0;
+    NT_ASSERT(s_resource.free_asset_count < NT_RESOURCE_MAX_ASSETS);
+    s_resource.free_assets[s_resource.free_asset_count++] = idx;
 }
 
 /* ---- Time helper ---- */
@@ -180,7 +198,9 @@ static bool asset_blob_resident(const NtAssetMeta *meta) {
     return pack->pack_type == NT_PACK_VIRTUAL || pack->blob != NULL;
 }
 
-static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) { return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : meta->runtime_handle; }
+static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) {
+    return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : s_resource.assets[meta->owner_asset].runtime_handle;
+}
 
 static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
     /* PIN_BLOB is a hard precondition, independent of AUX_BACKED: a zero-copy provider needs a real
@@ -277,12 +297,13 @@ static void resource_resolve_pass(void) {
             continue;
         }
 
-        /* Track best available state from any matching entry */
-        if (meta->state > tmp->scan_state && tmp->scan_state != NT_ASSET_STATE_READY) {
-            tmp->scan_state = meta->state;
+        /* Track best available state from any matching entry. */
+        uint8_t state = s_resource.assets[meta->owner_asset].state;
+        if (state > tmp->scan_state && tmp->scan_state != NT_ASSET_STATE_READY) {
+            tmp->scan_state = state;
         }
 
-        if (meta->state != NT_ASSET_STATE_READY) {
+        if (state != NT_ASSET_STATE_READY) {
             continue;
         }
 
@@ -500,6 +521,11 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
         s_resource.free_queue[i] = (uint16_t)(NT_RESOURCE_MAX_SLOTS - i); /* top has lowest */
     }
 
+    s_resource.free_asset_count = NT_RESOURCE_MAX_ASSETS;
+    for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS; i++) {
+        s_resource.free_assets[i] = (uint16_t)(NT_RESOURCE_MAX_ASSETS - 1U - i);
+    }
+
     s_resource.next_mount_seq = 1; /* monotonic mount-order counter for the resolve tiebreak */
     s_resource.activate_time_budget_ms = NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS;
     s_resource.retry_max_attempts = 0; /* infinite by default */
@@ -626,22 +652,9 @@ void nt_resource_step(void) {
             if (io_done) {
                 NT_LOG_INFO("pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
 
-                /* Check if asset entries already exist (re-download after blob eviction).
-                 * If so, skip parse_pack -- entries have correct offsets/sizes already.
-                 * Just restore the blob pointer and let the activation loop re-activate. */
-                bool has_existing_assets = false;
-                for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
-                    if (s_resource.assets[ai].pack_index == pi && s_resource.assets[ai].resource_id != 0) {
-                        has_existing_assets = true;
-                        break;
-                    }
-                }
-
-                if (has_existing_assets) {
-                    /* Re-download after blob eviction: restore blob, skip re-parse.
-                     * Assumes pack content is immutable -- same URL/path always returns
-                     * identical data. If hot-update is ever needed, validate CRC32 here
-                     * and fall through to full re-parse on mismatch. */
+                /* The retained size identifies parsed packs, including empty manifests. */
+                if (pack->blob_size != 0) {
+                    /* Retained records require identical bytes; content replacement needs a remount. */
                     NT_ASSERT(loaded_size == pack->blob_size);
                     pack->blob = loaded_blob;
                     pack->blob_size = loaded_size;
@@ -694,7 +707,7 @@ void nt_resource_step(void) {
                 if (meta->pack_index != pi) {
                     continue;
                 }
-                if (meta->state != NT_ASSET_STATE_REGISTERED) {
+                if (meta->owner_asset != ai || meta->state != NT_ASSET_STATE_REGISTERED) {
                     continue;
                 }
 
@@ -715,28 +728,15 @@ void nt_resource_step(void) {
                     }
                 }
 
-                /* Deduplicate: if marked as dedup, find the original (same pack+offset+size, already READY) */
                 const uint8_t *asset_data = pack->blob + meta->offset;
-                uint32_t handle = 0;
-                if (meta->is_dedup) {
-                    for (uint32_t di = 0; di < s_resource.asset_hwm; di++) {
-                        const NtAssetMeta *other = &s_resource.assets[di];
-                        if (di != ai && other->state == NT_ASSET_STATE_READY && other->pack_index == pi && other->offset == meta->offset && other->size == meta->size) {
-                            handle = other->runtime_handle;
-                            break;
-                        }
-                    }
-                }
-                if (handle == 0) {
-                    handle = s_resource.activators[atype].activate(asset_data, meta->size);
-                }
+                uint32_t handle = s_resource.activators[atype].activate(asset_data, meta->size);
                 if (handle != 0) {
                     meta->state = NT_ASSET_STATE_READY;
                     meta->runtime_handle = handle;
-                    s_resource.needs_resolve = true;
                 } else {
                     meta->state = NT_ASSET_STATE_FAILED;
                 }
+                s_resource.needs_resolve = true;
                 pack->blob_last_access_ms = resource_get_time_ms();
                 activated_any = true;
 #if NT_LOG_MIN_LEVEL == 0
@@ -795,7 +795,7 @@ void nt_resource_step(void) {
                     free((void *)pack->blob);
                 }
                 pack->blob = NULL;
-                /* Keep blob_size -- used to validate re-download returns same data */
+                /* Preserve the parsed-pack marker and expected reload size. */
             }
         }
     }
@@ -907,18 +907,16 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
         NT_LOG_ERROR("unmount pack 0x%08x while blob pinned (pins=%u) — consumers will render tofu", pack_id.value, pack->blob_pins);
     }
 
-    /* Deactivate READY assets and clear all assets belonging to this pack */
+    /* Deactivate owned objects before severing their providers. */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
-            /* Deactivate if file pack asset is READY with runtime handle.
-             * Skip dedup assets — they share the original's handle, not their own. */
-            if (s_resource.assets[i].state == NT_ASSET_STATE_READY && s_resource.assets[i].runtime_handle != 0 && pack->pack_type == NT_PACK_FILE && !s_resource.assets[i].is_dedup) {
+            /* Aliases borrow the canonical owner's object. */
+            if (s_resource.assets[i].state == NT_ASSET_STATE_READY && s_resource.assets[i].runtime_handle != 0 && pack->pack_type == NT_PACK_FILE && s_resource.assets[i].owner_asset == i) {
                 uint8_t atype = s_resource.assets[i].asset_type;
                 if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].deactivate) {
                     s_resource.activators[atype].deactivate(s_resource.assets[i].runtime_handle);
                 }
             }
-            s_resource.assets[i].resource_id = 0;
         }
     }
 
@@ -954,6 +952,12 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
         }
         slot->user_data = NULL;
         slot->user_data_asset_idx = UINT16_MAX;
+    }
+
+    for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
+        if (s_resource.assets[i].resource_id != 0 && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+            asset_free((uint16_t)i);
+        }
     }
 
     /* Free blob if it was loaded via I/O (resource system owns it).
@@ -1004,10 +1008,12 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         goto parse_done;
     }
 
-    if (s_resource.packs[pack_idx].blob != NULL) {
+    if (s_resource.packs[pack_idx].blob_size != 0) {
         NT_LOG_ERROR("pack already parsed");
         goto parse_done;
     }
+
+    NT_ASSERT(s_resource.packs[pack_idx].pack_type == NT_PACK_FILE);
 
     /* Validate blob size */
     if (blob_size < sizeof(NtPackHeader)) {
@@ -1065,48 +1071,45 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Meta section start from header (no scan needed) */
     uint32_t meta_section_start = h->meta_offset;
 
-    /* Reject the whole pack before registering any assets. */
-    for (uint16_t i = 0; i < h->asset_count; i++) {
-        if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
+    /* Reject the whole pack before reserving any slots. */
+    for (uint32_t i = 0; i < h->asset_count; i++) {
+        const NtAssetEntry *entry = &entries[i];
+        if (entry->offset < h->header_size || entry->size > blob_size || entry->offset > blob_size - entry->size) {
             NT_LOG_ERROR("entry data outside data region");
+            goto parse_done;
+        }
+        if (entry->resource_id == 0 || entry->owner_entry > i) {
+            NT_LOG_ERROR("invalid asset identity or owner");
+            goto parse_done;
+        }
+        const NtAssetEntry *owner = &entries[entry->owner_entry];
+        if (owner->owner_entry != entry->owner_entry || owner->asset_type != entry->asset_type || owner->offset != entry->offset || owner->size != entry->size) {
+            NT_LOG_ERROR("invalid alias owner");
             goto parse_done;
         }
     }
 
-    for (uint16_t i = 0; i < h->asset_count; i++) {
-        uint32_t idx = asset_alloc();
-        NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
-
+    NT_ASSERT(h->asset_count <= s_resource.free_asset_count);
+    uint32_t old_top = s_resource.free_asset_count;
+    s_resource.free_asset_count -= h->asset_count;
+    /* The reserved suffix maps manifest ordinals until parsing ends; no callbacks run here. */
+    for (uint32_t i = 0; i < h->asset_count; i++) {
+        uint16_t idx = s_resource.free_assets[old_top - 1U - i];
+        if (idx >= s_resource.asset_hwm) {
+            s_resource.asset_hwm = (uint32_t)idx + 1;
+        }
+        const NtAssetEntry *entry = &entries[i];
         NtAssetMeta *meta = &s_resource.assets[idx];
-        meta->resource_id = entries[i].resource_id;
-        meta->asset_type = entries[i].asset_type;
-        meta->format_version = entries[i].format_version;
-        meta->pack_index = (uint16_t)pack_idx;
-        meta->offset = entries[i].offset;
-        meta->size = entries[i].size;
-        meta->runtime_handle = 0;
-        /* Convert absolute meta_offset to meta_data-relative in one pass */
-        if (entries[i].meta_offset != 0 && entries[i].meta_offset >= meta_section_start) {
-            meta->meta_offset = entries[i].meta_offset - meta_section_start;
-        } else {
-            meta->meta_offset = NT_NO_METADATA;
-        }
-
-        /* Detect dedup: check if a previous entry in this pack has same offset+size */
-        meta->is_dedup = 0;
-        for (uint16_t j = 0; j < i; j++) {
-            if (entries[j].offset == entries[i].offset && entries[j].size == entries[i].size) {
-                meta->is_dedup = 1;
-                break;
-            }
-        }
-
-        /* Blob assets auto-transition to READY (no GPU activation needed) */
-        if (entries[i].asset_type == NT_ASSET_BLOB) {
-            meta->state = NT_ASSET_STATE_READY;
-        } else {
-            meta->state = NT_ASSET_STATE_REGISTERED;
-        }
+        *meta = (NtAssetMeta){
+            .resource_id = entry->resource_id,
+            .asset_type = entry->asset_type,
+            .owner_asset = s_resource.free_assets[old_top - 1U - entry->owner_entry],
+            .pack_index = (uint16_t)pack_idx,
+            .offset = entry->offset,
+            .size = entry->size,
+            .meta_offset = (entry->meta_offset != 0 && entry->meta_offset >= meta_section_start) ? entry->meta_offset - meta_section_start : NT_NO_METADATA,
+            .state = (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) ? NT_ASSET_STATE_READY : NT_ASSET_STATE_REGISTERED,
+        };
     }
 
     /* Parse metadata section */
@@ -1281,17 +1284,17 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
         return NULL; /* not a blob */
     }
 
-    /* Slot runtime_handle stores the winning asset index (set by resolve Phase D) */
+    /* Follow the published named entry; released indices are invalidated before reuse. */
     const NtResourceSlot *slot = &s_resource.slots[index];
     if (slot->state != NT_ASSET_STATE_READY) {
         return NULL;
     }
-    uint32_t ai = slot->runtime_handle;
+    uint32_t ai = slot->resolve_asset_idx;
     if (ai >= s_resource.asset_hwm) {
         return NULL;
     }
     const NtAssetMeta *meta = &s_resource.assets[ai];
-    if (meta->resource_id == 0 || meta->state != NT_ASSET_STATE_READY) {
+    if (meta->resource_id == 0 || s_resource.assets[meta->owner_asset].state != NT_ASSET_STATE_READY) {
         return NULL;
     }
     if (meta->pack_index >= NT_RESOURCE_MAX_PACKS) {
@@ -1401,6 +1404,8 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
         return NT_ERR_INVALID_ARG;
     }
 
+    NT_ASSERT(resource_id.value != 0);
+
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         NT_LOG_ERROR("register pack not found");
@@ -1421,20 +1426,16 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
         }
     }
 
-    uint32_t idx = asset_alloc();
-    NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
-
-    NtAssetMeta *meta = &s_resource.assets[idx];
-    meta->resource_id = resource_id.value;
-    meta->asset_type = asset_type;
-    meta->state = NT_ASSET_STATE_READY;
-    meta->format_version = 0;
-    meta->pack_index = (uint16_t)pack_idx;
-    meta->is_dedup = 0;
-    meta->_pad = 0;
-    meta->offset = 0;
-    meta->size = 0;
-    meta->runtime_handle = runtime_handle;
+    uint16_t idx = asset_alloc();
+    s_resource.assets[idx] = (NtAssetMeta){
+        .resource_id = resource_id.value,
+        .asset_type = asset_type,
+        .state = NT_ASSET_STATE_READY,
+        .owner_asset = idx,
+        .pack_index = (uint16_t)pack_idx,
+        .runtime_handle = runtime_handle,
+        .meta_offset = NT_NO_METADATA,
+    };
 
     s_resource.needs_resolve = true;
 
@@ -1446,14 +1447,18 @@ void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id) {
         return;
     }
 
+    NT_ASSERT(resource_id.value != 0);
+
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         return;
     }
 
+    NT_ASSERT(s_resource.packs[pack_idx].pack_type == NT_PACK_VIRTUAL);
+
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
-            s_resource.assets[i].resource_id = 0; /* mark as free */
+            asset_free((uint16_t)i);
             s_resource.needs_resolve = true;
             return;
         }
@@ -1591,7 +1596,7 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
                 .blob_pins = blob_pins,
                 .pack_index = meta->pack_index,
                 .type = meta->asset_type,
-                .state = meta->state,
+                .state = s_resource.assets[meta->owner_asset].state,
             };
             return true;
         }
@@ -1697,7 +1702,7 @@ void nt_resource_invalidate(uint8_t asset_type) {
     /* Pass 1: Deactivate and mark assets back to REGISTERED */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         NtAssetMeta *meta = &s_resource.assets[i];
-        if (meta->resource_id == 0) {
+        if (meta->resource_id == 0 || meta->owner_asset != i) {
             continue;
         }
         if (meta->asset_type != asset_type) {
@@ -1710,9 +1715,8 @@ void nt_resource_invalidate(uint8_t asset_type) {
         if (s_resource.packs[meta->pack_index].pack_type == NT_PACK_VIRTUAL) {
             continue;
         }
-        /* Deactivate if READY with runtime handle.
-         * Skip dedup assets — they share the original's handle. */
-        if (meta->state == NT_ASSET_STATE_READY && meta->runtime_handle != 0 && !meta->is_dedup) {
+        /* Deactivate the owned object once. */
+        if (meta->state == NT_ASSET_STATE_READY && meta->runtime_handle != 0) {
             uint8_t atype = meta->asset_type;
             if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].deactivate) {
                 s_resource.activators[atype].deactivate(meta->runtime_handle);
@@ -1817,8 +1821,9 @@ void nt_resource_dump_pack(nt_hash32_t pack_id) {
 void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle) {
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == pack_index) {
-            s_resource.assets[i].state = state;
-            s_resource.assets[i].runtime_handle = runtime_handle;
+            NtAssetMeta *owner = &s_resource.assets[s_resource.assets[i].owner_asset];
+            owner->state = state;
+            owner->runtime_handle = runtime_handle;
             s_resource.needs_resolve = true;
             return;
         }

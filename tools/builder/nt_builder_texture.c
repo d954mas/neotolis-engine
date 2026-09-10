@@ -203,7 +203,7 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
-                                                   nt_asset_type_t *out_type, uint16_t *out_version) {
+                                                   nt_asset_type_t *out_type) {
     nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, NULL);
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
@@ -270,13 +270,12 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     *out_data = buf;
     *out_size = total_asset_size;
     *out_type = NT_ASSET_TEXTURE;
-    *out_version = NT_TEXTURE_VERSION_V2;
     return NT_BUILD_OK;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
-                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
+                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type) {
     NT_BUILD_ASSERT(compress_opts && "texture encode: compression opts are NULL");
     nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, compress_opts);
 
@@ -346,7 +345,6 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     *out_data = buf;
     *out_size = total_asset_size;
     *out_type = NT_ASSET_TEXTURE;
-    *out_version = NT_TEXTURE_VERSION_V2;
     return NT_BUILD_OK;
 }
 
@@ -356,14 +354,13 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
     uint8_t *buf = NULL;
     uint32_t buf_size = 0;
     nt_asset_type_t type;
-    uint16_t version;
-    nt_build_result_t ret = nt_builder_encode_texture_to_buf(rgba_pixels, width, height, opts, &buf, &buf_size, &type, &version);
+    nt_build_result_t ret = nt_builder_encode_texture_to_buf(rgba_pixels, width, height, opts, &buf, &buf_size, &type);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
     ret = nt_builder_append_data(ctx, buf, buf_size);
     if (ret == NT_BUILD_OK) {
-        ret = nt_builder_register_asset(ctx, resource_id, type, version, buf_size);
+        ret = nt_builder_register_asset(ctx, resource_id, type, buf_size);
     }
     free(buf);
     return ret;
@@ -374,14 +371,13 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
     uint8_t *buf = NULL;
     uint32_t buf_size = 0;
     nt_asset_type_t type;
-    uint16_t version;
-    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, 1, &buf, &buf_size, &type, &version);
+    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, 1, &buf, &buf_size, &type);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
     ret = nt_builder_append_data(ctx, buf, buf_size);
     if (ret == NT_BUILD_OK) {
-        ret = nt_builder_register_asset(ctx, resource_id, type, version, buf_size);
+        ret = nt_builder_register_asset(ctx, resource_id, type, buf_size);
     }
     free(buf);
     return ret;

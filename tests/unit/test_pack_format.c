@@ -34,7 +34,7 @@ void test_pack_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('K', bytes[3]);
 }
 
-void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(2, NT_PACK_VERSION); }
+void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(3, NT_PACK_VERSION); }
 
 void test_pack_align(void) {
     TEST_ASSERT_EQUAL_UINT(4, NT_PACK_ASSET_ALIGN);
@@ -75,7 +75,7 @@ void test_asset_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtAssetEntry, resource_id));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtAssetEntry, offset));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtAssetEntry, size));
-    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtAssetEntry, format_version));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtAssetEntry, owner_entry));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtAssetEntry, asset_type));
     TEST_ASSERT_EQUAL_UINT(19, offsetof(NtAssetEntry, _pad));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, meta_offset));

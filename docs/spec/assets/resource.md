@@ -19,9 +19,9 @@ implementation requires the flag to be defined.
 
 | Getter | Last completed work, in milliseconds |
 | --- | --- |
-| `nt_resource_get_last_parse_ms()` | One `nt_resource_parse_pack()` call, including validation, CRC, registration, dedup and metadata copying |
+| `nt_resource_get_last_parse_ms()` | One `nt_resource_parse_pack()` call, including validation, CRC, registration, owner translation and metadata copying |
 | `nt_resource_get_last_crc_ms()` | CRC inside that same parse; zero if the call did not reach CRC |
-| `nt_resource_get_last_activate_ms()` | The activation phase of the last initialized step, including scans, dedup lookup and CPU activator calls |
+| `nt_resource_get_last_activate_ms()` | The activation phase of the last initialized step, including scans and canonical-owner CPU activator calls |
 | `nt_resource_get_last_step_ms()` | The last initialized `nt_resource_step()` through resolve completion |
 
 Direct parse calls and recoverable failures replace parse/CRC results. Multiple
@@ -99,9 +99,11 @@ mirror them here). The contract is the SPLIT, not the fields:
 
 - **`NtAssetMeta`** — one record per asset per mounted pack: identity
   (`resource_id`), where the bytes are (`pack_index`, `offset`, `size`,
-  `meta_offset`), the per-type `format_version` the runtime checks, and the
-  asset's own load `state`. `is_dedup` marks assets sharing one byte range
-  inside a pack, so activation must not free it twice.
+  `meta_offset`), and a direct `owner_asset` index. Owners reference themselves;
+  aliases reference a canonical record in the same pack. Only the owner has
+  authoritative activation state and runtime handle; aliases read through it.
+  Payload headers retain their own format versions. A BLOB's effective handle
+  remains its named record index, including zero, rather than its owner's index.
 - **`NtResourceSlot`** — one persistent record per unique resource_id the game
   asked for. Holds what the game currently sees (`runtime_handle`, `state`,
   `generation` for stale-handle detection), the published winner's identity and
@@ -286,6 +288,35 @@ nt_resource_create_pack(pack_id, priority);
 nt_resource_register(pack_id, resource_id, asset_type, runtime_handle);
 nt_resource_unregister(pack_id, resource_id);
 ```
+
+Register/unregister assert a nonzero resource_id. Unregister applies only to
+virtual packs; file entries leave together on unmount. Re-registering an existing
+virtual name updates its record without allocating. Virtual records own their
+registry identity, while the game retains ownership of their runtime objects.
+
+## Shared runtime objects and free slots
+
+The builder writes canonical ownership into the manifest. Compatible names with
+identical encoded bytes may share one runtime object within one pack. Either name
+works without requesting the other: activation is eager for canonical owners.
+Aliases retain their own metadata, resource ID, priority selection and per-slot
+auxiliary data. A failed owner makes its aliases unavailable until explicit
+recovery; aliases never attempt activation independently. Ownership never crosses
+packs, so a usable lower-priority pack can still supply the existing fallback.
+Unmount and type invalidation deactivate each owned object once.
+
+Free AssetMeta indices live in a preallocated uint16 stack. Allocation and release
+pop/push once; the asset high-water mark still bounds registry scans. The existing
+virtual-name lookup remains a scan. Parsing reserves a suffix of the stack and
+uses it to translate manifest ordinals without allocating a separate map.
+
+Before releasing an index, invalidate matching published-winner and auxiliary
+source indices in its requested slot. This preserves change detection even if
+the same name and runtime handle reuse that index before the next step. Copy-out
+user_data survives until normal resolve cleanup/rebuild; PIN_BLOB providers are
+severed before indices become reusable and before freeing the blob. BLOB and
+metadata getters return NULL after release until the next publication. Published
+handle/state and the publication epoch remain owned by the resolve pass.
 
 ## Asset types
 

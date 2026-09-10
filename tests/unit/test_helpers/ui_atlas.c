@@ -232,7 +232,7 @@ static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t suffix, ui
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry->resource_id = atlas_rid;
     entry->asset_type = NT_ASSET_ATLAS;
-    entry->format_version = NT_ATLAS_VERSION;
+    entry->owner_entry = 0;
     entry->offset = atlas_offset;
     entry->size = UI_ATLAS_BLOB_SIZE;
     entry->meta_offset = 0;

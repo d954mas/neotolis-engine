@@ -138,12 +138,11 @@ typedef struct {
 
 /* Per-asset encode result -- produced by workers, consumed by sequential assembly */
 typedef struct {
-    uint8_t *data;           /* encoded bytes (malloc'd by encode function, freed after assembly) */
-    uint32_t size;           /* encoded byte count */
-    nt_asset_type_t type;    /* asset type for register_asset (NT_ASSET_MESH, NT_ASSET_TEXTURE, etc.) */
-    uint16_t format_version; /* format version for register_asset */
-    bool from_cache;         /* true = loaded from cache, false = freshly encoded */
-    double encode_secs;      /* wall time for this asset's encode (set by worker or single-threaded loop) */
+    uint8_t *data;        /* encoded bytes (malloc'd by encode function, freed after assembly) */
+    uint32_t size;        /* encoded byte count */
+    nt_asset_type_t type; /* asset type for register_asset (NT_ASSET_MESH, NT_ASSET_TEXTURE, etc.) */
+    bool from_cache;      /* true = loaded from cache, false = freshly encoded */
+    double encode_secs;   /* wall time for this asset's encode (set by worker or single-threaded loop) */
 } NtEncodeResult;
 
 /* Shared state between main thread and encode workers */
@@ -259,7 +258,7 @@ nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint32_t data_size);
 
 /* Internal decode functions -- called from add_* (eager decode) */
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts);
@@ -298,11 +297,10 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
 
 /* Thread-safe encode functions -- return independent buffers (no shared state) */
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
-                                                   nt_asset_type_t *out_type, uint16_t *out_version);
+                                                   nt_asset_type_t *out_type);
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
-                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version);
-nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type,
-                                                  uint16_t *out_version);
+                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type);
+nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type);
 
 /* Metadata accumulation (called from import functions) */
 void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);
