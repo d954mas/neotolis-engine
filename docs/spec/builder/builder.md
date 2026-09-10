@@ -141,6 +141,18 @@ alter TTEX wire semantics or version.
 6. manifest generation (embedded in pack header)
 7. write NTPACK binary
 
+Manifest entries carry a canonical `owner_entry` ordinal. Unique entries point
+to themselves; deduplicated entries point directly to an earlier self-owned
+entry of the same type and byte range. Late encoded-byte dedup requires matching
+types. Early source dedup copies the canonical ordinal even when its source entry
+was itself deduplicated later. Metadata is assigned per resource ID after both
+paths. Sharing is local to one pack; the runtime does not infer ownership from
+equal ranges. Pack dumps use the same authored links for duplicate statistics.
+
+The manifest stores ownership and byte ranges; each asset's payload header
+stores its format version. The encode cache stores payload bytes without the
+pack manifest; encoder changes invalidate it through `NT_BUILDER_VERSION`.
+
 ## Builder validation
 
 Builder must check: references between assets, resource types, mesh/material/shader compatibility, required attributes, runtime format generation correctness, audio format validity.
@@ -260,7 +272,10 @@ redo that work regardless of the cache. Mesh wire encode is milliseconds per
 mesh; if it ever grows expensive, the fix is moving it behind the cache, not
 widening this contract.
 
-**Pipeline order:** early dedup → cache lookup → encode → cache store. Dedup runs first so duplicates never hit cache. Cache stores only unique encoded results.
+**Pipeline order:** early dedup → cache lookup → encode → pack assembly with
+encoded-byte dedup → cache store. Early duplicates skip lookup and encoding.
+Entries that match only after encoding can retain separate cache keys while
+sharing one payload in the pack.
 
 Texture cache and early dedup compare the same effective settings: resized
 dimensions, resolved pixel format, premultiplication, sampler defaults, RAW

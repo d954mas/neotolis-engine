@@ -189,17 +189,6 @@ static const char *asset_type_tag(uint8_t type, const uint8_t *asset_data, uint3
     return nt_asset_type_name(type);
 }
 
-/* ---- Duplicate detection ---- */
-
-static int32_t find_duplicate_original(const NtAssetEntry *entries, uint32_t current_index) {
-    for (uint32_t i = 0; i < current_index; i++) {
-        if (entries[i].offset == entries[current_index].offset && entries[i].size == entries[current_index].size) {
-            return (int32_t)i;
-        }
-    }
-    return -1;
-}
-
 /* ---- Header path derivation (uses shared utility from nt_builder_internal.h) ---- */
 
 /* ---- Font-specific detail printer ---- */
@@ -587,8 +576,23 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         count = max_entries;
     }
 
-#if NT_LOG_MIN_LEVEL == 0
     const NtAssetEntry *entries = (const NtAssetEntry *)(buffer + sizeof(NtPackHeader));
+    for (uint32_t i = 0; i < count; i++) {
+        const NtAssetEntry *entry = &entries[i];
+        if (entry->resource_id == 0 || entry->owner_entry > i) {
+            NT_LOG_ERROR("invalid asset identity or owner");
+            free(buffer);
+            return NT_BUILD_ERR_FORMAT;
+        }
+        const NtAssetEntry *owner = &entries[entry->owner_entry];
+        if (owner->owner_entry != entry->owner_entry || owner->asset_type != entry->asset_type || owner->offset != entry->offset || owner->size != entry->size) {
+            NT_LOG_ERROR("invalid alias owner");
+            free(buffer);
+            return NT_BUILD_ERR_FORMAT;
+        }
+    }
+
+#if NT_LOG_MIN_LEVEL == 0
     /* Parse .h file for name resolution */
     NameEntry *name_entries = (NameEntry *)calloc(MAX_NAME_ENTRIES, sizeof(NameEntry));
     uint32_t name_count = 0;
@@ -652,7 +656,7 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
 
         /* Duplicate detection */
         char note_str[32] = "";
-        int32_t dup_of = find_duplicate_original(entries, i);
+        int32_t dup_of = e->owner_entry == i ? -1 : (int32_t)e->owner_entry;
         if (dup_of >= 0) {
             (void)snprintf(note_str, sizeof(note_str), "dup #%d", dup_of);
         }

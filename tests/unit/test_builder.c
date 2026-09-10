@@ -357,7 +357,7 @@ void test_shader_round_trip(void) {
     NtAssetEntry entry;
     TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_SHADER_CODE, entry.asset_type);
-    TEST_ASSERT_EQUAL_UINT16(NT_SHADER_CODE_VERSION, entry.format_version);
+    TEST_ASSERT_EQUAL_UINT16(0, entry.owner_entry);
 
     /* Verify CRC32 */
     (void)fseek(f, 0, SEEK_END);
@@ -1247,7 +1247,7 @@ void test_blob_import(void) {
     NtAssetEntry entry;
     TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_BLOB, entry.asset_type);
-    TEST_ASSERT_EQUAL_UINT16(NT_BLOB_VERSION, entry.format_version);
+    TEST_ASSERT_EQUAL_UINT16(0, entry.owner_entry);
 
     /* Verify blob header at entry offset */
     (void)fseek(f, (long)entry.offset, SEEK_SET);
@@ -3285,6 +3285,97 @@ void test_builder_mesh_has_aabb(void) {
 /* --- Early dedup tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_late_dedup_equal_bytes_require_same_type(void) {
+    const uint8_t payload[] = {0x12, 0x34, 0x56, 0x78};
+    const nt_asset_type_t types[] = {NT_ASSET_MESH, NT_ASSET_TEXTURE, NT_ASSET_TEXTURE};
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/dedup_cross_type.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_append_data(ctx, payload, sizeof(payload)));
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_register_asset(ctx, i + 1U, types[i], sizeof(payload)));
+    }
+
+    NtAssetEntry entries[3];
+    memcpy(entries, ctx->entries, sizeof(entries));
+    uint32_t dedup_count = ctx->dedup_count;
+    uint32_t data_size = ctx->data_size;
+    nt_builder_free_pack(ctx);
+
+    TEST_ASSERT_EQUAL_UINT16(0, entries[0].owner_entry);
+    TEST_ASSERT_EQUAL_UINT16(1, entries[1].owner_entry);
+    TEST_ASSERT_EQUAL_UINT16(1, entries[2].owner_entry);
+    TEST_ASSERT_NOT_EQUAL(entries[0].offset, entries[1].offset);
+    TEST_ASSERT_EQUAL_UINT32(entries[1].offset, entries[2].offset);
+    TEST_ASSERT_EQUAL_UINT32(1, dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(2 * sizeof(payload), data_size);
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_UINT(types[i], entries[i].asset_type);
+        TEST_ASSERT_EQUAL_UINT32(sizeof(payload), entries[i].size);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_early_dedup_of_late_alias_keeps_canonical_owner_and_metadata(void) {
+    const char *pack_path = TMP_DIR "/dedup_canonical_owner.ntpack";
+    const uint8_t pixels_a[] = {10, 20, 30, 255};
+    const uint8_t pixels_b[] = {10, 40, 50, 255};
+    const uint32_t metadata[] = {17, 29, 43};
+    const uint64_t meta_kind = 123;
+    uint64_t resource_ids[3];
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_R8;
+    opts.premultiplied = false;
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* RGBA hashes differ, but R8 encoding drops the differing channels. */
+    nt_builder_add_texture_raw(ctx, pixels_a, 1, 1, "textures/canonical", &opts);
+    nt_builder_add_texture_raw(ctx, pixels_b, 1, 1, "textures/late_alias", &opts);
+    nt_builder_add_texture_raw(ctx, pixels_b, 1, 1, "textures/early_alias", &opts);
+    for (uint32_t i = 0; i < 3; i++) {
+        resource_ids[i] = ctx->pending[i].resource_id;
+        nt_builder_add_meta(ctx, resource_ids[i], meta_kind, &metadata[i], sizeof(metadata[i]));
+    }
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    int32_t early_original = ctx->pending[2].dedup_original;
+    uint32_t early_dedup_count = ctx->early_dedup_count;
+    uint32_t late_dedup_count = ctx->dedup_count;
+    nt_builder_free_pack(ctx);
+    TEST_ASSERT_EQUAL_INT32(1, early_original);
+    TEST_ASSERT_EQUAL_UINT32(1, early_dedup_count);
+    TEST_ASSERT_EQUAL_UINT32(1, late_dedup_count);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader header;
+    NtAssetEntry entries[3];
+    TEST_ASSERT_EQUAL(1, fread(&header, sizeof(header), 1, f));
+    TEST_ASSERT_EQUAL_UINT16(3, header.asset_count);
+    TEST_ASSERT_EQUAL_UINT32(3, header.meta_count);
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(entries), 1, f));
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_UINT64(resource_ids[i], entries[i].resource_id);
+        TEST_ASSERT_EQUAL_UINT16(0, entries[i].owner_entry);
+        TEST_ASSERT_EQUAL_UINT(NT_ASSET_TEXTURE, entries[i].asset_type);
+        TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[i].offset);
+        TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[i].size);
+        TEST_ASSERT_TRUE(entries[i].meta_offset >= header.meta_offset);
+        TEST_ASSERT_EQUAL(0, fseek(f, (long)entries[i].meta_offset, SEEK_SET));
+        NtMetaEntryHeader meta_header;
+        uint32_t value;
+        TEST_ASSERT_EQUAL(1, fread(&meta_header, sizeof(meta_header), 1, f));
+        TEST_ASSERT_EQUAL_UINT64(resource_ids[i], meta_header.resource_id);
+        TEST_ASSERT_EQUAL_UINT64(meta_kind, meta_header.kind);
+        TEST_ASSERT_EQUAL_UINT32(sizeof(value), meta_header.size);
+        TEST_ASSERT_EQUAL(1, fread(&value, sizeof(value), 1, f));
+        TEST_ASSERT_EQUAL_UINT32(metadata[i], value);
+    }
+    (void)fclose(f);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_early_dedup_identical_textures(void) {
     /* Two identical PNG textures from memory with different resource IDs.
      * Early dedup should detect identical bytes+kind+opts and share data. */
@@ -4600,7 +4691,7 @@ void test_font_add_basic_ascii(void) {
     /* Find the font asset entry */
     const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
     TEST_ASSERT_EQUAL_UINT(NT_ASSET_FONT, entry->asset_type);
-    TEST_ASSERT_EQUAL_UINT(NT_FONT_VERSION, entry->format_version);
+    TEST_ASSERT_EQUAL_UINT16(0, entry->owner_entry);
     TEST_ASSERT_TRUE(entry->size > sizeof(NtFontAssetHeader));
 
     /* Parse font header */
@@ -9364,6 +9455,8 @@ int main(void) {
     RUN_TEST(test_builder_mesh_has_aabb);
 
     /* Early dedup */
+    RUN_TEST(test_late_dedup_equal_bytes_require_same_type);
+    RUN_TEST(test_early_dedup_of_late_alias_keeps_canonical_owner_and_metadata);
     RUN_TEST(test_early_dedup_identical_textures);
     RUN_TEST(test_early_dedup_identical_blobs);
     RUN_TEST(test_early_dedup_different_opts_not_deduped);

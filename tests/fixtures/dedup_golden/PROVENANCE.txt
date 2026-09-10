@@ -14,7 +14,7 @@ atlas_dedup_fixture_add (4 art states on 10 distinct canvas sizes/offsets, so
 folding is reachable only after the alpha trim). 10 frames -> 4 placements.
 Atlas name "dedup_golden" — the name seeds the texture page resource ids, so
 the SHA depends on it; re-capture with any other name will not match.
-etalon_dedup_on sha256 4ace0c4e69e9e75b59360959e6cd7b04a1b681506dfd4cbbaa035989d9588e5e
+etalon_dedup_on sha256 b1b488d64b6923ef43059d18882e84602b3847550f17eff652197a2502c9bb33
 test_atlas_transform_mask::test_golden_byte_identity_dedup_on re-packs the same
 fixture, asserts the pack still folds to 4 distinct placements, then asserts
 byte-identity against this dump + sha256 pair.
@@ -33,7 +33,7 @@ IS its relative transform, and the dump reads back the inverse permutation
 0 1 2 3 4 6 5 7 — the ROT90/ROT270 swap is what makes this etalon sensitive to
 a relabelling of the D4 element codes.
 Atlas name "dedup_d4_golden" — same name-seeds-the-SHA caveat.
-etalon_dedup_d4 sha256 e257e751ef98f46bf44ba72c1f47a1c0a11b87a749a27c6ebb6f7029f5ff0c01
+etalon_dedup_d4 sha256 b48e7b49fabe3360dbeec89416d741fdb9b2b75612295b9885e6314c312a00bb
 test_atlas_transform_mask::test_golden_byte_identity_dedup_d4 re-packs the
 fixture, asserts one placement and eight pairwise-distinct region transforms,
 then asserts byte-identity against this dump + sha256 pair.
@@ -43,3 +43,8 @@ test_atlas_transform_mask, then take the SHA-256 of
 build/tests/tmp/<name>.ntpack and copy build/tests/tmp/<name>_dump.txt over the
 dump file (the test also prints the current dump on divergence), where <name> is
 dedup_golden or dedup_d4_golden. Keep every file LF — pinned in .gitattributes.
+
+NTPACK v3 migration (2026-09-10): recaptured pack SHA after replacing
+manifest format_version with owner_entry. Restoring only the v2 header version
+and former manifest versions reproduced every previous SHA exactly. Payloads
+and structural region dumps are unchanged.

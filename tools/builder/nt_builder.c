@@ -140,7 +140,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     return NT_BUILD_OK;
 }
 
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint32_t data_size) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -154,29 +154,31 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
      * The just-written data sits at data_buf[new_data_start .. data_size). */
     uint32_t new_data_start = ctx->data_size - data_size;
     const uint8_t *new_data = ctx->data_buf + new_data_start;
-    uint32_t dedup_offset = UINT32_MAX;
+    uint32_t owner_entry = ctx->entry_count;
 
     for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-        if (ctx->entries[ei].size == data_size && ctx->entries[ei].offset + data_size <= new_data_start) {
-            if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
-                dedup_offset = ctx->entries[ei].offset;
-                break;
-            }
+        if (ctx->entries[ei].asset_type != type || ctx->entries[ei].size != data_size || ctx->entries[ei].offset + data_size > new_data_start) {
+            continue;
+        }
+        if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
+            owner_entry = ctx->entries[ei].owner_entry;
+            break;
         }
     }
 
     uint32_t idx = ctx->entry_count;
     NtAssetEntry *entry = &ctx->entries[idx];
     entry->resource_id = resource_id;
-    entry->format_version = format_version;
+    entry->owner_entry = (uint16_t)owner_entry;
+    NT_BUILD_ASSERT(owner_entry <= idx && ctx->entries[owner_entry].owner_entry == owner_entry);
     entry->asset_type = (uint8_t)type;
     entry->_pad = 0;
     entry->size = data_size;
 
-    if (dedup_offset != UINT32_MAX) {
+    if (owner_entry != idx) {
         /* Duplicate found -- rewind data_buf, point to existing data */
         ctx->data_size = new_data_start;
-        entry->offset = dedup_offset; /* temporary: relative to data_buf start */
+        entry->offset = ctx->entries[owner_entry].offset; /* temporary: relative to data_buf start */
         ctx->dedup_count++;
         ctx->dedup_saved_bytes += data_size;
     } else {
@@ -397,33 +399,27 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     return false;
 }
 
-/* Derive asset_type and format_version from build asset kind (deterministic 1:1 mapping) */
-static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type, uint16_t *out_version) {
+/* Derive asset_type from build asset kind (deterministic 1:1 mapping) */
+static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type) {
     switch (kind) {
     case NT_BUILD_ASSET_MESH:
         *out_type = NT_ASSET_MESH;
-        *out_version = NT_MESH_VERSION;
         break;
     case NT_BUILD_ASSET_TEXTURE:
         *out_type = NT_ASSET_TEXTURE;
-        *out_version = NT_TEXTURE_VERSION_V2;
         break;
     case NT_BUILD_ASSET_SHADER:
         *out_type = NT_ASSET_SHADER_CODE;
-        *out_version = NT_SHADER_CODE_VERSION;
         break;
     case NT_BUILD_ASSET_BLOB:
         *out_type = NT_ASSET_BLOB;
-        *out_version = NT_BLOB_VERSION;
         break;
     case NT_BUILD_ASSET_FONT:
         *out_type = NT_ASSET_FONT;
-        *out_version = NT_FONT_VERSION;
         break;
     case NT_BUILD_ASSET_ATLAS:
     case NT_BUILD_ASSET_ATLAS_REGION:
         *out_type = NT_ASSET_ATLAS;
-        *out_version = NT_ATLAS_VERSION;
         break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
@@ -671,8 +667,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
     NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
-    /* PAR-03: Initialize global state before any encode (thread-safe prerequisite).
-     * Check if any pending non-deduped texture entry has compression. */
+    /* Basis global initialization must finish before encode workers start. */
     bool needs_basis = false;
     for (uint32_t i = 0; i < ctx->pending_count && !needs_basis; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
@@ -873,7 +868,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 #endif
         NT_LOG_INFO("Parallel encode complete: %.2fs (%u items, %u threads)", parallel_secs, work_count, num_threads);
     } else if (work_count > 0) {
-        /* --- SINGLE-THREADED ENCODE (backward compatible) --- */
+        /* Single-threaded encode */
         for (uint32_t wi = 0; wi < work_count; wi++) {
             uint32_t i = work_indices[wi];
             NtBuildEntry *pe = &ctx->pending[i];
@@ -903,9 +898,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         nt_build_result_t ret = nt_builder_append_data(ctx, results[i].data, results[i].size);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "assembly: append_data failed");
         nt_asset_type_t type;
-        uint16_t format_version;
-        derive_asset_type(pe->kind, &type, &format_version);
-        ret = nt_builder_register_asset(ctx, pe->resource_id, type, format_version, results[i].size);
+        derive_asset_type(pe->kind, &type);
+        ret = nt_builder_register_asset(ctx, pe->resource_id, type, results[i].size);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "assembly: register_asset failed");
 
         increment_kind_counter(ctx, pe->kind);
@@ -935,8 +929,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
             if (ctx->entries[ei].resource_id == orig_rid) {
                 NT_BUILD_ASSERT(ctx->entry_count < NT_BUILD_MAX_ASSETS && "entry limit reached");
+                NT_BUILD_ASSERT(ctx->entries[ei].owner_entry <= ei && ctx->entries[ctx->entries[ei].owner_entry].owner_entry == ctx->entries[ei].owner_entry);
                 NtAssetEntry *dup = &ctx->entries[ctx->entry_count++];
-                *dup = ctx->entries[ei]; /* copy offset, size, type, version */
+                *dup = ctx->entries[ei]; /* copy canonical ownership and payload range */
                 dup->resource_id = pe->resource_id;
                 found = true;
                 break;

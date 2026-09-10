@@ -251,7 +251,7 @@ nt_build_result_t nt_builder_invalidate_outputs(NtBuilderContext *ctx);
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint32_t data_size);
 
 /* Internal decode functions -- called from add_* (eager decode) */
 nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts);

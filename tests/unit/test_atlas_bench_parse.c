@@ -406,7 +406,7 @@ static void reject_missing_page_texture(void) {
     entry.resource_id = 1;
     entry.offset = header.header_size;
     entry.size = sizeof(atlas_blob);
-    entry.format_version = NT_ATLAS_VERSION;
+    entry.owner_entry = 0;
     entry.asset_type = NT_ASSET_ATLAS;
 
     FILE *file = fopen(path, "wb");
@@ -451,7 +451,7 @@ static void selected_geometry_is_owned_and_y_down(void) {
     NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
     header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
     header.total_size = header.header_size + atlas_size;
-    NtAssetEntry entry = {.offset = header.header_size, .size = atlas_size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    NtAssetEntry entry = {.resource_id = 1, .offset = header.header_size, .size = atlas_size, .owner_entry = 0, .asset_type = NT_ASSET_ATLAS};
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
@@ -485,7 +485,7 @@ static void selected_geometry_rejects_corrupt_index_window(void) {
     NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
     header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
     header.total_size = header.header_size + size;
-    NtAssetEntry entry = {.offset = header.header_size, .size = size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    NtAssetEntry entry = {.resource_id = 1, .offset = header.header_size, .size = size, .owner_entry = 0, .asset_type = NT_ASSET_ATLAS};
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));
@@ -519,7 +519,7 @@ static void selected_geometry_rejects_overlapping_sections(void) {
     NtPackHeader header = {.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 1};
     header.header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
     header.total_size = header.header_size + size;
-    NtAssetEntry entry = {.offset = header.header_size, .size = size, .format_version = NT_ATLAS_VERSION, .asset_type = NT_ASSET_ATLAS};
+    NtAssetEntry entry = {.resource_id = 1, .offset = header.header_size, .size = size, .owner_entry = 0, .asset_type = NT_ASSET_ATLAS};
     FILE *file = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(sizeof(header), fwrite(&header, 1, sizeof(header), file));

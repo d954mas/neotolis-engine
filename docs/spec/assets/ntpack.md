@@ -37,7 +37,7 @@ Custom flat binary format instead of ZIP. Rationale:
 │   resource_id: uint64                 │
 │   offset: uint32  ← from file start  │
 │   size: uint32                        │
-│   format_version: uint16              │
+│   owner_entry: uint16                 │
 │   asset_type: uint8                   │
 │   _pad: uint8                         │
 │   meta_offset: uint32  ← per-asset   │
@@ -46,10 +46,8 @@ Custom flat binary format instead of ZIP. Rationale:
 │   ...                                 │
 ╞══════════════════════════════════════╡
 │ [padding to 8-byte alignment]         │
-│ [asset 0 binary data]                 │
-│ [asset 1 binary data]                 │
-│ ...                                   │
-│ [asset N-1 binary data]               │
+│ [unique asset payloads + alignment]   │
+│ aliases share their owner's range    │
 ╞══════════════════════════════════════╡
 │ [meta section] (optional)             │
 │   NtMetaEntryHeader + payload ...     │
@@ -58,6 +56,11 @@ Custom flat binary format instead of ZIP. Rationale:
 ```
 
 Assets aligned to 4 bytes (NT_PACK_ASSET_ALIGN). Header/entries region aligned to 8 bytes (NT_PACK_DATA_ALIGN) before data start. Meta section appended after asset data, covered by CRC32. Resident copy made at parse time (survives blob eviction).
+
+Every entry stores its own file-relative `offset` and `size`, including aliases.
+The builder adds the final `header_size` to payload-buffer offsets when writing
+the manifest. `owner_entry` identifies shared runtime ownership; it is not needed
+to find the payload bytes.
 
 ## Version policy
 
@@ -75,51 +78,65 @@ NtMetaEntryHeader (20 bytes, packed):
     /* uint8_t data[size] follows immediately */
 ```
 
-Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — returns pointer to resident memory, NULL if absent.
+Query: `nt_resource_get_meta(handle, nt_hash64_str("tag"), &size)` — returns pointer to resident memory, NULL if absent.
 
 ## Runtime parsing
 
-All asset entry byte ranges are checked before any asset is registered. An invalid
-range rejects the pack without leaving partial asset records, so a corrected pack
-can be loaded into the same mount.
+All asset byte ranges and ownership links are checked before any slots are
+reserved or records modified. Parsing requires a file mount; virtual packs
+accept registrations only. Invalid ranges, zero resource IDs or malformed
+owner links reject the pack through the existing recoverable parse error; a
+corrected pack can load into the same mount. Capacity exhaustion asserts.
 
-```c
-// Pseudocode — see nt_resource.c for actual implementation
-void parse_pack(const uint8_t *blob, uint32_t blob_size) {
-    const NtPackHeader *h = (const NtPackHeader *)blob;
+Each mount accepts one successful parse, including an empty pack. A later parse
+returns `NT_ERR_INVALID_ARG` even after blob eviction: eviction preserves the
+registered assets, metadata and original blob size. Resource-managed I/O restores
+evicted bytes without parsing the manifest again. The URL/path must return
+identical bytes for the mount's lifetime: reload asserts the size matches but
+does not recheck the CRC or manifest. Unmount and mount again to replace the pack.
 
-    NT_ASSERT(h->magic == NT_PACK_MAGIC);
-    NT_ASSERT(h->version == NT_PACK_VERSION); /* no backwards compat */
+For direct parsing without resource-managed I/O, success retains the caller's
+blob pointer without copying or taking ownership. The caller keeps the bytes
+valid and unchanged until unmount or shutdown and frees them afterward. A rejected
+parse does not retain the supplied buffer. Resource-managed I/O owns its loaded
+buffer and frees it on eviction or unmount.
 
-    const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
+NTPACK v3 uses the 16-bit `owner_entry` field in each 24-byte entry:
 
-    for (uint16_t i = 0; i < h->asset_count; i++) {
-        NtAssetMeta *meta = asset_alloc();
-        meta->resource_id = entries[i].resource_id;
-        meta->offset = entries[i].offset;
-        meta->size = entries[i].size;
-        /* Convert per-asset meta_offset from absolute to meta_data-relative */
-        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset - h->meta_offset : NT_NO_METADATA;
-    }
+- Entry i owns its runtime object when owner_entry equals i.
+- An alias points to an earlier entry which points to itself. Chains, forward
+  references and cycles are invalid.
+- An alias has the owner's asset type, offset and size. Its resource ID and
+  metadata remain independent.
+- Equal byte ranges do not imply sharing: separately self-owned entries are
+  valid. Ownership is explicitly authored by the builder, never reconstructed
+  by sorting or searching ranges at runtime.
 
-    /* Copy meta section to resident memory (survives blob eviction) */
-    if (h->meta_count > 0 && h->meta_offset != 0) {
-        uint32_t meta_size = blob_size - h->meta_offset;
-        pack->meta_data = malloc(meta_size);
-        memcpy(pack->meta_data, blob + h->meta_offset, meta_size);
-    }
-}
+The registry has a preallocated stack of free uint16 indices, initialized to
+return low indices first. Unmount and virtual unregister return each live index
+once. A parse reserves N indices; its reserved stack suffix maps manifest ordinals
+to registry indices while filling records:
+
+```text
+old_top = free_count
+free_count -= N
+r(i) = free_assets[old_top - 1 - i]
+assets[r(i)].owner_asset = r(entries[i].owner_entry)
 ```
+
+Parsing invokes no callbacks while using that suffix and retains no pointer into
+it. Every live record stores its translated owner index before the suffix can be
+overwritten by later frees. Empty packs access no stack entries. Registration
+needs no temporary allocation or capacity-sized WASM stack array; the persistent
+index stack uses two bytes per configured asset slot (4 KiB at the default limit).
+The existing resident metadata copy remains separate and survives blob eviction.
 
 ## Asset data access
 
-```c
-const uint8_t *pack_get_asset_data(const PackMeta *pack, uint32_t offset, uint32_t size) {
-    return pack->blob_data + offset;
-}
-```
-
-Zero copy. Data is already in WASM heap.
+With the pack blob resident, a validated entry's payload begins at
+`blob + entry.offset` and spans `entry.size` bytes. Runtime activators borrow
+that range. `nt_resource_get_blob` returns the bytes after `NtBlobAssetHeader`
+for a published BLOB resource; its public contract defines the view's lifetime.
 
 ## Debugging
 
