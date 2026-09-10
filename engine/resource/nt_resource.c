@@ -20,6 +20,10 @@
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
 
+#ifndef NT_RESOURCE_TIMING_ENABLED
+#error "NT_RESOURCE_TIMING_ENABLED must be defined by the build (0 or 1)"
+#endif
+
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
 #define NT_SLOT_MAP_SIZE (NT_RESOURCE_MAX_SLOTS * 2)

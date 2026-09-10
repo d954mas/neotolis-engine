@@ -29,7 +29,7 @@ endfunction()
 
 nt426_consumer(parent_log LOG nt_log_interface)
 nt426_consumer(parent_core CORE nt_core)
-nt426_consumer(parent_resource RESOURCE nt_resource_interface)
+nt426_consumer(parent_resource RESOURCE nt_resource)
 nt426_consumer(parent_ui UI nt_ui_interface nt_shared)
 nt426_consumer(parent_gfx GFX nt_gfx_interface nt_shared)
 add_subdirectory(sibling)

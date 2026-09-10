@@ -13,8 +13,9 @@ Related: [Async Loading](async-loading.md), [Pack Format](ntpack.md), [Builder A
 `NT_RESOURCE_TIMING_ENABLED` is independent of metrics, DevAPI and UI. CMake
 uses OFF by default, Debug presets and `native-release-test` use ON, and
 production Release presets use OFF. For performance comparisons use Release
-with this flag explicitly ON. `nt_resource_interface` publishes the numeric
-0/1 definition to header consumers.
+with this flag explicitly ON. The `nt_resource` target publishes the numeric
+0/1 definition. The public header and API are independent of it; only the
+implementation requires the flag to be defined.
 
 | Getter | Last completed work, in milliseconds |
 | --- | --- |

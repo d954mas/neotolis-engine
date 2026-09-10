@@ -13,14 +13,13 @@ _Static_assert(NT_INTROSPECT_WRITE_ENABLED == NT426_EXPECT_INTROSPECT_WRITE, "co
 _Static_assert(NT_LOG_MIN_LEVEL == NT426_EXPECT_LOG, "core log floor");
 #elif defined(NT426_CHECK_UI) || defined(NT426_CHECK_UI_STUB)
 #include "ui/nt_ui.h"
-_Static_assert(NT_RESOURCE_TIMING_ENABLED == NT426_EXPECT_RESOURCE_TIMING, "UI resource timing configuration");
 _Static_assert(NT_UI_TIMING_ENABLED == NT426_EXPECT_UI_TIMING, "UI timing configuration");
 #if defined(NT426_CHECK_UI_STUB)
 _Static_assert(NT_UI_DEBUG_TOOLS == 1, "UI stub keeps its existing probe contract");
 #endif
 #elif defined(NT426_CHECK_RESOURCE)
 #include "resource/nt_resource.h"
-_Static_assert(NT_RESOURCE_TIMING_ENABLED == NT426_EXPECT_RESOURCE_TIMING, "resource timing interface configuration");
+_Static_assert(NT_RESOURCE_TIMING_ENABLED == NT426_EXPECT_RESOURCE_TIMING, "resource timing configuration");
 #elif defined(NT426_CHECK_GFX)
 #include "graphics/nt_gfx.h"
 _Static_assert(NT_GFX_GPU_TIMING_ENABLED == NT426_EXPECT_GFX_GPU_TIMING, "GPU timing interface configuration");

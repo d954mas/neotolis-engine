@@ -24,7 +24,6 @@ DEFINES = {
     "NT_INTROSPECT_WRITE_ENABLED": 0,
     "NT_UI_DEBUG_TOOLS": 0,
     "NT_UI_TIMING_ENABLED": 0,
-    "NT_RESOURCE_TIMING_ENABLED": 0,
     "NT_GFX_GPU_TIMING_ENABLED": 0,
 }
 
@@ -79,6 +78,7 @@ class Checks:
         print("PASS: all 18 macro forms at floors 0..3; exact marker/latch/reference presence")
 
     def headers(self):
+        self.compile("resource-header-without-timing", '#include "resource/nt_resource.h"\n', DEFINES)
         headers = {
             "NT_LOG_MIN_LEVEL": "log/nt_log.h",
             "NT_METRICS_ENABLED": "metrics/nt_metrics.h",
@@ -86,7 +86,6 @@ class Checks:
             "NT_INTROSPECT_ENABLED": "introspect/nt_introspect.h",
             "NT_INTROSPECT_WRITE_ENABLED": "introspect/nt_introspect.h",
             "NT_UI_TIMING_ENABLED": "ui/nt_ui.h",
-            "NT_RESOURCE_TIMING_ENABLED": "resource/nt_resource.h",
             "NT_GFX_GPU_TIMING_ENABLED": "graphics/nt_gfx.h",
         }
         for define, header in headers.items():

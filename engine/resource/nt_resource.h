@@ -5,10 +5,6 @@
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
 
-#ifndef NT_RESOURCE_TIMING_ENABLED
-#error "NT_RESOURCE_TIMING_ENABLED must be defined by the build (0 or 1)"
-#endif
-
 /* ---- Compile-time limits (overridable via -D) ---- */
 
 #ifndef NT_RESOURCE_MAX_PACKS

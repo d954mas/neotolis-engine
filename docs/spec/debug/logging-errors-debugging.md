@@ -35,7 +35,9 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 `NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED` and
 `NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
 `native-release-test` select ON; production Release presets select OFF.
-Their existing interfaces publish numeric 0/1 values. No producer depends
+UI/GPU interfaces and the `nt_resource` target publish numeric 0/1 values.
+The resource header does not require the flag; only its implementation checks it.
+No producer depends
 on `NT_METRICS_ENABLED`: the game may consume measurements directly.
 
 UI timing OFF removes the layout/build/walk clock reads and three private
