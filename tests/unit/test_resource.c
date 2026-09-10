@@ -1001,6 +1001,87 @@ static uint32_t fake_activate_seq(const uint8_t *data, uint32_t size) {
     return s_next_handle++;
 }
 
+void test_parse_alias_ranges_preserve_activation_order(void) {
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_pack(8, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    const uint32_t offsets[] = {48, 0, 48, 48, 16, 0, 80, 80};
+    const uint32_t sizes[] = {16, 16, 8, 16, 16, 16, 0, 0};
+    const uint32_t handles[] = {100, 101, 102, 100, 103, 101, 104, 104};
+    nt_resource_t resources[8];
+    for (uint32_t i = 0; i < 8; i++) {
+        entries[i].offset = ((NtPackHeader *)blob)->header_size + offsets[i];
+        entries[i].size = sizes[i];
+        entries[i].asset_type = NT_ASSET_TEXTURE;
+        resources[i] = nt_resource_request((nt_hash64_t){entries[i].resource_id}, NT_ASSET_TEXTURE);
+    }
+    nt_hash32_t pid = nt_hash32_str("alias_ranges");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    s_next_handle = 100;
+    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate_seq, fake_deactivate);
+    nt_resource_set_activate_time_budget(0.0F);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(5, s_activate_call_count);
+    for (uint32_t i = 0; i < 8; i++) {
+        TEST_ASSERT_TRUE(nt_resource_is_ready(resources[i]));
+        TEST_ASSERT_EQUAL_UINT32(handles[i], nt_resource_get(resources[i]));
+    }
+    nt_resource_invalidate(NT_ASSET_TEXTURE);
+    TEST_ASSERT_EQUAL_UINT32(5, s_deactivate_call_count);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(10, s_activate_call_count);
+    for (uint32_t i = 0; i < 8; i++) {
+        TEST_ASSERT_EQUAL_UINT32(handles[i] + 5, nt_resource_get(resources[i]));
+    }
+    nt_resource_unmount(pid);
+    TEST_ASSERT_EQUAL_UINT32(10, s_deactivate_call_count);
+    free(blob);
+}
+
+void test_asset_holes_shared_by_file_and_virtual_packs(void) {
+    nt_hash32_t virtual_pid = nt_hash32_str("mixed_virtual");
+    nt_hash32_t file_pid = nt_hash32_str("mixed_file");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(virtual_pid, 0));
+    for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS; i++) {
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(virtual_pid, (nt_hash64_t){i + 1}, NT_ASSET_TEXTURE, i + 100));
+    }
+    uint32_t blob_size = 0;
+    const uint32_t hole_count = (NT_RESOURCE_MAX_ASSETS + 1U) / 2U;
+    uint8_t *blob = build_test_pack(hole_count, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    for (uint32_t cycle = 0; cycle < 3; cycle++) {
+        for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS; i += 2) {
+            nt_resource_unregister(virtual_pid, (nt_hash64_t){i + 1});
+        }
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(file_pid, 0));
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(file_pid, blob, blob_size));
+        TEST_ASSERT_EQUAL_UINT16(NT_RESOURCE_MAX_ASSETS, nt_resource_asset_count());
+        nt_resource_unmount(file_pid);
+        TEST_ASSERT_EQUAL_UINT16(NT_RESOURCE_MAX_ASSETS - hole_count, nt_resource_asset_count());
+        for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS; i += 2) {
+            TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(virtual_pid, (nt_hash64_t){i + 1}, NT_ASSET_TEXTURE, i + 100));
+        }
+    }
+    for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS && i < NT_RESOURCE_MAX_SLOTS; i++) {
+        (void)nt_resource_request((nt_hash64_t){i + 1}, NT_ASSET_TEXTURE);
+    }
+    nt_resource_step();
+    for (uint32_t i = 0; i < NT_RESOURCE_MAX_ASSETS && i < NT_RESOURCE_MAX_SLOTS; i++) {
+        nt_resource_t resource = nt_resource_request((nt_hash64_t){i + 1}, NT_ASSET_TEXTURE);
+        TEST_ASSERT_EQUAL_UINT32(i + 100, nt_resource_get(resource));
+    }
+    nt_resource_unmount(virtual_pid);
+    TEST_ASSERT_EQUAL_UINT16(0, nt_resource_asset_count());
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(file_pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(file_pid, blob, blob_size));
+    nt_resource_unmount(file_pid);
+    free(blob);
+}
+
 /* ---- Mock on_resolve / on_cleanup for user_data tests ---- */
 
 static uint32_t s_resolve_call_count;
@@ -2956,6 +3037,8 @@ int main(void) {
 
     /* Asset slot reuse */
     RUN_TEST(test_asset_slot_reuse);
+    RUN_TEST(test_asset_holes_shared_by_file_and_virtual_packs);
+    RUN_TEST(test_parse_alias_ranges_preserve_activation_order);
 
     /* Pack loading tests */
     RUN_TEST(test_parse_invalid_later_entry_allows_corrected_load);

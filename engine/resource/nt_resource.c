@@ -147,8 +147,8 @@ static void slot_map_insert(uint64_t resource_id, uint16_t slot_index) {
 
 /* ---- Asset slot allocation (reuses holes before appending) ---- */
 
-static uint32_t asset_alloc(void) {
-    for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
+static uint32_t asset_alloc(uint32_t start) {
+    for (uint32_t i = start; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == 0) {
             return i;
         }
@@ -157,6 +157,21 @@ static uint32_t asset_alloc(void) {
         return UINT32_MAX;
     }
     return s_resource.asset_hwm++;
+}
+
+static int asset_range_compare(const void *left, const void *right) {
+    uint16_t li = *(const uint16_t *)left;
+    uint16_t ri = *(const uint16_t *)right;
+    const NtAssetMeta *a = &s_resource.assets[li];
+    const NtAssetMeta *b = &s_resource.assets[ri];
+    if (a->offset != b->offset) {
+        return a->offset < b->offset ? -1 : 1;
+    }
+    if (a->size != b->size) {
+        return a->size < b->size ? -1 : 1;
+    }
+    /* Keep the first manifest entry as the owner of a shared range. */
+    return (li > ri) - (li < ri);
 }
 
 /* ---- Time helper ---- */
@@ -1073,9 +1088,17 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         }
     }
 
+    uint16_t *range_order = NULL;
+    if (h->asset_count > 0) {
+        range_order = (uint16_t *)malloc((size_t)h->asset_count * sizeof(uint16_t));
+        NT_ASSERT(range_order);
+    }
+    uint32_t next_asset = 0;
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        uint32_t idx = asset_alloc();
+        uint32_t idx = asset_alloc(next_asset);
         NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
+        next_asset = idx + 1;
+        range_order[i] = (uint16_t)idx;
 
         NtAssetMeta *meta = &s_resource.assets[idx];
         meta->resource_id = entries[i].resource_id;
@@ -1092,14 +1115,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             meta->meta_offset = NT_NO_METADATA;
         }
 
-        /* Detect dedup: check if a previous entry in this pack has same offset+size */
         meta->is_dedup = 0;
-        for (uint16_t j = 0; j < i; j++) {
-            if (entries[j].offset == entries[i].offset && entries[j].size == entries[i].size) {
-                meta->is_dedup = 1;
-                break;
-            }
-        }
 
         /* Blob assets auto-transition to READY (no GPU activation needed) */
         if (entries[i].asset_type == NT_ASSET_BLOB) {
@@ -1108,6 +1124,17 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             meta->state = NT_ASSET_STATE_REGISTERED;
         }
     }
+
+    /* Sort only indices: registry order still determines activation order. */
+    if (h->asset_count > 1) {
+        qsort(range_order, h->asset_count, sizeof(range_order[0]), asset_range_compare);
+    }
+    for (uint16_t i = 1; i < h->asset_count; i++) {
+        const NtAssetMeta *previous = &s_resource.assets[range_order[i - 1]];
+        NtAssetMeta *meta = &s_resource.assets[range_order[i]];
+        meta->is_dedup = (uint8_t)(previous->offset == meta->offset && previous->size == meta->size);
+    }
+    free(range_order);
 
     /* Parse metadata section */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
@@ -1421,7 +1448,7 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
         }
     }
 
-    uint32_t idx = asset_alloc();
+    uint32_t idx = asset_alloc(0);
     NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
 
     NtAssetMeta *meta = &s_resource.assets[idx];

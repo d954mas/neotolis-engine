@@ -83,6 +83,16 @@ All asset entry byte ranges are checked before any asset is registered. An inval
 range rejects the pack without leaving partial asset records, so a corrected pack
 can be loaded into the same mount.
 
+Registration fills free AssetMeta records in increasing index order, using one
+cursor for the whole pack. Unmount and virtual unregister holes remain reusable.
+Dedup sorts a temporary array of record indices by `(offset, size, index)` and
+marks adjacent equal ranges. The registry itself stays in manifest order, so the
+first entry sharing a range remains its owner and activation order is unchanged.
+The index array is allocated only for this load operation and freed before parsing
+metadata. It uses two bytes per entry (up to 4 KiB at the default asset limit),
+adds no persistent registry state and does not scale the WASM stack with capacity.
+Activation's search for an already-ready alias is separate.
+
 ```c
 // Pseudocode — see nt_resource.c for actual implementation
 void parse_pack(const uint8_t *blob, uint32_t blob_size) {
@@ -93,8 +103,11 @@ void parse_pack(const uint8_t *blob, uint32_t blob_size) {
 
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
+    uint32_t next_asset = 0;
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        NtAssetMeta *meta = asset_alloc();
+        uint32_t index = asset_alloc(next_asset);
+        next_asset = index + 1;
+        NtAssetMeta *meta = &assets[index];
         meta->resource_id = entries[i].resource_id;
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
