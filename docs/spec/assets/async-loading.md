@@ -191,7 +191,7 @@ rejection).
 
 ## Asset activation strategy
 
-**Eager with rate-limit**: when a pack becomes READY, `resource_step()` processes up to N assets per frame from the ready queue. This prevents frame spikes while ensuring assets become available quickly.
+**Eager with a time budget**: when a pack becomes READY, `resource_step()` activates canonical owners in registry order. It guarantees at least one attempt per step when work is available; a zero budget is unlimited. Aliases consume no activation attempts and read owner state directly, regardless of registry order or which names the game requested. BLOB owners become READY during parse. Success and failure both dirty resolve; failure stays terminal until explicit invalidation/reload, without independent alias retries.
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

@@ -28,7 +28,7 @@ static void make_blob(void) {
     *h = (NtPackHeader){.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .asset_count = 3, .header_size = 104, .total_size = sizeof s_blob, .meta_count = 1, .meta_offset = 136};
     NtAssetEntry *entries = (NtAssetEntry *)(s_blob + sizeof *h);
     for (uint32_t i = 0; i < 3; ++i) {
-        entries[i] = (NtAssetEntry){.resource_id = 101U + i, .offset = i == 2 ? 120U : 104U, .size = 16, .asset_type = NT_ASSET_MESH};
+        entries[i] = (NtAssetEntry){.resource_id = 101U + i, .offset = i == 2 ? 120U : 104U, .size = 16, .owner_entry = i == 2 ? 2 : 0, .asset_type = NT_ASSET_MESH};
     }
     entries[0].meta_offset = h->meta_offset;
     s_blob[104] = 1;

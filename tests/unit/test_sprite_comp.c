@@ -168,7 +168,7 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
     entry[0].asset_type = NT_ASSET_ATLAS;
-    entry[0].format_version = NT_ATLAS_VERSION;
+    entry[0].owner_entry = (uint16_t)0;
     entry[0].offset = atlas_offset;
     entry[0].size = atlas_blob_size;
     entry[0].meta_offset = 0;

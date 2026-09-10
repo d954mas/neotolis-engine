@@ -37,7 +37,7 @@ Custom flat binary format instead of ZIP. Rationale:
 │   resource_id: uint64                 │
 │   offset: uint32  ← from file start  │
 │   size: uint32                        │
-│   format_version: uint16              │
+│   owner_entry: uint16                 │
 │   asset_type: uint8                   │
 │   _pad: uint8                         │
 │   meta_offset: uint32  ← per-asset   │
@@ -79,50 +79,41 @@ Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — ret
 
 ## Runtime parsing
 
-All asset entry byte ranges are checked before any asset is registered. An invalid
-range rejects the pack without leaving partial asset records, so a corrected pack
-can be loaded into the same mount.
+All asset byte ranges and ownership links are checked before any slots are
+reserved or records modified. Parsing requires a file mount; virtual packs
+accept registrations only. Invalid ranges, zero resource IDs or malformed
+owner links reject the pack through the existing recoverable parse error; a
+corrected pack can load into the same mount. Capacity exhaustion asserts.
 
-Registration fills free AssetMeta records in increasing index order, using one
-cursor for the whole pack. Unmount and virtual unregister holes remain reusable.
-Dedup sorts a temporary array of record indices by `(offset, size, index)` and
-marks adjacent equal ranges. The registry itself stays in manifest order, so the
-first entry sharing a range remains its owner and activation order is unchanged.
-The index array is allocated only for this load operation and freed before parsing
-metadata. It uses two bytes per entry (up to 4 KiB at the default asset limit),
-adds no persistent registry state and does not scale the WASM stack with capacity.
-Activation's search for an already-ready alias is separate.
+NTPACK v3 uses the 16-bit `owner_entry` field in each 24-byte entry:
 
-```c
-// Pseudocode — see nt_resource.c for actual implementation
-void parse_pack(const uint8_t *blob, uint32_t blob_size) {
-    const NtPackHeader *h = (const NtPackHeader *)blob;
+- Entry i owns its runtime object when owner_entry equals i.
+- An alias points to an earlier entry which points to itself. Chains, forward
+  references and cycles are invalid.
+- An alias has the owner's asset type, offset and size. Its resource ID and
+  metadata remain independent.
+- Equal byte ranges do not imply sharing: separately self-owned entries are
+  valid. Ownership is explicitly authored by the builder, never reconstructed
+  by sorting or searching ranges at runtime.
 
-    NT_ASSERT(h->magic == NT_PACK_MAGIC);
-    NT_ASSERT(h->version == NT_PACK_VERSION); /* no backwards compat */
+The registry has a preallocated stack of free uint16 indices, initialized to
+return low indices first. Unmount and virtual unregister return each live index
+once. A parse reserves N indices; its reserved stack suffix maps manifest ordinals
+to registry indices while filling records:
 
-    const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
-
-    uint32_t next_asset = 0;
-    for (uint16_t i = 0; i < h->asset_count; i++) {
-        uint32_t index = asset_alloc(next_asset);
-        next_asset = index + 1;
-        NtAssetMeta *meta = &assets[index];
-        meta->resource_id = entries[i].resource_id;
-        meta->offset = entries[i].offset;
-        meta->size = entries[i].size;
-        /* Convert per-asset meta_offset from absolute to meta_data-relative */
-        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset - h->meta_offset : NT_NO_METADATA;
-    }
-
-    /* Copy meta section to resident memory (survives blob eviction) */
-    if (h->meta_count > 0 && h->meta_offset != 0) {
-        uint32_t meta_size = blob_size - h->meta_offset;
-        pack->meta_data = malloc(meta_size);
-        memcpy(pack->meta_data, blob + h->meta_offset, meta_size);
-    }
-}
+```text
+old_top = free_count
+free_count -= N
+r(i) = free_assets[old_top - 1 - i]
+assets[r(i)].owner_asset = r(entries[i].owner_entry)
 ```
+
+Parsing invokes no callbacks while using that suffix and retains no pointer into
+it. Every live record stores its translated owner index before the suffix can be
+overwritten by later frees. Empty packs access no stack entries. Registration
+needs no temporary allocation or capacity-sized WASM stack array; the persistent
+index stack uses two bytes per configured asset slot (4 KiB at the default limit).
+The existing resident metadata copy remains separate and survives blob eviction.
 
 ## Asset data access
 

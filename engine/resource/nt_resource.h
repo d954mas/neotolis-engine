@@ -131,6 +131,7 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 
 /* ---- Pack parsing ---- */
 
+/* Requires a file pack created by mount; virtual packs accept register only. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
@@ -162,10 +163,10 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle);
  * needs_resolve flag; nt_resource_step() drains it by running resolve_pass,
  * which diffs per-slot and bumps the epoch when the published view differs.
  *
- * slot_alloc() is the only path that writes slot->* outside resolve_pass,
- * but it only initializes a freshly created slot (state=REGISTERED, handle=0)
- * that no observer has seen yet — the slot's first real publication still
- * goes through resolve_pass and bumps the epoch normally. */
+ * Outside resolve, slot allocation initializes unpublished state; release
+ * invalidates winner/aux indices before asset reuse, and unmount severs
+ * zero-copy providers before freeing their blob. Publication and epoch
+ * changes still go through resolve_pass. */
 uint32_t nt_resource_publication_epoch(void);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
@@ -185,7 +186,8 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 /* Virtual packs publish caller-created runtime handles. The resource system stores the
  * handle value but does not own/destroy the runtime object; virtual unregister/unmount
  * never call the asset deactivator. Resolve cleanup callbacks may still release
- * per-slot user_data. */
+ * per-slot user_data. Register/unregister require a nonzero resource_id.
+ * Unregister is virtual-only; file assets are removed by whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);

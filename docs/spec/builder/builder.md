@@ -85,6 +85,19 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 6. manifest generation (embedded in pack header)
 7. write NTPACK binary
 
+Manifest entries carry a canonical `owner_entry` ordinal. Unique entries point
+to themselves; deduplicated entries point directly to an earlier self-owned
+entry of the same type and byte range. Late encoded-byte dedup requires matching
+types. Early source dedup copies the canonical ordinal even when its source entry
+was itself deduplicated later. Metadata is assigned per resource ID after both
+paths. Sharing is local to one pack; the runtime does not infer ownership from
+equal ranges. Pack dumps use the same authored links for duplicate statistics.
+
+NTPACK v3 replaces the redundant per-entry format version with this ordinal while
+keeping the 24-byte entry layout. Actual payload-header versions and raw encoded
+cache contents are unchanged; a manifest-only migration does not invalidate the
+payload cache.
+
 ## Builder validation
 
 Builder must check: references between assets, resource types, mesh/material/shader compatibility, required attributes, runtime format generation correctness, audio format validity.

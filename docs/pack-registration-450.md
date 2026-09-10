@@ -1,5 +1,9 @@
 # Pack registration comparison (#450)
 
+Historical qsort experiment at `161b8768`. The subsequent owner/free-stack
+migration, current behavior and three-way measurements are recorded in
+[Resource ownership migration](resource-ownership-450.md).
+
 Baseline: `0c26ded1b0e710bae0ced0147307966496324e38`, including #449 and #459.
 Measured 2026-09-10 on Windows, Emscripten 4.0.19 Release (`-O3 -DNDEBUG`,
 default TRAP asserts), `NT_RESOURCE_TIMING_ENABLED=ON`, `NT_BUILD_TESTS=OFF`,

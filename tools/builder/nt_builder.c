@@ -140,7 +140,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     return NT_BUILD_OK;
 }
 
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint32_t data_size) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -154,29 +154,31 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
      * The just-written data sits at data_buf[new_data_start .. data_size). */
     uint32_t new_data_start = ctx->data_size - data_size;
     const uint8_t *new_data = ctx->data_buf + new_data_start;
-    uint32_t dedup_offset = UINT32_MAX;
+    uint32_t owner_entry = ctx->entry_count;
 
     for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-        if (ctx->entries[ei].size == data_size && ctx->entries[ei].offset + data_size <= new_data_start) {
-            if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
-                dedup_offset = ctx->entries[ei].offset;
-                break;
-            }
+        if (ctx->entries[ei].asset_type != type || ctx->entries[ei].size != data_size || ctx->entries[ei].offset + data_size > new_data_start) {
+            continue;
+        }
+        if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
+            owner_entry = ctx->entries[ei].owner_entry;
+            break;
         }
     }
 
     uint32_t idx = ctx->entry_count;
     NtAssetEntry *entry = &ctx->entries[idx];
     entry->resource_id = resource_id;
-    entry->format_version = format_version;
+    entry->owner_entry = (uint16_t)owner_entry;
+    NT_BUILD_ASSERT(owner_entry <= idx && ctx->entries[owner_entry].owner_entry == owner_entry);
     entry->asset_type = (uint8_t)type;
     entry->_pad = 0;
     entry->size = data_size;
 
-    if (dedup_offset != UINT32_MAX) {
+    if (owner_entry != idx) {
         /* Duplicate found -- rewind data_buf, point to existing data */
         ctx->data_size = new_data_start;
-        entry->offset = dedup_offset; /* temporary: relative to data_buf start */
+        entry->offset = ctx->entries[owner_entry].offset; /* temporary: relative to data_buf start */
         ctx->dedup_count++;
         ctx->dedup_saved_bytes += data_size;
     } else {
@@ -395,33 +397,27 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     return false;
 }
 
-/* Derive asset_type and format_version from build asset kind (deterministic 1:1 mapping) */
-static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type, uint16_t *out_version) {
+/* Derive asset_type from build asset kind (deterministic 1:1 mapping) */
+static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_type) {
     switch (kind) {
     case NT_BUILD_ASSET_MESH:
         *out_type = NT_ASSET_MESH;
-        *out_version = NT_MESH_VERSION;
         break;
     case NT_BUILD_ASSET_TEXTURE:
         *out_type = NT_ASSET_TEXTURE;
-        *out_version = NT_TEXTURE_VERSION_V2;
         break;
     case NT_BUILD_ASSET_SHADER:
         *out_type = NT_ASSET_SHADER_CODE;
-        *out_version = NT_SHADER_CODE_VERSION;
         break;
     case NT_BUILD_ASSET_BLOB:
         *out_type = NT_ASSET_BLOB;
-        *out_version = NT_BLOB_VERSION;
         break;
     case NT_BUILD_ASSET_FONT:
         *out_type = NT_ASSET_FONT;
-        *out_version = NT_FONT_VERSION;
         break;
     case NT_BUILD_ASSET_ATLAS:
     case NT_BUILD_ASSET_ATLAS_REGION:
         *out_type = NT_ASSET_ATLAS;
-        *out_version = NT_ATLAS_VERSION;
         break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
@@ -443,7 +439,7 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
         NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
         result->size = pe->decoded_size;
-        derive_asset_type(pe->kind, &result->type, &result->format_version);
+        derive_asset_type(pe->kind, &result->type);
         return NT_BUILD_OK;
     }
     case NT_BUILD_ASSET_TEXTURE: {
@@ -461,10 +457,9 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
 
         nt_build_result_t ret;
         if (td->has_compress) {
-            ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, encode_threads, &result->data, &result->size, &result->type,
-                                                              &result->format_version);
+            ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, encode_threads, &result->data, &result->size, &result->type);
         } else {
-            ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &result->data, &result->size, &result->type, &result->format_version);
+            ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &result->data, &result->size, &result->type);
         }
 
         if (pixels_owned) {
@@ -737,7 +732,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 results[i].data = cached_data;
                 results[i].size = cached_size;
                 results[i].type = NT_ASSET_SHADER_CODE;
-                results[i].format_version = NT_SHADER_CODE_VERSION;
                 results[i].from_cache = true;
                 results[i].encode_secs = 0.0;
 #if NT_LOG_MIN_LEVEL == 0
@@ -762,7 +756,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         double t_start = nt_time_now();
 #endif
         NtBuildShaderData *sd = (NtBuildShaderData *)pe->data;
-        nt_build_result_t ret = nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);
+        nt_build_result_t ret = nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, &results[i].data, &results[i].size, &results[i].type);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "shader encode failed");
 
 #if NT_LOG_MIN_LEVEL == 0
@@ -799,7 +793,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 #endif
             results[i].data = cached_data;
             results[i].size = cached_size;
-            derive_asset_type(pe->kind, &results[i].type, &results[i].format_version);
+            derive_asset_type(pe->kind, &results[i].type);
             results[i].from_cache = true;
 #if NT_LOG_MIN_LEVEL == 0
             cache_restore_secs += nt_time_now() - t_restore_start;
@@ -929,7 +923,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         nt_build_result_t ret = nt_builder_append_data(ctx, results[i].data, results[i].size);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "assembly: append_data failed");
-        ret = nt_builder_register_asset(ctx, pe->resource_id, results[i].type, results[i].format_version, results[i].size);
+        ret = nt_builder_register_asset(ctx, pe->resource_id, results[i].type, results[i].size);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "assembly: register_asset failed");
 
         increment_kind_counter(ctx, pe->kind);
@@ -959,8 +953,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
             if (ctx->entries[ei].resource_id == orig_rid) {
                 NT_BUILD_ASSERT(ctx->entry_count < NT_BUILD_MAX_ASSETS && "entry limit reached");
+                NT_BUILD_ASSERT(ctx->entries[ei].owner_entry <= ei && ctx->entries[ctx->entries[ei].owner_entry].owner_entry == ctx->entries[ei].owner_entry);
                 NtAssetEntry *dup = &ctx->entries[ctx->entry_count++];
-                *dup = ctx->entries[ei]; /* copy offset, size, type, version */
+                *dup = ctx->entries[ei]; /* copy canonical ownership and payload range */
                 dup->resource_id = pe->resource_id;
                 found = true;
                 break;

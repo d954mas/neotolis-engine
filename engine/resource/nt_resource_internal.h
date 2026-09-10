@@ -66,12 +66,11 @@ typedef struct {
     uint32_t offset;         /* byte offset in pack blob */
     uint32_t size;           /* asset data size in bytes */
     uint32_t runtime_handle; /* GFX handle (uint32), 0 = none */
-    uint16_t format_version; /* from NtAssetEntry */
+    uint16_t owner_asset;    /* canonical record index; self for owners */
     uint16_t pack_index;     /* index into packs[] array */
     uint8_t asset_type;      /* nt_asset_type_t (mesh/texture/shader) */
     uint8_t state;           /* nt_asset_state_t */
-    uint8_t is_dedup;        /* 1 = shares data with another asset in same pack (same offset+size) */
-    uint8_t _pad;
+    uint8_t _pad[2];
     uint32_t meta_offset; /* byte offset into pack's meta_data buffer (NT_NO_METADATA = absent) */
 } NtAssetMeta;
 

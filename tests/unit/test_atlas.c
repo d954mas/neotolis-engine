@@ -1373,7 +1373,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
     entry[0].asset_type = NT_ASSET_ATLAS;
-    entry[0].format_version = NT_ATLAS_VERSION;
+    entry[0].owner_entry = (uint16_t)0;
     entry[0].offset = atlas_offset;
     entry[0].size = atlas_blob_size;
     entry[0].meta_offset = 0;
@@ -1381,7 +1381,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
 
     entry[1].resource_id = FIXTURE_PAGE0_ID;
     entry[1].asset_type = NT_ASSET_TEXTURE;
-    entry[1].format_version = 1;
+    entry[1].owner_entry = (uint16_t)1;
     entry[1].offset = tex0_offset;
     entry[1].size = (uint32_t)sizeof(tex0_blob);
     entry[1].meta_offset = 0;
@@ -1389,7 +1389,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
 
     entry[2].resource_id = FIXTURE_PAGE1_ID;
     entry[2].asset_type = NT_ASSET_TEXTURE;
-    entry[2].format_version = 1;
+    entry[2].owner_entry = (uint16_t)2;
     entry[2].offset = tex1_offset;
     entry[2].size = (uint32_t)sizeof(tex1_blob);
     entry[2].meta_offset = 0;
@@ -1767,7 +1767,7 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
     entry[0].asset_type = NT_ASSET_ATLAS;
-    entry[0].format_version = NT_ATLAS_VERSION;
+    entry[0].owner_entry = (uint16_t)0;
     entry[0].offset = atlas_offset;
     entry[0].size = atlas_blob_size;
     entry[0].meta_offset = meta_offset; /* points to first NtMetaEntryHeader for this asset */
@@ -1847,7 +1847,7 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
     NtAssetEntry *e_nm = (NtAssetEntry *)(pack_blob_nm + sizeof(NtPackHeader));
     e_nm[0].resource_id = atlas_rid;
     e_nm[0].asset_type = NT_ASSET_ATLAS;
-    e_nm[0].format_version = NT_ATLAS_VERSION;
+    e_nm[0].owner_entry = (uint16_t)0;
     e_nm[0].offset = atlas_offset;
     e_nm[0].size = atlas_blob_size;
     e_nm[0].meta_offset = 0; /* no metadata */
@@ -2071,7 +2071,7 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
         NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
         entry[0].resource_id = atlas_rid;
         entry[0].asset_type = NT_ASSET_ATLAS;
-        entry[0].format_version = NT_ATLAS_VERSION;
+        entry[0].owner_entry = (uint16_t)0;
         entry[0].offset = atlas_offset;
         entry[0].size = atlas_blob_size;
         entry[0].meta_offset = meta_offset;

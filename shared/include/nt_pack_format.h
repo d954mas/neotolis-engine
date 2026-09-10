@@ -11,7 +11,7 @@
 
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
 #define NT_PACK_MAGIC 0x4B41504E
-#define NT_PACK_VERSION 2
+#define NT_PACK_VERSION 3
 /*
  * Alignment constants for zero-copy access.
  *
@@ -70,18 +70,18 @@ typedef struct {
 
 /*
  * AssetEntry: 24 bytes total (packed).
- * resource_id(8) + offset(4) + size(4) + format_version(2) +
+ * resource_id(8) + offset(4) + size(4) + owner_entry(2) +
  * asset_type(1) + _pad(1) + meta_offset(4) = 24
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint64_t resource_id;    /* 0:  nt_hash64 of asset path */
-    uint32_t offset;         /* 8:  byte offset from file start */
-    uint32_t size;           /* 12: asset data size in bytes */
-    uint16_t format_version; /* 16: per-asset-type format version */
-    uint8_t asset_type;      /* 18: nt_asset_type_t */
-    uint8_t _pad;            /* 19: explicit padding */
-    uint32_t meta_offset;    /* 20: byte offset from file start to first meta entry for this asset (0 = no meta) */
+    uint64_t resource_id; /* 0:  nt_hash64 of asset path */
+    uint32_t offset;      /* 8:  byte offset from file start */
+    uint32_t size;        /* 12: asset data size in bytes */
+    uint16_t owner_entry; /* 16: canonical entry ordinal: self or earlier owner */
+    uint8_t asset_type;   /* 18: nt_asset_type_t */
+    uint8_t _pad;         /* 19: explicit padding */
+    uint32_t meta_offset; /* 20: byte offset from file start to first meta entry for this asset (0 = no meta) */
 } NtAssetEntry;
 #pragma pack(pop)
 
