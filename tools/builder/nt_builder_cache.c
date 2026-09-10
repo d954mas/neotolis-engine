@@ -63,7 +63,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
         uint8_t wv = (uint8_t)td->opts.wrap_v;
-        uint8_t gen_mips = (td->has_compress || td->opts.gen_mipmaps) ? 1 : 0;
+        uint8_t gen_mips = (td->opts.compress.codec != NT_BASISU_CODEC_NONE || td->opts.gen_mipmaps) ? 1 : 0;
         buf[pos++] = fmin;
         buf[pos++] = fmag;
         buf[pos++] = wu;
@@ -71,19 +71,19 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         buf[pos++] = gen_mips;
 
         /* compression path */
-        uint8_t has_compress = td->has_compress ? 1 : 0;
+        uint8_t has_compress = td->opts.compress.codec != NT_BASISU_CODEC_NONE ? 1 : 0;
         memcpy(buf + pos, &has_compress, sizeof(has_compress));
         pos += (uint32_t)sizeof(has_compress);
 
-        if (td->has_compress) {
-            uint32_t codec = (uint32_t)td->compress.codec;
+        if (td->opts.compress.codec != NT_BASISU_CODEC_NONE) {
+            uint32_t codec = (uint32_t)td->opts.compress.codec;
             memcpy(buf + pos, &codec, sizeof(codec));
             pos += (uint32_t)sizeof(codec);
 
-            if (td->compress.codec == NT_BASISU_CODEC_ETC1S) {
-                uint32_t quality = td->compress.etc1s.quality;
-                float endpoint = td->compress.etc1s.endpoint_rdo_threshold;
-                float selector = td->compress.etc1s.selector_rdo_threshold;
+            if (td->opts.compress.codec == NT_BASISU_CODEC_ETC1S) {
+                uint32_t quality = td->opts.compress.etc1s.quality;
+                float endpoint = td->opts.compress.etc1s.endpoint_rdo_threshold;
+                float selector = td->opts.compress.etc1s.selector_rdo_threshold;
                 /* Equality treats signed zeros identically. */
                 endpoint = endpoint == 0.0F ? 0.0F : endpoint;
                 selector = selector == 0.0F ? 0.0F : selector;
@@ -94,8 +94,8 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
                 memcpy(buf + pos, &selector, sizeof(selector));
                 pos += (uint32_t)sizeof(selector);
             } else {
-                uint32_t pack_level = td->compress.uastc.pack_level;
-                float lambda = td->compress.uastc.rdo_lambda;
+                uint32_t pack_level = td->opts.compress.uastc.pack_level;
+                float lambda = td->opts.compress.uastc.rdo_lambda;
                 lambda = lambda == 0.0F ? 0.0F : lambda;
                 memcpy(buf + pos, &pack_level, sizeof(pack_level));
                 pos += (uint32_t)sizeof(pack_level);

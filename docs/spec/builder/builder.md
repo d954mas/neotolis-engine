@@ -82,7 +82,7 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 
 `nt_basisu_codec_t` and `nt_basisu_encode_opts_t` are shared by the public
 builder and encoder in `shared/include/nt_basisu_codec.h`. The descriptor tags
-exactly one branch: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
+an active branch when compressed: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
 `NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes.
 
 | Active field | Valid range | Meaning |
@@ -105,7 +105,7 @@ nt_basisu_encode_opts_t compression = nt_tex_compress_uastc_default();
 compression.uastc.pack_level = 3;
 compression.uastc.rdo_lambda = 0.5F;
 nt_tex_opts_t texture = nt_tex_opts_defaults();
-texture.compress = &compression;
+texture.compress = compression;
 nt_builder_add_texture(ctx, "assets/normal.png", &texture);
 ```
 
@@ -116,17 +116,20 @@ change after the call. Inactive union bytes and padding have no meaning and
 are never used by validation, cache hashing, dedup equality or the encoder.
 Signed zero has the same identity as positive zero.
 
-`compress == NULL` keeps the RAW path. File/memory textures still decode and
-resize at add time to establish pixel identity, then re-decode their retained
+`compress` is stored by value; `compress.codec == NT_BASISU_CODEC_NONE`
+(the zero initializer) keeps the RAW path. NONE denotes absence of Basis
+compression in builder options, not a Basis file codec. File/memory textures
+still decode and resize at add time to establish pixel identity, then re-decode their retained
 source at encode time. Raw pixels are copied. Atlas pages pass through the
 same texture encoder. Premultiplication remains after resize, before encoding.
 Thread allocation and alpha detection are unchanged.
 
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
-controls RAW runtime mip generation). A mip filter requires exactly
+controls RAW runtime mip generation and is stored unchanged). The builder
+checks exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
-The lower encoder's explicit `gen_mipmaps` argument still permits single-level
-encoding. This C API change does not alter TTEX wire semantics or version.
+The lower encoder always generates this chain. This C API change does not
+alter TTEX wire semantics or version.
 
 ## Builder stages
 

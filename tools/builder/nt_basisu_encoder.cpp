@@ -10,7 +10,7 @@ extern "C" {
 void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
 
 nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha,
-                                           const nt_basisu_encode_opts_t *opts, bool gen_mipmaps) {
+                                           const nt_basisu_encode_opts_t *opts) {
     nt_basisu_encode_result_t result = {};
     if (basis_threads < 1) {
         basis_threads = 1;
@@ -50,7 +50,7 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     }
 
     params.m_create_ktx2_file = false;
-    params.m_mip_gen = gen_mipmaps;
+    params.m_mip_gen = true;
     /* Premultiplied RGB and alpha must use the same linear filter. */
     params.m_mip_srgb = false;
     params.m_check_for_alpha = has_alpha;

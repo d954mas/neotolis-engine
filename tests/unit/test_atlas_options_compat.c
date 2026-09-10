@@ -27,7 +27,7 @@ int main(void) {
     const nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
 
     const nt_atlas_opts_t atlas = {
-        .compress = &compress,
+        .compress = compress,
         .format = NT_TEXTURE_FORMAT_RG8,
         .max_size = 101,
         .padding = 102,
@@ -63,8 +63,9 @@ int main(void) {
         .dedup = NT_ATLAS_SPRITE_DEDUP_ON,
     };
 
-    if (atlas.compress != &compress || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 101 || atlas.padding != 102 || atlas.margin != 103 || atlas.extrude != 104 ||
-        atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.max_added_area_percent != 7.5F || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL ||
+    if (atlas.compress.codec != compress.codec || atlas.compress.etc1s.quality != compress.etc1s.quality || atlas.compress.etc1s.endpoint_rdo_threshold != compress.etc1s.endpoint_rdo_threshold ||
+        atlas.compress.etc1s.selector_rdo_threshold != compress.etc1s.selector_rdo_threshold || atlas.format != NT_TEXTURE_FORMAT_RG8 || atlas.max_size != 101 || atlas.padding != 102 ||
+        atlas.margin != 103 || atlas.extrude != 104 || atlas.alpha_threshold != 105 || atlas.max_vertices != 6 || atlas.max_added_area_percent != 7.5F || atlas.shape != NT_ATLAS_SHAPE_CONVEX_HULL ||
         atlas.allowed_transforms != NT_ATLAS_TRANSFORMS_IDENTITY_ROT90 || !atlas.power_of_two || atlas.debug_png || !atlas.premultiplied || atlas.pixels_per_unit != 1.25F ||
         atlas.filter_min != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.filter_mag != NT_TEXTURE_DEFAULT_FILTER_NEAREST || atlas.wrap_u != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE ||
         atlas.wrap_v != NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE || atlas.gen_mipmaps || !atlas.dedup) {

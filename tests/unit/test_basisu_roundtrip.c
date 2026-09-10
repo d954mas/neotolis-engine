@@ -54,7 +54,7 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     uint8_t src[MAX_W * MAX_H * 4];
     fill_pixels(src, width, height, alpha);
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha, &opts, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
     TEST_ASSERT_TRUE(nt_basisu_validate_header(enc.data, enc.size));
     uint32_t levels = 1;
@@ -89,22 +89,6 @@ void test_etc1s_alpha(void) { codec_cases(NT_BASISU_CODEC_ETC1S, true); }
 void test_uastc_rgb(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, false); }
 void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 
-void test_encode_without_mipmaps(void) {
-    uint8_t pixels[16 * 8 * 4];
-    fill_pixels(pixels, 16, 8, false);
-    for (uint32_t i = 0; i < 2; i++) {
-        nt_basisu_codec_t codec = i == 0 ? NT_BASISU_CODEC_ETC1S : NT_BASISU_CODEC_UASTC_LDR;
-        nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, false, &opts, false);
-        TEST_ASSERT_NOT_NULL(enc.data);
-        uint32_t mip_count = enc.mip_count;
-        uint32_t levels = nt_basisu_get_level_count(enc.data, enc.size);
-        nt_basisu_encode_free(&enc);
-        TEST_ASSERT_EQUAL_UINT32(1, mip_count);
-        TEST_ASSERT_EQUAL_UINT32(1, levels);
-    }
-}
-
 void test_reject_non_basis_header(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
@@ -120,7 +104,7 @@ static void check_premultiplied_mip(nt_basisu_codec_t codec) {
         }
     }
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 8, 8, true, &opts, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 8, 8, true, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
     uint8_t mip[4] = {0};
     bool started = nt_basisu_start_transcoding(enc.data, enc.size);
@@ -237,7 +221,7 @@ void test_public_basis_file_memory_atlas(void) {
         NtBuilderContext *ctx = nt_builder_start_pack(path);
         nt_builder_set_threads(ctx, 2);
         nt_tex_opts_t opts = nt_tex_opts_defaults();
-        opts.compress = &codecs[i];
+        opts.compress = codecs[i];
         opts.max_size = 8;
         opts.premultiplied = true;
         opts.gen_mipmaps = false;
@@ -250,13 +234,14 @@ void test_public_basis_file_memory_atlas(void) {
         opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_MIRRORED_REPEAT;
         nt_builder_add_texture_raw(ctx, pixels, 16, 8, "raw_pixels", &opts);
         nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
-        atlas_opts.compress = &codecs[i];
+        atlas_opts.compress = codecs[i];
         atlas_opts.max_size = 32;
         atlas_opts.padding = 0;
         atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
         atlas_opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
         NtAtlasBuild *atlas = nt_atlas_begin(ctx, "atlas", &atlas_opts);
-        memset(&codecs[i], 0, sizeof(codecs[i]));
+        memset(&opts.compress, 0, sizeof(opts.compress));
+        memset(&atlas_opts.compress, 0, sizeof(atlas_opts.compress));
         nt_atlas_sprite_opts_t sprite = nt_atlas_sprite_opts_defaults();
         sprite.name = "sprite";
         nt_atlas_add_raw(atlas, pixels, 16, 8, &sprite);
@@ -278,7 +263,7 @@ void test_public_basis_single_pixel_full_mip_chain(void) {
     nt_basisu_encode_opts_t codecs[] = {nt_tex_compress_etc1s_default(), nt_tex_compress_uastc_default()};
     for (uint32_t i = 0; i < 2; i++) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
-        opts.compress = &codecs[i];
+        opts.compress = codecs[i];
         const char *path = i == 0 ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
         nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
@@ -297,7 +282,6 @@ int main(void) {
     RUN_TEST(test_etc1s_alpha);
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
-    RUN_TEST(test_encode_without_mipmaps);
     RUN_TEST(test_reject_non_basis_header);
     RUN_TEST(test_etc1s_premultiplied_mip);
     RUN_TEST(test_uastc_premultiplied_mip);

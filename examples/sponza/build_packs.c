@@ -116,11 +116,11 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
 }
 
 /* --- Add all textures with per-role format, optional resize, and optional compression --- */
-/* color_compress: compression for diffuse/specular/unknown textures (NULL = no compression)
- * normal_compress: compression for normal maps (NULL = no compression) */
+/* color_compress: compression for diffuse/specular/unknown textures (NONE = no compression)
+ * normal_compress: compression for normal maps (NONE = no compression) */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_basisu_encode_opts_t *color_compress, const nt_basisu_encode_opts_t *normal_compress) {
+static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, nt_basisu_encode_opts_t color_compress, nt_basisu_encode_opts_t normal_compress) {
     tex_role_t *roles = build_texture_roles(scene);
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
@@ -133,18 +133,18 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
 
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.max_size = max_size;
-        const nt_basisu_encode_opts_t *tex_compress = color_compress;
+        nt_basisu_encode_opts_t tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
             opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8;
             break;
         case TEX_ROLE_NORMAL:
             /* RG8 for RAW (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
-            opts.format = normal_compress ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
+            opts.format = normal_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
             tex_compress = normal_compress;
             break;
         case TEX_ROLE_SPECULAR:
-            opts.format = color_compress ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
+            opts.format = color_compress.codec != NT_BASISU_CODEC_NONE ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
             break;
         case TEX_ROLE_UNKNOWN:
             opts.format = NT_TEXTURE_FORMAT_RGBA8;
@@ -465,7 +465,7 @@ static void populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { a
 static void populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     nt_basisu_encode_opts_t color = nt_tex_compress_etc1s_default();
     nt_basisu_encode_opts_t normal = nt_tex_compress_uastc_default();
-    add_textures(ctx, scene, 512, &color, &normal);
+    add_textures(ctx, scene, 512, color, normal);
 }
 
 static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
@@ -473,7 +473,7 @@ static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
      * Shaders come from sponza_core (always loaded first). */
     nt_basisu_encode_opts_t color = nt_tex_compress_uastc_default();
     nt_basisu_encode_opts_t normal = nt_tex_compress_uastc_default();
-    add_textures(ctx, scene, 0, &color, &normal);
+    add_textures(ctx, scene, 0, color, normal);
     add_meshes_and_manifest(ctx, scene, false);
 }
 

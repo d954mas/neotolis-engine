@@ -245,13 +245,13 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
 typedef struct {
-    nt_texture_pixel_format_t format;        /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                       /* 0 = no resize, otherwise max(w,h) clamped to this */
-    const nt_basisu_encode_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
-    bool premultiplied;                      /* true = RGB premultiplied by alpha before encoding.
-                                              * Default false for compatibility. Set true for UI/sprite
-                                              * textures rendered with bilinear filtering to avoid dark
-                                              * fringes at alpha edges. Only meaningful for RGBA8. */
+    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
+    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
+    nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
+    bool premultiplied;               /* true = RGB premultiplied by alpha before encoding.
+                                       * Default false for compatibility. Set true for UI/sprite
+                                       * textures rendered with bilinear filtering to avoid dark
+                                       * fringes at alpha edges. Only meaningful for RGBA8. */
     /* Default sampler state baked into the V3 NtTextureAssetHeader so the
      * activator creates the right sampler. Materials may override per
      * binding. Default values match the historical hardcoded activator
@@ -273,7 +273,7 @@ static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
     return (nt_tex_opts_t){
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 0,
-        .compress = NULL,
+        .compress = {0},
         .premultiplied = false,
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
@@ -353,13 +353,13 @@ typedef enum {
 #define NT_ATLAS_TRANSFORMS_FLIPS (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H | NT_ATLAS_TRANSFORM_FLIP_V | NT_ATLAS_TRANSFORM_ROT180)
 
 typedef struct {
-    const nt_basisu_encode_opts_t *compress; /* NULL = raw RGBA */
-    nt_texture_pixel_format_t format;        /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                       /* max atlas page dimension (default: 2048) */
-    uint32_t padding;                        /* extra spacing between sprites after extrude (default: 2) */
-    uint32_t margin;                         /* atlas edge margin (default: 0) */
-    uint32_t extrude;                        /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
-    uint8_t alpha_threshold;                 /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
+    nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
+    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
+    uint32_t max_size;                /* max atlas page dimension (default: 2048) */
+    uint32_t padding;                 /* extra spacing between sprites after extrude (default: 2) */
+    uint32_t margin;                  /* atlas edge margin (default: 0) */
+    uint32_t extrude;                 /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
+    uint8_t alpha_threshold;          /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
     uint8_t max_vertices; /* max polygon vertices per region — range 4..16 (default 8; 3 asserts — a triangle cannot cover a full-perimeter mask; 16 hard cap: downstream stack arrays limit to 32) */
     float max_added_area_percent; /* max simplification-added area relative to retained-pixel area (default: 10%) */
     nt_atlas_shape_t shape;       /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
@@ -397,7 +397,7 @@ typedef struct {
 /* Default atlas options */
 static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
     return (nt_atlas_opts_t){
-        .compress = NULL,
+        .compress = {0},
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 2048,
         .padding = 2,

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 typedef enum {
+    NT_BASISU_CODEC_NONE = 0, /* Builder RAW path; not a Basis file codec. */
     NT_BASISU_CODEC_ETC1S = 1,
     NT_BASISU_CODEC_UASTC_LDR = 2,
 } nt_basisu_codec_t;
