@@ -199,6 +199,7 @@ Environment differences a local Windows host cannot reproduce:
 - `examples/*/generated/*.h` are builder output committed to git; pack builds run inside every native build, so if one dirties them the committed copies were stale — commit the refresh (output is deterministic, no timestamps).
 - Visual QA: self-capture of GL windows (GDI/PrintWindow) does not work here. Pixel-exact checks: devapi `capture.frame` (glReadPixels, works headless, needs `NT_DEVAPI_ENABLED=ON` + CAPTURE group). Aesthetics/layout: ask the user to run and look — say explicitly what to check.
 - Browser smoke tests drive `tests/browser/app` (`window.__nt` hooks), not the showcase.
+- Real Basis coverage uses `bash scripts/check_basisu_browser.sh` after activating emsdk and installing `tests/browser` npm/Chromium dependencies. It rebuilds the independent native fixture pack and real-transcoder WASM Debug/Release fixtures, then verifies CPU conversion and RGB/alpha/mip sampling. `NT_BASIS_HARDWARE=1 NT_BASIS_PORT=8463 bash scripts/check_basisu_browser.sh` requires a hardware renderer; unsupported GPU formats remain unverified. See `docs/basisu-2.50.md`.
 - wasm links failing with `node.exe ... returned 3221225794` (0xC0000142) on random emscripten tools = transient Windows process-spawn exhaustion under parallel links — retry once before investigating.
 - New EM_JS that allocates into the wasm heap: use `wasmExports['malloc']` — `Module['_malloc']` fails at runtime under emmalloc, bare `_malloc` fails Closure (pattern: `engine/http/web/nt_http_web.c`).
 

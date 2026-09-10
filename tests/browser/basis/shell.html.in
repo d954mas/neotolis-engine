@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@NT_SHELL_TITLE@</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <canvas id="canvas" width="96" height="64" style="width:96px;height:64px"></canvas>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      print: function (text) { console.log(text); },
+      printErr: function (text) { console.error(text); }
+    };
+  </script>
+  @NT_SHELL_SCRIPT_BLOCK@
+</body>
+</html>

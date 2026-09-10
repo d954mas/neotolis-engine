@@ -746,6 +746,9 @@ jobs:
       - name: Run browser smoke test
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
 
+      - name: Check real Basis LDR conversion and sampling (Debug and Release)
+        run: bash scripts/check_basisu_browser.sh
+
       - name: Check release diagnostics with independent UI and GPU timing
         run: |
           for timing in "0 0" "0 1" "1 0"; do

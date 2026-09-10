@@ -1,4 +1,8 @@
 // File: android_astc_decomp.cpp
+//
+// 4/3/2026: Globally set BASISU_DISABLE_ANDROID_ASTC_DECOMP to 1 to completely disable this code and redirect all calls to our internal ASTC decoder in astc_helpers.h.
+// 
+// decodeVoidExtentBlock(): Fixing function so bits 10-11 are properly checked (they must both be 1 according to the spec), otherwise fuzzing using random 128-bit bit blocks doesn't match ARM or our decoder's output.
 
 /*-------------------------------------------------------------------------
  * drawElements Quality Program Tester Core
@@ -27,7 +31,16 @@
  * \file
  * \brief ASTC Utilities.
  *//*--------------------------------------------------------------------*/
-#include "android_astc_decomp.h"
+
+// Set BASISU_DISABLE_ANDROID_ASTC_DECOMP to 1 to completely disable dEQP's code (we'll use our own internal decoder in this case, but you'll lose validation vs. a 2nd decoder).
+#ifndef BASISU_DISABLE_ANDROID_ASTC_DECOMP
+#define BASISU_DISABLE_ANDROID_ASTC_DECOMP (0)
+#endif
+
+#if !BASISU_DISABLE_ANDROID_ASTC_DECOMP
+
+#include <vector>
+#include <stdint.h>
 #include <assert.h>
 #include <algorithm>
 #include <fenv.h>
@@ -713,8 +726,17 @@ inline void setASTCErrorColorBlock (void* dst, int blockWidth, int blockHeight, 
     }
 }
 
-DecompressResult decodeVoidExtentBlock (void* dst, const Block128& blockData, int blockWidth, int blockHeight, bool isSRGB, bool isLDRMode)
+DecompressResult decodeVoidExtentBlock(void* dst, const Block128& blockData, int blockWidth, int blockHeight, bool isSRGB, bool isLDRMode, bool rejectVoidExtentNaNInf)
 {
+    // rg: Adding check here to match ARM's decoder and basisu's.
+    // 18.23.Void - Extent Blocks
+    // "Bits 10 and 11 are reserved and must be 1."
+    if (blockData.getBits(10, 11) != 3)
+    {
+        setASTCErrorColorBlock(dst, blockWidth, blockHeight, isSRGB);
+        return DECOMPRESS_RESULT_ERROR;
+    }
+
     const deUint32  minSExtent          = blockData.getBits(12, 24);
     const deUint32  maxSExtent          = blockData.getBits(25, 37);
     const deUint32  minTExtent          = blockData.getBits(38, 50);
@@ -751,13 +773,16 @@ DecompressResult decodeVoidExtentBlock (void* dst, const Block128& blockData, in
 
         if (isHDRBlock)
         {
-            for (int c = 0; c < 4; c++)
+            if (rejectVoidExtentNaNInf)
             {
-                if (isFloat16InfOrNan((deFloat16)rgba[c]))
+                for (int c = 0; c < 4; c++)
                 {
-                    //throw InternalError("Infinity or NaN color component in HDR void extent block in ASTC texture (behavior undefined by ASTC specification)");
-                    setASTCErrorColorBlock(dst, blockWidth, blockHeight, isSRGB);
-                    return DECOMPRESS_RESULT_ERROR;
+                    if (isFloat16InfOrNan((deFloat16)rgba[c]))
+                    {
+                        //throw InternalError("Infinity or NaN color component in HDR void extent block in ASTC texture (behavior undefined by ASTC specification)");
+                        setASTCErrorColorBlock(dst, blockWidth, blockHeight, isSRGB);
+                        return DECOMPRESS_RESULT_ERROR;
+                    }
                 }
             }
 
@@ -1732,7 +1757,7 @@ DecompressResult setTexelColors (void* dst, ColorEndpointPair* colorEndpoints, T
     return result;
 }
 
-DecompressResult decompressBlock (void* dst, const Block128& blockData, int blockWidth, int blockHeight, bool isSRGB, bool isLDR)
+DecompressResult decompressBlock(void* dst, const Block128& blockData, int blockWidth, int blockHeight, bool isSRGB, bool isLDR, bool rejectVoidExtentNaNInf)
 {
     DE_ASSERT(isLDR || !isSRGB);
 
@@ -1748,7 +1773,7 @@ DecompressResult decompressBlock (void* dst, const Block128& blockData, int bloc
 
     // Separate path for void-extent.
     if (blockMode.isVoidExtent)
-        return decodeVoidExtentBlock(dst, blockData, blockWidth, blockHeight, isSRGB, isLDR);
+        return decodeVoidExtentBlock(dst, blockData, blockWidth, blockHeight, isSRGB, isLDR, rejectVoidExtentNaNInf);
 
     // Compute weight grid values.
     const int numWeights            = computeNumWeights(blockMode);
@@ -2000,14 +2025,14 @@ static void convert_from_half_to_float_prec(uint32_t n, float* pVals)
 }
 
 // Assumes the decode_unorm8 extension is active (only upper 8 bits used).
-bool decompress_ldr(uint8_t *pDst, const uint8_t * data, bool isSRGB, int blockWidth, int blockHeight)
+bool decompress_ldr(uint8_t *pDst, const uint8_t * data, bool isSRGB, int blockWidth, int blockHeight, bool rejectVoidExtentNaNInf)
 {
     float linear[MAX_BLOCK_WIDTH * MAX_BLOCK_HEIGHT * 4];
 
     const Block128 blockData(data);
 
     // isSRGB is true, this writes uint8_t's. Otherwise it writes floats.
-    if (decompressBlock(isSRGB ? (void*)pDst : (void*)&linear[0], blockData, blockWidth, blockHeight, isSRGB, true) != DECOMPRESS_RESULT_VALID_BLOCK)
+    if (decompressBlock(isSRGB ? (void*)pDst : (void*)&linear[0], blockData, blockWidth, blockHeight, isSRGB, true, rejectVoidExtentNaNInf) != DECOMPRESS_RESULT_VALID_BLOCK)
     {
         return false;
     }
@@ -2031,11 +2056,11 @@ bool decompress_ldr(uint8_t *pDst, const uint8_t * data, bool isSRGB, int blockW
     return true;
 }
 
-bool decompress_hdr(float* pDstRGBA, const uint8_t* data, int blockWidth, int blockHeight)
+bool decompress_hdr(float* pDstRGBA, const uint8_t* data, int blockWidth, int blockHeight, bool rejectVoidExtentNaNInf)
 {
     const Block128 blockData(data);
 
-    if (decompressBlock(pDstRGBA, blockData, blockWidth, blockHeight, false, false) != DECOMPRESS_RESULT_VALID_BLOCK)
+    if (decompressBlock(pDstRGBA, blockData, blockWidth, blockHeight, false, false, rejectVoidExtentNaNInf) != DECOMPRESS_RESULT_VALID_BLOCK)
     {
         return false;
     }
@@ -2045,9 +2070,9 @@ bool decompress_hdr(float* pDstRGBA, const uint8_t* data, int blockWidth, int bl
     return true;
 }
 
-bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
+bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool& is_hdr_flag)
 {
-    is_hdr = false;
+    is_hdr_flag = false;
 
     const Block128 blockData(data);
 
@@ -2057,7 +2082,7 @@ bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
         return false;
     }
 
-    is_hdr = (status == 1);
+    is_hdr_flag = (status == 1);
 
     return true;
 }
@@ -2069,3 +2094,5 @@ bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+#endif // BASISU_DISABLE_ANDROID_ASTC_DECOMP

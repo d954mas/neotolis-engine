@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
                 uint8_t *p = &pixels[(((size_t)y * 96) + x) * 4];
                 p[0] = (uint8_t)(32U + (x * 160U / 96U));
                 p[1] = (uint8_t)(24U + (y * 120U / 64U));
-                p[2] = 64;
+                p[2] = ((x / 4U + y / 8U) & 1U) ? 208 : 48;
                 p[3] = (i & 1U) ? (uint8_t)(40U + (x * 180U / 96U)) : 255;
             }
         }
