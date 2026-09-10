@@ -589,7 +589,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 1 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 3 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

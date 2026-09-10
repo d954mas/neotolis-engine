@@ -1,8 +1,36 @@
 # Basis Universal encoder (C++ static library, native only)
 enable_language(CXX)
 
-file(GLOB BASISU_ENCODER_SOURCES "${NT_ENGINE_ROOT}/deps/basisu/encoder/*.cpp")
-file(GLOB BASISU_ENCODER_3RDPARTY "${NT_ENGINE_ROOT}/deps/basisu/encoder/3rdparty/*.cpp")
+set(BASISU_ENCODER_SOURCES
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_astc_hdr_6x6_enc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_astc_hdr_common.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_astc_ldr_common.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_astc_ldr_encode.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_astc_ldr_fencode.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_backend.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_basis_file.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_bc7enc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_comp.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_enc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_etc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_frontend.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_gpu_texture.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_kernels_sse.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_opencl.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_pvrtc1_4.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_resample_filters.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_resampler.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_ssim.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_tinyexr.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_uastc_enc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_uastc_hdr_4x4_enc.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/basisu_xbc7_encode.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/jpgd.cpp"
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/pvpngreader.cpp"
+)
+set(BASISU_ENCODER_3RDPARTY
+    "${NT_ENGINE_ROOT}/deps/basisu/encoder/3rdparty/android_astc_decomp.cpp"
+)
 
 add_library(nt_basisu_encoder STATIC
     nt_basisu_encoder.cpp
