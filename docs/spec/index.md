@@ -34,6 +34,9 @@ no source-format parsers. The full picture is in
 
 ## Chapters
 
+Build setup, presets, flags and check commands live in [Building and checks](../build.md).
+The chapters below define engine behavior.
+
 | File | Contents |
 |---|---|
 | [core/principles.md](core/principles.md) | Design philosophy and the strict engine/game ownership boundary |

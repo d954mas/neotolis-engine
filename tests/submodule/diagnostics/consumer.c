@@ -17,6 +17,9 @@ _Static_assert(NT_UI_TIMING_ENABLED == NT426_EXPECT_UI_TIMING, "UI timing config
 #if defined(NT426_CHECK_UI_STUB)
 _Static_assert(NT_UI_DEBUG_TOOLS == 1, "UI stub keeps its existing probe contract");
 #endif
+#elif defined(NT426_CHECK_RESOURCE)
+#include "resource/nt_resource.h"
+_Static_assert(NT_RESOURCE_TIMING_ENABLED == NT426_EXPECT_RESOURCE_TIMING, "resource timing configuration");
 #elif defined(NT426_CHECK_GFX)
 #include "graphics/nt_gfx.h"
 _Static_assert(NT_GFX_GPU_TIMING_ENABLED == NT426_EXPECT_GFX_GPU_TIMING, "GPU timing interface configuration");

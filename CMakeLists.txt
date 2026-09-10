@@ -65,6 +65,7 @@ if(NOT NT_LOG_MIN_LEVEL MATCHES "^[0-3]$")
     message(FATAL_ERROR "NT_LOG_MIN_LEVEL must be 0 (INFO), 1 (WARN), 2 (ERROR), or 3 (NONE).")
 endif()
 option(NT_UI_TIMING_ENABLED "Measure UI layout, tree building and walking." OFF)
+option(NT_RESOURCE_TIMING_ENABLED "Measure pack parsing and resource steps." OFF)
 option(NT_GFX_GPU_TIMING_ENABLED "Build optional GPU timer queries and segment labels." OFF)
 # OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})

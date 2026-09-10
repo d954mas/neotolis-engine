@@ -84,6 +84,14 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Widget IDs
+
+Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs
+are additive (`seed + offset`), so consecutive seeds can collide with children of
+adjacent widgets. Derive sub-IDs with `nt_ui_child_id` / `nt_ui_fmix_id` instead.
+Virtualized widgets must recycle IDs, as `nt_ui_vlist` does with its ring;
+ever-growing IDs saturate Clay's element hashmap until `build_tree` asserts.
+
 ## Floating zIndex is relative
 
 Upstream Clay sorts every floating element globally by its own

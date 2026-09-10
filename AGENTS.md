@@ -1,134 +1,37 @@
-﻿## Project
+## Project
 
-Neotolis Engine — minimalist **C17** game engine for **Web/WASM** (WebGL 2). Code-first, modular. Builder does heavy work offline; runtime is intentionally simple.
+Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. The game controls the loop; the builder does heavy work offline; runtime stays simple.
 
-## Source of truth
+## Read before changing
 
-Check the spec before making code changes:
-
-- `docs/spec/index.md` — start here: overview, chapter list, module → chapter map
-- Changing a module → read its chapter in `docs/spec/` (chapters are small, read them whole)
-
-If code and spec diverge, flag it explicitly in the response. Do not silently "normalize" behavior by guessing.
+- Start at [docs/spec/index.md](docs/spec/index.md); read the whole chapter for each module you change. Public API changes also read [API contracts](docs/spec/core/api-contracts.md).
+- Before configuring, building, writing tests or debugging build/CI failures, read [docs/build.md](docs/build.md). It owns setup, flags, check coverage and troubleshooting.
+- Code/spec divergence must be stated explicitly. Mark any necessary temporary deviation in the change explanation and final report; never guess a replacement contract.
+- Keep module behavior in its spec and build instructions in `docs/build.md`. This file contains shared working rules, not a catalogue of flags or past failures.
 
 ## Workflow
 
-- Start work with a GitHub issue + feature branch **before** the first commit; never stack commits on local master. Branch naming: `{issue_number}-{slug}`, no `feature/` prefix.
-- Navigate C code with clangd LSP first (definition / references / call hierarchy) — exact and cheaper than grep at this codebase size. After adding new `.c` files, rebuild `native-debug` so `compile_commands.json` picks them up; until then clangd diagnostics on new or platform-`#if` files are unreliable ("file not found", wrong `#if` branch) — confirm against a real build before chasing them.
+- Start with a GitHub issue and feature branch before the first commit; never stack commits on local master. Branch names: `{issue_number}-{slug}`. Continue the current task's branch/PR when requested.
+- Navigate C with clangd LSP first. After adding a `.c` file, rebuild `native-debug` to refresh `compile_commands.json`; confirm new-file and platform-`#if` diagnostics against a real build.
+- Execute the requested scope. Report unrelated improvements separately.
+- Before changing a validator contract, find every constructor of that data shape, including spec examples and parameterized test helpers.
 
-## Build
+## Engine principles
 
-- **Runtime**: WASM via Emscripten (`emcc`)
-- **Builder**: native C binary
-- **Standard**: C17
-- **Why C17**: broader compiler, Emscripten toolchain, and build environment support
-- **NT_STATIC_CRT** (CMake option, default ON): pins the static release CRT on Windows. Consumers embedding builder + runtime in one exe set OFF to inherit their own `CMAKE_MSVC_RUNTIME_LIBRARY`. All pinning goes through `nt_set_static_crt(_cxx)` — never raw `-U_DLL` (gated by `scripts/check_crt_pins.sh`).
-- **NT_BUILD_TESTS** (CMake option, default ON): builds `tests/`, which is also what hands the
-  `NT_TEST_ACCESS` compile define — the module test-probe surfaces (`// #region test_access`) — to the
-  engine libraries the tests link. `native-release` pins it OFF, so perf measurement (`bunnymark`,
-  `bench_shapes`, `atlas_bench`) and the release `builder` carry no probe state or probe bookkeeping,
-  the way wasm always has (`tests/` has always been `if(NOT EMSCRIPTEN)`). On a wasm preset the option
-  gates only the ctest targets. Test TUs meet NDEBUG in `native-release-test`, a CI-only job.
-- **NT_LOG_MIN_LEVEL** (numeric CMake STRING): 0 INFO, 1 WARN, 2 ERROR, 3 NONE.
-  Plain CMake defaults to 0 regardless of build type. Debug presets and
-  `native-release-test` select 0; production Release presets select 1.
-  Configure the engine, not only the exe.
-  NONE uses the existing stub source through `nt_log`; `nt_log_stub` remains a link-time choice.
-  `scripts/atlas/{benchmark,autoresearch-bench,bench-vector}.sh` select INFO in
-  `build/_cmake/native-release-atlas-bench`; `--no-build` uses that build's executable.
-- **NT_UI_TIMING_ENABLED**, **NT_GFX_GPU_TIMING_ENABLED** (default OFF regardless
-  of build type; Debug presets and `native-release-test` ON, production Release
-  presets OFF): independent producers; neither requires metrics. UI getters return zero
-  with timing OFF; GPU poll reports unavailable. Metrics OFF also removes example host
-  measurement preparation. Validate with `python scripts/check_diagnostics_config.py`
-  and `python scripts/check_diagnostics_runtime.py` (serial; separate build directories;
-  both also run in `scripts/check.sh --push`).
-  The runtime matrix covers existing log/rich-parser consumers at all four floors
-  with FULL asserts, plus TRAP positive paths and inspector ON with UI timing OFF.
-  Browser diagnostics use `tests/browser/diagnostics.spec.ts`; set `NT_SHOWCASE_DIR`
-  to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`, `CI=1` to forbid
-  server reuse, and matching `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Both Debug
-  and Release default to timer values above 32 bits to verify the 64-bit bridge.
-- **NT_HYBRID_HPG** (CMake option, default ON): exe exports the NVIDIA/AMD hint symbols so hybrid-GPU Windows laptops run games on the discrete GPU. OFF for battery-friendly games/tools; the user's per-app Windows graphics preference always overrides the hint.
-- **NT_FONT_EMBOLDEN_ENABLED** (default OFF, debug included): opt in to synthetic font weight and outline. Real B/BI faces, oblique, shadow and line decorations work with OFF. Verify geometry changes in both configurations; the ON mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label`, and all `test_nt_ui_rich_*` suites.
-- **NT_UI_CLAY_DEBUG_VIEW** (default OFF): Clay's built-in view, independent of the Neotolis inspector (`NT_UI_DEBUG_TOOLS`). Enable explicitly and call `Clay_SetDebugModeEnabled(true)` after `nt_ui_begin`; requesting the disabled view asserts through the Clay error handler.
+- **Explicit, code-first, composable:** game owns gameplay, system order, render passes and content organization. Do not hide policy in the engine or replace modules with a monolith. See [principles](docs/spec/core/principles.md).
+- **Keep it simple and small:** avoid speculative abstractions and dependencies. Every byte counts; use only the modules needed.
+- **Prebuilt assets:** source formats and heavy validation belong in the builder. Runtime loads binary packs and enforces its documented safety checks and recoverable contracts.
+- **Platform abstraction:** browser/OS calls go through the owning engine wrapper.
+- **Data-oriented where useful:** dense storage, typed handles and predictable access for renderers/components; input, window and app remain simple structs.
+- **No heap in hot paths:** use fixed limits, preallocated storage or frame scratch; no hidden reallocations, unnecessary copies or heavy layers. Hot paths include frame/fixed loops, render-item generation, batching, per-frame resource resolve and dense ECS/SoA iteration.
 
-Valid rich markup that needs a disabled feature asserts: supply real bold faces or enable synthesis. Malformed markup still warns and skips. A label's `NT_UI_LABEL_VARIANT_BOLD` always requests synthesis; selecting a real bold `font_id` needs no BOLD bit.
-CI additionally exercises both optional features under NDEBUG and builds them with emcc in Release. `python scripts/check_clay_arena.py <off-build-dir> <on-build-dir>` compares the existing Clay arena tests with identical capacities; build `test_nt_ui_clay_debug_view` in both directories first.
+## Asserts and errors
 
-If specific build, check, or run commands appear in the repo, keep them up to date in this file.
-
-### Bootstrap from a clean clone
-
-On Windows run these from Git Bash / MSYS — the system `bash.exe` routes to WSL,
-which is not the supported environment for `scripts/*.sh`.
-
-```
-git lfs pull                          # example assets are LFS pointers without this
-bash scripts/setup.sh                 # install + activate the pinned emsdk (.emsdk-version)
-                                      # later sessions: source emsdk/emsdk_env.sh
-cmake --preset native-debug           # the four presets check.sh expects:
-cmake --preset native-release
-emcmake cmake --preset wasm-debug
-emcmake cmake --preset wasm-release
-bash scripts/check.sh                 # sanity check that the environment is alive
-```
-
-Native example builds produce their asset packs automatically (pack builders are
-wired into the build graph — `cmake/nt_example_packs.cmake`); wasm presets copy
-packs a prior native build produced — build a native preset first (a wasm build
-attempted before that fails loudly, and succeeds once the packs exist).
-The FIRST native build cold-encodes the sponza pack — hours, not the usual
-"warm ~12 s" gate; `build/examples/*/_cache` makes every rerun seconds. To
-defer that cost, configure once with `-DNT_SKIP_EXAMPLE_PACKS=sponza` (a
-persistent cache var — reset it with `-DNT_SKIP_EXAMPLE_PACKS=` when you need
-sponza). Packs depend only on the builder exe — after editing shader/asset
-sources, delete the `.ntpack` before visual QA to force a repack.
-
-## Philosophy
-
-1. **Code-first** — game controls the main loop. The engine gives building blocks, not a pipeline.
-2. **Explicit over implicit** — you see everything. No hidden behavior, no magic behind the scenes.
-3. **Keep it simple** — less code is better. Simplify further when possible.
-4. **Tiny size** — every byte counts. Binary size tracked on every PR.
-5. **Set of modules** — use only what you need.
-6. **Prebuilt assets** — source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.
-
-## Working principles
-
-- **Data-oriented** for renderer and components (SoA, dense iteration, typed handles). Not everything — input, window, app stay simple structs.
-- **Platform abstraction** — all platform calls go through engine wrappers, never call browser/OS API directly from modules.
-- **No heap in hot path** — use compile-time limits (`#define`), preallocated storages, frame scratch memory.
-- **Builder validates, runtime is a safety net** — runtime checks only magic/version/type, handles fallbacks gracefully. No heavy validation at runtime.
-- **Fail early, prefer asserts** — when something is wrong, prefer crashing over silent fallbacks. `NT_ASSERT` for invariants and unexpected states, `NT_BUILD_ASSERT` in the builder (programmer invariants, unexpected states, OOM, a missing/unreadable file, and a decode failure in the single-asset adds). Error returns are fine as part of public API contracts (resource not found → NULL), but never to silently swallow a bug or broken data. Release default is TRAP. OFF remains available only as an unsupported size-oriented escape hatch.
-  - `NT_ASSERT_MODE=OFF` compiles `NT_ASSERT` to `((void)0)`. Once an asserted precondition is violated, behavior is undefined; no fallback path is required solely for OFF. Assert expressions must still be side-effect-free because OFF does not evaluate them. Hard guards belong only at untrusted/runtime-input boundaries or where a public API promises recoverable rejection.
-  - Exception: CONTENT-dependent sprite failures inside the ATLAS builder route to the graceful `nt_builder_get_errors` channel instead of aborting, so one bad sprite cannot kill a build or a GUI. Full list of those cases: [docs/spec/builder/builder.md](docs/spec/builder/builder.md#asserts-vs-graceful-content-errors).
-
-## Code style
-
-- **Comments: short WHY only.** Single-line preferred, never more than 2-3. Explain a non-obvious decision or hidden constraint — not what the code does (identifiers do that). If you need more than 2-3 lines, the code probably needs refactoring, not commenting.
-  - **Do not write**: historical context (`Pre-fix the X was Y, then commit ab6d235 moved it…`), Phase/REVIEW/CHUNK tags, commit SHAs, PR numbers, issue numbers, test-name pins (`pin: test_X`), user quotes, "what changed and why" narratives, `EXPERIMENTAL` boilerplate paragraphs. Those belong in commit messages, PR descriptions, or the changelog — not in source.
-  - **Do write**: one-line invariants the reader can't derive from the code (`Walker layer-sort relies on debug layers being >= 240.`), short safety notes (`Pointer must outlive the layout solve.`), or a brief WHY where a non-obvious choice was made (`Direct-map avoids hash-table realloc in hot path.`).
-- Use `// #region name` / `// #endregion` to mark logical sections inside long functions (VS Code foldable regions). No blank line after `// #region` or before `// #endregion`. Do not remove existing short inline comments when adding regions — regions group, comments explain.
-- Organize large files with regions instead of splitting into more TUs — cross-TU calls block inlining on the hot path (no LTO).
-
-## Before adding a new subsystem
-
-- Diagram coordinate/data transforms between all systems involved.
-- Check API consistency with parallel subsystems (if sprites have it, UI images need it too).
-- Verify types and ranges will scale (target: mobile WASM).
-- Prototype the riskiest integration point before building the rest.
-- Test with asymmetric data that breaks on axis swap or flip.
-
-## Change rules
-
-- Do not introduce monolithic subsystems where the spec requires a composable module set.
-- Do not move game responsibility into the engine without explicit architectural justification.
-- When adding a new subsystem, verify it does not conflict with the spec on explicit-over-implicit and runtime simplicity.
-- If a temporary deviation from the spec is necessary, mark it explicitly in the change comment and the final report.
-- New UI widget demos go into the existing `examples/ui_showcase` vitrine (new tab) — never a new example dir.
-- Never id sibling widgets as `base_id + index`: Clay's anonymous child ids are additive (`seed + offset`), so consecutive seeds collide → DUPLICATE_ID. Salt sub-ids with a mixed hash (`nt_ui_child_id` / `nt_ui_fmix_id`). Virtualized widgets must RECYCLE ids (see `nt_ui_vlist`'s ring) or Clay's element hashmap saturates until `build_tree` asserts.
-- Never fold a pool handle or a small enum linearly into a cache key: nested folds give the handle and some state lane the same coefficient (`program.id*K + ... + cull*K`), so `(p, cull)` and `(p+1, cull-1)` collide, and pool handles are sequential, so neighbouring resources silently share the cached object. Pack the identity exactly (pipelines: `nt_gfx_pipeline_key_t`) or `nt_hash64` the whole canonical struct, and ship every new cache key with a neighbour test (consecutive handles × one-step change of each field → all keys distinct). See docs/spec/render/architecture.md §Cache identity.
+- Prefer `NT_ASSERT` for invariants and unexpected runtime states; use `NT_BUILD_ASSERT` for builder programmer invariants, unexpected states, OOM, missing/unreadable files and single-asset decode failures.
+- Error returns are valid for documented recoverable API outcomes, never to silently swallow bugs or broken data.
+- Release defaults to TRAP. OFF is an unsupported size escape hatch: violated asserted preconditions cause undefined behavior; no fallback is required solely for OFF.
+- Assert expressions must be side-effect-free because OFF does not evaluate them. Hard guards belong at untrusted/runtime-input boundaries and where the API promises recoverable rejection.
+- ATLAS builder content failures use `nt_builder_get_errors`; keep the exact exception list in [builder error policy](docs/spec/builder/builder.md#asserts-vs-graceful-content-errors).
 
 ## No ceremony
 
@@ -143,100 +46,33 @@ API, new state, a new backend hook, or a new obligation on every caller: stop an
 ask the developer with one paragraph — what breaks without it, the smallest
 alternative, what each catches. The developer decides.
 
-## Performance and hot path
+## Code and design
 
-- Hot path includes at minimum: frame loop, fixed update loop, render item generation, batching, resource resolve per frame, and any dense ECS/SoA iterations.
-- In hot path: no heap allocation, no hidden container realloc, no unnecessary copies, no heavy abstraction layers.
-- Prefer dense data, predictable memory access patterns, and simple control flow.
+- Comments explain a non-obvious WHY, preferably one line, at most 2–3. No history, commit/issue references, Phase/REVIEW/CHUNK tags, test-name pins, user quotes or experimental boilerplate in source; explanations of changes belong in commits/PRs.
+- Use `// #region name` / `// #endregion` in long functions, with no blank line just inside either marker. Preserve existing short inline comments.
+- Organize large files with regions rather than extra translation units; cross-TU calls inhibit inlining without LTO.
+- Before adding a subsystem: diagram data/coordinate transforms, compare parallel APIs, check mobile-WASM types/ranges, prototype the riskiest integration, and test asymmetric data.
+- New widget demos belong in `examples/ui_showcase`, never a new example directory. Follow the [UI ID rules](docs/spec/ui/nt-ui.md#widget-ids).
+- Cache identity must be exact or hashed as a whole, never a linear fold of handles/enums. Include consecutive-handle × one-field-change tests; see [render architecture](docs/spec/render/architecture.md).
 
-## Pre-commit checks
+## Required checks
 
-**After each edit burst and before every commit:** run
+- After each edit burst and before each commit: `bash scripts/format_and_check.sh`.
+- Before push: `bash scripts/check.sh --push`. `bash scripts/format_and_check.sh --push` combines both requirements; `bash scripts/check.sh --full` runs the full format/tidy sweep.
+- Fix failures before committing. A fresh full gate is authoritative; targeted tests alone can use stale binaries.
+- Never run two `check.sh`/`ctest` processes in one tree at once, including subagents. Remove `build/.check.lock` only after confirming its owner is dead.
+- Before pushing new C test/tool files, run `clang-tidy -p build/_cmake/tidy-ci <file>` directly; see [check details](docs/build.md#checks).
+- Commit deterministic regenerated `examples/*/generated/*.h` when pack builds reveal stale committed copies.
 
-```
-bash scripts/format_and_check.sh
-```
+## Evidence and review
 
-It auto-formats changed files (`fmt.sh`) under the same run lock, then runs the full read-only check
-(warm: ~12 s, ~25 s when builder/atlas paths changed — the three atlas-bench
-guard tests auto-run only then; `--push`/`--full` always run them). `check.sh`
-direct modes never mutate files; `format_and_check.sh` opts into the formatter before the checks.
+- State the changed claim and prove it with the narrowest check that exercises the expected behavior. Build success alone is not runtime proof; inspect errors even when exit status is zero.
+- Before running an example/benchmark by hand, rebuild its target. An existing executable is not freshness evidence.
+- Missing infrastructure or untested behavior is `unverified`, with the next concrete command; never imply success. Record rejected approaches in the issue so later work does not repeat them.
+- For full branch review, use [.claude/skills/reviewing-engine-code/SKILL.md](.claude/skills/reviewing-engine-code/SKILL.md): independent read-only reviewers, engine-principle lens and adversarial verification.
 
-It runs the cheap gates (module composition, EM_JS_DEPS, doc links + spec-index coverage, CRT-pin centralization), builds native-debug, runs ctest, then checks clang-format and clang-tidy on changed files only (falls back to full tidy when headers changed). clang-tidy uses a devapi-enabled compile DB matching the CI lint job, so devapi TUs are checked, not skipped. Vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`, `deps/curl`, `deps/zlib`) follow upstream style and are excluded; review patches to them separately.
+## Communication
 
-- Before `git push`: `bash scripts/check.sh --push` — additionally builds native-release (NDEBUG drops NT_ASSERT_FULL-only code, so `-Wunused` under `-Werror` fires where no debug build sees it), wasm-debug (emscripten catches warnings native clang exempts), wasm-release (Closure-only failures are invisible to debug builds), and runs the submodule consumption test plus the diagnostics configuration/runtime matrices.
-- Full sweep (CI lint equivalent): `bash scripts/check.sh --full` — whole-tree format + full tidy.
-
-If any check fails — fix before committing. Do not commit code that hasn't passed.
-
-### Known CI-only failure classes after a green `--push`
-
-Environment differences a local Windows host cannot reproduce:
-
-- **GNU ld link order** — Linux resolves archives left-to-right; Windows/wasm links don't. Swappable impls + stubs must trail every consumer (`... nt_resource ... nt_http_stub nt_fs_stub nt_log_stub` last; see `tests/submodule/CMakeLists.txt`; `nt_fs_stub` is native-only — omit it on wasm, where `nt_resource` compiles its FS path out). A standalone test using libm also needs `if(NOT WIN32) target_link_libraries(<test> PRIVATE m) endif()`.
-- **clang-format version skew** — CI's Linux clang-format flags multi-space-aligned trailing comments the local one accepts. Keep trailing comments single-spaced.
-- **emsdk pin skew** — CI installs `.emsdk-version`; if local `emcc --version` differs, wasm-release/Closure can false-green locally. Compare versions before trusting it.
-- **clang-tidy skips `#if defined(__linux__)` blocks off-Linux** — reason about platform-`#if` code as Linux code or add `NOLINT` defensively.
-- **Browser Smoke runs under LeakSanitizer, headless** — skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is set.
-- **CI debug ctest runs under ASan/LeakSanitizer** — an `NT_TEST_EXPECT_ASSERT` that longjmps past a live `malloc` fails the test with a leak report printed *after* Unity's `OK`; code an assert-trip test crosses must hold no heap (stack or preallocated buffers).
-- **CI ctest must stay serial** — the real-GL tests share one xvfb display; parallel ctest there fails `glfwInit`. Local `-j` is safe (desktop GL); the real-GL tests hold `RESOURCE_LOCK gl_display` (list in `cmake/test_target.cmake`).
-- **CI native-release passes a global `-DNT_ASSERT_MODE`** — a per-target `-D` collides (`-Wmacro-redefined` under `-Werror`). Force a different assert mode via a wrapper TU with `#undef`/`#define` (pattern: `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`).
-- **Test TUs are not built by a local `--push`** — `native-release` pins `NT_BUILD_TESTS=OFF`, so a
-  `-Wunused` that only NDEBUG shows in a `tests/` file first fires in CI's `native-release-test` job.
-- **Local tidy can false-green NEW files** — before pushing new test/tool files run `clang-tidy -p build/_cmake/tidy-ci <file>` directly (the devapi-enabled DB check.sh creates; plain native-debug lacks devapi TUs); that reproduces CI.
-
-## Test-infra & debugging gotchas
-
-- Only a fresh full `check.sh` run is authoritative — targeted builds + ctest can pass on stale binaries after an edit burst.
-- Never run two `check.sh`/`ctest` in one tree at once (agent + lead included): shared test outputs and relinked exes make builder/atlas tests fail spuriously. `check.sh` holds `build/.check.lock` and exits 2 while another run is active; `rmdir` it only if the other run is dead.
-- A failed test's name and output after `check.sh`: `build/_cmake/native-debug/check-ctest.log` (kept on disk) or `Testing/Temporary/LastTestsFailed.log` — do not rely on a `tail`-truncated terminal.
-- A failed `NT_BUILD_ASSERT` aborts the test process; if a dead process still holds the exe (next link fails with permission denied), `taskkill //F //IM <test>.exe`. Deliberate assert-trip tests: run the binary directly, not through ctest.
-- A crashing test that prints nothing: diagnose with `lldb -b -o run -o bt <exe>` (gdb absent; MSVC CRT buffers stdout to pipes and ignores stdbuf).
-- `UNITY_EXCLUDE_FLOAT` is defined — float Unity asserts compile to nothing; compare small exact values via `(int32_t)` casts.
-- `nt_atlas_begin` requires atlas-level `shape == RECT` when `extrude > 0`.
-- Changing a validator contract: first grep every constructor of that data shape — spec literals AND parameterized helpers.
-- `nt_builder.lib` is not linkable ad hoc from a shell (unresolved glad/cgltf externals outside its CMake `PUBLIC` link set) — behavioural probes need a real CMake target.
-- `examples/*/generated/*.h` are builder output committed to git; pack builds run inside every native build, so if one dirties them the committed copies were stale — commit the refresh (output is deterministic, no timestamps).
-- Visual QA: self-capture of GL windows (GDI/PrintWindow) does not work here. Pixel-exact checks: devapi `capture.frame` (glReadPixels, works headless, needs `NT_DEVAPI_ENABLED=ON` + CAPTURE group). Aesthetics/layout: ask the user to run and look — say explicitly what to check.
-- Browser smoke tests drive `tests/browser/app` (`window.__nt` hooks), not the showcase.
-- wasm links failing with `node.exe ... returned 3221225794` (0xC0000142) on random emscripten tools = transient Windows process-spawn exhaustion under parallel links — retry once before investigating.
-- New EM_JS that allocates into the wasm heap: use `wasmExports['malloc']` — `Module['_malloc']` fails at runtime under emmalloc, bare `_malloc` fails Closure (pattern: `engine/http/web/nt_http_web.c`).
-
-## Evidence standard
-
-State the changed claim in one sentence; prove it with the NARROWEST check that
-exercises that claim; the result must match expected behavior, not exit 0.
-**Not enough:** build success as runtime proof; a generic green command; "could
-not test" treated as pass (report `unverified` + the next concrete command);
-errors in logs ignored because the exit code was 0. An existing binary is never
-freshness evidence — before running an example/bench by hand, `cmake --build`
-first (a no-op build costs sub-second). Record rejected/superseded approaches in
-the issue so the next session does not re-propose them.
-
-## Reviewing a branch
-
-For a full pre-merge review against engine principles, spec, correctness, and tests, use the `reviewing-engine-code` skill in `.claude/skills/` — say "review this branch". It spawns parallel focus-lens reviewers (including a mandatory engine-principle lens driven by its `references/principle-catalog.md`), adversarially verifies findings, and reports P0-P2. Claude Code auto-discovers it; in Codex, read `.claude/skills/reviewing-engine-code/SKILL.md` directly (it is a self-contained, runtime-agnostic playbook) or install it into `~/.codex/skills/`.
-
-If build or test infrastructure is missing, state it explicitly in the response — do not imply the check was done.
-
-## Developer Profile
-
-### Response Style
-- Concise by default: the result in the first 1-2 lines, then only the delta —
-  no context recap, no repeated summaries, routine ops (commit/gate/push) = one line.
-- Expand only for: new concepts, decisions with trade-offs, or when asked ("подробно").
-  Tables only when comparing ≥3 options.
-
-### Decisions & Libraries
-- Present multiple options with trade-offs, don't choose for the developer.
-  Respect library choices — when suggesting dependencies, include size impact,
-  benchmarks, and how other engines handle it.
-
-### Debugging
-- Developer hypothesis — verify first, confirm or refute with evidence from code.
-  Bug without hypothesis — diagnose and fix independently.
-  Don't restate what the developer already wrote.
-
-### Boundaries
-- Execute what was requested precisely, no deviations.
-  Improvements and findings — suggest separately after the main task.
+- Lead with the result in 1–2 lines; then only the delta. Keep routine commit/check/push reports to one line. Expand for concepts, trade-offs or an explicit request; tables compare at least three items.
+- Present material design/library choices with trade-offs; do not choose for the developer. Respect library choices and include size, benchmarks and other engines' practice when proposing dependencies.
+- Verify the developer's debugging hypothesis first and confirm/refute with evidence. Without a hypothesis, diagnose and fix independently. Do not repeat the user's words.
