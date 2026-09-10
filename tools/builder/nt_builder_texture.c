@@ -15,7 +15,7 @@
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- assert expansions inflate the count
-nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts) {
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_basisu_encode_opts_t *compress_opts) {
     nt_tex_opts_t resolved = opts ? *opts : nt_tex_opts_defaults();
     nt_texture_pixel_format_t format = resolved.format ? resolved.format : NT_TEXTURE_FORMAT_RGBA8;
 
@@ -31,18 +31,18 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 
     if (compress_opts) {
         NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8) && "texture opts: Basis compression requires RGBA8 or RGB8");
-        NT_BUILD_ASSERT((compress_opts->mode == NT_TEX_COMPRESS_ETC1S || compress_opts->mode == NT_TEX_COMPRESS_UASTC) && "texture opts: compression mode out of range");
-        if (compress_opts->mode == NT_TEX_COMPRESS_ETC1S) {
-            NT_BUILD_ASSERT((compress_opts->quality >= 1 && compress_opts->quality <= 255) && "texture opts: ETC1S quality must be 1..255");
-            NT_BUILD_ASSERT((isfinite(compress_opts->selector_rdo_quality) && compress_opts->selector_rdo_quality >= 0.0F && compress_opts->selector_rdo_quality <= 1.0e10F) &&
+        NT_BUILD_ASSERT((compress_opts->codec == NT_BASISU_CODEC_ETC1S || compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR) && "texture opts: compression mode out of range");
+        if (compress_opts->codec == NT_BASISU_CODEC_ETC1S) {
+            NT_BUILD_ASSERT((compress_opts->etc1s.quality >= 1 && compress_opts->etc1s.quality <= 255) && "texture opts: ETC1S quality must be 1..255");
+            NT_BUILD_ASSERT((isfinite(compress_opts->etc1s.selector_rdo_threshold) && compress_opts->etc1s.selector_rdo_threshold >= 0.0F && compress_opts->etc1s.selector_rdo_threshold <= 1.0e10F) &&
                             "texture opts: ETC1S selector RDO must be finite and in 0..1e10");
-            NT_BUILD_ASSERT((isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.0F && compress_opts->endpoint_rdo_quality <= 1.0e10F) &&
+            NT_BUILD_ASSERT((isfinite(compress_opts->etc1s.endpoint_rdo_threshold) && compress_opts->etc1s.endpoint_rdo_threshold >= 0.0F && compress_opts->etc1s.endpoint_rdo_threshold <= 1.0e10F) &&
                             "texture opts: ETC1S endpoint RDO must be finite and in 0..1e10");
         } else {
-            NT_BUILD_ASSERT(compress_opts->quality <= 4 && "texture opts: UASTC quality must be 0..4");
-            NT_BUILD_ASSERT((compress_opts->endpoint_rdo_quality == 0.0F ||
-                             (isfinite(compress_opts->endpoint_rdo_quality) && compress_opts->endpoint_rdo_quality >= 0.001F && compress_opts->endpoint_rdo_quality <= 50.0F)) &&
-                            "texture opts: UASTC endpoint RDO must be 0 or in 0.001..50");
+            NT_BUILD_ASSERT(compress_opts->uastc.pack_level <= 4 && "texture opts: UASTC pack level must be 0..4");
+            NT_BUILD_ASSERT(
+                (compress_opts->uastc.rdo_lambda == 0.0F || (isfinite(compress_opts->uastc.rdo_lambda) && compress_opts->uastc.rdo_lambda >= 0.001F && compress_opts->uastc.rdo_lambda <= 50.0F)) &&
+                "texture opts: UASTC RDO lambda must be 0 or in 0.001..50");
         }
     }
 
@@ -275,7 +275,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
+nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_basisu_encode_opts_t *compress_opts,
                                                               uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
     NT_BUILD_ASSERT(compress_opts && "texture encode: compression opts are NULL");
     nt_texture_pixel_format_t fmt = nt_builder_assert_texture_opts(opts, compress_opts);
@@ -298,10 +298,8 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     }
 
     /* Encode via Basis Universal -- adaptive pool size per worker */
-    bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
     uint32_t bt = (encode_threads > 0) ? encode_threads : 1;
-    nt_basisu_encode_result_t enc =
-        nt_basisu_encode(bt, source, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(bt, source, width, height, has_alpha, compress_opts, true);
 
     free(premul_buf);
 
@@ -314,7 +312,11 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     nt_texture_default_filter_t fmin = opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
     bool wants_mips = (fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_LINEAR ||
                        fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
-    NT_BUILD_ASSERT((!wants_mips || enc.mip_count > 1) && "texture encode: filter_min selects a mipmap variant but Basis produced a single-level chain");
+    uint32_t full_mip_count = 1;
+    for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
+        full_mip_count++;
+    }
+    NT_BUILD_ASSERT((!wants_mips || enc.mip_count == full_mip_count) && "texture encode: mipmap filter requires a full Basis mip chain");
 
     /* Build V3 header */
     NtTextureAssetHeaderV2 tex_hdr;
@@ -370,7 +372,7 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
 }
 
 nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                       const nt_tex_compress_opts_t *compress_opts) {
+                                                       const nt_basisu_encode_opts_t *compress_opts) {
     uint8_t *buf = NULL;
     uint32_t buf_size = 0;
     nt_asset_type_t type;

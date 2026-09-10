@@ -35,12 +35,12 @@ typedef struct {
 typedef struct {
     uint32_t width;
     uint32_t height;
-    nt_tex_opts_t opts;              /* format + resize (compress ptr zeroed, use has_compress) */
-    nt_tex_compress_opts_t compress; /* Basis compression settings */
-    bool has_compress;               /* true = use Basis path, false = raw path */
-    uint8_t *source_data;            /* deep-copied encoded image bytes for re-decode (owned, NULL if from file) */
-    uint32_t source_size;            /* 0 if from file */
-    char *source_path;               /* resolved file path for re-read (owned, NULL if from memory) */
+    nt_tex_opts_t opts;               /* format + resize (compress ptr zeroed, use has_compress) */
+    nt_basisu_encode_opts_t compress; /* Basis compression settings */
+    bool has_compress;                /* true = use Basis path, false = raw path */
+    uint8_t *source_data;             /* deep-copied encoded image bytes for re-decode (owned, NULL if from file) */
+    uint32_t source_size;             /* 0 if from file */
+    char *source_path;                /* resolved file path for re-read (owned, NULL if from memory) */
 } NtBuildTextureData;
 
 /* Type-specific data for font entries */
@@ -89,12 +89,12 @@ typedef struct {
 
 /* Atlas build state (active between begin and commit). */
 struct NtAtlasBuild {
-    NtBuilderContext *ctx;           /* owner pack */
-    char *name;                      /* atlas name for resource_id (owned) */
-    nt_atlas_opts_t opts;            /* copy of user opts (compress ptr zeroed, use has_compress) */
-    nt_tex_compress_opts_t compress; /* Basis compression settings */
-    bool has_compress;               /* true = use Basis path */
-    NtAtlasSpriteInput *sprites;     /* dynamic array (heap) */
+    NtBuilderContext *ctx;            /* owner pack */
+    char *name;                       /* atlas name for resource_id (owned) */
+    nt_atlas_opts_t opts;             /* copy of user opts (compress ptr zeroed, use has_compress) */
+    nt_basisu_encode_opts_t compress; /* Basis compression settings */
+    bool has_compress;                /* true = use Basis path */
+    NtAtlasSpriteInput *sprites;      /* dynamic array (heap) */
     uint32_t sprite_count;
     uint32_t sprite_capacity;
     uint64_t cache_key; /* computed atlas cache key */
@@ -262,7 +262,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal decode functions -- called from add_* (eager decode) */
-nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts);
+nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *opts, const nt_basisu_encode_opts_t *compress_opts);
 nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
 nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
@@ -293,13 +293,13 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 /* Internal encode functions -- called from finish_pack (encode phase) */
 nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts);
 nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                       const nt_tex_compress_opts_t *compress_opts);
+                                                       const nt_basisu_encode_opts_t *compress_opts);
 nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id);
 
 /* Thread-safe encode functions -- return independent buffers (no shared state) */
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
                                                    nt_asset_type_t *out_type, uint16_t *out_version);
-nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
+nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_basisu_encode_opts_t *compress_opts,
                                                               uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version);
 nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type,
                                                   uint16_t *out_version);

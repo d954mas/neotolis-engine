@@ -9,8 +9,8 @@ extern "C" {
 
 void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
 
-nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo,
-                                           float selector_rdo, bool gen_mipmaps) {
+nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha,
+                                           const nt_basisu_encode_opts_t *opts, bool gen_mipmaps) {
     nt_basisu_encode_result_t result = {};
     if (basis_threads < 1) {
         basis_threads = 1;
@@ -27,23 +27,26 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     basisu::image src_image(rgba_pixels, width, height, 4);
     params.m_source_images.push_back(src_image);
 
-    if (uastc) {
+    switch (opts->codec) {
+    case NT_BASISU_CODEC_UASTC_LDR:
         params.set_format_mode(basist::basis_tex_format::cUASTC_LDR_4x4);
-        params.m_pack_uastc_ldr_4x4_flags = quality;
-        if (endpoint_rdo > 0.0F) {
-            params.m_rdo_uastc_ldr_4x4 = true;
-            params.m_rdo_uastc_ldr_4x4_quality_scalar = endpoint_rdo;
+        params.m_pack_uastc_ldr_4x4_flags = opts->uastc.pack_level;
+        params.m_rdo_uastc_ldr_4x4 = opts->uastc.rdo_lambda > 0.0F;
+        if (opts->uastc.rdo_lambda > 0.0F) {
+            params.m_rdo_uastc_ldr_4x4_quality_scalar = opts->uastc.rdo_lambda;
             params.m_rdo_uastc_ldr_4x4_dict_size = 32768;
         }
-    } else {
+        break;
+    case NT_BASISU_CODEC_ETC1S:
         params.set_format_mode(basist::basis_tex_format::cETC1S);
-        params.m_quality_level = static_cast<int>(quality);
-        if (endpoint_rdo > 0.0F) {
-            params.m_endpoint_rdo_thresh = endpoint_rdo;
-        }
-        if (selector_rdo > 0.0F) {
-            params.m_selector_rdo_thresh = selector_rdo;
-        }
+        params.m_quality_level = static_cast<int>(opts->etc1s.quality);
+        params.m_endpoint_rdo_thresh = opts->etc1s.endpoint_rdo_threshold;
+        params.m_selector_rdo_thresh = opts->etc1s.selector_rdo_threshold;
+        params.m_no_endpoint_rdo = opts->etc1s.endpoint_rdo_threshold == 0.0F;
+        params.m_no_selector_rdo = opts->etc1s.selector_rdo_threshold == 0.0F;
+        break;
+    default:
+        return result;
     }
 
     params.m_create_ktx2_file = false;

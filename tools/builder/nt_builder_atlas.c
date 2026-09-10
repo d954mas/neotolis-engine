@@ -893,9 +893,6 @@ NtAtlasBuild *nt_atlas_begin(NtBuilderContext *ctx, const char *name, const nt_a
     state->opts = resolved;
     if (resolved.compress) {
         state->compress = *resolved.compress;
-        if (state->compress.mode == NT_TEX_COMPRESS_UASTC) {
-            state->compress.selector_rdo_quality = 0.0F;
-        }
         state->has_compress = true;
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */

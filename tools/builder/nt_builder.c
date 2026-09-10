@@ -337,6 +337,7 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
 
 /* --- Early dedup: compare decoded_data + encoding opts --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     if (a->kind != b->kind) {
         return false;
@@ -360,7 +361,7 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
         if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
             return false;
         }
-        if (ta->opts.gen_mipmaps != tb->opts.gen_mipmaps) {
+        if ((ta->has_compress || ta->opts.gen_mipmaps) != (tb->has_compress || tb->opts.gen_mipmaps)) {
             return false;
         }
         /* premultiplied also affects encoded pixel bytes + header flags;
@@ -373,10 +374,14 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
             return false;
         }
         if (ta->has_compress) {
-            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.endpoint_rdo_quality != tb->compress.endpoint_rdo_quality ||
-                ta->compress.selector_rdo_quality != tb->compress.selector_rdo_quality) {
+            if (ta->compress.codec != tb->compress.codec) {
                 return false;
             }
+            if (ta->compress.codec == NT_BASISU_CODEC_ETC1S) {
+                return ta->compress.etc1s.quality == tb->compress.etc1s.quality && ta->compress.etc1s.endpoint_rdo_threshold == tb->compress.etc1s.endpoint_rdo_threshold &&
+                       ta->compress.etc1s.selector_rdo_threshold == tb->compress.etc1s.selector_rdo_threshold;
+            }
+            return ta->compress.uastc.pack_level == tb->compress.uastc.pack_level && ta->compress.uastc.rdo_lambda == tb->compress.uastc.rdo_lambda;
         }
         return true;
     }
@@ -1374,9 +1379,6 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
             td->has_compress = true;
             td->compress = *opts->compress;
             td->opts.gen_mipmaps = true;
-            if (td->compress.mode == NT_TEX_COMPRESS_UASTC) {
-                td->compress.selector_rdo_quality = 0.0F;
-            }
         }
     }
     td->opts.format = effective_format;

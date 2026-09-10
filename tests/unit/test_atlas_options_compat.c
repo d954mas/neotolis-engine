@@ -24,7 +24,7 @@ _Static_assert(offsetof(nt_atlas_opts_t, gen_mipmaps) > offsetof(nt_atlas_opts_t
 _Static_assert(offsetof(nt_atlas_opts_t, dedup) > offsetof(nt_atlas_opts_t, gen_mipmaps), "atlas v2 layout: dedup flag is appended");
 
 int main(void) {
-    const nt_tex_compress_opts_t compress = {.mode = NT_TEX_COMPRESS_ETC1S};
+    const nt_basisu_encode_opts_t compress = nt_tex_compress_etc1s_default();
 
     const nt_atlas_opts_t atlas = {
         .compress = &compress,

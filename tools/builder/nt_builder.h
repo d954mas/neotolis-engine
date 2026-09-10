@@ -1,6 +1,8 @@
 #ifndef NT_BUILDER_H
 #define NT_BUILDER_H
 
+#include "nt_basisu_codec.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -242,16 +244,14 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
-typedef struct nt_tex_compress_opts_t nt_tex_compress_opts_t;
-
 typedef struct {
-    nt_texture_pixel_format_t format;       /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                      /* 0 = no resize, otherwise max(w,h) clamped to this */
-    const nt_tex_compress_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
-    bool premultiplied;                     /* true = RGB premultiplied by alpha before encoding.
-                                             * Default false for compatibility. Set true for UI/sprite
-                                             * textures rendered with bilinear filtering to avoid dark
-                                             * fringes at alpha edges. Only meaningful for RGBA8. */
+    nt_texture_pixel_format_t format;        /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
+    uint32_t max_size;                       /* 0 = no resize, otherwise max(w,h) clamped to this */
+    const nt_basisu_encode_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
+    bool premultiplied;                      /* true = RGB premultiplied by alpha before encoding.
+                                              * Default false for compatibility. Set true for UI/sprite
+                                              * textures rendered with bilinear filtering to avoid dark
+                                              * fringes at alpha edges. Only meaningful for RGBA8. */
     /* Default sampler state baked into the V3 NtTextureAssetHeader so the
      * activator creates the right sampler. Materials may override per
      * binding. Default values match the historical hardcoded activator
@@ -285,47 +285,35 @@ static inline nt_tex_opts_t nt_tex_opts_defaults(void) {
 
 /* --- Texture compression options (Basis Universal encoding) --- */
 
-typedef enum {
-    NT_TEX_COMPRESS_ETC1S = 1, /* ETC1S mode -- small size, good for color/diffuse textures */
-    NT_TEX_COMPRESS_UASTC = 2, /* UASTC mode -- higher quality, good for normal maps */
-} nt_tex_compress_mode_t;
-
-struct nt_tex_compress_opts_t {
-    nt_tex_compress_mode_t mode; /* ETC1S or UASTC */
-    uint32_t quality;            /* ETC1S: 1-255 (higher=better), UASTC: 0-4 (pack level) */
-    float endpoint_rdo_quality;  /* ETC1S: 0..1e10. UASTC: 0 (off) or 0.001..50 */
-    float selector_rdo_quality;  /* ETC1S: 0..1e10. UASTC: ignored and canonicalized to 0 */
-};
-
 /* --- Compression presets (5 levels: lowest → highest) --- */
 
 /* ETC1S: variable-rate, smaller files, good for diffuse/color.
  * Basis defaults: quality=128, endpoint_rdo=1.5, selector_rdo=1.25
  * quality: 1-255 (encode effort). RDO: block merging for smaller files (0 = off). */
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_lowest(void) {
-    return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 1, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F};
+static inline nt_basisu_encode_opts_t nt_tex_compress_etc1s_lowest(void) {
+    return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_ETC1S, .etc1s = {.quality = 1, .endpoint_rdo_threshold = 1.5F, .selector_rdo_threshold = 1.25F}};
 }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_low(void) {
-    return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 64, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F};
+static inline nt_basisu_encode_opts_t nt_tex_compress_etc1s_low(void) {
+    return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_ETC1S, .etc1s = {.quality = 64, .endpoint_rdo_threshold = 1.5F, .selector_rdo_threshold = 1.25F}};
 }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_default(void) {
-    return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 128, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F};
+static inline nt_basisu_encode_opts_t nt_tex_compress_etc1s_default(void) {
+    return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_ETC1S, .etc1s = {.quality = 128, .endpoint_rdo_threshold = 1.5F, .selector_rdo_threshold = 1.25F}};
 }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_high(void) {
-    return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 200, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F};
+static inline nt_basisu_encode_opts_t nt_tex_compress_etc1s_high(void) {
+    return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_ETC1S, .etc1s = {.quality = 200, .endpoint_rdo_threshold = 1.5F, .selector_rdo_threshold = 1.25F}};
 }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_highest(void) {
-    return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 255, .endpoint_rdo_quality = 0.0F, .selector_rdo_quality = 0.0F};
+static inline nt_basisu_encode_opts_t nt_tex_compress_etc1s_highest(void) {
+    return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_ETC1S, .etc1s = {.quality = 255, .endpoint_rdo_threshold = 0.0F, .selector_rdo_threshold = 0.0F}};
 }
 
 /* UASTC: fixed-rate GPU blocks, higher quality. RDO makes blocks similar for better gzip/zstd.
  * Basis defaults: pack_level=2, rdo_lambda=1.0, dict_size=32768 (set in encoder).
- * quality: 0-4 (pack level / mode search depth). endpoint_rdo: RDO lambda (0 = off). */
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_lowest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 0, .endpoint_rdo_quality = 2.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 1, .endpoint_rdo_quality = 1.5F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_default(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 2, .endpoint_rdo_quality = 1.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .endpoint_rdo_quality = 0.0F}; }
+ * pack_level: 0-4 (mode search depth). rdo_lambda: 0 = off. */
+static inline nt_basisu_encode_opts_t nt_tex_compress_uastc_lowest(void) { return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_UASTC_LDR, .uastc = {.pack_level = 0, .rdo_lambda = 2.0F}}; }
+static inline nt_basisu_encode_opts_t nt_tex_compress_uastc_low(void) { return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_UASTC_LDR, .uastc = {.pack_level = 1, .rdo_lambda = 1.5F}}; }
+static inline nt_basisu_encode_opts_t nt_tex_compress_uastc_default(void) { return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_UASTC_LDR, .uastc = {.pack_level = 2, .rdo_lambda = 1.0F}}; }
+static inline nt_basisu_encode_opts_t nt_tex_compress_uastc_high(void) { return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_UASTC_LDR, .uastc = {.pack_level = 3, .rdo_lambda = 0.5F}}; }
+static inline nt_basisu_encode_opts_t nt_tex_compress_uastc_highest(void) { return (nt_basisu_encode_opts_t){.codec = NT_BASISU_CODEC_UASTC_LDR, .uastc = {.pack_level = 4, .rdo_lambda = 0.0F}}; }
 
 /* --- Atlas options (nt_atlas_begin configuration) --- */
 
@@ -365,13 +353,13 @@ typedef enum {
 #define NT_ATLAS_TRANSFORMS_FLIPS (NT_ATLAS_TRANSFORM_IDENTITY | NT_ATLAS_TRANSFORM_FLIP_H | NT_ATLAS_TRANSFORM_FLIP_V | NT_ATLAS_TRANSFORM_ROT180)
 
 typedef struct {
-    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
-    nt_texture_pixel_format_t format;       /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
-    uint32_t max_size;                      /* max atlas page dimension (default: 2048) */
-    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2) */
-    uint32_t margin;                        /* atlas edge margin (default: 0) */
-    uint32_t extrude;                       /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
-    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
+    const nt_basisu_encode_opts_t *compress; /* NULL = raw RGBA */
+    nt_texture_pixel_format_t format;        /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
+    uint32_t max_size;                       /* max atlas page dimension (default: 2048) */
+    uint32_t padding;                        /* extra spacing between sprites after extrude (default: 2) */
+    uint32_t margin;                         /* atlas edge margin (default: 0) */
+    uint32_t extrude;                        /* AABB edge duplication count, <= max_size. Must be 0 unless shape is RECT. */
+    uint8_t alpha_threshold;                 /* alpha >= this = opaque for trimming (default: 1; 0 retains every pixel — no trim, transparent RGB composed) */
     uint8_t max_vertices; /* max polygon vertices per region — range 4..16 (default 8; 3 asserts — a triangle cannot cover a full-perimeter mask; 16 hard cap: downstream stack arrays limit to 32) */
     float max_added_area_percent; /* max simplification-added area relative to retained-pixel area (default: 10%) */
     nt_atlas_shape_t shape;       /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
@@ -589,7 +577,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
-#define NT_BUILDER_VERSION 3 /* Bump when encode logic changes to invalidate cache */
+#define NT_BUILDER_VERSION 4 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */

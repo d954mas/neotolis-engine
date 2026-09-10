@@ -18,6 +18,7 @@
 
 /* --- opts_version_hash: serialize kind + type-specific fields + builder version --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- exact identity lists each active field
 uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     uint8_t buf[128];
     uint32_t pos = 0;
@@ -62,7 +63,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
         uint8_t wv = (uint8_t)td->opts.wrap_v;
-        uint8_t gen_mips = td->opts.gen_mipmaps ? 1 : 0;
+        uint8_t gen_mips = (td->has_compress || td->opts.gen_mipmaps) ? 1 : 0;
         buf[pos++] = fmin;
         buf[pos++] = fmag;
         buf[pos++] = wu;
@@ -75,21 +76,32 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         pos += (uint32_t)sizeof(has_compress);
 
         if (td->has_compress) {
-            uint32_t mode = (uint32_t)td->compress.mode;
-            memcpy(buf + pos, &mode, sizeof(mode));
-            pos += (uint32_t)sizeof(mode);
+            uint32_t codec = (uint32_t)td->compress.codec;
+            memcpy(buf + pos, &codec, sizeof(codec));
+            pos += (uint32_t)sizeof(codec);
 
-            uint32_t quality = td->compress.quality;
-            memcpy(buf + pos, &quality, sizeof(quality));
-            pos += (uint32_t)sizeof(quality);
-
-            float endpoint_rdo = td->compress.endpoint_rdo_quality;
-            memcpy(buf + pos, &endpoint_rdo, sizeof(endpoint_rdo));
-            pos += (uint32_t)sizeof(endpoint_rdo);
-
-            float selector_rdo = td->compress.selector_rdo_quality;
-            memcpy(buf + pos, &selector_rdo, sizeof(selector_rdo));
-            pos += (uint32_t)sizeof(selector_rdo);
+            if (td->compress.codec == NT_BASISU_CODEC_ETC1S) {
+                uint32_t quality = td->compress.etc1s.quality;
+                float endpoint = td->compress.etc1s.endpoint_rdo_threshold;
+                float selector = td->compress.etc1s.selector_rdo_threshold;
+                /* Equality treats signed zeros identically. */
+                endpoint = endpoint == 0.0F ? 0.0F : endpoint;
+                selector = selector == 0.0F ? 0.0F : selector;
+                memcpy(buf + pos, &quality, sizeof(quality));
+                pos += (uint32_t)sizeof(quality);
+                memcpy(buf + pos, &endpoint, sizeof(endpoint));
+                pos += (uint32_t)sizeof(endpoint);
+                memcpy(buf + pos, &selector, sizeof(selector));
+                pos += (uint32_t)sizeof(selector);
+            } else {
+                uint32_t pack_level = td->compress.uastc.pack_level;
+                float lambda = td->compress.uastc.rdo_lambda;
+                lambda = lambda == 0.0F ? 0.0F : lambda;
+                memcpy(buf + pos, &pack_level, sizeof(pack_level));
+                pos += (uint32_t)sizeof(pack_level);
+                memcpy(buf + pos, &lambda, sizeof(lambda));
+                pos += (uint32_t)sizeof(lambda);
+            }
         }
         break;
     }

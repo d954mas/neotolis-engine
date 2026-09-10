@@ -1,6 +1,8 @@
 #ifndef NT_BASISU_ENCODER_H
 #define NT_BASISU_ENCODER_H
 
+#include "nt_basisu_codec.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -27,15 +29,12 @@ typedef struct {
  * rgba_pixels: RGBA8 pixel data (width * height * 4 bytes)
  * width, height: image dimensions
  * has_alpha: true if alpha channel is meaningful (false = RGB-only optimization)
- * uastc: false = ETC1S mode, true = UASTC mode
- * quality: ETC1S: 1-255, UASTC: 0-4 (pack level)
- * endpoint_rdo: ETC1S: endpoint RDO threshold (0.0 = disabled). UASTC: RDO lambda (0.0 = disabled)
- * selector_rdo: ETC1S: selector RDO threshold (0.0 = disabled). UASTC: ignored
+ * opts: required descriptor; borrowed only for this call. Active fields must
+ *   satisfy the ranges in nt_basisu_codec.h (validated by public builder adds).
  * gen_mipmaps: true = encoder generates full mip chain
  * Returns: result with data pointer and size. data=NULL on failure.
  */
-nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo,
-                                           float selector_rdo, bool gen_mipmaps);
+nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, const nt_basisu_encode_opts_t *opts, bool gen_mipmaps);
 
 /* Free encoder output data */
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result);
