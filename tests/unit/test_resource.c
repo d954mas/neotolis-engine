@@ -1871,13 +1871,19 @@ static void test_provider_on_resolve(const uint8_t *data, uint32_t size, uint32_
     p->size = size;
 }
 
-static void test_provider_on_cleanup(void *user_data) { free(user_data); }
+static void test_provider_on_cleanup(void *user_data) {
+    const test_provider_t *provider = user_data;
+    TEST_ASSERT_EQUAL_UINT8(0, provider->data[provider->size - 1U]);
+    s_cleanup_call_count++;
+    free(user_data);
+}
 
 /* Unmount frees an I/O-owned pinned blob synchronously; the zero-copy provider viewing into it must
  * be severed inline (user_data -> NULL) in the SAME call, before any read can dereference freed memory.
  * Without the sever, user_data stays non-NULL (dangling) until the next resolve pass -> UAF window. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void check_blob_pin_unmount_severs_provider_synchronously(bool aliases) {
+    s_cleanup_call_count = 0;
     nt_hash32_t pid = nt_hash32_str("pin_sever_pack");
     nt_hash64_t rid = nt_hash64_str("pin_sever_res");
 
@@ -1920,15 +1926,15 @@ static void check_blob_pin_unmount_severs_provider_synchronously(bool aliases) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
     TEST_ASSERT_EQUAL_PTR(provider, nt_resource_peek_user_data(h));
 
-    /* Unmount frees the blob; the provider view must be severed inline — NO intervening resolve/step —
-     * so no read can dereference the freed blob. The published winner state is reconciled by the next
-     * resolve pass (winner-loss + epoch bump), matching the pre-existing unmount contract. */
+    /* Cleanup must read live bytes inside unmount, without an intervening step masking the order. */
     nt_resource_unmount(pid);
     TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
+    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
 
     /* Next resolve reconciles the dropped winner. */
     nt_resource_step();
     TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
+    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
     TEST_ASSERT_FALSE(nt_resource_is_ready(h));
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 

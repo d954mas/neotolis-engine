@@ -97,14 +97,13 @@ typedef struct {
     uint8_t behavior_flags;
 } nt_resource_type_desc_t;
 
-/* Copies desc for this registry lifetime; desc is required and borrowed only for this call.
- * Register the complete type before activation/publication. Identical repeats are no-ops;
- * any
- * replacement asserts, including after unmount. AUX_BACKED requires resolve + cleanup.
- * First registration may enable file owners still waiting for activation. Virtual publication
- * or file BLOB
- * readiness fixes the default description if none was registered. Unmount and
- * module shutdown never unlock a type; only resource shutdown ends its description's lifetime. */
+/* Copies the complete desc; its pointer is required and borrowed only during this call.
+ * Identical repeats are no-ops. Replacements assert until resource shutdown, even after unmount.
+ * AUX_BACKED
+ * requires resolve + cleanup. First registration may enable waiting file owners.
+ * Register before activation/publication: virtual publication or file BLOB readiness fixes
+ * the current
+ * description, including the implicit empty default. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
 /* ---- Descriptor ---- */
@@ -166,7 +165,7 @@ uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 /* Returns the asset type (NT_ASSET_*) the slot was created for. Returns 0
- * for invalid or stale handles. Useful for runtime type checks at API
+ * for invalid handles. Useful for runtime type checks at API
  * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
 uint8_t nt_resource_get_asset_type(nt_resource_t handle);
 /* Advances only during resolve when a published winner, state or auxiliary payload changes.
