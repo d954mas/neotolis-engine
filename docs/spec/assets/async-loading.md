@@ -181,9 +181,20 @@ type description with an activator rewinds all packs so skipped types become eli
 An identical repeated registration does not rewind anything. A new mount starts
 at zero. Restoring an evicted blob preserves the cursor because it preserves asset
 states. Growing the global registry may make completed packs scan its new suffix
-once; a stable idle registry needs only the bounded pack walk, not asset scans.
+once. The activation phase of a stable idle registry needs only the bounded
+pack walk. Expired AUTO blobs can still scan owners before eviction, as below.
 Cursor movement alone does not dirty resolve or change the publication epoch.
 Callbacks follow the [resource callback contract](resource.md#resource-callback-contract).
+
+Before evicting an expired, unpinned AUTO blob, scan its live canonical owners.
+Any REGISTERED owner retains the bytes, including owners skipped because their
+type has not yet been registered. A completed cursor means the scan completed,
+not that activation completed. First registration of the type can then resume
+activation without remounting or reloading. READY and FAILED owners do not by
+themselves hold the blob; normal TTL eviction resumes once no owners are waiting.
+Explicit unmount still removes a waiting pack. This uses existing owner state,
+with no pending counter: only would-be evictions incur the scan, exiting at the
+first pending owner. An expired pack waiting for a type can incur it each step.
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

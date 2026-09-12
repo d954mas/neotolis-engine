@@ -1947,7 +1947,7 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     nt_hash32_t pid = nt_hash32_str("pin_unpub_pack");
     nt_hash64_t rid = nt_hash64_str("pin_unpub_res");
 
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
 
@@ -1955,6 +1955,7 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
     TEST_ASSERT_NOT_NULL(blob);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+    nt_resource_step();
 
     /* No consumer yet -> blob_pins stays 0; TTL expiry evicts the blob before
      * any pin is established. */
@@ -1966,7 +1967,6 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
     /* Consumer arrives; the asset reports READY but its blob is gone. The
      * PIN_BLOB provider must NOT publish as a usable winner. */
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 99);
     nt_resource_step();
 
     TEST_ASSERT_FALSE(nt_resource_is_ready(h)); /* unpublishable without a resident blob */

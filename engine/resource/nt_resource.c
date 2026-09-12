@@ -762,6 +762,18 @@ void nt_resource_step(void) {
             pack->blob_evict_skip_logged = 0; /* no longer pinned — re-arm the one-shot */
             // #endregion
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
+                bool pending_activation = false;
+                for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+                    const NtAssetMeta *asset = &s_resource.assets[ai];
+                    if (asset->resource_id != 0 && asset->pack_index == pi && asset->owner_asset == ai && asset->state == NT_ASSET_STATE_REGISTERED) {
+                        pending_activation = true;
+                        break;
+                    }
+                }
+                /* A completed cursor can still have skipped owners whose type is not registered. */
+                if (pending_activation) {
+                    continue;
+                }
                 /* Only free blobs owned by resource system (loaded via I/O).
                  * Caller-owned blobs (parse_pack direct) have io_type == NT_IO_NONE. */
                 if (pack->io_type != NT_IO_NONE) {

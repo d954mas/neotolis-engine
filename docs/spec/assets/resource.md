@@ -111,6 +111,11 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
+AUTO never evicts bytes needed by live REGISTERED canonical owners, including
+owners awaiting first type registration. Only an otherwise eligible expired blob
+scans owners to check this. READY/FAILED owners do not prevent eviction, and
+explicit unmount removes the pack even while activation is pending.
+
 ## Registry state split
 
 Layouts live in `engine/resource/nt_resource_internal.h` (not public API — do not
