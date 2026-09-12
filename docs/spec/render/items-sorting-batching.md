@@ -95,13 +95,20 @@ alive, neither binding changes, and neither referenced live resource is
 destroyed or has its slot reused.
 
 `nt_sprite_renderer_batch_key(material, page_resource)` packs the material's
-16-bit pool slot and the resolved atlas page resource's 16-bit slot. The page
-resource comes from the sprite component's resolved-region cache, so render-item
-construction does not search the atlas. The game excludes unresolved sprites and
+16-bit pool slot and the current GPU texture's 16-bit pool slot. The page resource
+is a stable uint32 index from the sprite component's resolved-region cache;
+the helper resolves its current texture with one O(1) `nt_resource_get`, without
+searching the atlas. Different resource names publishing the same texture,
+including a shared placeholder, yield equal keys for the same material.
+The game excludes unresolved sprites and
 resolved tombstones before calling the helper; tombstones have no page resource.
 The same bounded-lifetime rule applies through
-`nt_sprite_renderer_draw_list()`: the material binding and resolved page must not
-change. SpriteRenderer still checks the actual page while emitting, so a page
+`nt_sprite_renderer_draw_list()`: the material binding and published GPU texture
+stay live and unchanged from item construction until the call returns. Recompute
+keys for the next list after provider changes; context restore discards old lists.
+A not-yet-loaded page without a placeholder has texture slot zero: sampled
+sprites are skipped at emit, while textureless materials still draw geometry.
+SpriteRenderer still checks the actual page while emitting, so a page
 mismatch inside a run splits safely; this does not relax the material-key
 contract. Transform and drawable color may change after item construction because
 neither renderer's key encodes them.

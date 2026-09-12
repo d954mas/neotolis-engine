@@ -73,7 +73,8 @@ The runtime additionally caches:
 
 - **Resolved region index** — `uint16_t` index into the atlas region table.
 - **Resolved region data** — atlas geometry pointers and the actual page
-  resource used by the renderer and its batch key.
+  resource used by the renderer. The batch-key helper resolves this stable
+  resource index to the currently published GPU texture in O(1).
 - **Atlas revision snapshot** — `uint32_t`, used to detect republish.
 - **Effective origin** — `float[2]`, either authored from the region or
   overridden by the game.

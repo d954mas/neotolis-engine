@@ -528,6 +528,27 @@ if(NOT EMSCRIPTEN)
     # parallel ctest (CPU contention skews the sub-ms timing), clean serially. Run alone.
     set_tests_properties(test_resource PROPERTIES RUN_SERIAL TRUE)
 
+    foreach(slot_capacity IN ITEMS 65537 65535)
+        set(slot_target test_resource_slots)
+        if(slot_capacity EQUAL 65535)
+            set(slot_target test_resource_slots_65535)
+        endif()
+        add_executable(${slot_target}
+            unit/test_resource_slots.c
+            unit/test_helpers/nt_assert_trap.c
+            ${CMAKE_SOURCE_DIR}/engine/resource/nt_resource.c
+        )
+        target_include_directories(${slot_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+        target_link_libraries(${slot_target} PRIVATE nt_core nt_shared nt_gfx_interface nt_http_stub nt_fs_stub nt_log_stub nt_time nt_hash unity)
+        target_compile_definitions(${slot_target} PRIVATE
+            NT_RESOURCE_MAX_SLOTS=${slot_capacity}
+            NT_RESOURCE_TIMING_ENABLED=$<BOOL:${NT_RESOURCE_TIMING_ENABLED}>
+            NT_LOG_DOMAIN="resource"
+            _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
+        )
+        nt_setup_test_target(${slot_target} TIMEOUT 10)
+    endforeach()
+
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)

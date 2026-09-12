@@ -136,12 +136,47 @@ void test_double_init(void) {
 
 void test_handle_invalid(void) { TEST_ASSERT_EQUAL_UINT32(0, NT_RESOURCE_INVALID.id); }
 
-void test_handle_encode_decode(void) {
-    /* Construct handle: index=5, gen=3 -> id = (3 << 16) | 5 = 196613 */
-    nt_resource_t h = {.id = (3U << 16) | 5U};
-    TEST_ASSERT_EQUAL_UINT32(196613, h.id);
-    TEST_ASSERT_EQUAL_UINT16(5, nt_resource_slot_index(h));
-    TEST_ASSERT_EQUAL_UINT16(3, nt_resource_generation(h));
+void test_handles_are_stable_slot_indices(void) {
+    nt_hash64_t rid = nt_hash64_str("stable_resource");
+    nt_hash32_t pid = nt_hash32_str("stable_provider");
+    nt_resource_t first = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(1, first.id);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_MESH, 17));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(17, nt_resource_get(first));
+
+    nt_resource_unmount(pid);
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_is_ready(first));
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_resource_find(rid).id);
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_resource_request(rid, NT_ASSET_MESH).id);
+    nt_resource_t second = nt_resource_request(nt_hash64_str("different_resource"), NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(2, second.id);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_MESH, 29));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(29, nt_resource_get(first));
+    TEST_ASSERT_FALSE(nt_resource_is_ready(second));
+}
+
+void test_access_rejects_unallocated_slot_indices(void) {
+    nt_resource_t valid = nt_resource_request(nt_hash64_str("allocated_resource"), NT_ASSET_MESH);
+    const nt_resource_t invalid[] = {{0}, {.id = valid.id + 1U}, {.id = UINT32_MAX}};
+    for (uint32_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(invalid[i]));
+        TEST_ASSERT_FALSE(nt_resource_is_ready(invalid[i]));
+        TEST_ASSERT_EQUAL(NT_ASSET_STATE_FAILED, nt_resource_get_state(invalid[i]));
+        TEST_ASSERT_EQUAL_UINT8(0, nt_resource_get_asset_type(invalid[i]));
+        TEST_ASSERT_NULL(nt_resource_peek_user_data(invalid[i]));
+        uint32_t size = 123;
+        TEST_ASSERT_NULL(nt_resource_get_blob(invalid[i], &size));
+        TEST_ASSERT_EQUAL_UINT32(0, size);
+        size = 123;
+        TEST_ASSERT_NULL(nt_resource_get_meta(invalid[i], (nt_hash64_t){1}, &size));
+        TEST_ASSERT_EQUAL_UINT32(0, size);
+    }
 }
 
 /* ---- Parser tests ---- */
@@ -2929,7 +2964,7 @@ void test_peek_user_data_invalid_handle(void) {
     /* Invalid zero handle */
     TEST_ASSERT_NULL(nt_resource_peek_user_data((nt_resource_t){0}));
 
-    /* Request a resource to get a valid handle, then shutdown+reinit (stale generation) */
+    /* An allocated slot exposes its provider; an unallocated index has no aux data. */
     reset_resolve_state();
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
@@ -2948,11 +2983,7 @@ void test_peek_user_data_invalid_handle(void) {
     /* Handle is valid now */
     TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(h));
 
-    /* Shutdown + reinit: old handle becomes stale */
-    nt_resource_shutdown();
-    nt_resource_init(&s_desc);
-
-    TEST_ASSERT_NULL(nt_resource_peek_user_data(h));
+    TEST_ASSERT_NULL(nt_resource_peek_user_data((nt_resource_t){.id = h.id + 1U}));
 
     (void)remove("build/test_ud_invalid.ntpack");
 }
@@ -3488,9 +3519,10 @@ int main(void) {
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_double_init);
 
-    /* Handle encoding */
+    /* Resource handles */
     RUN_TEST(test_handle_invalid);
-    RUN_TEST(test_handle_encode_decode);
+    RUN_TEST(test_handles_are_stable_slot_indices);
+    RUN_TEST(test_access_rejects_unallocated_slot_indices);
 
     /* Parser rejection tests */
     RUN_TEST(test_parse_too_small);

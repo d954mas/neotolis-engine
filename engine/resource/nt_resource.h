@@ -23,6 +23,9 @@ _Static_assert(NT_RESOURCE_MAX_ASSETS > 0 && NT_RESOURCE_MAX_ASSETS <= UINT16_MA
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
 
+/* The slot map reserves two buckets per requested resource. */
+_Static_assert(NT_RESOURCE_MAX_SLOTS > 0 && NT_RESOURCE_MAX_SLOTS <= UINT32_MAX / 2U, "NT_RESOURCE_MAX_SLOTS must be in [1, UINT32_MAX / 2]");
+
 /* ---- Activation time budget (ms per nt_resource_step call) ---- */
 
 #ifndef NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS
@@ -40,19 +43,16 @@ typedef enum {
     NT_PACK_STATE_FAILED,      /* load failed (may retry) */
 } nt_pack_state_t;
 
-/* ---- Resource handle ---- */
+/* ---- Stable resource handle ----
+ * id is a slot index, valid from request until resource shutdown.
+ * Unmount/reload changes the provider, not this identity. Never retain handles
+ * across shutdown/init; indices may be assigned to different names after reinit. */
 
 typedef struct {
     uint32_t id;
 } nt_resource_t;
 
 #define NT_RESOURCE_INVALID ((nt_resource_t){0})
-
-/* ---- Handle encoding: lower 16 bits = slot index, upper 16 bits = generation ---- */
-
-static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_t)(r.id & 0xFFFF); }
-
-static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
 
 /* ---- Activator callback types ---- */
 
@@ -199,7 +199,7 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
 void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
 void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
-/* Borrowed current slot aux pointer. Returns NULL for invalid/stale handles or
+/* Borrowed current slot aux pointer. Returns NULL for invalid handles or
  * slots with no current aux data. Non-NULL is valid only until the next resource
  * resolve/cleanup that changes this slot, or shutdown. Resolve/cleanup callbacks
  * own mutation and freeing; caller must not free, mutate, or store it. */

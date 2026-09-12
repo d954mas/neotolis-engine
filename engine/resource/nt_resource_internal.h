@@ -120,7 +120,6 @@ typedef struct {
 typedef struct {
     uint64_t resource_id;         /* nt_hash64 value */
     uint32_t runtime_handle;      /* published winner's runtime handle (what game sees) */
-    uint16_t generation;          /* stale-handle detection; incremented on slot reuse */
     uint16_t resolve_asset_idx;   /* index into assets[] of published winner */
     uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
     uint8_t asset_type;           /* nt_asset_type_t */

@@ -70,15 +70,15 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     };
 }
 
-/* Only RESOLVED, non-tombstoned sprites have a page_resource. Handles must
- * match current bindings and stay live and unrebound until draw_list returns.
+/* Only RESOLVED, non-tombstoned sprites have a page_resource. Material and the
+ * currently published texture must stay live and unrebound until draw_list returns.
  * Store the returned token unchanged; separate draw_list calls form barriers. */
 static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_resource_t page_resource) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
-    uint32_t page_slot = nt_resource_slot_index(page_resource);
     NT_ASSERT(material_slot != 0);
-    NT_ASSERT(page_slot != 0);
-    return (material_slot << NT_POOL_SLOT_SHIFT) | page_slot;
+    NT_ASSERT(page_resource.id != 0);
+    uint32_t texture_slot = nt_pool_slot_index(nt_resource_get(page_resource));
+    return (material_slot << NT_POOL_SLOT_SHIFT) | texture_slot;
 }
 
 /* ---- Lifecycle ---- */
