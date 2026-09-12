@@ -54,20 +54,17 @@ static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_
 
 static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
 
-/* ---- Activator callback types ----
- * No callback may change resource lifecycle or registrations: init/shutdown/step,
- * mount/unmount/load/parse/register/unregister/invalidate, or activators/callbacks/
- * behavior flags. Reentrant mutations can invalidate traversal progress.
- *
- * For resource access, activate/deactivate and on_resolve/on_cleanup may use
- * callback args and explicitly callback-safe APIs, but must not request/get.
- * on_post_resolve fires after publication and may also request/find/get. */
+/* ---- Activator callback types ---- */
+
+/* Callbacks must not step or mutate resource lifecycle/registrations: traversal borrows registry state.
+ * Resource access uses callback arguments and explicitly callback-safe APIs, such as find.
+ * Only on_post_resolve may also request/get, after publication. */
 
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
-/* data may be NULL when the winner's pack blob is not resident
- * (placeholder, virtual pack, or evicted file-pack blob).
- * data pointer is only valid for the duration of this call — copy if needed. */
+/* Borrowed pack bytes; NULL for virtual winners or an evicted blob. Never free or mutate.
+ * Copy to retain unless PIN_BLOB is set; then keep the view only until this slot's next
+ * on_resolve/on_cleanup. See docs/spec/assets/resource.md for the pin lifecycle. */
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);

@@ -76,39 +76,12 @@ the `NT_IO_FS` path is compiled out, so `load_auto` resolves to `nt_http`.
 
 ## Loading progress
 
-Current `NtPackMeta`:
+The private `NtPackMeta` layout lives in
+[`nt_resource_internal.h`](../../../engine/resource/nt_resource_internal.h).
+It stores per-pack I/O progress (`bytes_received`, `bytes_total`), request linkage,
+retry state, blob residency, and the activation cursor described below.
 
-```c
-typedef struct {
-    uint32_t pack_id;    /* nt_hash32 value */
-    int16_t priority;    /* higher = wins on conflict */
-    uint8_t pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
-    uint8_t mounted;     /* 1 if slot occupied */
-    uint32_t mount_seq;  /* monotonic mount order tiebreak (runtime-only, not serialized) */
-    uint8_t pack_state;  /* nt_pack_state_t */
-    uint8_t blob_policy; /* NT_BLOB_KEEP or NT_BLOB_AUTO */
-    const uint8_t *blob; /* loaded pack bytes, may be NULL after eviction */
-    uint32_t blob_size;  /* original blob size */
-    uint8_t *meta_data;  /* resident metadata copy (survives blob eviction) */
-    uint32_t meta_size;
-    uint32_t meta_count;
-    uint32_t bytes_received; /* async progress */
-    uint32_t bytes_total;
-    uint32_t io_request_id;
-    uint8_t io_type;        /* NT_IO_NONE / NT_IO_FS (native only) / NT_IO_HTTP */
-    uint16_t attempt_count; /* retry state */
-    uint32_t retry_delay_ms;
-    uint32_t retry_time_ms;
-    uint32_t blob_last_access_ms;
-    uint32_t blob_ttl_ms;
-    uint32_t blob_pins; /* PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
-    uint8_t blob_evict_skip_logged; /* edge-trigger for the AUTO-as-KEEP one-shot log */
-    uint32_t activate_cursor; /* next registry index to inspect for this pack */
-    char load_path[256];
-} NtPackMeta;
-```
-
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` is the per-pack aggregate pin count that gates Phase-C eviction and unmount for zero-copy consumers — see [Resource System — blob pinning](resource.md) for the full lifecycle.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. `blob_pins` is the per-pack aggregate pin count that gates eviction for zero-copy consumers. Explicit unmount overrides pins and clears their borrowed views before freeing the blob — see [Resource System — blob pinning](resource.md#blob-pinning) for the full lifecycle.
 
 ## HTTP requests — nt_http contract
 
@@ -218,6 +191,12 @@ If `on_post_resolve` work creates new dependent slots (for example atlas page te
 ## Retry policy
 
 Normal load failures use 1-2 retries with exponential backoff. After retries fail: PackState = FAILED, log error, game code decides response (show error, retry later).
+
+**Known spec/code divergence:** the policy above is bounded, but `nt_resource_init`
+currently sets `retry_max_attempts = 0`, which means unlimited attempts.
+`nt_resource_set_retry_policy` can set a finite total attempt limit, including the
+initial attempt; `1` disables retries. The default policy still needs a separate
+decision; callers needing bounded retries must configure that limit explicitly.
 
 Aux-miss reloads (target winner requires aux data but its blob was evicted) reuse the same I/O path, but schedule an immediate retry on the next `resource_step()` instead of waiting for backoff.
 

@@ -765,8 +765,8 @@ void nt_resource_step(void) {
             }
             // #region blob-pin evict gate — a pinned blob is held as KEEP + timer-frozen
             if (pack->blob_pins > 0) {
-                /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
-                 * blob and never bump last-access, so freeze the TTL clock: pins->0 starts a fresh grace. */
+                /* Zero-copy reads do not update last-access. Refresh it while pinned so
+                 * dropping the last pin starts a fresh TTL grace period. */
                 pack->blob_last_access_ms = now_ms;
                 if (!pack->blob_evict_skip_logged) {
                     NT_LOG_WARN("blob pack %u pinned (pins=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
@@ -918,7 +918,7 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     /* Sever every zero-copy provider viewing this pack's blob BEFORE the free, else a font read before
      * the next resolve pass dereferences freed memory. Drop only user_data; the resolve pass handles
-     * winner-loss. AUX_BACKED providers copy data OUT (survive the free), so must NOT be severed here. */
+     * winner-loss. Copy-out providers without PIN_BLOB survive the free and stay intact here. */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         if (slot->resource_id == 0 || slot->user_data == NULL || slot->resolve_asset_idx >= s_resource.asset_hwm) {
