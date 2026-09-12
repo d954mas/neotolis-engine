@@ -259,15 +259,11 @@ static void resource_resolve_pass(void) {
             continue;
         }
         NtResolveTemp *tmp = &resolve_temp[si];
-        tmp->candidate_runtime_handle = 0;
         tmp->target_prio = INT16_MIN;
         tmp->candidate_prio = INT16_MIN;
-        tmp->target_seq = 0;
-        tmp->candidate_seq = 0;
         tmp->target_asset_idx = UINT16_MAX;
         tmp->candidate_asset_idx = UINT16_MAX;
         tmp->scan_state = NT_ASSET_STATE_REGISTERED;
-        tmp->post_resolve_pending = 0;
     }
 
     /* D.2: Single pass over assets -- O(A) via slot_map lookup */
@@ -391,17 +387,17 @@ static void resource_resolve_pass(void) {
             }
         }
 
-        if (next_has_real_winner && entry->on_resolve != NULL && (next_changed || needs_aux_sync)) {
-            const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
-            uint32_t size = 0;
-            const uint8_t *data = asset_data_ptr(winner, &size);
-            entry->on_resolve(data, size, next_handle, &slot->user_data);
-            tmp->post_resolve_pending = 1;
-            if (aux_backed) {
-                NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
-                slot->user_data_asset_idx = next_asset_idx;
+        if (next_has_real_winner && (next_changed || needs_aux_sync)) {
+            if (entry->on_resolve != NULL) {
+                const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
+                uint32_t size = 0;
+                const uint8_t *data = asset_data_ptr(winner, &size);
+                entry->on_resolve(data, size, next_handle, &slot->user_data);
+                if (aux_backed) {
+                    NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
+                    slot->user_data_asset_idx = next_asset_idx;
+                }
             }
-        } else if (next_has_real_winner && (next_changed || needs_aux_sync)) {
             tmp->post_resolve_pending = 1;
         }
 
