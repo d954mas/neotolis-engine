@@ -689,7 +689,7 @@ void nt_resource_step(void) {
                 continue; /* blob evicted */
             }
 
-            for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+            for (uint32_t ai = pack->activate_cursor; ai < s_resource.asset_hwm; ai++) {
                 NtAssetMeta *meta = &s_resource.assets[ai];
                 if (meta->resource_id == 0) {
                     continue;
@@ -714,6 +714,7 @@ void nt_resource_step(void) {
                 if (activated_any && budget_ms > 0.0F) {
                     double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
                     if (elapsed_ms >= (double)budget_ms) {
+                        pack->activate_cursor = ai;
                         goto budget_exhausted;
                     }
                 }
@@ -733,6 +734,7 @@ void nt_resource_step(void) {
                 activated_count++;
 #endif
             }
+            pack->activate_cursor = s_resource.asset_hwm;
         }
     budget_exhausted:;
 #if NT_RESOURCE_TIMING_ENABLED
@@ -1629,10 +1631,16 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 
 /* ---- Activator registration ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate) {
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT((s_resource.activators[asset_type].activate == NULL || s_resource.activators[asset_type].activate == activate) && "activator already registered");
     NT_ASSERT((s_resource.activators[asset_type].deactivate == NULL || s_resource.activators[asset_type].deactivate == deactivate) && "deactivator already registered");
+    if (s_resource.activators[asset_type].activate == NULL && activate != NULL) {
+        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+            s_resource.packs[pi].activate_cursor = 0;
+        }
+    }
     s_resource.activators[asset_type].activate = activate;
     s_resource.activators[asset_type].deactivate = deactivate;
 }
@@ -1708,6 +1716,7 @@ void nt_resource_invalidate(uint8_t asset_type) {
                 s_resource.activators[atype].deactivate(meta->runtime_handle);
             }
         }
+        s_resource.packs[meta->pack_index].activate_cursor = 0;
         meta->state = NT_ASSET_STATE_REGISTERED;
         meta->runtime_handle = 0;
     }
@@ -1808,6 +1817,7 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == pack_index) {
             NtAssetMeta *owner = &s_resource.assets[s_resource.assets[i].owner_asset];
+            s_resource.packs[owner->pack_index].activate_cursor = 0;
             owner->state = state;
             owner->runtime_handle = runtime_handle;
             s_resource.needs_resolve = true;

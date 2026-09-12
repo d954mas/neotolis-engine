@@ -127,6 +127,19 @@ For aux-backed asset types, "usable now" means one of two things:
 
 If a higher-priority target winner is not yet publishable, the slot keeps the best lower-priority usable fallback published. If no usable fallback exists, the slot reports `LOADING` until publication can complete. `nt_resource_get_state()` and `nt_resource_is_ready()` always report the published state, not the raw target winner state.
 
+### Resource callback contract
+
+Activate/deactivate, resolve/cleanup and post-resolve callbacks must not change
+resource lifecycle or registrations: init/shutdown/step, mount/unmount/load/parse,
+register/unregister, invalidate, or activators/callbacks/behavior flags. A change
+to activation eligibility could rewind a cursor that the active traversal then
+overwrites with its own progress.
+
+For resource access, callbacks may use their arguments and APIs explicitly marked
+callback-safe, such as `nt_resource_find`. Only post-resolve may additionally
+request slots and use get-style accessors after publication. Calls into other
+engine modules follow those modules' own contracts.
+
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
 Per-asset-type callbacks for auxiliary data that persists across pack stacking. Registered separately from activate/deactivate — asset types that don't use them pay nothing.
@@ -155,7 +168,7 @@ Behavior flags:
 
 **on_cleanup** fires when a slot loses its published real winner (no publishable real candidate remains) and during shutdown for remaining non-NULL user_data. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
 
-**on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors, but must not recurse into `mount` / `unmount` / `step` / `load` / `parse`. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
+**on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors under the callback contract above. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
 
 Publication change detection uses three pieces of state: published asset identity (`resolve_asset_idx`), published `runtime_handle`, and aux synchronization (`user_data_asset_idx`). Placeholder substitution does not trigger `on_resolve` — placeholders are visual fallbacks, not real winners.
 

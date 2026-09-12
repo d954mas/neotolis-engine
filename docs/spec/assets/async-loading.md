@@ -103,6 +103,7 @@ typedef struct {
     uint32_t blob_ttl_ms;
     uint32_t blob_pins; /* PIN_BLOB aggregate — published winners pinning this blob (O(1) Phase-C gate) */
     uint8_t blob_evict_skip_logged; /* edge-trigger for the AUTO-as-KEEP one-shot log */
+    uint32_t activate_cursor; /* next registry index to inspect for this pack */
     char load_path[256];
 } NtPackMeta;
 ```
@@ -198,6 +199,17 @@ activation attempts and read owner state directly, regardless of which names
 the game requested. BLOB owners become READY during parse. Success and failure
 both dirty resolve. Failed activation requires explicit type invalidation or
 unmount/remount to retry; restoring evicted bytes alone does not reset its state.
+
+Each pack retains an activation cursor into the asset registry. A budget stop
+leaves it on the eligible owner not yet attempted; a completed scan leaves it at
+the current asset high-water mark. Subsequent steps skip that completed prefix.
+Invalidating file owners rewinds their packs, and registering a previously absent
+activator rewinds all packs so skipped types become eligible. A new mount starts
+at zero. Restoring an evicted blob preserves the cursor because it preserves asset
+states. Growing the global registry may make completed packs scan its new suffix
+once; a stable idle registry needs only the bounded pack walk, not asset scans.
+Cursor movement alone does not dirty resolve or change the publication epoch.
+Callbacks follow the [resource callback contract](resource.md#resource-callback-contract).
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

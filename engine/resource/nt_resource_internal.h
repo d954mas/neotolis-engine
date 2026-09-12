@@ -106,7 +106,8 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_pins; /* published PIN_BLOB winners pinning this pack's blob; rebuilt from winners each resolve pass, gates Phase-C eviction */
+    uint32_t blob_pins;       /* published PIN_BLOB winners pinning this pack's blob; rebuilt from winners each resolve pass, gates Phase-C eviction */
+    uint32_t activate_cursor; /* no activation-eligible owner lies below this registry index */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
 } NtPackMeta;

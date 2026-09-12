@@ -17,7 +17,9 @@ static uint32_t s_reads;
 static NtPackHeader s_pack;
 static const nt_hash32_t s_id = {1};
 static uint8_t s_blob[160];
+static uint8_t s_other_blob[160];
 static uint32_t s_activations;
+static uint8_t s_activation_order[8];
 static double s_activation_seconds;
 static const char *const s_path_a = "test_resource_timing_a.ntpack";
 static const char *const s_path_b = "test_resource_timing_b.ntpack";
@@ -48,8 +50,26 @@ static void write_pack(const char *path, const void *data, uint32_t size) {
     TEST_ASSERT_EQUAL_INT(0, closed);
 }
 
+static void parse_other_pack(void) {
+    memcpy(s_other_blob, s_blob, sizeof s_other_blob);
+    NtPackHeader *header = (NtPackHeader *)s_other_blob;
+    NtAssetEntry *entries = (NtAssetEntry *)(s_other_blob + sizeof *header);
+    for (uint32_t i = 0; i < header->asset_count; ++i) {
+        entries[i].resource_id += 100;
+    }
+    NtMetaEntryHeader *meta = (NtMetaEntryHeader *)(s_other_blob + header->meta_offset);
+    meta->resource_id += 100;
+    s_other_blob[104] = 3;
+    s_other_blob[120] = 4;
+    header->checksum = nt_crc32(s_other_blob + header->header_size, header->total_size - header->header_size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){2}, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){2}, s_other_blob, sizeof s_other_blob));
+}
+
 static uint32_t activate(const uint8_t *data, uint32_t size) {
     TEST_ASSERT_EQUAL_UINT32(16, size);
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof s_activation_order, s_activations);
+    s_activation_order[s_activations] = data[0];
     ++s_activations;
     s_seconds += s_activation_seconds;
     return 100U + data[0];
@@ -76,6 +96,7 @@ void setUp(void) {
     s_tick = 0.125;
     s_reads = 0;
     s_activations = 0;
+    memset(s_activation_order, 0, sizeof s_activation_order);
     s_activation_seconds = 0.0;
     (void)remove(s_path_a);
     (void)remove(s_path_b);
@@ -230,6 +251,90 @@ static void test_multiple_parses_keep_last_result_not_sum(void) {
     assert_parse(125, 0);
 }
 
+static void test_budget_resumes_in_pack_then_asset_order(void) {
+    s_tick = 0.0;
+    s_activation_seconds = 0.25;
+    nt_resource_set_activate_time_budget(125.0F);
+    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
+    parse_other_pack();
+    nt_resource_t last = nt_resource_request((nt_hash64_t){203}, NT_ASSET_MESH);
+    for (uint32_t step = 1; step <= 4; ++step) {
+        nt_resource_step();
+        TEST_ASSERT_EQUAL_UINT32(step, s_activations);
+        TEST_ASSERT_EQUAL(step == 4, nt_resource_is_ready(last));
+    }
+    const uint8_t expected[] = {1, 2, 3, 4};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, s_activation_order, sizeof expected);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(4, s_activations);
+}
+
+static void test_invalidate_revisits_owner_before_budget_resume(void) {
+    s_tick = 0.0;
+    s_activation_seconds = 0.25;
+    nt_resource_set_activate_time_budget(125.0F);
+    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(1, s_activations);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
+    TEST_ASSERT_FALSE(nt_resource_is_ready(last));
+    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(2, s_activations);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(alias));
+    TEST_ASSERT_FALSE(nt_resource_is_ready(last));
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(last));
+    TEST_ASSERT_EQUAL_UINT32(3, s_activations);
+    const uint8_t expected[] = {1, 1, 2};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, s_activation_order, sizeof expected);
+}
+
+static void test_remount_during_budget_reuses_holes_in_registry_order(void) {
+    s_tick = 0.0;
+    s_activation_seconds = 0.25;
+    nt_resource_set_activate_time_budget(125.0F);
+    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
+    parse_other_pack();
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(1, s_activations);
+    nt_resource_unmount(s_id);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(s_id, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(2, s_activations);
+    TEST_ASSERT_FALSE(nt_resource_is_ready(alias));
+    for (uint32_t step = 3; step <= 5; ++step) {
+        nt_resource_step();
+        TEST_ASSERT_EQUAL_UINT32(step, s_activations);
+    }
+    const uint8_t expected[] = {1, 2, 1, 3, 4};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, s_activation_order, sizeof expected);
+    TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(alias));
+}
+
+static void test_alias_state_helper_reactivates_completed_owner(void) {
+    s_tick = 0.0;
+    nt_resource_set_activate_time_budget(0.0F);
+    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(2, s_activations);
+    nt_resource_test_set_asset_state((nt_hash64_t){102}, 0, NT_ASSET_STATE_REGISTERED, 0);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(3, s_activations);
+    TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(alias));
+    const uint8_t expected[] = {1, 2, 1};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, s_activation_order, sizeof expected);
+}
+
 static void test_resident_bytes_eviction_reload_and_unmount(void) {
     const nt_hash32_t other = {2};
     assert_bytes(0, 0);
@@ -292,6 +397,10 @@ int main(void) {
     RUN_TEST(test_crc_and_entry_failures_publish_completed_parse);
     RUN_TEST(test_idle_steps_refresh_step_and_preserve_parse);
     RUN_TEST(test_budget_dedup_and_resolve_keep_their_phase_boundaries);
+    RUN_TEST(test_budget_resumes_in_pack_then_asset_order);
+    RUN_TEST(test_invalidate_revisits_owner_before_budget_resume);
+    RUN_TEST(test_remount_during_budget_reuses_holes_in_registry_order);
+    RUN_TEST(test_alias_state_helper_reactivates_completed_owner);
     RUN_TEST(test_multiple_parses_keep_last_result_not_sum);
     RUN_TEST(test_resident_bytes_eviction_reload_and_unmount);
     RUN_TEST(test_retry_waits_until_deadline);
