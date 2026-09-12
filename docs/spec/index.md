@@ -23,7 +23,7 @@ transforms, loads runtime assets from NTPACK packs asynchronously, and provides 
 WebGL 2 render backend and input/platform services (audio is planned). Data flows
 through a small set of composable modules: entities own hierarchy, per-kind
 components hold render state, thin render items are sorted and batched by
-game-chosen policy, and generational handles resolve resources published from
+game-chosen policy, and stable resource indices resolve resources published from
 priority-stacked packs.
 
 The builder is a separate native binary that does the heavy work offline: it imports

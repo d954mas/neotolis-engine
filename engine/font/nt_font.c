@@ -1624,9 +1624,9 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     /* Fonts are zero-copy consumers — a no-op activator marks the slot READY,
      * on_resolve/on_cleanup manage the {blob,size} view, and PIN_BLOB keeps the
      * winning pack blob resident so live glyph reads never dangle. */
-    nt_resource_set_activator(NT_ASSET_FONT, font_activate, font_deactivate);
-    nt_resource_set_resolve_callbacks(NT_ASSET_FONT, font_on_resolve, font_on_cleanup);
-    nt_resource_set_behavior_flags(NT_ASSET_FONT, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    nt_resource_register_type(
+        NT_ASSET_FONT, &(nt_resource_type_desc_t){
+                           .activate = font_activate, .deactivate = font_deactivate, .on_resolve = font_on_resolve, .on_cleanup = font_on_cleanup, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
 
     s_font.last_resolve_epoch = 0;
     s_font.initialized = true;

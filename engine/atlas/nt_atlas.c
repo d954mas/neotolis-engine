@@ -631,10 +631,12 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
 // #region public api
 nt_result_t nt_atlas_init(void) {
     NT_ASSERT(!s_atlas.initialized && "nt_atlas_init called twice");
-    nt_resource_set_activator(NT_ASSET_ATLAS, atlas_activate, atlas_deactivate);
-    nt_resource_set_resolve_callbacks(NT_ASSET_ATLAS, atlas_on_resolve, atlas_on_cleanup);
-    nt_resource_set_post_resolve_callback(NT_ASSET_ATLAS, atlas_on_post_resolve);
-    nt_resource_set_behavior_flags(NT_ASSET_ATLAS, NT_RESOURCE_BEHAVIOR_AUX_BACKED);
+    nt_resource_register_type(NT_ASSET_ATLAS, &(nt_resource_type_desc_t){.activate = atlas_activate,
+                                                                         .deactivate = atlas_deactivate,
+                                                                         .on_resolve = atlas_on_resolve,
+                                                                         .on_cleanup = atlas_on_cleanup,
+                                                                         .on_post_resolve = atlas_on_post_resolve,
+                                                                         .behavior_flags = NT_RESOURCE_BEHAVIOR_AUX_BACKED});
     s_atlas.initialized = true;
     return NT_OK;
 }

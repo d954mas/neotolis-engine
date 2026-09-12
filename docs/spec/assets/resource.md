@@ -1,7 +1,7 @@
 # Resource System
 
 Two-level resource registry: `NtAssetMeta` per pack asset, `NtResourceSlot` per
-requested resource_id, generational `nt_resource_t` handles, and priority-stacked
+requested resource_id, stable `nt_resource_t` indices, and priority-stacked
 packs with target/published winner resolve. Covers resolve callbacks, blob
 pinning (PIN_BLOB), virtual packs, asset types with the NT_ASSET_FONT and
 NT_ASSET_ATLAS binary formats, placeholder policy, and `nt_hash` identity hashing.
@@ -60,7 +60,7 @@ accounting.
 - `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
 - `NtResourceSlot`: per unique resource requested by game code — holds resolved handle and optional user_data
-- `nt_resource_t`: generational handle to a slot — what game code holds and passes around
+- `nt_resource_t`: stable 32-bit slot index — what game code holds and passes around
 
 Two-level system:
 - **Assets** (MAX_ASSETS): metadata from all packs. Same resource_id can appear in multiple packs.
@@ -76,9 +76,28 @@ For simple runtime-handle asset types (texture, mesh, blob), target and publishe
 
 `resource_id` is a `uint64_t` xxHash (XXH64) of the asset path, wrapped in `nt_hash64_t` for type safety. Game code obtains it via `nt_hash64_str("path")`. The `nt_hash` module provides centralized hashing for both builder and runtime. The registry uses resource_id to match assets across packs and resolve priority.
 
-## Generational handles
+## Stable resource handles
 
-Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data. `nt_resource_get()` returns the currently published winner handle. `nt_resource_is_ready()` means "published winner is fully usable", not merely "some runtime handle exists somewhere in the stack."
+`nt_resource_t.id` is a `uint32_t` slot index; zero is invalid. The first request
+of a nonzero resource_id allocates a slot, and repeated request/find calls return
+that same index through unmount, provider changes, reload and remount. Find never
+allocates. Requested slots are never recycled until resource shutdown: there is
+no generation or free queue. After shutdown all handles are invalid; the game
+requests fresh handles after reinit. Equal numbers across registry lifetimes do
+not imply the same resource. Asset records and GPU/material/entity pools retain
+their independent reuse rules and generations where applicable.
+
+`NT_RESOURCE_MAX_SLOTS` (default 2048) counts all unique names requested during
+the registry lifetime, including dependent requests from post-resolve callbacks.
+It is a preallocated capacity; exhausting it asserts. Slot-map indices, counts
+and allocated-prefix scans use uint32_t. The compile-time range is
+`1..UINT32_MAX / 2` because the map has two buckets per slot; actual arrays must
+also fit the target address space. Unmount frees asset records, not requested slots.
+
+Accessors reject zero and unallocated indices with their documented empty results.
+`nt_resource_get()` returns the current published runtime handle.
+`nt_resource_is_ready()` means the published winner is fully usable, not merely
+that a runtime handle exists somewhere in the stack.
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
@@ -91,6 +110,12 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 `NT_BLOB_AUTO` eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
+
+AUTO never evicts bytes while the pack has pending activation. The existing
+activation cursor gates eviction until its scan completes; no owner scan or
+pending counter is needed. Every non-BLOB file type has an activator registered
+before mounting. READY/FAILED owners do not prevent eviction, and explicit
+unmount removes the pack even while activation is pending.
 
 ## Registry state split
 
@@ -105,8 +130,7 @@ mirror them here). The contract is the SPLIT, not the fields:
   Payload headers retain their own format versions. A BLOB's effective handle
   remains its named record index, including zero, rather than its owner's index.
 - **`NtResourceSlot`** — one persistent record per unique resource_id the game
-  asked for. Holds what the game currently sees (`runtime_handle`, `state`,
-  `generation` for stale-handle detection), the published winner's identity
+  asked for. Holds what the game currently sees (`runtime_handle`, `state`), the published winner's identity
   (`resolve_asset_idx`), and the `user_data` built by `on_resolve` with its
   source identity (`user_data_asset_idx`). Change detection compares these
   published fields before replacing them with the next winner.
@@ -131,7 +155,7 @@ If a higher-priority target winner is not yet publishable, the slot keeps the be
 
 Activate/deactivate, resolve/cleanup and post-resolve callbacks must not change
 resource lifecycle or registrations: init/shutdown/step, mount/unmount/load/parse,
-register/unregister, invalidate, or activators/callbacks/behavior flags. A change
+register/unregister, invalidate, or type registration. A change
 to activation eligibility could rewind a cursor that the active traversal then
 overwrites with its own progress.
 
@@ -140,18 +164,53 @@ callback-safe, such as `nt_resource_find`. Only post-resolve may additionally
 request slots and use get-style accessors after publication. Calls into other
 engine modules follow those modules' own contracts.
 
+### Startup type registration
+
+`nt_resource_register_type(type, desc)` copies one complete `nt_resource_type_desc_t`
+into the registry's type table. The descriptor pointer is borrowed only for the
+call. Its fields are `activate`, `deactivate`, `on_resolve`, `on_cleanup`,
+`on_post_resolve` and `behavior_flags`.
+
+Register each type once after resource init and before the first successful
+file or virtual mount. That first mount closes type registration until resource
+shutdown/init, even if every pack is later unmounted. Repeated registration
+asserts, including an identical description. No replace, freeze or finalize API
+exists; parsing and publication do not change type descriptions.
+
+Font and atlas init register their descriptions, and the game registers the gfx
+activators it uses. Complete those module initializations before mounting packs.
+Simple virtual providers use the empty default without explicit registration.
+BLOB readiness is built in and needs no activator. Other file asset types require
+a configured activator: missing one is a configuration error asserted during
+parse, before any asset records or blob ownership change. Unknown manifest types
+are malformed input and reject the pack through the recoverable parse error.
+
+Registration requires an initialized registry, a valid type-table index, a non-NULL
+descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
+requires both. Validation precedes registration, so an invalid description leaves
+the type available for a valid first registration. PIN_BLOB is incompatible with
+virtual assets: registering a virtual provider for a PIN type asserts before
+mutation. Callbacks and flags stay together for the registry lifetime.
+
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
-Per-asset-type callbacks for auxiliary data that persists across pack stacking. Registered separately from activate/deactivate — asset types that don't use them pay nothing.
+Per-type callbacks manage auxiliary data across pack stacking. Types register
+them with their activator and behavior flags in the same description; unused
+callbacks are NULL.
 
 ```c
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
 
-nt_resource_set_resolve_callbacks(asset_type, on_resolve, on_cleanup);
-nt_resource_set_post_resolve_callback(asset_type, on_post_resolve);
-nt_resource_set_behavior_flags(asset_type, flags);
+nt_resource_register_type(asset_type, &(nt_resource_type_desc_t){
+    .activate = activate,
+    .deactivate = deactivate,
+    .on_resolve = on_resolve,
+    .on_cleanup = on_cleanup,
+    .on_post_resolve = on_post_resolve,
+    .behavior_flags = flags,
+});
 const void *nt_resource_peek_user_data(handle);
 ```
 
@@ -202,6 +261,10 @@ Two consumption models exist for asset types that derive state from pack bytes:
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 
 ## GPU context loss recovery
+
+`nt_resource_invalidate(NT_ASSET_BLOB)` asserts before any registry mutation.
+Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
+preserves BLOB owner/alias readiness and resident payloads.
 
 `nt_gfx_begin_frame()` detects a restored context and sets
 `g_nt_gfx.context_restored` for that frame. Resource readiness, resolved runtime

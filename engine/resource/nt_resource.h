@@ -23,6 +23,9 @@ _Static_assert(NT_RESOURCE_MAX_ASSETS > 0 && NT_RESOURCE_MAX_ASSETS <= UINT16_MA
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
 
+/* The slot map reserves two buckets per requested resource. */
+_Static_assert(NT_RESOURCE_MAX_SLOTS > 0 && NT_RESOURCE_MAX_SLOTS <= UINT32_MAX / 2U, "NT_RESOURCE_MAX_SLOTS must be in [1, UINT32_MAX / 2]");
+
 /* ---- Activation time budget (ms per nt_resource_step call) ---- */
 
 #ifndef NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS
@@ -40,19 +43,16 @@ typedef enum {
     NT_PACK_STATE_FAILED,      /* load failed (may retry) */
 } nt_pack_state_t;
 
-/* ---- Resource handle ---- */
+/* ---- Stable resource handle ----
+ * id is a slot index, valid from request until resource shutdown.
+ * Unmount/reload changes the provider, not this identity. Never retain handles
+ * across shutdown/init; indices may be assigned to different names after reinit. */
 
 typedef struct {
     uint32_t id;
 } nt_resource_t;
 
 #define NT_RESOURCE_INVALID ((nt_resource_t){0})
-
-/* ---- Handle encoding: lower 16 bits = slot index, upper 16 bits = generation ---- */
-
-static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_t)(r.id & 0xFFFF); }
-
-static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
 
 /* ---- Activator callback types ---- */
 
@@ -87,6 +87,22 @@ typedef enum {
      * aggregate NtPackMeta.blob_pins), rebuilt from the published winners each resolve pass. */
     NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
 } nt_resource_behavior_t;
+
+typedef struct {
+    nt_activate_fn activate;
+    nt_deactivate_fn deactivate;
+    nt_resolve_fn on_resolve;
+    nt_cleanup_fn on_cleanup;
+    nt_post_resolve_fn on_post_resolve;
+    uint8_t behavior_flags;
+} nt_resource_type_desc_t;
+
+/* Copies the complete desc; its pointer is required and borrowed only during this call.
+ * Register each type once, before the first successful file or virtual mount.
+ * Repeated or later
+ * registration asserts until resource shutdown/init.
+ * AUX_BACKED requires resolve + cleanup. Simple virtual providers and BLOB need no registration. */
+void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
 /* ---- Descriptor ---- */
 
@@ -129,8 +145,13 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 /* ---- Pack parsing ---- */
 
 /* Requires a file mount not yet successfully parsed; repeat parses return NT_ERR_INVALID_ARG.
- * Without resource-managed I/O, stores caller-owned blob without copying or freeing it;
- * keep it valid and unchanged until unmount/shutdown. Remount to replace parsed data. */
+ * Unknown manifest types reject the pack.
+ * Non-BLOB types require an activator registered before
+ * mounting.
+ * Missing activators assert before records or blob ownership change.
+ * Without resource-managed I/O, borrows the blob until unmount/shutdown.
+ * Keep borrowed bytes valid and unchanged.
+ * Remount to replace parsed data. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
@@ -147,7 +168,7 @@ uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 /* Returns the asset type (NT_ASSET_*) the slot was created for. Returns 0
- * for invalid or stale handles. Useful for runtime type checks at API
+ * for invalid handles. Useful for runtime type checks at API
  * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
 uint8_t nt_resource_get_asset_type(nt_resource_t handle);
 /* Advances only during resolve when a published winner, state or auxiliary payload changes.
@@ -173,7 +194,9 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
  * handle value but does not own/destroy the runtime object; virtual unregister/unmount
  * never call the asset deactivator. Resolve cleanup callbacks may still release
  * per-slot user_data. Register/unregister require a nonzero resource_id.
- * Unregister is virtual-only; file assets are removed by whole-pack unmount. */
+ * A PIN_BLOB type rejects virtual providers before mutation.
+ * Unregister is virtual-only; file assets are removed by
+ * whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);
@@ -193,13 +216,7 @@ nt_result_t nt_resource_load_auto(nt_hash32_t pack_id, const char *path);
 nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id);
 void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total);
 
-/* ---- Activator registration ---- */
-
-void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
-void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
-void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
-void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
-/* Borrowed current slot aux pointer. Returns NULL for invalid/stale handles or
+/* Borrowed current slot aux pointer. Returns NULL for invalid handles or
  * slots with no current aux data. Non-NULL is valid only until the next resource
  * resolve/cleanup that changes this slot, or shutdown. Resolve/cleanup callbacks
  * own mutation and freeing; caller must not free, mutate, or store it. */
@@ -222,8 +239,10 @@ void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t t
 
 /* ---- Context loss recovery ---- */
 
-/* Invalidates non-virtual assets of one type for later reactivation. On
- * context_restored, discard earlier render state and wait for a later resource_step. */
+/* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts:
+ * raw bytes have no activation to repeat. On
+ * context_restored, discard earlier render state and wait for a later
+ * resource_step. */
 void nt_resource_invalidate(uint8_t asset_type);
 
 /* ---- Debug: dump loaded pack contents to log ---- */
