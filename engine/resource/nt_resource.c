@@ -352,10 +352,6 @@ static void resource_resolve_pass(void) {
         const bool next_has_real_winner = tmp->candidate_asset_idx < s_resource.asset_hwm;
         const uint16_t next_asset_idx = tmp->candidate_asset_idx;
         const uint32_t next_handle = tmp->candidate_runtime_handle;
-        if (next_has_real_winner || next_handle != 0) {
-            /* Virtual publication fixes the default description even without explicit registration. */
-            s_resource.types[atype].fixed = true;
-        }
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->resolve_asset_idx || next_handle != slot->runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
@@ -683,13 +679,6 @@ void nt_resource_step(void) {
                 }
 
                 uint8_t atype = meta->asset_type;
-                if (atype >= NT_RESOURCE_MAX_ASSET_TYPES) {
-                    continue;
-                }
-                if (!s_resource.types[atype].desc.activate) {
-                    continue;
-                }
-
                 /* Check time budget (0 = unlimited).
                  * Guarantee at least 1 activation per step — prevents starvation. */
                 if (activated_any && budget_ms > 0.0F) {
@@ -762,16 +751,7 @@ void nt_resource_step(void) {
             pack->blob_evict_skip_logged = 0; /* no longer pinned — re-arm the one-shot */
             // #endregion
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
-                bool pending_activation = false;
-                for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
-                    const NtAssetMeta *asset = &s_resource.assets[ai];
-                    if (asset->resource_id != 0 && asset->pack_index == pi && asset->owner_asset == ai && asset->state == NT_ASSET_STATE_REGISTERED) {
-                        pending_activation = true;
-                        break;
-                    }
-                }
-                /* A completed cursor can still have skipped owners whose type is not registered. */
-                if (pending_activation) {
+                if (pack->activate_cursor < s_resource.asset_hwm) {
                     continue;
                 }
                 /* Only free blobs owned by resource system (loaded via I/O).
@@ -1041,6 +1021,10 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Reject the whole pack before reserving any slots. */
     for (uint32_t i = 0; i < h->asset_count; i++) {
         const NtAssetEntry *entry = &entries[i];
+        if (entry->asset_type < NT_ASSET_MESH || entry->asset_type > NT_ASSET_ATLAS) {
+            NT_LOG_ERROR("unsupported asset type");
+            goto parse_done;
+        }
         if (entry->offset < h->header_size || entry->size > blob_size || entry->offset > blob_size - entry->size) {
             NT_LOG_ERROR("entry data outside data region");
             goto parse_done;
@@ -1054,6 +1038,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             NT_LOG_ERROR("invalid alias owner");
             goto parse_done;
         }
+        NT_ASSERT(entry->asset_type == NT_ASSET_BLOB || s_resource.types[entry->asset_type].desc.activate != NULL);
     }
 
     NT_ASSERT(h->asset_count <= s_resource.free_asset_count);
@@ -1077,9 +1062,6 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
             .meta_offset = (entry->meta_offset != 0 && entry->meta_offset >= meta_section_start) ? entry->meta_offset - meta_section_start : NT_NO_METADATA,
             .state = (entry->asset_type == NT_ASSET_BLOB && entry->owner_entry == i) ? NT_ASSET_STATE_READY : NT_ASSET_STATE_REGISTERED,
         };
-        if (meta->state == NT_ASSET_STATE_READY) {
-            s_resource.types[NT_ASSET_BLOB].fixed = true;
-        }
     }
 
     /* Parse metadata section */
@@ -1565,29 +1547,16 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc) {
     NT_ASSERT(s_resource.initialized);
+    NT_ASSERT(s_resource.next_mount_seq == 1);
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(desc != NULL);
     NT_ASSERT((desc->behavior_flags & ~(NT_RESOURCE_BEHAVIOR_AUX_BACKED | NT_RESOURCE_BEHAVIOR_PIN_BLOB)) == 0);
     NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL);
     NT_ASSERT((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0 || (desc->on_resolve != NULL && desc->on_cleanup != NULL));
     NtResourceTypeEntry *entry = &s_resource.types[asset_type];
-    if (entry->fixed) {
-        NT_ASSERT(entry->desc.activate == desc->activate && entry->desc.deactivate == desc->deactivate && entry->desc.on_resolve == desc->on_resolve && entry->desc.on_cleanup == desc->on_cleanup &&
-                  entry->desc.on_post_resolve == desc->on_post_resolve && entry->desc.behavior_flags == desc->behavior_flags);
-        return;
-    }
-    if ((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-        for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-            NT_ASSERT(s_resource.assets[i].resource_id == 0 || s_resource.assets[i].asset_type != asset_type || s_resource.packs[s_resource.assets[i].pack_index].pack_type != NT_PACK_VIRTUAL);
-        }
-    }
+    NT_ASSERT(!entry->registered);
     entry->desc = *desc;
-    entry->fixed = true;
-    if (desc->activate != NULL) {
-        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
-            s_resource.packs[pi].activate_cursor = 0;
-        }
-    }
+    entry->registered = true;
 }
 
 /* ---- Activation time budget ---- */

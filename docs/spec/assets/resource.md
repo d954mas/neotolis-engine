@@ -111,10 +111,11 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
-AUTO never evicts bytes needed by live REGISTERED canonical owners, including
-owners awaiting first type registration. Only an otherwise eligible expired blob
-scans owners to check this. READY/FAILED owners do not prevent eviction, and
-explicit unmount removes the pack even while activation is pending.
+AUTO never evicts bytes while the pack has pending activation. The existing
+activation cursor gates eviction until its scan completes; no owner scan or
+pending counter is needed. Every non-BLOB file type has an activator registered
+before mounting. READY/FAILED owners do not prevent eviction, and explicit
+unmount removes the pack even while activation is pending.
 
 ## Registry state split
 
@@ -163,37 +164,33 @@ callback-safe, such as `nt_resource_find`. Only post-resolve may additionally
 request slots and use get-style accessors after publication. Calls into other
 engine modules follow those modules' own contracts.
 
-### Immutable type registration
+### Startup type registration
 
-`nt_resource_register_type(type, desc)` copies a complete `nt_resource_type_desc_t`
-into the registry's fixed type table. The descriptor pointer is borrowed only
-for the call. Its fields are `activate`, `deactivate`, `on_resolve`, `on_cleanup`,
-`on_post_resolve` and `behavior_flags`. Register the complete description before
-activation or publication; callbacks remain registered until resource shutdown.
-Font and atlas init register their complete descriptions. The game explicitly
-registers the gfx activators for the asset types it uses.
+`nt_resource_register_type(type, desc)` copies one complete `nt_resource_type_desc_t`
+into the registry's type table. The descriptor pointer is borrowed only for the
+call. Its fields are `activate`, `deactivate`, `on_resolve`, `on_cleanup`,
+`on_post_resolve` and `behavior_flags`.
 
-The description is fixed by registration, even before any assets exist. An
-identical description (field values, not pointer or padding equality) is a no-op.
-Any changed field asserts before mutation, including after every pack is
-unmounted or the consumer module is shut down. Only resource shutdown/init starts
-a new registration lifetime. No setters or replacement adapters exist.
+Register each type once after resource init and before the first successful
+file or virtual mount. That first mount closes type registration until resource
+shutdown/init, even if every pack is later unmounted. Repeated registration
+asserts, including an identical description. No replace, freeze or finalize API
+exists; parsing and publication do not change type descriptions.
 
-The first registration of a type with an activator may happen after file owners
-were parsed and skipped as REGISTERED. It rewinds the existing activation cursors;
-the next step can activate them. A description explicitly registered without an
-activator cannot later gain one. Simple virtual providers need no empty
-registration: their first publication fixes the zero description. Built-in BLOB
-owners similarly fix the current description when parse makes them READY without
-an activator. Register any callbacks for these types before that first use.
+Font and atlas init register their descriptions, and the game registers the gfx
+activators it uses. Complete those module initializations before mounting packs.
+Simple virtual providers use the empty default without explicit registration.
+BLOB readiness is built in and needs no activator. Other file asset types require
+a configured activator: missing one is a configuration error asserted during
+parse, before any asset records or blob ownership change. Unknown manifest types
+are malformed input and reject the pack through the recoverable parse error.
 
 Registration requires an initialized registry, a valid type-table index, a non-NULL
 descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
-requires both. Invalid descriptions assert before becoming fixed, so an attempted
-invalid registration does not prevent a subsequent valid first registration.
-PIN_BLOB is incompatible with virtual assets: both registering a virtual provider
-for a PIN type and first registering a PIN description with existing virtual
-providers assert before mutation. Flags cannot change independently of callbacks.
+requires both. Validation precedes registration, so an invalid description leaves
+the type available for a valid first registration. PIN_BLOB is incompatible with
+virtual assets: registering a virtual provider for a PIN type asserts before
+mutation. Callbacks and flags stay together for the registry lifetime.
 
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 

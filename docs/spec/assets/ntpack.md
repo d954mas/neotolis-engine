@@ -86,7 +86,10 @@ All asset byte ranges and ownership links are checked before any slots are
 reserved or records modified. Parsing requires a file mount; virtual packs
 accept registrations only. Invalid ranges, zero resource IDs or malformed
 owner links reject the pack through the existing recoverable parse error; a
-corrected pack can load into the same mount. Capacity exhaustion asserts.
+corrected pack can load into the same mount. Manifest types outside the defined
+`NT_ASSET_MESH..NT_ASSET_ATLAS` range also reject the pack. Every non-BLOB file
+type requires an activator configured before the first mount; missing one asserts
+before reserving records or retaining bytes. Capacity exhaustion asserts.
 
 Each mount accepts one successful parse, including an empty pack. A later parse
 returns `NT_ERR_INVALID_ARG` even after blob eviction: eviction preserves the

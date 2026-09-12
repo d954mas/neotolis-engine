@@ -166,7 +166,8 @@ rejection).
 
 **Eager with a time budget:** `nt_resource_step()` visits packs by registry index,
 then their canonical owners by asset index. Only READY packs with resident bytes
-and REGISTERED owners with an activator are eligible. At least one eligible
+and REGISTERED owners are eligible. Parsing requires an activator for every
+non-BLOB file type, configured before the first mount. At least one eligible
 activation is attempted per step; a zero budget is unlimited. Aliases consume no
 activation attempts and read owner state directly, regardless of which names
 the game requested. BLOB owners become READY during parse. Success and failure
@@ -176,25 +177,21 @@ unmount/remount to retry; restoring evicted bytes alone does not reset its state
 Each pack retains an activation cursor into the asset registry. A budget stop
 leaves it on the eligible owner not yet attempted; a completed scan leaves it at
 the current asset high-water mark. Subsequent steps skip that completed prefix.
-Invalidating file owners rewinds their packs, and first registering a complete
-type description with an activator rewinds all packs so skipped types become eligible.
-An identical repeated registration does not rewind anything. A new mount starts
-at zero. Restoring an evicted blob preserves the cursor because it preserves asset
-states. Growing the global registry may make completed packs scan its new suffix
-once. The activation phase of a stable idle registry needs only the bounded
-pack walk. Expired AUTO blobs can still scan owners before eviction, as below.
+Invalidating file owners rewinds their packs; a new mount starts at zero.
+Restoring an evicted blob preserves the cursor because it preserves asset states.
+Growing the global registry may make completed packs scan its new suffix once.
+The activation phase of a stable idle registry needs only the bounded pack walk.
 Cursor movement alone does not dirty resolve or change the publication epoch.
 Callbacks follow the [resource callback contract](resource.md#resource-callback-contract).
 
-Before evicting an expired, unpinned AUTO blob, scan its live canonical owners.
-Any REGISTERED owner retains the bytes, including owners skipped because their
-type has not yet been registered. A completed cursor means the scan completed,
-not that activation completed. First registration of the type can then resume
-activation without remounting or reloading. READY and FAILED owners do not by
-themselves hold the blob; normal TTL eviction resumes once no owners are waiting.
-Explicit unmount still removes a waiting pack. This uses existing owner state,
-with no pending counter: only would-be evictions incur the scan, exiting at the
-first pending owner. An expired pack waiting for a type can incur it each step.
+An expired, unpinned AUTO blob remains resident while its activation cursor is
+below the asset high-water mark. A budget stop leaves the cursor before the
+pending owner, so eviction cannot remove bytes needed on a later step. Types
+cannot gain activators after mounting, so a completed cursor cannot conceal
+owners waiting for late registration. READY and FAILED owners do not themselves
+hold the blob. The cursor check may conservatively retain a completed pack while
+other registry growth remains unscanned. Explicit unmount still removes a pack
+with pending activation. There is no additional owner scan or pending counter.
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

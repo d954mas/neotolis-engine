@@ -27,6 +27,7 @@ static void record_publication(const uint8_t *data, uint32_t size, nt_resource_t
 }
 
 static void test_slots_cross_16_bit_boundary_and_survive_unmount(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.on_post_resolve = record_publication});
     const nt_hash32_t pack = {1};
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pack, 0));
     for (uint32_t i = 1; i <= NT_RESOURCE_MAX_SLOTS; i++) {
@@ -43,12 +44,13 @@ static void test_slots_cross_16_bit_boundary_and_survive_unmount(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_RESOURCE_MAX_SLOTS, high.id);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){1}, NT_ASSET_MESH, 101));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){NT_RESOURCE_MAX_SLOTS}, NT_ASSET_MESH, 202));
-    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.on_post_resolve = record_publication});
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(high));
     TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(low));
     TEST_ASSERT_EQUAL_UINT32(202, nt_resource_get(high));
+#if NT_INTROSPECT_ENABLED
     TEST_ASSERT_EQUAL_UINT64(NT_RESOURCE_MAX_SLOTS, nt_resource_source_of(NT_ASSET_MESH, 202));
+#endif
     TEST_ASSERT_EQUAL_UINT32(2, s_published_count);
     TEST_ASSERT_EQUAL_UINT32(low.id, s_published[0]);
     TEST_ASSERT_EQUAL_UINT32(high.id, s_published[1]);

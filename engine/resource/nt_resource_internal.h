@@ -52,7 +52,7 @@ typedef enum {
 
 typedef struct {
     nt_resource_type_desc_t desc;
-    bool fixed;
+    bool registered;
 } NtResourceTypeEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */

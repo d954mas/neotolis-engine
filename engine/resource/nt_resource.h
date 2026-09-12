@@ -98,12 +98,10 @@ typedef struct {
 } nt_resource_type_desc_t;
 
 /* Copies the complete desc; its pointer is required and borrowed only during this call.
- * Identical repeats are no-ops. Replacements assert until resource shutdown, even after unmount.
- * AUX_BACKED
- * requires resolve + cleanup. First registration may enable waiting file owners.
- * Register before activation/publication: virtual publication or file BLOB readiness fixes
- * the current
- * description, including the implicit empty default. */
+ * Register each type once, before the first successful file or virtual mount.
+ * Repeated or later
+ * registration asserts until resource shutdown/init.
+ * AUX_BACKED requires resolve + cleanup. Simple virtual providers and BLOB need no registration. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
 /* ---- Descriptor ---- */
@@ -147,8 +145,13 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 /* ---- Pack parsing ---- */
 
 /* Requires a file mount not yet successfully parsed; repeat parses return NT_ERR_INVALID_ARG.
- * Without resource-managed I/O, stores caller-owned blob without copying or freeing it;
- * keep it valid and unchanged until unmount/shutdown. Remount to replace parsed data. */
+ * Unknown manifest types reject the pack.
+ * Non-BLOB types require an activator registered before
+ * mounting.
+ * Missing activators assert before records or blob ownership change.
+ * Without resource-managed I/O, borrows the blob until unmount/shutdown.
+ * Keep borrowed bytes valid and unchanged.
+ * Remount to replace parsed data. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
