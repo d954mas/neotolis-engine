@@ -106,14 +106,15 @@ mirror them here). The contract is the SPLIT, not the fields:
   remains its named record index, including zero, rather than its owner's index.
 - **`NtResourceSlot`** — one persistent record per unique resource_id the game
   asked for. Holds what the game currently sees (`runtime_handle`, `state`,
-  `generation` for stale-handle detection), the published winner's identity and
-  rank (`resolve_prio`/`resolve_seq`/`resolve_asset_idx`), the previous winner
-  for change detection, and the `user_data` built by `on_resolve`.
+  `generation` for stale-handle detection), the published winner's identity
+  (`resolve_asset_idx`), and the `user_data` built by `on_resolve` with its
+  source identity (`user_data_asset_idx`). Change detection compares these
+  published fields before replacing them with the next winner.
 - **`NtResolveTemp`** — per-slot scratch valid only inside one resolve pass, in
   a separate array so the persistent slot stays small (resolve runs only when
   `needs_resolve` is set). It carries the TARGET winner (best READY asset even
   if its blob is evicted) alongside the publishable CANDIDATE, plus the
-  callback-pending flags the pass consumes.
+  post-resolve callback flag the pass consumes.
 
 The resolve pass computes both the target winner and the published winner for each slot:
 - the target winner is purely priority/sequence-based over READY assets

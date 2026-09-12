@@ -257,11 +257,7 @@ static void resource_resolve_pass(void) {
         if (slot->resource_id == 0) {
             continue;
         }
-        slot->prev_resolve_asset_idx = slot->resolve_asset_idx;
-        slot->prev_runtime_handle = slot->runtime_handle;
-
         NtResolveTemp *tmp = &resolve_temp[si];
-        tmp->target_runtime_handle = 0;
         tmp->candidate_runtime_handle = 0;
         tmp->target_prio = INT16_MIN;
         tmp->candidate_prio = INT16_MIN;
@@ -270,7 +266,6 @@ static void resource_resolve_pass(void) {
         tmp->target_asset_idx = UINT16_MAX;
         tmp->candidate_asset_idx = UINT16_MAX;
         tmp->scan_state = NT_ASSET_STATE_REGISTERED;
-        tmp->resolve_pending = 0;
         tmp->post_resolve_pending = 0;
     }
 
@@ -314,7 +309,6 @@ static void resource_resolve_pass(void) {
 
         /* Target winner: highest-priority READY asset, even if it is not yet publishable. */
         if (prio > tmp->target_prio || (prio == tmp->target_prio && seq >= tmp->target_seq)) {
-            tmp->target_runtime_handle = runtime_handle;
             tmp->target_prio = prio;
             tmp->target_seq = seq;
             NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
@@ -374,7 +368,7 @@ static void resource_resolve_pass(void) {
         const bool next_has_real_winner = tmp->candidate_asset_idx < s_resource.asset_hwm;
         const uint16_t next_asset_idx = tmp->candidate_asset_idx;
         const uint32_t next_handle = tmp->candidate_runtime_handle;
-        const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
+        const bool next_changed = next_has_real_winner && (next_asset_idx != slot->resolve_asset_idx || next_handle != slot->runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
         // #region PIN_BLOB pin count — rebuilt from published winners (reset at top of resolve pass)
@@ -401,7 +395,6 @@ static void resource_resolve_pass(void) {
             uint32_t size = 0;
             const uint8_t *data = asset_data_ptr(winner, &size);
             entry->on_resolve(data, size, next_handle, &slot->user_data);
-            tmp->resolve_pending = 1;
             tmp->post_resolve_pending = 1;
             if (aux_backed) {
                 NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
@@ -430,8 +423,6 @@ static void resource_resolve_pass(void) {
 
         slot->resolve_asset_idx = next_has_real_winner ? next_asset_idx : UINT16_MAX;
         slot->runtime_handle = next_handle;
-        slot->resolve_prio = (int16_t)(next_has_real_winner ? tmp->candidate_prio : INT16_MIN);
-        slot->resolve_seq = next_has_real_winner ? tmp->candidate_seq : 0;
         slot->state = next_state;
 
         if (publication_changed) {
@@ -841,12 +832,8 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
 
     slot->resource_id = resource_id;
     slot->runtime_handle = 0;
-    slot->resolve_prio = INT16_MIN;
-    slot->resolve_seq = 0;
     slot->resolve_asset_idx = UINT16_MAX;
-    slot->prev_resolve_asset_idx = UINT16_MAX;
     slot->user_data_asset_idx = UINT16_MAX;
-    slot->prev_runtime_handle = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
     slot->user_data = NULL;

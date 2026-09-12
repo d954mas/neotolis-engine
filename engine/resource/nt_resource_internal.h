@@ -117,18 +117,14 @@ typedef struct {
  * One entry per unique resource_id requested by the game.
  * Tracks the currently published winner and auxiliary data. */
 typedef struct {
-    uint64_t resource_id;            /* nt_hash64 value */
-    uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
-    uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
-    int16_t resolve_prio;            /* priority of currently published winner */
-    uint32_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
-    uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
-    uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
-    uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
-    uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
-    uint8_t asset_type;              /* nt_asset_type_t */
-    uint8_t state;                   /* nt_asset_state_t visible to game code */
-    void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
+    uint64_t resource_id;         /* nt_hash64 value */
+    uint32_t runtime_handle;      /* published winner's runtime handle (what game sees) */
+    uint16_t generation;          /* stale-handle detection; incremented on slot reuse */
+    uint16_t resolve_asset_idx;   /* index into assets[] of published winner */
+    uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
+    uint8_t asset_type;           /* nt_asset_type_t */
+    uint8_t state;                /* nt_asset_state_t visible to game code */
+    void *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 
 /* Transient per-slot state — only valid during resource_resolve_pass().
@@ -136,7 +132,6 @@ typedef struct {
  * Heap-allocated per pass to keep NtResourceSlot small for
  * the common case (resolve runs only when needs_resolve is true). */
 typedef struct {
-    uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
     int16_t target_prio;               /* priority of target winner */
     int16_t candidate_prio;            /* priority of publishable candidate */
@@ -145,7 +140,6 @@ typedef struct {
     uint16_t target_asset_idx;         /* assets[] index of target winner */
     uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
     uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */
-    uint8_t resolve_pending;           /* on_resolve should fire for the published winner */
     uint8_t post_resolve_pending;      /* on_post_resolve should fire after the pass */
     uint8_t _pad;
 } NtResolveTemp;
