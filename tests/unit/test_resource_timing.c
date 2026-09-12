@@ -206,8 +206,7 @@ static void test_budget_dedup_and_resolve_keep_their_phase_boundaries(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
-    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, resolve, cleanup);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate, .on_resolve = resolve, .on_cleanup = cleanup});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_MESH);
     nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_MESH);
@@ -255,7 +254,7 @@ static void test_budget_resumes_in_pack_then_asset_order(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     parse_other_pack();
     nt_resource_t last = nt_resource_request((nt_hash64_t){203}, NT_ASSET_MESH);
@@ -274,7 +273,7 @@ static void test_invalidate_revisits_owner_before_budget_resume(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
     nt_resource_t last = nt_resource_request((nt_hash64_t){103}, NT_ASSET_MESH);
@@ -298,7 +297,7 @@ static void test_remount_during_budget_reuses_holes_in_registry_order(void) {
     s_tick = 0.0;
     s_activation_seconds = 0.25;
     nt_resource_set_activate_time_budget(125.0F);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     parse_other_pack();
     nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
@@ -322,7 +321,7 @@ static void test_remount_during_budget_reuses_holes_in_registry_order(void) {
 static void test_alias_state_helper_reactivates_completed_owner(void) {
     s_tick = 0.0;
     nt_resource_set_activate_time_budget(0.0F);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(s_id, s_blob, sizeof s_blob));
     nt_resource_t alias = nt_resource_request((nt_hash64_t){102}, NT_ASSET_MESH);
     nt_resource_step();
@@ -341,7 +340,7 @@ static void test_resident_bytes_eviction_reload_and_unmount(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(other, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(other, (const uint8_t *)&s_pack, sizeof s_pack));
     write_pack(s_path_a, s_blob, sizeof s_blob);
-    nt_resource_set_activator(NT_ASSET_MESH, activate, NULL);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = activate});
     nt_resource_set_activate_time_budget(0.0F);
     nt_resource_t first = nt_resource_request((nt_hash64_t){101}, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(s_id, s_path_a));

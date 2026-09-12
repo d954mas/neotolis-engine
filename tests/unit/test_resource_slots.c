@@ -43,7 +43,7 @@ static void test_slots_cross_16_bit_boundary_and_survive_unmount(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_RESOURCE_MAX_SLOTS, high.id);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){1}, NT_ASSET_MESH, 101));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){NT_RESOURCE_MAX_SLOTS}, NT_ASSET_MESH, 202));
-    nt_resource_set_post_resolve_callback(NT_ASSET_MESH, record_publication);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.on_post_resolve = record_publication});
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(high));
     TEST_ASSERT_EQUAL_UINT32(101, nt_resource_get(low));
@@ -94,7 +94,7 @@ static void test_post_resolve_allocates_last_slot(void) {
     for (uint32_t i = 1; i < NT_RESOURCE_MAX_SLOTS; i++) {
         nt_resource_request((nt_hash64_t){i}, NT_ASSET_MESH);
     }
-    nt_resource_set_post_resolve_callback(NT_ASSET_MESH, request_dependent_page);
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.on_post_resolve = request_dependent_page});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack((nt_hash32_t){1}, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register((nt_hash32_t){1}, (nt_hash64_t){1}, NT_ASSET_MESH, 101));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register((nt_hash32_t){1}, (nt_hash64_t){NT_RESOURCE_MAX_SLOTS}, NT_ASSET_MESH, 202));

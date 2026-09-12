@@ -176,8 +176,9 @@ unmount/remount to retry; restoring evicted bytes alone does not reset its state
 Each pack retains an activation cursor into the asset registry. A budget stop
 leaves it on the eligible owner not yet attempted; a completed scan leaves it at
 the current asset high-water mark. Subsequent steps skip that completed prefix.
-Invalidating file owners rewinds their packs, and registering a previously absent
-activator rewinds all packs so skipped types become eligible. A new mount starts
+Invalidating file owners rewinds their packs, and first registering a complete
+type description with an activator rewinds all packs so skipped types become eligible.
+An identical repeated registration does not rewind anything. A new mount starts
 at zero. Restoring an evicted blob preserves the cursor because it preserves asset
 states. Growing the global registry may make completed packs scan its new suffix
 once; a stable idle registry needs only the bounded pack walk, not asset scans.

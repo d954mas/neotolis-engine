@@ -149,7 +149,7 @@ If a higher-priority target winner is not yet publishable, the slot keeps the be
 
 Activate/deactivate, resolve/cleanup and post-resolve callbacks must not change
 resource lifecycle or registrations: init/shutdown/step, mount/unmount/load/parse,
-register/unregister, invalidate, or activators/callbacks/behavior flags. A change
+register/unregister, invalidate, or type registration. A change
 to activation eligibility could rewind a cursor that the active traversal then
 overwrites with its own progress.
 
@@ -158,18 +158,57 @@ callback-safe, such as `nt_resource_find`. Only post-resolve may additionally
 request slots and use get-style accessors after publication. Calls into other
 engine modules follow those modules' own contracts.
 
+### Immutable type registration
+
+`nt_resource_register_type(type, desc)` copies a complete `nt_resource_type_desc_t`
+into the registry's fixed type table. The descriptor pointer is borrowed only
+for the call. Its fields are `activate`, `deactivate`, `on_resolve`, `on_cleanup`,
+`on_post_resolve` and `behavior_flags`. Register the complete description before
+activation or publication; callbacks remain registered until resource shutdown.
+Font and atlas init register their complete descriptions. The game explicitly
+registers the gfx activators for the asset types it uses.
+
+The description is fixed by registration, even before any assets exist. An
+identical description (field values, not pointer or padding equality) is a no-op.
+Any changed field asserts before mutation, including after every pack is
+unmounted or the consumer module is shut down. Only resource shutdown/init starts
+a new registration lifetime. No setters or replacement adapters exist.
+
+The first registration of a type with an activator may happen after file owners
+were parsed and skipped as REGISTERED. It rewinds the existing activation cursors;
+the next step can activate them. A description explicitly registered without an
+activator cannot later gain one. Simple virtual providers need no empty
+registration: their first publication fixes the zero description. Built-in BLOB
+owners similarly fix the current description when parse makes them READY without
+an activator. Register any callbacks for these types before that first use.
+
+Registration requires an initialized registry, a valid type-table index, a non-NULL
+descriptor and known flag bits. `on_resolve` requires `on_cleanup`; AUX_BACKED
+requires both. Invalid descriptions assert before becoming fixed, so an attempted
+invalid registration does not prevent a subsequent valid first registration.
+PIN_BLOB is incompatible with virtual assets: both registering a virtual provider
+for a PIN type and first registering a PIN description with existing virtual
+providers assert before mutation. Flags cannot change independently of callbacks.
+
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
-Per-asset-type callbacks for auxiliary data that persists across pack stacking. Registered separately from activate/deactivate — asset types that don't use them pay nothing.
+Per-type callbacks manage auxiliary data across pack stacking. Types register
+them with their activator and behavior flags in the same description; unused
+callbacks are NULL.
 
 ```c
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
 
-nt_resource_set_resolve_callbacks(asset_type, on_resolve, on_cleanup);
-nt_resource_set_post_resolve_callback(asset_type, on_post_resolve);
-nt_resource_set_behavior_flags(asset_type, flags);
+nt_resource_register_type(asset_type, &(nt_resource_type_desc_t){
+    .activate = activate,
+    .deactivate = deactivate,
+    .on_resolve = on_resolve,
+    .on_cleanup = on_cleanup,
+    .on_post_resolve = on_post_resolve,
+    .behavior_flags = flags,
+});
 const void *nt_resource_peek_user_data(handle);
 ```
 
@@ -220,6 +259,10 @@ Two consumption models exist for asset types that derive state from pack bytes:
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 
 ## GPU context loss recovery
+
+`nt_resource_invalidate(NT_ASSET_BLOB)` asserts before any registry mutation.
+Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
+preserves BLOB owner/alias readiness and resident payloads.
 
 `nt_gfx_begin_frame()` detects a restored context and sets
 `g_nt_gfx.context_restored` for that frame. Resource readiness, resolved runtime

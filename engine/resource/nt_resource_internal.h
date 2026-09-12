@@ -51,13 +51,9 @@ typedef enum {
 #define NT_RESOURCE_MAX_ASSET_TYPES 8
 
 typedef struct {
-    nt_activate_fn activate;
-    nt_deactivate_fn deactivate;
-    nt_resolve_fn on_resolve;
-    nt_cleanup_fn on_cleanup;
-    nt_post_resolve_fn on_post_resolve;
-    uint8_t behavior_flags;
-} NtActivatorEntry;
+    nt_resource_type_desc_t desc;
+    bool fixed;
+} NtResourceTypeEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */
 

@@ -88,6 +88,25 @@ typedef enum {
     NT_RESOURCE_BEHAVIOR_PIN_BLOB = 1 << 1,
 } nt_resource_behavior_t;
 
+typedef struct {
+    nt_activate_fn activate;
+    nt_deactivate_fn deactivate;
+    nt_resolve_fn on_resolve;
+    nt_cleanup_fn on_cleanup;
+    nt_post_resolve_fn on_post_resolve;
+    uint8_t behavior_flags;
+} nt_resource_type_desc_t;
+
+/* Copies desc for this registry lifetime; desc is required and borrowed only for this call.
+ * Register the complete type before activation/publication. Identical repeats are no-ops;
+ * any
+ * replacement asserts, including after unmount. AUX_BACKED requires resolve + cleanup.
+ * First registration may enable file owners still waiting for activation. Virtual publication
+ * or file BLOB
+ * readiness fixes the default description if none was registered. Unmount and
+ * module shutdown never unlock a type; only resource shutdown ends its description's lifetime. */
+void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
+
 /* ---- Descriptor ---- */
 
 typedef struct {
@@ -173,7 +192,9 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
  * handle value but does not own/destroy the runtime object; virtual unregister/unmount
  * never call the asset deactivator. Resolve cleanup callbacks may still release
  * per-slot user_data. Register/unregister require a nonzero resource_id.
- * Unregister is virtual-only; file assets are removed by whole-pack unmount. */
+ * A PIN_BLOB type rejects virtual providers before mutation.
+ * Unregister is virtual-only; file assets are removed by
+ * whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);
@@ -193,12 +214,6 @@ nt_result_t nt_resource_load_auto(nt_hash32_t pack_id, const char *path);
 nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id);
 void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total);
 
-/* ---- Activator registration ---- */
-
-void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
-void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
-void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
-void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
 /* Borrowed current slot aux pointer. Returns NULL for invalid handles or
  * slots with no current aux data. Non-NULL is valid only until the next resource
  * resolve/cleanup that changes this slot, or shutdown. Resolve/cleanup callbacks
@@ -222,8 +237,10 @@ void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t t
 
 /* ---- Context loss recovery ---- */
 
-/* Invalidates non-virtual assets of one type for later reactivation. On
- * context_restored, discard earlier render state and wait for a later resource_step. */
+/* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts:
+ * raw bytes have no activation to repeat. On
+ * context_restored, discard earlier render state and wait for a later
+ * resource_step. */
 void nt_resource_invalidate(uint8_t asset_type);
 
 /* ---- Debug: dump loaded pack contents to log ---- */

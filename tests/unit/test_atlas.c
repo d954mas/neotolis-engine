@@ -1403,7 +1403,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     /* --- Resource system init --- */
     nt_resource_init(NULL);
     nt_atlas_init();
-    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_texture_activate, fake_texture_deactivate);
+    nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = fake_texture_activate, .deactivate = fake_texture_deactivate});
 
     /* Mount pack, parse, request */
     nt_hash32_t pid = nt_hash32_str("atlas_integ_pack");
