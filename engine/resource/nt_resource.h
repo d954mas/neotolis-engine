@@ -54,20 +54,17 @@ static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_
 
 static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
 
-/* ---- Activator callback types ----
- * on_resolve/on_cleanup fire during resolve iteration. They may use callback
- * args and APIs explicitly marked callback-safe, but must not request/get,
- * mount/unmount/step/load/parse resource state; on_post_resolve is the stable read seam.
- *
- * on_post_resolve fires after the resolve iteration finishes. It may call
- * request/find/get-style resource accessors, but must not recurse into
- * mount/unmount/step/load/parse. */
+/* ---- Activator callback types ---- */
+
+/* Callbacks must not step or mutate resource lifecycle/registrations: traversal borrows registry state.
+ * Resource access uses callback arguments and explicitly callback-safe APIs, such as find.
+ * Only on_post_resolve may also request/get, after publication. */
 
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
-/* data may be NULL when the winner's pack blob is not resident
- * (placeholder, virtual pack, or evicted file-pack blob).
- * data pointer is only valid for the duration of this call — copy if needed. */
+/* Borrowed pack bytes; NULL for virtual winners or an evicted blob. Never free or mutate.
+ * Copy to retain unless PIN_BLOB is set; then keep the view only until this slot's next
+ * on_resolve/on_cleanup. See docs/spec/assets/resource.md for the pin lifecycle. */
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
@@ -142,7 +139,7 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 
 /* Pure lookup — returns the handle for an already-registered resource, or
  * NT_RESOURCE_INVALID if no slot exists. Never allocates a new slot.
- * Safe to call inside on_resolve / on_cleanup callbacks. */
+ * Safe to call inside all resource callbacks. */
 nt_resource_t nt_resource_find(nt_hash64_t resource_id);
 
 uint32_t nt_resource_get(nt_resource_t handle);

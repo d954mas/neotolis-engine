@@ -34,7 +34,8 @@
 static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
-    NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1]; /* index 0 reserved */
+    NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1];       /* index 0 reserved */
+    NtResolveTemp resolve_temp[NT_RESOURCE_MAX_SLOTS + 1]; /* valid only during resource_resolve_pass */
     NtActivatorEntry activators[NT_RESOURCE_MAX_ASSET_TYPES];
     uint16_t free_assets[NT_RESOURCE_MAX_ASSETS];
     uint32_t free_asset_count;
@@ -243,8 +244,8 @@ static void schedule_pack_redownload_if_needed(NtPackMeta *pack) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resource_resolve_pass(void) {
-    NtResolveTemp *resolve_temp = (NtResolveTemp *)calloc(NT_RESOURCE_MAX_SLOTS + 1, sizeof(NtResolveTemp));
-    NT_ASSERT(resolve_temp);
+    NtResolveTemp *resolve_temp = s_resource.resolve_temp;
+    memset(resolve_temp, 0, sizeof(s_resource.resolve_temp));
 
     /* PIN_BLOB pin count is rebuilt from the published winners in D.4 below — clear it first. */
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
@@ -257,21 +258,12 @@ static void resource_resolve_pass(void) {
         if (slot->resource_id == 0) {
             continue;
         }
-        slot->prev_resolve_asset_idx = slot->resolve_asset_idx;
-        slot->prev_runtime_handle = slot->runtime_handle;
-
         NtResolveTemp *tmp = &resolve_temp[si];
-        tmp->target_runtime_handle = 0;
-        tmp->candidate_runtime_handle = 0;
         tmp->target_prio = INT16_MIN;
         tmp->candidate_prio = INT16_MIN;
-        tmp->target_seq = 0;
-        tmp->candidate_seq = 0;
         tmp->target_asset_idx = UINT16_MAX;
         tmp->candidate_asset_idx = UINT16_MAX;
         tmp->scan_state = NT_ASSET_STATE_REGISTERED;
-        tmp->resolve_pending = 0;
-        tmp->post_resolve_pending = 0;
     }
 
     /* D.2: Single pass over assets -- O(A) via slot_map lookup */
@@ -314,7 +306,6 @@ static void resource_resolve_pass(void) {
 
         /* Target winner: highest-priority READY asset, even if it is not yet publishable. */
         if (prio > tmp->target_prio || (prio == tmp->target_prio && seq >= tmp->target_seq)) {
-            tmp->target_runtime_handle = runtime_handle;
             tmp->target_prio = prio;
             tmp->target_seq = seq;
             NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
@@ -374,7 +365,7 @@ static void resource_resolve_pass(void) {
         const bool next_has_real_winner = tmp->candidate_asset_idx < s_resource.asset_hwm;
         const uint16_t next_asset_idx = tmp->candidate_asset_idx;
         const uint32_t next_handle = tmp->candidate_runtime_handle;
-        const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
+        const bool next_changed = next_has_real_winner && (next_asset_idx != slot->resolve_asset_idx || next_handle != slot->runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
         // #region PIN_BLOB pin count — rebuilt from published winners (reset at top of resolve pass)
@@ -396,18 +387,17 @@ static void resource_resolve_pass(void) {
             }
         }
 
-        if (next_has_real_winner && entry->on_resolve != NULL && (next_changed || needs_aux_sync)) {
-            const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
-            uint32_t size = 0;
-            const uint8_t *data = asset_data_ptr(winner, &size);
-            entry->on_resolve(data, size, next_handle, &slot->user_data);
-            tmp->resolve_pending = 1;
-            tmp->post_resolve_pending = 1;
-            if (aux_backed) {
-                NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
-                slot->user_data_asset_idx = next_asset_idx;
+        if (next_has_real_winner && (next_changed || needs_aux_sync)) {
+            if (entry->on_resolve != NULL) {
+                const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
+                uint32_t size = 0;
+                const uint8_t *data = asset_data_ptr(winner, &size);
+                entry->on_resolve(data, size, next_handle, &slot->user_data);
+                if (aux_backed) {
+                    NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
+                    slot->user_data_asset_idx = next_asset_idx;
+                }
             }
-        } else if (next_has_real_winner && (next_changed || needs_aux_sync)) {
             tmp->post_resolve_pending = 1;
         }
 
@@ -430,8 +420,6 @@ static void resource_resolve_pass(void) {
 
         slot->resolve_asset_idx = next_has_real_winner ? next_asset_idx : UINT16_MAX;
         slot->runtime_handle = next_handle;
-        slot->resolve_prio = (int16_t)(next_has_real_winner ? tmp->candidate_prio : INT16_MIN);
-        slot->resolve_seq = next_has_real_winner ? tmp->candidate_seq : 0;
         slot->state = next_state;
 
         if (publication_changed) {
@@ -459,8 +447,6 @@ static void resource_resolve_pass(void) {
         s_resource.activators[atype].on_post_resolve(data, size, resource_make(si, slot->generation), slot->runtime_handle, slot->user_data);
     }
     // #endregion
-
-    free(resolve_temp);
 }
 
 /* ---- I/O issue helper (shared by load + retry) ---- */
@@ -699,7 +685,7 @@ void nt_resource_step(void) {
                 continue; /* blob evicted */
             }
 
-            for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+            for (uint32_t ai = pack->activate_cursor; ai < s_resource.asset_hwm; ai++) {
                 NtAssetMeta *meta = &s_resource.assets[ai];
                 if (meta->resource_id == 0) {
                     continue;
@@ -724,6 +710,7 @@ void nt_resource_step(void) {
                 if (activated_any && budget_ms > 0.0F) {
                     double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
                     if (elapsed_ms >= (double)budget_ms) {
+                        pack->activate_cursor = ai;
                         goto budget_exhausted;
                     }
                 }
@@ -743,6 +730,7 @@ void nt_resource_step(void) {
                 activated_count++;
 #endif
             }
+            pack->activate_cursor = s_resource.asset_hwm;
         }
     budget_exhausted:;
 #if NT_RESOURCE_TIMING_ENABLED
@@ -777,8 +765,8 @@ void nt_resource_step(void) {
             }
             // #region blob-pin evict gate — a pinned blob is held as KEEP + timer-frozen
             if (pack->blob_pins > 0) {
-                /* Real if-guard, not NT_ASSERT (no-op in shipping). Zero-copy consumers read the live
-                 * blob and never bump last-access, so freeze the TTL clock: pins->0 starts a fresh grace. */
+                /* Zero-copy reads do not update last-access. Refresh it while pinned so
+                 * dropping the last pin starts a fresh TTL grace period. */
                 pack->blob_last_access_ms = now_ms;
                 if (!pack->blob_evict_skip_logged) {
                     NT_LOG_WARN("blob pack %u pinned (pins=%u) — NT_BLOB_AUTO held as KEEP", pi, pack->blob_pins);
@@ -841,12 +829,8 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
 
     slot->resource_id = resource_id;
     slot->runtime_handle = 0;
-    slot->resolve_prio = INT16_MIN;
-    slot->resolve_seq = 0;
     slot->resolve_asset_idx = UINT16_MAX;
-    slot->prev_resolve_asset_idx = UINT16_MAX;
     slot->user_data_asset_idx = UINT16_MAX;
-    slot->prev_runtime_handle = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
     slot->user_data = NULL;
@@ -934,7 +918,7 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     /* Sever every zero-copy provider viewing this pack's blob BEFORE the free, else a font read before
      * the next resolve pass dereferences freed memory. Drop only user_data; the resolve pass handles
-     * winner-loss. AUX_BACKED providers copy data OUT (survive the free), so must NOT be severed here. */
+     * winner-loss. Copy-out providers without PIN_BLOB survive the free and stay intact here. */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         if (slot->resource_id == 0 || slot->user_data == NULL || slot->resolve_asset_idx >= s_resource.asset_hwm) {
@@ -1643,10 +1627,16 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 
 /* ---- Activator registration ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate) {
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT((s_resource.activators[asset_type].activate == NULL || s_resource.activators[asset_type].activate == activate) && "activator already registered");
     NT_ASSERT((s_resource.activators[asset_type].deactivate == NULL || s_resource.activators[asset_type].deactivate == deactivate) && "deactivator already registered");
+    if (s_resource.activators[asset_type].activate == NULL && activate != NULL) {
+        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+            s_resource.packs[pi].activate_cursor = 0;
+        }
+    }
     s_resource.activators[asset_type].activate = activate;
     s_resource.activators[asset_type].deactivate = deactivate;
 }
@@ -1722,6 +1712,7 @@ void nt_resource_invalidate(uint8_t asset_type) {
                 s_resource.activators[atype].deactivate(meta->runtime_handle);
             }
         }
+        s_resource.packs[meta->pack_index].activate_cursor = 0;
         meta->state = NT_ASSET_STATE_REGISTERED;
         meta->runtime_handle = 0;
     }
@@ -1822,6 +1813,7 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == pack_index) {
             NtAssetMeta *owner = &s_resource.assets[s_resource.assets[i].owner_asset];
+            s_resource.packs[owner->pack_index].activate_cursor = 0;
             owner->state = state;
             owner->runtime_handle = runtime_handle;
             s_resource.needs_resolve = true;

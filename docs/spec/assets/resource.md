@@ -106,14 +106,16 @@ mirror them here). The contract is the SPLIT, not the fields:
   remains its named record index, including zero, rather than its owner's index.
 - **`NtResourceSlot`** — one persistent record per unique resource_id the game
   asked for. Holds what the game currently sees (`runtime_handle`, `state`,
-  `generation` for stale-handle detection), the published winner's identity and
-  rank (`resolve_prio`/`resolve_seq`/`resolve_asset_idx`), the previous winner
-  for change detection, and the `user_data` built by `on_resolve`.
+  `generation` for stale-handle detection), the published winner's identity
+  (`resolve_asset_idx`), and the `user_data` built by `on_resolve` with its
+  source identity (`user_data_asset_idx`). Change detection compares these
+  published fields before replacing them with the next winner.
 - **`NtResolveTemp`** — per-slot scratch valid only inside one resolve pass, in
-  a separate array so the persistent slot stays small (resolve runs only when
-  `needs_resolve` is set). It carries the TARGET winner (best READY asset even
+  a preallocated module array separate from the published slot state. The array
+  is cleared before each pass; resolve runs only when `needs_resolve` is set.
+  It carries the TARGET winner (best READY asset even
   if its blob is evicted) alongside the publishable CANDIDATE, plus the
-  callback-pending flags the pass consumes.
+  post-resolve callback flag the pass consumes.
 
 The resolve pass computes both the target winner and the published winner for each slot:
 - the target winner is purely priority/sequence-based over READY assets
@@ -124,6 +126,19 @@ For aux-backed asset types, "usable now" means one of two things:
 - or the winner's blob is currently resident, so `on_resolve` can rebuild `user_data` immediately
 
 If a higher-priority target winner is not yet publishable, the slot keeps the best lower-priority usable fallback published. If no usable fallback exists, the slot reports `LOADING` until publication can complete. `nt_resource_get_state()` and `nt_resource_is_ready()` always report the published state, not the raw target winner state.
+
+### Resource callback contract
+
+Activate/deactivate, resolve/cleanup and post-resolve callbacks must not change
+resource lifecycle or registrations: init/shutdown/step, mount/unmount/load/parse,
+register/unregister, invalidate, or activators/callbacks/behavior flags. A change
+to activation eligibility could rewind a cursor that the active traversal then
+overwrites with its own progress.
+
+For resource access, callbacks may use their arguments and APIs explicitly marked
+callback-safe, such as `nt_resource_find`. Only post-resolve may additionally
+request slots and use get-style accessors after publication. Calls into other
+engine modules follow those modules' own contracts.
 
 ### Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
@@ -149,11 +164,20 @@ Behavior flags:
 - published `runtime_handle` changes (re-activation / invalidate / context loss)
 - or an aux-backed asset is being published but its `user_data` has not yet been synchronized to that asset
 
-`on_resolve` only runs when the published winner is usable now. For aux-backed assets this means the callback either already owns matching `user_data`, or the winner's blob is resident and can be parsed immediately. For simple runtime-handle asset types, `data` may still be NULL (virtual pack, placeholder-style handle substitution, or evicted blob) because publication can proceed from the runtime handle alone. The data pointer is valid only for the duration of the call — callbacks must copy if needed.
+`on_resolve` only runs when the published winner is usable now. For aux-backed assets this means the callback either already owns matching `user_data`, or the winner's blob is resident and can be parsed immediately. For simple runtime-handle asset types, `data` may still be NULL (virtual pack or evicted blob) because publication can proceed from the runtime handle alone.
 
-**on_cleanup** fires when a slot loses its published real winner (no publishable real candidate remains) and during shutdown for remaining non-NULL user_data. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+Non-NULL `data` borrows the winner's pack bytes; callbacks must not mutate or free
+them. Without `PIN_BLOB`, the view is valid only during the call and must be copied
+if needed later. A `PIN_BLOB` consumer may keep the view between callbacks because
+its published winner pins the blob. The next `on_resolve` for this slot must
+replace or clear any retained view; the engine passes existing `user_data`
+without calling `on_cleanup` first. `on_cleanup` must discard the retained view.
+Explicit unmount invokes that cleanup before freeing the blob, including during
+shutdown; see [Blob pinning](#blob-pinning).
 
-**on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors, but must not recurse into `mount` / `unmount` / `step` / `load` / `parse`. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
+**on_cleanup** fires for non-NULL `user_data` when a resolve finds no publishable real winner, synchronously when explicit unmount removes a `PIN_BLOB` slot's published provider, and during shutdown for remaining data. Copy-out data without `PIN_BLOB` survives unmount until the next resolve or shutdown. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+
+**on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors under the callback contract above. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
 
 Publication change detection uses three pieces of state: published asset identity (`resolve_asset_idx`), published `runtime_handle`, and aux synchronization (`user_data_asset_idx`). Placeholder substitution does not trigger `on_resolve` — placeholders are visual fallbacks, not real winners.
 
@@ -166,14 +190,14 @@ Two consumption models exist for asset types that derive state from pack bytes:
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
 - **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
 
-**Pin count (`NtPackMeta.blob_pins`).** Each pack carries a `uint32_t blob_pins`, the aggregate count of published winners (across all slots) pinning that pack's blob. The **resolve pass owns the count and rebuilds it from scratch each pass**: it resets every pack's `blob_pins` to 0 at the top of the pass, then increments the winning pack once per published `PIN_BLOB` winner as it publishes them. Because the count is *derived* from the current published winners rather than transferred on winner-change, it self-heals — there is no per-slot pin identity to keep in sync, so `packs[]` index reuse (same-step unmount+remount), sequence wrap, or a winner dropping cannot corrupt it. Consumers never pin/unpin themselves. Phase-C eviction reads the previous pass's rebuilt count via a real `if (blob_pins > 0)` gate (an assert would be compiled out in shipping builds).
+**Pin count (`NtPackMeta.blob_pins`).** Each pack carries the aggregate count of published winners (across all slots) pinning its blob. The resolve pass resets every pack's count to zero, then increments it once per published `PIN_BLOB` winner. Rebuilding from the selected winners avoids maintaining separate pin ownership on each slot. Consumers never pin/unpin themselves. Eviction checks the previous pass's count and skips pinned blobs: pins are normal residency state, not an invariant violation.
 
 **Eviction vs. the pin (`NT_BLOB_AUTO`).**
 - **Timer-freeze (D-06):** while `blob_pins > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
 - **AUTO-as-KEEP (D-07):** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 - **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
 
-**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out (`AUX_BACKED`) consumers are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 

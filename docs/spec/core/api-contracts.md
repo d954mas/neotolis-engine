@@ -365,10 +365,8 @@ caller-filled output storage, or preallocated module storage. Heap allocation,
 persistent deep copy, and ownership transfer belong in init, builder, explicit
 load/activation boundaries, debug/devapi, or APIs documented as non-hot.
 Resource resolve runs from `nt_resource_step()` and is part of the hot path. Do
-not add resolve-time heap work as a style fix. The resource registry's current
-transient resolve-pass storage is an explicitly documented module-specific
-deviation, not a pattern; when touching that behavior, prefer preallocated
-module storage instead.
+not add resolve-time heap work as a style fix. The resource registry reuses
+preallocated module storage for its transient resolve-pass candidates.
 
 ## Wording Examples
 
