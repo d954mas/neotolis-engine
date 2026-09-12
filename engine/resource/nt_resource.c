@@ -34,7 +34,8 @@
 static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
-    NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1]; /* index 0 reserved */
+    NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1];       /* index 0 reserved */
+    NtResolveTemp resolve_temp[NT_RESOURCE_MAX_SLOTS + 1]; /* valid only during resource_resolve_pass */
     NtActivatorEntry activators[NT_RESOURCE_MAX_ASSET_TYPES];
     uint16_t free_assets[NT_RESOURCE_MAX_ASSETS];
     uint32_t free_asset_count;
@@ -243,8 +244,8 @@ static void schedule_pack_redownload_if_needed(NtPackMeta *pack) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resource_resolve_pass(void) {
-    NtResolveTemp *resolve_temp = (NtResolveTemp *)calloc(NT_RESOURCE_MAX_SLOTS + 1, sizeof(NtResolveTemp));
-    NT_ASSERT(resolve_temp);
+    NtResolveTemp *resolve_temp = s_resource.resolve_temp;
+    memset(resolve_temp, 0, sizeof(s_resource.resolve_temp));
 
     /* PIN_BLOB pin count is rebuilt from the published winners in D.4 below — clear it first. */
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
@@ -450,8 +451,6 @@ static void resource_resolve_pass(void) {
         s_resource.activators[atype].on_post_resolve(data, size, resource_make(si, slot->generation), slot->runtime_handle, slot->user_data);
     }
     // #endregion
-
-    free(resolve_temp);
 }
 
 /* ---- I/O issue helper (shared by load + retry) ---- */

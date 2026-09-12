@@ -127,10 +127,7 @@ typedef struct {
     void *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 
-/* Transient per-slot state — only valid during resource_resolve_pass().
- * Reset at the start of each pass, consumed by the end.
- * Heap-allocated per pass to keep NtResourceSlot small for
- * the common case (resolve runs only when needs_resolve is true). */
+/* Per-slot scratch reset for each resolve pass, separate from the published state. */
 typedef struct {
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
     int16_t target_prio;               /* priority of target winner */

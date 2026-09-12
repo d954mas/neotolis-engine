@@ -111,8 +111,9 @@ mirror them here). The contract is the SPLIT, not the fields:
   source identity (`user_data_asset_idx`). Change detection compares these
   published fields before replacing them with the next winner.
 - **`NtResolveTemp`** — per-slot scratch valid only inside one resolve pass, in
-  a separate array so the persistent slot stays small (resolve runs only when
-  `needs_resolve` is set). It carries the TARGET winner (best READY asset even
+  a preallocated module array separate from the published slot state. The array
+  is cleared before each pass; resolve runs only when `needs_resolve` is set.
+  It carries the TARGET winner (best READY asset even
   if its blob is evicted) alongside the publishable CANDIDATE, plus the
   post-resolve callback flag the pass consumes.
 
