@@ -8,6 +8,7 @@
  */
 
 #include "app/nt_app.h"
+#include "atlas/nt_atlas.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -251,6 +252,7 @@ int main(void) {
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_mesh, .deactivate = nt_gfx_deactivate_mesh});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
+    nt_atlas_init();
 
     s_pack_id = nt_hash32_str("atlas_demo");
 

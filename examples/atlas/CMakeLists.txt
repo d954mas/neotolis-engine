@@ -4,7 +4,7 @@ set(ATLAS_ASSETS_DIR "${ATLAS_OUTPUT_DIR}/assets")
 set(ATLAS_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/atlas")
 
 add_executable(atlas_demo main.c)
-target_link_libraries(atlas_demo PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash)
+target_link_libraries(atlas_demo PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash nt_atlas)
 # Generated asset headers from builder (atlas_assets.h etc.)
 target_include_directories(atlas_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)
