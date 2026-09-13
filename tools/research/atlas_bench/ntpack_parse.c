@@ -15,9 +15,7 @@
  * areas come out in normalized-UV^2 units regardless of page pixel size. */
 #define NT_BENCH_UV_INV (1.0 / 65535.0)
 
-/* Full-file walk (nt_bench_parse_ntpack, impl in 78-03): after NtPackHeader,
- * the NtAssetEntry with asset_type==NT_ASSET_ATLAS holds this blob; page pixel
- * dims live in the paired NT_ASSET_TEXTURE entry, not here (blob has UVs only). */
+/* Page pixel dimensions live in the paired texture asset, not the atlas blob. */
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 

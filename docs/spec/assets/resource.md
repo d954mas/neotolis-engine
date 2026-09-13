@@ -542,12 +542,12 @@ uint16[total_index_count] (at index_offset)
   Builder pre-swaps each triangle's last two indices at pack time (a,b,c)→(a,c,b)
   so the in-blob winding is world-CCW after y-up vertices are read directly. This
   lets sprite materials use cull_mode = BACK without per-game opt-outs.
-  Runtime offsets indices by vertex_start when building GPU buffers.
+  Runtime adds the region's staging-buffer base to each local index.
 ```
 
 Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation checks the positive finite intrinsic scale and integer bounds (magic, version, canonical section offsets, per-region vertex/index spans, and every region's `page_index` referencing a declared page — a region-bearing blob with no pages is rejected before publication); it runs once per blob change at activate and resolve, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
 
-The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 uses the same intrinsic scale for border widths, independently of target size and `slice9_scale`.
+The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 converts border pixels to game units using `inverse_pixels_per_unit * slice9_scale`. If opposite borders exceed the target dimension, their destination widths shrink proportionally.
 
 All geometry and scale are ready before publication. Geometry getters return borrowed slices owned by the atlas snapshot, valid until its replacement or cleanup. The runtime keeps no raw local XY and performs no geometry bake. First publication assigns region indices in blob order and inserts the names directly, without merge lookups or removal scans.
 

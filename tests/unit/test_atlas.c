@@ -2281,8 +2281,7 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     TEST_ASSERT_FALSE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
-/* The previous wire version must be rejected by validation.
- * Constructs a blob with version=5 and verifies validation returns false. */
+/* The previous wire version (v7) must trigger the version assertion. */
 void test_atlas_previous_version_rejected(void) {
     uint8_t buf[512];
     uint32_t size = 0;

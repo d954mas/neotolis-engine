@@ -90,7 +90,7 @@ uint32_t nt_atlas_revision(nt_resource_t atlas);
 /* Return the number of regions (including tombstones from merge). */
 uint32_t nt_atlas_region_count(nt_resource_t atlas);
 
-/* Return atlas texture page count. Returns 0 while unresolved. */
+/* Return atlas texture page count. Asserts atlas resolved. */
 uint8_t nt_atlas_page_count(nt_resource_t atlas);
 
 /* O(1) amortized lookup of a region by its name hash.
@@ -200,10 +200,7 @@ uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint
  * nt_resource_shutdown(). Production code has no nt_atlas_shutdown. */
 void nt_atlas_test_reset(void);
 
-/* Mirrors the header validation logic in atlas_on_resolve (magic, version,
- * size bounds) but returns false on failure instead of asserting.
- * Gives automated coverage of the validation path without needing a
- * death-test harness. */
+/* Run the runtime blob validator with the same asserts and rejection rules. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
 /* Direct access to owned geometry and intrinsic scale without a resource slot. */

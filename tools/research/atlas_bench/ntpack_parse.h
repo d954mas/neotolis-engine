@@ -45,9 +45,9 @@ typedef struct {
     int16_t trim_offset_y;
 } nt_bench_selected_geometry_t;
 
-/* Parse one atlas asset blob (header + pages + regions + positions + UVs + indices).
- * Returns 0 on success, negative on malformed input. Hard-guards every offset
- * against blob_size — safe in every NT_ASSERT mode (asserts are void in OFF). */
+/* Extract atlas metrics from region metadata and UVs; bounds-check every read.
+ * Returns 0 on success, negative on parse failure.
+ * Does not validate position values or the index array. */
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out);
 
 /* Parse the atlas and its paired texture-page dimensions from a full pack. */

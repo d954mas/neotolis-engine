@@ -62,7 +62,6 @@ static uint8_t *read_bin_file(const char *path, size_t *out_len) {
     return buf;
 }
 
-/* UV bbox straight off the runtime's raw vertex array — the fold observable. */
 static void runtime_region_uv_bbox(const struct nt_atlas_data *ad, const nt_texture_region_t *r, uint16_t out_bbox[4]) {
     const nt_atlas_uv_t *verts = nt_atlas_test_uvs(ad);
     out_bbox[0] = UINT16_MAX;

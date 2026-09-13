@@ -17,7 +17,7 @@
  * an override past 255 would truncate page_count on the (uint8_t) cast. */
 _Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MAX_PAGES must fit uint8_t");
 
-/* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
+/* Reserved for GPU-instanced rect renderer; runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
 #define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))
@@ -37,7 +37,7 @@ _Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MA
  * vertex_offset / index_offset are byte offsets from header start.
  *
  * Indices are local per region (0 .. vertex_count-1).
- * Runtime offsets them by vertex_start when building GPU buffers.
+ * Runtime adds the region's staging-buffer base to each local index.
  * Triangle list: every 3 consecutive indices form one triangle.
  * Builder validates triangulation before serializing.
  */
