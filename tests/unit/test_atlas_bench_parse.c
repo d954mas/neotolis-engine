@@ -1,4 +1,5 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +15,17 @@
 /* Build the same byte layout consumed by the runtime atlas loader. */
 
 typedef struct {
+    int16_t local_x;
+    int16_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} mock_atlas_vertex_t;
+
+typedef struct {
+    float inverse_pixels_per_unit;
     const NtAtlasRegion *regions;
     uint16_t region_count;
-    const NtAtlasVertex *vertices;
+    const mock_atlas_vertex_t *vertices;
     uint32_t total_vertex_count;
     const uint16_t *indices;
     uint32_t total_index_count;
@@ -27,11 +36,13 @@ typedef struct {
 static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atlas_spec_t *spec) {
     const uint32_t page_bytes = (uint32_t)spec->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)spec->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    const uint32_t vertex_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    const uint32_t position_bytes = spec->total_vertex_count * (uint32_t)sizeof(float[2]);
+    const uint32_t uv_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasUv);
     const uint32_t index_bytes = spec->total_index_count * (uint32_t)sizeof(uint16_t);
 
     const uint32_t vertex_offset = (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes;
-    const uint32_t index_offset = vertex_offset + vertex_bytes;
+    const uint32_t uv_offset = vertex_offset + position_bytes;
+    const uint32_t index_offset = uv_offset + uv_bytes;
     const uint32_t total = index_offset + index_bytes;
 
     TEST_ASSERT_MESSAGE(total <= cap, "mock blob buffer too small");
@@ -48,6 +59,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     hdr->total_vertex_count = spec->total_vertex_count;
     hdr->index_offset = index_offset;
     hdr->total_index_count = spec->total_index_count;
+    hdr->inverse_pixels_per_unit = spec->inverse_pixels_per_unit == 0.0F ? 1.0F : spec->inverse_pixels_per_unit;
 
     if (page_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader), spec->page_ids, page_bytes);
@@ -55,8 +67,22 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    if (vertex_bytes > 0) {
-        memcpy(out + vertex_offset, spec->vertices, vertex_bytes);
+    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
+    for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
+        positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;
+        positions[i][1] = (float)spec->vertices[i].local_y * hdr->inverse_pixels_per_unit;
+        uvs[i] = (NtAtlasUv){spec->vertices[i].atlas_u, spec->vertices[i].atlas_v};
+    }
+    for (uint32_t r = 0; r < spec->region_count; r++) {
+        const NtAtlasRegion *region = &spec->regions[r];
+        TEST_ASSERT_TRUE(region->vertex_start <= spec->total_vertex_count);
+        TEST_ASSERT_TRUE(region->vertex_count <= spec->total_vertex_count - region->vertex_start);
+        for (uint32_t i = 0; i < region->vertex_count; i++) {
+            const uint32_t at = region->vertex_start + i;
+            positions[at][0] = ((float)spec->vertices[at].local_x + (float)region->trim_offset_x) * hdr->inverse_pixels_per_unit;
+            positions[at][1] = ((float)spec->vertices[at].local_y + (float)region->trim_offset_y) * hdr->inverse_pixels_per_unit;
+        }
     }
     if (index_bytes > 0) {
         memcpy(out + index_offset, spec->indices, index_bytes);
@@ -72,7 +98,7 @@ void tearDown(void) {}
 
 /* 3 regions with vertex_counts {3, 5, 8} laid out contiguously. */
 static uint32_t build_counts_blob(uint8_t *buf, uint32_t cap) {
-    NtAtlasVertex verts[16];
+    mock_atlas_vertex_t verts[16];
     for (uint16_t i = 0; i < 16; i++) {
         verts[i].local_x = (int16_t)(i * 4);
         verts[i].local_y = (int16_t)(i * 5);
@@ -106,7 +132,7 @@ static uint32_t build_counts_blob(uint8_t *buf, uint32_t cap) {
 
 /* One region, a non-degenerate unit-ish quad in atlas-UV corners. */
 static uint32_t build_quad_blob(uint8_t *buf, uint32_t cap) {
-    NtAtlasVertex verts[4];
+    mock_atlas_vertex_t verts[4];
     /* CCW quad corners, all distinct atlas_u/atlas_v. */
     const uint16_t us[4] = {1000, 5000, 5000, 1000};
     const uint16_t vs[4] = {2000, 2000, 6000, 6000};
@@ -144,7 +170,7 @@ static uint32_t build_quad_blob(uint8_t *buf, uint32_t cap) {
  * differ from region 0 while the footprint stays equal. */
 typedef enum { MIDDLE_ALIAS, MIDDLE_DISTINCT, MIDDLE_ABSENT } middle_kind_t;
 
-static void write_quad(NtAtlasVertex *dst, uint16_t u0, uint16_t u1, uint16_t v0, uint16_t v1, uint16_t rotate) {
+static void write_quad(mock_atlas_vertex_t *dst, uint16_t u0, uint16_t u1, uint16_t v0, uint16_t v1, uint16_t rotate) {
     const uint16_t us[4] = {u0, u1, u1, u0};
     const uint16_t vs[4] = {v0, v0, v1, v1};
     for (uint16_t i = 0; i < 4; i++) {
@@ -157,7 +183,7 @@ static void write_quad(NtAtlasVertex *dst, uint16_t u0, uint16_t u1, uint16_t v0
 }
 
 static uint32_t build_placement_blob(uint8_t *buf, uint32_t cap, middle_kind_t middle) {
-    NtAtlasVertex verts[12];
+    mock_atlas_vertex_t verts[12];
     NtAtlasRegion regions[3];
     memset(regions, 0, sizeof(regions));
 
@@ -197,7 +223,7 @@ static uint32_t build_placement_blob(uint8_t *buf, uint32_t cap, middle_kind_t m
  * a rotated start vertex, which must still fold. */
 typedef enum { TRI_COMPLEMENTARY, TRI_DUPLICATE, TRI_REVERSED, TRI_SINGLE } tri_kind_t;
 
-static void write_tri(NtAtlasVertex *dst, const uint16_t *us, const uint16_t *vs, uint16_t rotate) {
+static void write_tri(mock_atlas_vertex_t *dst, const uint16_t *us, const uint16_t *vs, uint16_t rotate) {
     for (uint16_t i = 0; i < 3; i++) {
         const uint16_t src = (uint16_t)((i + rotate) % 3);
         dst[i].local_x = (int16_t)(i * 3);
@@ -212,7 +238,7 @@ static uint32_t build_triangle_blob(uint8_t *buf, uint32_t cap, tri_kind_t kind)
     static const uint16_t lower_v[3] = {2000, 2000, 6000};
     static const uint16_t upper_u[3] = {1000, 5000, 1000};
     static const uint16_t upper_v[3] = {2000, 6000, 6000};
-    NtAtlasVertex verts[6];
+    mock_atlas_vertex_t verts[6];
     NtAtlasRegion regions[2];
     memset(regions, 0, sizeof(regions));
 
@@ -222,7 +248,7 @@ static uint32_t build_triangle_blob(uint8_t *buf, uint32_t cap, tri_kind_t kind)
     } else {
         write_tri(&verts[3], lower_u, lower_v, 1);
         if (kind == TRI_REVERSED) {
-            const NtAtlasVertex tmp = verts[4];
+            const mock_atlas_vertex_t tmp = verts[4];
             verts[4] = verts[5];
             verts[5] = tmp;
         }
@@ -388,6 +414,7 @@ static void reject_missing_page_texture(void) {
     atlas->magic = NT_ATLAS_MAGIC;
     atlas->version = NT_ATLAS_VERSION;
     atlas->page_count = 1;
+    atlas->inverse_pixels_per_unit = 1.0F;
     /* Past the page-id array, so the blob parser passes and the page lookup is
      * what this case actually exercises. */
     atlas->vertex_offset = (uint32_t)(sizeof(NtAtlasHeader) + sizeof(uint64_t));
@@ -424,7 +451,7 @@ static void reject_missing_page_texture(void) {
 
 static void selected_geometry_is_owned_and_y_down(void) {
     const char *path = "test_atlas_bench_selected.ntpack";
-    const NtAtlasVertex vertices[4] = {
+    const mock_atlas_vertex_t vertices[4] = {
         {.local_x = 0, .local_y = 4},
         {.local_x = 0, .local_y = 0},
         {.local_x = 4, .local_y = 0},
@@ -432,14 +459,15 @@ static void selected_geometry_is_owned_and_y_down(void) {
     };
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     NtAtlasRegion region = {0};
-    region.source_w = 6;
+    region.source_w = 9;
     region.source_h = 7;
-    region.trim_offset_x = 1;
+    region.trim_offset_x = 3;
     region.trim_offset_y = 2;
     region.vertex_count = 4;
     region.index_count = 6;
     uint8_t atlas_blob[512];
     const mock_atlas_spec_t spec = {
+        .inverse_pixels_per_unit = 1.0F / 7.0F,
         .regions = &region,
         .region_count = 1,
         .vertices = vertices,
@@ -467,18 +495,30 @@ static void selected_geometry_is_owned_and_y_down(void) {
     TEST_ASSERT_EQUAL_INT32(4, geometry.polygon[1].y);
     TEST_ASSERT_EQUAL_UINT16(2, geometry.triangle_indices[1]);
     TEST_ASSERT_EQUAL_UINT16(1, geometry.triangle_indices[2]);
-    TEST_ASSERT_EQUAL_UINT16(6, geometry.source_w);
+    TEST_ASSERT_EQUAL_UINT16(9, geometry.source_w);
+    TEST_ASSERT_EQUAL_INT32(4, geometry.polygon[2].x);
     TEST_ASSERT_EQUAL_INT16(2, geometry.trim_offset_y);
     nt_bench_selected_geometry_destroy(&geometry);
     TEST_ASSERT_NULL(geometry.polygon);
     TEST_ASSERT_NULL(geometry.triangle_indices);
+    const float invalid_positions[] = {0.123F, NAN, INFINITY};
+    for (uint32_t i = 0; i < sizeof(invalid_positions) / sizeof(invalid_positions[0]); i++) {
+        file = fopen(path, "r+b");
+        TEST_ASSERT_NOT_NULL(file);
+        TEST_ASSERT_EQUAL_INT(0, fseek(file, (long)(entry.offset + ((NtAtlasHeader *)atlas_blob)->vertex_offset), SEEK_SET));
+        TEST_ASSERT_EQUAL_size_t(sizeof(float), fwrite(&invalid_positions[i], 1, sizeof(float), file));
+        TEST_ASSERT_EQUAL_INT(0, fclose(file));
+        TEST_ASSERT_TRUE(nt_bench_parse_selected_geometry(path, 0, 4, 4, &geometry) < 0);
+        TEST_ASSERT_NULL(geometry.polygon);
+        TEST_ASSERT_NULL(geometry.triangle_indices);
+    }
     (void)remove(path);
 }
 
 static void selected_geometry_rejects_corrupt_index_window(void) {
     const char *path = "test_atlas_bench_selected_corrupt.ntpack";
     uint8_t blob[512];
-    const NtAtlasVertex vertices[3] = {0};
+    const mock_atlas_vertex_t vertices[3] = {0};
     NtAtlasRegion region = {.vertex_count = 3, .index_count = 3, .index_start = UINT32_MAX};
     const mock_atlas_spec_t spec = {.regions = &region, .region_count = 1, .vertices = vertices, .total_vertex_count = 3};
     const uint32_t size = build_mock_atlas_blob(blob, sizeof(blob), &spec);
@@ -502,7 +542,7 @@ static void selected_geometry_rejects_corrupt_index_window(void) {
 static void selected_geometry_rejects_overlapping_sections(void) {
     const char *path = "test_atlas_bench_selected_overlap.ntpack";
     uint8_t blob[512];
-    const NtAtlasVertex vertices[3] = {0};
+    const mock_atlas_vertex_t vertices[3] = {0};
     const uint16_t indices[3] = {0, 1, 2};
     NtAtlasRegion region = {.vertex_count = 3, .index_count = 3};
     const mock_atlas_spec_t spec = {

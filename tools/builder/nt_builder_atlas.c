@@ -165,7 +165,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  * ===================================================================
  *
  * Packs individual sprite images into atlas texture pages.
- * Produces binary atlas metadata (NtAtlasHeader + regions + vertices)
+ * Produces binary atlas metadata and ready positions, UVs and indices
  * and RGBA texture pages (fed into the texture encode pipeline).
  *
  * -- Pipeline (nt_atlas_commit) ---------------------------------------
@@ -182,7 +182,7 @@ void nt_build_error_format(const nt_build_error_t *err, char *buf, size_t len) {
  *  pipeline_serialize      Compute atlas UVs, write binary blob
  *  pipeline_cache_write    Store result for next build
  *  pipeline_debug_png      Optional outline visualization
- *  pipeline_publish_outputs Register atlas, pages, metadata and regions
+ *  pipeline_publish_outputs Register atlas, pages and regions
  *  pipeline_cleanup        Free all temporary allocations
  *
  * -- File layout ------------------------------------------------------
@@ -852,6 +852,7 @@ static nt_texture_pixel_format_t atlas_assert_opts(const nt_atlas_opts_t *opts) 
                     "nt_atlas_begin: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
     /* Validate scale before accepting any transaction inputs. */
     NT_BUILD_ASSERT(opts->pixels_per_unit > 0.0F && isfinite(opts->pixels_per_unit) && "nt_atlas_begin: pixels_per_unit must be > 0 and finite");
+    NT_BUILD_ASSERT(1.0F / opts->pixels_per_unit > 0.0F && isfinite(1.0F / opts->pixels_per_unit) && "nt_atlas_begin: inverse_pixels_per_unit must be positive and finite");
     // #endregion
     nt_tex_opts_t texture_opts = {
         .format = opts->format,
@@ -3419,13 +3420,20 @@ static char *atlas_page_normalized_path(const char *atlas_name, uint32_t page);
 
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
 
-/* One sprite's serialized geometry, emitted before the blob is sized. Hashed and
+/* One sprite's integer geometry, proved before scaling and before the blob is sized. Hashed and
  * compared as raw bytes, so padding would make block identity non-deterministic. */
 typedef struct {
-    NtAtlasVertex vertices[NT_POLYGON_MAX_VERTICES];
+    int16_t local_x;
+    int16_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} SerializeVertex;
+
+typedef struct {
+    SerializeVertex vertices[NT_POLYGON_MAX_VERTICES];
     uint16_t indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
 } SerializeBlock;
-_Static_assert(sizeof(SerializeBlock) == (NT_POLYGON_MAX_VERTICES * sizeof(NtAtlasVertex)) + (NT_POLYGON_MAX_TRIANGLE_INDICES * sizeof(uint16_t)), "SerializeBlock must have no padding");
+_Static_assert(sizeof(SerializeBlock) == (NT_POLYGON_MAX_VERTICES * sizeof(SerializeVertex)) + (NT_POLYGON_MAX_TRIANGLE_INDICES * sizeof(uint16_t)), "SerializeBlock must have no padding");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_serialize(AtlasPipeline *p) {
@@ -3538,7 +3546,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t atlas_h = p->page_h[pl->page];
 
         for (uint32_t v = 0; v < vertex_count; v++) {
-            NtAtlasVertex *vtx = &blocks[i].vertices[v];
+            SerializeVertex *vtx = &blocks[i].vertices[v];
             int32_t lx = p->hull_vertices[i][v].x;
             int32_t ly = p->hull_vertices[i][v].y;
             /* Y-flip vertex into y-up local space at the blob boundary (v5).
@@ -3580,12 +3588,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
             vtx->atlas_v = (uint16_t)tmp_v;
         }
 
-        /* Re-prove the emitted bytes against this sprite's own mask: the check that
+        /* Re-prove the integer geometry against this sprite's own mask: the check that
          * catches a wrong relative transform before it can ship. */
         Point2D reconstructed[NT_POLYGON_MAX_VERTICES];
         uint16_t reconstructed_indices[NT_POLYGON_MAX_TRIANGLE_INDICES];
         for (uint32_t v = 0; v < vertex_count; v++) {
-            const NtAtlasVertex *serialized = &blocks[i].vertices[v];
+            const SerializeVertex *serialized = &blocks[i].vertices[v];
             reconstructed[v].x = serialized->local_x;
             reconstructed[v].y = (int32_t)p->trim_h[i] - serialized->local_y;
         }
@@ -3609,7 +3617,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     // #region serialize block dedup
     /* First writer in add order wins; identity is decided by memcmp, so a hash
      * collision can share nothing. trim_offset joins that identity though it is not in
-     * the block: the runtime bakes it into cached_pos[], indexed by vertex_start. */
+     * the block: it participates in the source-space positions baked below. */
     uint32_t slot_capacity = 16;
     while (slot_capacity < p->sprite_count * 2U) {
         slot_capacity <<= 1U;
@@ -3669,10 +3677,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t total_index_count = index_cursor;
     // #endregion
 
-    /* Serialize blob: header + texture_resource_ids + regions + vertices + indices */
+    /* Serialize blob: header + texture_resource_ids + regions + positions + UVs + indices. */
     uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
     uint32_t vertex_offset = regions_offset + (p->sprite_count * (uint32_t)sizeof(NtAtlasRegion));
-    uint32_t index_offset = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
+    uint32_t uv_offset = vertex_offset + (total_vertex_count * (uint32_t)sizeof(float[2]));
+    uint32_t index_offset = uv_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasUv));
     uint32_t blob_size = index_offset + (total_index_count * (uint32_t)sizeof(uint16_t));
     uint8_t *blob = (uint8_t *)calloc(1, blob_size);
     NT_BUILD_ASSERT(blob && "pipeline_serialize: blob alloc failed");
@@ -3688,6 +3697,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     hdr->total_vertex_count = total_vertex_count;
     hdr->index_offset = index_offset;
     hdr->total_index_count = total_index_count;
+    const float ipu = 1.0F / p->opts->pixels_per_unit;
+    hdr->inverse_pixels_per_unit = ipu;
 
     /* Texture resource IDs */
     uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
@@ -3699,7 +3710,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
 
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
-    NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
+    float(*positions)[2] = (float(*)[2])(blob + vertex_offset);
+    NtAtlasUv *uvs = (NtAtlasUv *)(blob + uv_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
 
     /* Copy the winning blocks into the range they were assigned. */
@@ -3711,7 +3723,14 @@ static void pipeline_serialize(AtlasPipeline *p) {
         }
         NT_BUILD_ASSERT(sprite_vertex_start[i] + p->vertex_counts[i] <= total_vertex_count && sprite_index_start[i] + sprite_idx_count[i] <= total_index_count &&
                         "pipeline_serialize: block overruns the sized blob");
-        memcpy(&vertices[sprite_vertex_start[i]], blocks[i].vertices, (size_t)p->vertex_counts[i] * sizeof(NtAtlasVertex));
+        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
+            const SerializeVertex *vertex = &blocks[i].vertices[v];
+            const uint32_t at = sprite_vertex_start[i] + v;
+            positions[at][0] = ((float)vertex->local_x + (float)p->trim_x[i]) * ipu;
+            positions[at][1] = ((float)vertex->local_y + (float)atlas_sprite_trim_offset_y_up(p, i)) * ipu;
+            NT_BUILD_ASSERT(isfinite(positions[at][0]) && isfinite(positions[at][1]) && "atlas positions must fit finite float");
+            uvs[at] = (NtAtlasUv){vertex->atlas_u, vertex->atlas_v};
+        }
         memcpy(&indices[sprite_index_start[i]], blocks[i].indices, (size_t)sprite_idx_count[i] * sizeof(uint16_t));
         copied_vertex_count += p->vertex_counts[i];
         copied_index_count += sprite_idx_count[i];
@@ -3738,6 +3757,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * below are provably in range here. */
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
+        NT_BUILD_ASSERT(isfinite((float)reg->source_w * ipu) && isfinite((float)reg->source_h * ipu) && "atlas source dimensions must fit finite float");
         reg->trim_offset_x = (int16_t)p->trim_x[i];
         reg->trim_offset_y = (int16_t)atlas_sprite_trim_offset_y_up(p, i);
         reg->origin_x = p->sprites[i].origin_x;
@@ -3786,7 +3806,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     free(placement_lookup);
 }
 
-/* --- pipeline_publish_outputs: publish atlas, pages, metadata and codegen --- */
+/* --- pipeline_publish_outputs: publish atlas, pages and codegen --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — bounded formatting and allocation asserts expand into branches
 static char *atlas_page_normalized_path(const char *atlas_name, uint32_t page) {
@@ -3849,13 +3869,6 @@ static void pipeline_publish_outputs(AtlasPipeline *p) {
         p->page_pixels[pg] = NULL;
         free(tex_path);
     }
-
-    char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
-    NT_BUILD_ASSERT(atlas_norm_path && "atlas metadata path normalization failed");
-    uint64_t atlas_resource_id = nt_hash64_str(atlas_norm_path).value;
-    free(atlas_norm_path);
-    uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
-    nt_builder_add_meta(ctx, atlas_resource_id, kind_ppu, &p->opts->pixels_per_unit, sizeof(p->opts->pixels_per_unit));
 
     uint32_t required_regions = ctx->atlas_region_count + p->sprite_count;
     if (required_regions > ctx->atlas_region_capacity) {

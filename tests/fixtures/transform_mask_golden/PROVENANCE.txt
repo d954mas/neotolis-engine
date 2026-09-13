@@ -5,8 +5,8 @@ re-captured at atlas format v7 and again once the QUAD_* hint started firing
 Single-threaded (NT_BUILDER_THREADS=1), nt_atlas_opts_defaults().
 Atlas name "transform_golden" — the name seeds the texture page resource ids,
 so the SHA depends on it; re-capture with any other name will not match.
-etalon_all      = allow_transform=true  sha256 51dea1b54232808d06d513b147481f60b1f0e5c873071adad4d5f32d075ef7bb
-etalon_identity = allow_transform=false sha256 acd7de67fc8b522c56b0b9cffa982114aed8007e7998f3fe4a2b76af5defbcc6
+etalon_all      = allow_transform=true  sha256 2adce1c9f04c612dfd54f21ef0b4c66ce7413882548a092eed4806d19781ead5
+etalon_identity = allow_transform=false sha256 cc4c84991d95d2e975722fa3be8a5a732e6128d82d7610f13049b60f662363ee
 test_atlas_transform_mask re-packs the same fixture with allowed_transforms=0xFF/0x01
 and asserts byte-identity against these dump + sha256 files.
 Both packs are captured with atlas dedup explicitly OFF, so these etalons are a
@@ -21,3 +21,8 @@ NTPACK v3 migration (2026-09-10): recaptured pack SHA after replacing
 manifest format_version with owner_entry. Restoring only the v2 header version
 and former manifest versions reproduced every previous SHA exactly. Payloads
 and structural region dumps are unchanged.
+
+Atlas v8 migration (2026-09-13): recaptured SHA for ready float positions,
+separate UVs, intrinsic inverse PPU and removal of automatic PPU metadata.
+Reverse conversion of every new pack to v7 reproduced its previous SHA exactly;
+structural region dumps remain unchanged.

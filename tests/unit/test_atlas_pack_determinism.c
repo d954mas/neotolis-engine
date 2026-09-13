@@ -369,7 +369,7 @@ static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax,
     const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
     uint32_t regions_off = (uint32_t)sizeof(NtAtlasHeader) + ((uint32_t)ah->page_count * (uint32_t)sizeof(uint64_t));
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(ablob + regions_off);
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(ablob + ah->vertex_offset + ((size_t)ah->total_vertex_count * sizeof(float[2])));
 
     uint16_t u0 = UINT16_MAX;
     uint16_t u1 = 0;
@@ -378,7 +378,7 @@ static bool region0_uv_extents(const char *path, uint16_t *umin, uint16_t *umax,
     uint32_t vstart = regions[0].vertex_start;
     uint32_t nv = regions[0].vertex_count;
     for (uint32_t j = 0; j < nv; j++) {
-        const NtAtlasVertex *p = &verts[vstart + j];
+        const NtAtlasUv *p = &verts[vstart + j];
         if (p->atlas_u < u0) {
             u0 = p->atlas_u;
         }

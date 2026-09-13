@@ -4,6 +4,7 @@
 #undef NT_ASSERT_MODE
 #define NT_ASSERT_MODE 0
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -14,13 +15,13 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-/* Minimal valid v7 blob: 1 region, `page_count` pages (each region needs a
+/* Minimal valid v8 blob: 1 region, `page_count` pages (each region needs a
  * backing page), 4 vertices, 6 indices, sections tightly packed. Offsets stay
  * consistent for ANY page_count so a cap test isolates the cap check alone. */
 static uint32_t build_blob_pages(uint8_t *out, uint32_t cap, uint16_t page_count) {
     const uint32_t page_bytes = (uint32_t)page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t vertex_offset = (uint32_t)sizeof(NtAtlasHeader) + page_bytes + (uint32_t)sizeof(NtAtlasRegion);
-    const uint32_t index_offset = vertex_offset + (4U * (uint32_t)sizeof(NtAtlasVertex));
+    const uint32_t index_offset = vertex_offset + (4U * ((uint32_t)sizeof(float[2]) + (uint32_t)sizeof(NtAtlasUv)));
     const uint32_t total = index_offset + (6U * (uint32_t)sizeof(uint16_t));
     TEST_ASSERT_TRUE_MESSAGE(total <= cap, "mock blob buffer too small");
     memset(out, 0, total);
@@ -34,6 +35,7 @@ static uint32_t build_blob_pages(uint8_t *out, uint32_t cap, uint16_t page_count
     hdr->total_vertex_count = 4;
     hdr->index_offset = index_offset;
     hdr->total_index_count = 6;
+    hdr->inverse_pixels_per_unit = 1.0F;
 
     for (uint16_t pg = 0; pg < page_count; pg++) {
         const uint64_t tid = 0xA000ULL + pg;
@@ -186,9 +188,30 @@ void test_truncated_index_section_rejected(void) {
     assert_blob_hard_rejected(buf, size - 2U, "an index section past the blob end must be a hard reject");
 }
 
+void test_invalid_inverse_pixels_per_unit_rejected(void) {
+    const float invalid[] = {0.0F, -1.0F, INFINITY, -INFINITY, NAN};
+    for (uint32_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        uint8_t buf[512];
+        const uint32_t size = build_blob(buf, sizeof(buf));
+        ((NtAtlasHeader *)buf)->inverse_pixels_per_unit = invalid[i];
+        assert_blob_hard_rejected(buf, size, "invalid intrinsic scale must be a hard reject");
+    }
+}
+
+void test_truncated_position_or_uv_section_rejected(void) {
+    uint8_t buf[512];
+    const uint32_t size = build_blob(buf, sizeof(buf));
+    const NtAtlasHeader *hdr = (const NtAtlasHeader *)buf;
+    assert_blob_hard_rejected(buf, hdr->vertex_offset + (4U * (uint32_t)sizeof(float[2])) - 1U, "truncated positions must be rejected");
+    assert_blob_hard_rejected(buf, hdr->index_offset - 1U, "truncated UVs must be rejected");
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_atlas_test_activate(buf, size));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid_blob_activates);
+    RUN_TEST(test_invalid_inverse_pixels_per_unit_rejected);
+    RUN_TEST(test_truncated_position_or_uv_section_rejected);
     RUN_TEST(test_pageless_regioned_blob_rejected);
     RUN_TEST(test_corrupt_merge_blob_leaves_atlas_unchanged);
     RUN_TEST(test_bad_magic_rejected);

@@ -5,10 +5,7 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-/* V6: slice9_lrtb added to NtAtlasRegion (40->48 bytes).
- * V7: same layout, new region semantics — transform became compose(placement,
- *     relative) and a shared vertex_start gained the trim_offset precondition. */
-#define NT_ATLAS_VERSION 7
+#define NT_ATLAS_VERSION 8
 
 /* Effective format-wide page cap. The runtime preallocates this many resource
  * slots per atlas (no heap), so a blob above it can never load — the builder
@@ -20,7 +17,7 @@
  * an override past 255 would truncate page_count on the (uint8_t) cast. */
 _Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MAX_PAGES must fit uint8_t");
 
-/* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
+/* Reserved for GPU-instanced rect renderer; runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
 #define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))
@@ -30,42 +27,43 @@ _Static_assert(NT_ATLAS_MAX_PAGES > 0 && NT_ATLAS_MAX_PAGES <= 255, "NT_ATLAS_MA
 /*
  * Atlas asset binary layout:
  *
- *   Offset 0: NtAtlasHeader (28 bytes)
+ *   Offset 0: NtAtlasHeader (32 bytes)
  *   Then: uint64_t texture_resource_ids[page_count]
  *   Then: NtAtlasRegion regions[region_count]
- *   Then: NtAtlasVertex vertices[total_vertex_count]  (at vertex_offset)
+ *   Then: float positions[total_vertex_count][2] (at vertex_offset)
+ *   Then: NtAtlasUv uvs[total_vertex_count]
  *   Then: uint16_t  indices[total_index_count]   (at index_offset)
  *
  * vertex_offset / index_offset are byte offsets from header start.
  *
  * Indices are local per region (0 .. vertex_count-1).
- * Runtime offsets them by vertex_start when building GPU buffers.
+ * Runtime adds the region's staging-buffer base to each local index.
  * Triangle list: every 3 consecutive indices form one triangle.
- * Convex regions use fan triangulation; concave use ear-clipping.
+ * Builder validates triangulation before serializing.
  */
 
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;              /*  0: NT_ATLAS_MAGIC */
-    uint16_t version;            /*  4: NT_ATLAS_VERSION */
-    uint16_t region_count;       /*  6: number of NtAtlasRegion entries */
-    uint16_t page_count;         /*  8: number of texture pages */
-    uint16_t _pad;               /* 10: alignment padding */
-    uint32_t vertex_offset;      /* 12: byte offset from header start to vertex array */
-    uint32_t total_vertex_count; /* 16: total NtAtlasVertex entries across all regions */
-    uint32_t index_offset;       /* 20: byte offset from header start to index array */
-    uint32_t total_index_count;  /* 24: total uint16_t index entries across all regions */
-} NtAtlasHeader;                 /* 28 bytes */
+    uint32_t magic;                /*  0: NT_ATLAS_MAGIC */
+    uint16_t version;              /*  4: NT_ATLAS_VERSION */
+    uint16_t region_count;         /*  6: number of NtAtlasRegion entries */
+    uint16_t page_count;           /*  8: number of texture pages */
+    uint16_t _pad;                 /* 10: alignment padding */
+    uint32_t vertex_offset;        /* 12: byte offset from header start to float[2] positions */
+    uint32_t total_vertex_count;   /* 16: total positions / UV pairs across all regions */
+    uint32_t index_offset;         /* 20: byte offset from header start to index array */
+    uint32_t total_index_count;    /* 24: total uint16_t index entries across all regions */
+    float inverse_pixels_per_unit; /* 28: positive finite atlas scale, baked into positions */
+} NtAtlasHeader;                   /* 32 bytes */
 #pragma pack(pop)
-_Static_assert(sizeof(NtAtlasHeader) == 28, "NtAtlasHeader must be 28 bytes");
+_Static_assert(sizeof(NtAtlasHeader) == 32, "NtAtlasHeader must be 32 bytes");
 
 #pragma pack(push, 1)
 typedef struct {
     uint64_t name_hash;      /*  0: xxh64 of region name */
     uint16_t source_w;       /*  8: original image width in pixels (pre-trim) */
     uint16_t source_h;       /* 10: original image height in pixels (pre-trim) */
-    int16_t trim_offset_x;   /* 12: pixels stripped from the left edge during alpha trim
-                              *     (add to NtAtlasVertex.local_x to get source-image space X) */
+    int16_t trim_offset_x;   /* 12: pixels stripped from the left edge during alpha trim */
     int16_t trim_offset_y;   /* 14: pixels stripped from the BOTTOM edge in y-up source space (v5+) */
     float origin_x;          /* 16: pivot X, normalized over source_w (NOT trim_w).
                               *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
@@ -75,10 +73,7 @@ typedef struct {
                               *     Source-space (not trim-space) gives stable pivots across
                               *     animation frames where trim bounds vary. */
     float origin_y;          /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
-    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2).
-                              *     Builder-enforced, runtime-trusted (v7): regions share a span
-                              *     only when trim_offset_x/y match — the runtime bakes cached_pos
-                              *     per span and never re-checks. */
+    uint32_t vertex_start;   /* 24: index into positions and UV arrays; regions may share a span */
     uint32_t index_start;    /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;    /* 32: number of vertices for this region (max 16 per builder limit) */
     uint8_t page_index;      /* 33: which texture page this region belongs to */
@@ -98,26 +93,15 @@ typedef struct {
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 48, "NtAtlasRegion must be 48 bytes");
 
+/* Positions are source-space, y-up: (local + trim_offset) * inverse_pixels_per_unit.
+ * Origin stays dynamic and is subtracted by the renderer. */
 #pragma pack(push, 1)
 typedef struct {
-    int16_t local_x;  /*  0: corner X in trim-rect local space (0..trim_w).
-                       *     Polygon vertices use corner coordinates, not pixel centres:
-                       *     vertex at trim_w means the right edge of the last pixel column.
-                       *     Add NtAtlasRegion.trim_offset_x to get source-image space X.
-                       *     Subtract (origin_x * source_w) to get offset from the pivot:
-                       *       pivot_relative_x = (local_x + trim_offset_x) - (origin_x * source_w)
-                       *     The rendered world-space position of the vertex is then:
-                       *       world_x = entity_pos_x + pivot_relative_x * scale_x */
-    int16_t local_y;  /*  2: corner Y in trim-rect local space, y-up (0 = bottom of trim,
-                       *     trim_h = top). v5: builder flips this from PNG y-down at pack
-                       *     time so runtime can read positions directly without inverting.
-                       *     Symmetric to local_x: pivot_relative_y = (local_y + trim_offset_y)
-                       *     - (origin_y * source_h), with trim_offset_y / origin_y also y-up. */
-    uint16_t atlas_u; /*  4: atlas UV X (normalized 0-65535 over atlas width) */
-    uint16_t atlas_v; /*  6: atlas UV Y (normalized 0-65535 over atlas height) */
-} NtAtlasVertex;      /*  8 bytes — runtime mirror: nt_atlas_vertex_t (nt_atlas.h, same field order) */
+    uint16_t atlas_u; /* normalized 0..65535 over atlas page width */
+    uint16_t atlas_v; /* normalized 0..65535 over atlas page height, y-down */
+} NtAtlasUv;
 #pragma pack(pop)
-_Static_assert(sizeof(NtAtlasVertex) == 8, "NtAtlasVertex must be 8 bytes");
+_Static_assert(sizeof(NtAtlasUv) == 4, "NtAtlasUv must be 4 bytes");
 
 /* Stored values for NtAtlasRegion.transform (bit encoding + apply order on the field).
  * Values double as transform-mask bit indices — bit i permits stored value i.

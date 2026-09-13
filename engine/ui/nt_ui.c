@@ -1212,8 +1212,8 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
     float u1 = 0.0F;
     float v1 = 0.0F;
     for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
-        const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
-        const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
+        const float u = (float)rh.uvs[vi].atlas_u / 65535.0F;
+        const float v = (float)rh.uvs[vi].atlas_v / 65535.0F;
         u0 = (u < u0) ? u : u0;
         v0 = (v < v0) ? v : v0;
         u1 = (u > u1) ? u : u1;
@@ -2107,9 +2107,9 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
     NT_ASSERT(r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region tombstoned");
-    /* mat4(w,h) needs cached_pos {0,1}x{0,1}: 1x1 source AND PPU=1. */
+    /* mat4(w,h) needs positions {0,1}x{0,1}: 1x1 source AND PPU=1. */
     NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
-    /* mat4(w,h) needs cached_pos {0,1}x{0,1}: 1x1 source AND PPU=1. */
+    /* mat4(w,h) needs positions {0,1}x{0,1}: 1x1 source AND PPU=1. */
     NT_ASSERT(nt_atlas_get_inverse_pixels_per_unit(atlas) == 1.0F && "nt_ui_set_atlas_white_region: atlas must have PPU=1");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;

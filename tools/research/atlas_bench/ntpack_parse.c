@@ -15,21 +15,19 @@
  * areas come out in normalized-UV^2 units regardless of page pixel size. */
 #define NT_BENCH_UV_INV (1.0 / 65535.0)
 
-/* Full-file walk (nt_bench_parse_ntpack, impl in 78-03): after NtPackHeader,
- * the NtAssetEntry with asset_type==NT_ASSET_ATLAS holds this blob; page pixel
- * dims live in the paired NT_ASSET_TEXTURE entry, not here (blob has UVs only). */
+/* Page pixel dimensions live in the paired texture asset, not the atlas blob. */
 /* Dedup: region_count counts input sprites; total_vertex_count is the shared
  * (deduplicated) vertex pool, so hull_vert_total can exceed it via aliasing. */
 
 /* Same closed ring, ignoring which vertex it starts at and which way it turns —
  * an alias emits its own vertex block, so neither is fixed. */
-static bool uv_rings_equal(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+static bool uv_rings_equal(const NtAtlasUv *a, const NtAtlasUv *b, uint32_t n) {
     for (uint32_t s = 0; s < n; s++) {
         bool fwd = true;
         bool rev = true;
         for (uint32_t i = 0; i < n && (fwd || rev); i++) {
-            const NtAtlasVertex *f = &b[(s + i) % n];
-            const NtAtlasVertex *r = &b[(s + n - i) % n];
+            const NtAtlasUv *f = &b[(s + i) % n];
+            const NtAtlasUv *r = &b[(s + n - i) % n];
             fwd = fwd && a[i].atlas_u == f->atlas_u && a[i].atlas_v == f->atlas_v;
             rev = rev && a[i].atlas_u == r->atlas_u && a[i].atlas_v == r->atlas_v;
         }
@@ -41,13 +39,13 @@ static bool uv_rings_equal(const NtAtlasVertex *a, const NtAtlasVertex *b, uint3
 }
 
 /* Caller must have validated the region's vertex window against total_vertex_count. */
-static void region_uv_bbox(const NtAtlasVertex *verts, const NtAtlasRegion *r, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
+static void region_uv_bbox(const NtAtlasUv *verts, const NtAtlasRegion *r, uint16_t *umin, uint16_t *umax, uint16_t *vmin, uint16_t *vmax) {
     *umin = UINT16_MAX;
     *umax = 0;
     *vmin = UINT16_MAX;
     *vmax = 0;
     for (uint32_t j = 0; j < r->vertex_count; j++) {
-        const NtAtlasVertex *p = &verts[r->vertex_start + j];
+        const NtAtlasUv *p = &verts[r->vertex_start + j];
         if (p->atlas_u < *umin) {
             *umin = p->atlas_u;
         }
@@ -75,7 +73,7 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     }
 
     const NtAtlasHeader *h = (const NtAtlasHeader *)blob;
-    if (h->magic != NT_ATLAS_MAGIC || h->version != NT_ATLAS_VERSION) {
+    if (h->magic != NT_ATLAS_MAGIC || h->version != NT_ATLAS_VERSION || !isfinite(h->inverse_pixels_per_unit) || h->inverse_pixels_per_unit <= 0.0F) {
         return -3;
     }
     if (h->page_count > NT_BENCH_MAX_PAGES) {
@@ -90,7 +88,8 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
         return -5;
     }
 
-    const uint64_t verts_end = (uint64_t)h->vertex_offset + ((uint64_t)h->total_vertex_count * sizeof(NtAtlasVertex));
+    const uint64_t uv_offset = (uint64_t)h->vertex_offset + ((uint64_t)h->total_vertex_count * sizeof(float[2]));
+    const uint64_t verts_end = uv_offset + ((uint64_t)h->total_vertex_count * sizeof(NtAtlasUv));
     /* A vertex array overlapping the header/pages/regions would read metadata as
      * vertices — the same guard nt_bench_parse_selected_geometry applies. */
     if (verts_end > blob_size || h->vertex_offset < regions_end) {
@@ -98,7 +97,7 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
     }
 
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(blob + regions_off);
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(blob + h->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(blob + uv_offset);
 
     uint32_t hull_min = UINT32_MAX;
     uint32_t hull_max = 0;
@@ -141,8 +140,8 @@ int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_at
             uint16_t vmin = UINT16_MAX;
             uint16_t vmax = 0;
             for (uint32_t j = 0; j < nv; j++) {
-                const NtAtlasVertex *p = &verts[vstart + j];
-                const NtAtlasVertex *q = &verts[vstart + ((j + 1) % nv)];
+                const NtAtlasUv *p = &verts[vstart + j];
+                const NtAtlasUv *q = &verts[vstart + ((j + 1) % nv)];
                 shoelace += (double)p->atlas_u * (double)q->atlas_v - (double)q->atlas_u * (double)p->atlas_v;
                 if (p->atlas_u < umin) {
                     umin = p->atlas_u;
@@ -555,7 +554,7 @@ int nt_bench_file_sha256_hex(const char *path, char out_hex[65]) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — each serialized read stays adjacent to its fail-closed bounds guard
 int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_width, uint32_t trim_height, nt_bench_selected_geometry_t *out) {
-    if (pack_path == NULL || out == NULL || trim_width == 0U || trim_height == 0U) {
+    if (pack_path == NULL || out == NULL || trim_width == 0U || trim_height == 0U || trim_width > UINT16_MAX || trim_height > UINT16_MAX) {
         return -1;
     }
     memset(out, 0, sizeof(*out));
@@ -602,10 +601,12 @@ int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_inde
     const NtAtlasHeader *atlas = (const NtAtlasHeader *)blob;
     const uint64_t regions_offset = sizeof(NtAtlasHeader) + ((uint64_t)atlas->page_count * sizeof(uint64_t));
     const uint64_t regions_end = regions_offset + ((uint64_t)atlas->region_count * sizeof(NtAtlasRegion));
-    const uint64_t vertices_end = (uint64_t)atlas->vertex_offset + ((uint64_t)atlas->total_vertex_count * sizeof(NtAtlasVertex));
+    const uint64_t positions_end = (uint64_t)atlas->vertex_offset + ((uint64_t)atlas->total_vertex_count * sizeof(float[2]));
+    const uint64_t vertices_end = positions_end + ((uint64_t)atlas->total_vertex_count * sizeof(NtAtlasUv));
     const uint64_t indices_end = (uint64_t)atlas->index_offset + ((uint64_t)atlas->total_index_count * sizeof(uint16_t));
-    if (atlas->magic != NT_ATLAS_MAGIC || atlas->version != NT_ATLAS_VERSION || region_index >= atlas->region_count || regions_end > atlas_entry->size || atlas->vertex_offset < regions_end ||
-        vertices_end > atlas_entry->size || atlas->index_offset < vertices_end || indices_end > atlas_entry->size) {
+    if (atlas->magic != NT_ATLAS_MAGIC || atlas->version != NT_ATLAS_VERSION || !isfinite(atlas->inverse_pixels_per_unit) || atlas->inverse_pixels_per_unit <= 0.0F ||
+        region_index >= atlas->region_count || regions_end > atlas_entry->size || atlas->vertex_offset < regions_end || vertices_end > atlas_entry->size || atlas->index_offset < vertices_end ||
+        indices_end > atlas_entry->size) {
         free(bytes);
         return -7;
     }
@@ -626,19 +627,33 @@ int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_inde
         free(bytes);
         return -9;
     }
-    const NtAtlasVertex *vertices = (const NtAtlasVertex *)(blob + atlas->vertex_offset);
+    const uint8_t *positions = blob + atlas->vertex_offset;
     const uint16_t *serialized_indices = (const uint16_t *)(blob + atlas->index_offset);
+    const float ipu = atlas->inverse_pixels_per_unit;
     for (uint32_t i = 0; i < region->vertex_count; i++) {
-        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
-        const int32_t y = (int32_t)trim_height - vertex->local_y;
-        if (vertex->local_x < 0 || (uint32_t)vertex->local_x > trim_width || y < 0 || (uint32_t)y > trim_height) {
+        float position[2];
+        memcpy(position, positions + ((size_t)(region->vertex_start + i) * sizeof(position)), sizeof(position));
+        /* Recover integer source corners without truncating reciprocal-rounding error. */
+        const float source_x = roundf(position[0] / ipu);
+        const float source_y = roundf(position[1] / ipu);
+        if (!isfinite(source_x) || !isfinite(source_y) || source_x < 0.0F || source_x > UINT16_MAX || source_y < 0.0F || source_y > UINT16_MAX || source_x * ipu != position[0] ||
+            source_y * ipu != position[1]) {
             free(indices);
             free(polygon);
             free(bytes);
             return -10;
         }
-        polygon[i].x = vertex->local_x;
-        polygon[i].y = y;
+        const int32_t x = (int32_t)source_x - region->trim_offset_x;
+        const int32_t local_y = (int32_t)source_y - region->trim_offset_y;
+        const int64_t y = (int64_t)trim_height - local_y;
+        if (x < 0 || (uint32_t)x > trim_width || y < 0 || (uint64_t)y > trim_height) {
+            free(indices);
+            free(polygon);
+            free(bytes);
+            return -10;
+        }
+        polygon[i].x = x;
+        polygon[i].y = (int32_t)y;
     }
     memcpy(indices, serialized_indices + region->index_start, (size_t)region->index_count * sizeof(uint16_t));
     for (uint32_t i = 0; i < region->index_count; i++) {

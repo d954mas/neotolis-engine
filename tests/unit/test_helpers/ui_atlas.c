@@ -20,11 +20,11 @@
 
 /* Synthetic atlas blob layout (matches engine/atlas/nt_atlas_format.h):
  *
- *   NtAtlasHeader     (28 bytes)
+ *   NtAtlasHeader     (32 bytes)
  *   page resource id  (8 bytes)
  *   NtAtlasRegion[3]  (region 0 = 4-vert white quad, region 1 = 6-vert hull,
  *                      region 2 = 4-vert PACKED sub-region with non-[0,1] UV)
- *   NtAtlasVertex[14]
+ *   float[14][2] positions + NtAtlasUv[14]
  *   uint16[24]        (6 white + 12 hull + 6 packed)
  *
  * Mounts the blob as a real virtual pack so nt_resource_is_ready returns
@@ -45,14 +45,16 @@
 #define UI_ATLAS_PACKED_U1 0x8000u
 #define UI_ATLAS_PACKED_V1 0xC000u
 
-#define UI_ATLAS_HEADER_SIZE 28u
+#define UI_ATLAS_HEADER_SIZE ((uint32_t)sizeof(NtAtlasHeader))
 #define UI_ATLAS_PAGE_IDS_SIZE (UI_ATLAS_PAGE_COUNT * 8u)
 #define UI_ATLAS_REGIONS_SIZE (UI_ATLAS_REGION_COUNT * 48u)
-#define UI_ATLAS_VERTICES_SIZE (UI_ATLAS_VERTEX_COUNT * 8u)
+#define UI_ATLAS_POSITIONS_SIZE (UI_ATLAS_VERTEX_COUNT * (uint32_t)sizeof(float[2]))
+#define UI_ATLAS_UVS_SIZE (UI_ATLAS_VERTEX_COUNT * (uint32_t)sizeof(NtAtlasUv))
 #define UI_ATLAS_INDICES_SIZE (UI_ATLAS_INDEX_COUNT * 2u)
 
 #define UI_ATLAS_VERTEX_OFFSET (UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE + UI_ATLAS_REGIONS_SIZE)
-#define UI_ATLAS_INDEX_OFFSET (UI_ATLAS_VERTEX_OFFSET + UI_ATLAS_VERTICES_SIZE)
+#define UI_ATLAS_UV_OFFSET (UI_ATLAS_VERTEX_OFFSET + UI_ATLAS_POSITIONS_SIZE)
+#define UI_ATLAS_INDEX_OFFSET (UI_ATLAS_UV_OFFSET + UI_ATLAS_UVS_SIZE)
 #define UI_ATLAS_BLOB_SIZE (UI_ATLAS_INDEX_OFFSET + UI_ATLAS_INDICES_SIZE)
 
 /* Pack name suffix counter so multiple coexisting instances (and
@@ -76,6 +78,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         .total_vertex_count = UI_ATLAS_VERTEX_COUNT,
         .index_offset = UI_ATLAS_INDEX_OFFSET,
         .total_index_count = UI_ATLAS_INDEX_COUNT,
+        .inverse_pixels_per_unit = 1.0F,
     };
     memcpy(out_blob + 0, &hdr, sizeof hdr);
 
@@ -149,7 +152,12 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
     memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 96U, &region2, sizeof region2);
 
     /* ---- Vertices: 4 white + 6 polygon-hull + 4 packed ---- */
-    NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {
+    const struct {
+        int16_t local_x;
+        int16_t local_y;
+        uint16_t atlas_u;
+        uint16_t atlas_v;
+    } verts[UI_ATLAS_VERTEX_COUNT] = {
         /* white quad (trim-local 0..1, atlas UV 0..0xFFFF) */
         {0, 0, 0, 0xFFFF},
         {1, 0, 0xFFFF, 0xFFFF},
@@ -170,7 +178,13 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         {8, 8, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V0},
         {0, 8, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V0},
     };
-    memcpy(out_blob + UI_ATLAS_VERTEX_OFFSET, verts, sizeof verts);
+    float(*positions)[2] = (float(*)[2])(out_blob + UI_ATLAS_VERTEX_OFFSET);
+    NtAtlasUv *uvs = (NtAtlasUv *)(out_blob + UI_ATLAS_UV_OFFSET);
+    for (uint32_t i = 0; i < UI_ATLAS_VERTEX_COUNT; i++) {
+        positions[i][0] = (float)verts[i].local_x;
+        positions[i][1] = (float)verts[i].local_y;
+        uvs[i] = (NtAtlasUv){verts[i].atlas_u, verts[i].atlas_v};
+    }
 
     /* ---- Indices ---- */
     uint16_t indices[UI_ATLAS_INDEX_COUNT] = {

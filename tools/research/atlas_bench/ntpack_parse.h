@@ -45,16 +45,17 @@ typedef struct {
     int16_t trim_offset_y;
 } nt_bench_selected_geometry_t;
 
-/* Parse one atlas asset blob (NtAtlasHeader + pages + regions + verts).
- * Returns 0 on success, negative on malformed input. Hard-guards every offset
- * against blob_size — safe in every NT_ASSERT mode (asserts are void in OFF). */
+/* Extract atlas metrics from region metadata and UVs; bounds-check every read.
+ * Returns 0 on success, negative on parse failure.
+ * Does not validate position values or the index array. */
 int nt_bench_parse_atlas_blob(const uint8_t *blob, size_t blob_size, nt_bench_atlas_metrics_t *out);
 
 /* Parse the atlas and its paired texture-page dimensions from a full pack. */
 int nt_bench_parse_ntpack(const char *pack_path, nt_bench_atlas_metrics_t *out);
 
-/* Extract one region in builder y-down trim-local coordinates. The result owns
- * both arrays and is released only by nt_bench_selected_geometry_destroy(). */
+/* Extract one region in builder y-down trim-local coordinates; trim dimensions
+ * must fit uint16. Reject positions that do not re-encode from integer corners.
+ * The result owns both arrays; release with nt_bench_selected_geometry_destroy(). */
 int nt_bench_parse_selected_geometry(const char *pack_path, uint32_t region_index, uint32_t trim_width, uint32_t trim_height, nt_bench_selected_geometry_t *out);
 
 void nt_bench_selected_geometry_destroy(nt_bench_selected_geometry_t *geometry);

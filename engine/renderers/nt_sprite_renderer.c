@@ -547,9 +547,9 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 #endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*cpos)[2], const nt_atlas_vertex_t *vraw, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
+NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
                                                 float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
-    NT_ASSERT(r != NULL && cpos != NULL && vraw != NULL && idx != NULL);
+    NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
     if (r->vertex_count == 0U) {
         return; /* tombstone — silent no-op (matches old emit_one behaviour) */
@@ -568,8 +568,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* cached_pos is source-space (no origin baked) -- regions with
-     * different origins can share vertex data. */
+    /* Source-space positions omit origin, so different pivots can share geometry. */
     float tx = m[12];
     float ty = m[13];
     float tz = m[14];
@@ -599,9 +598,9 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
     if (r->vertex_count == 4) {
-        /* De-interleave cpos[4][2] → pxs/pys lanes. */
-        v128_t lo = wasm_v128_load(&cpos[0][0]);
-        v128_t hi = wasm_v128_load(&cpos[2][0]);
+        /* De-interleave positions[4][2] → pxs/pys lanes. */
+        v128_t lo = wasm_v128_load(&positions[0][0]);
+        v128_t hi = wasm_v128_load(&positions[2][0]);
         v128_t pxs = wasm_i32x4_shuffle(lo, hi, 0, 2, 4, 6);
         v128_t pys = wasm_i32x4_shuffle(lo, hi, 1, 3, 5, 7);
         if (fx) {
@@ -633,8 +632,8 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
             v->position[0] = xs_arr[i];
             v->position[1] = ys_arr[i];
             v->position[2] = zs_arr[i];
-            v->texcoord[0] = vraw[i].atlas_u;
-            v->texcoord[1] = vraw[i].atlas_v;
+            v->texcoord[0] = uvs[i].atlas_u;
+            v->texcoord[1] = uvs[i].atlas_v;
             v->color[0] = cr;
             v->color[1] = cg;
             v->color[2] = cb;
@@ -644,11 +643,11 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
 #endif /* __wasm_simd128__ */
     {
         for (uint8_t i = 0; i < r->vertex_count; i++) {
-            float px = cpos[i][0];
+            float px = positions[i][0];
             if (fx) {
                 px = -px;
             }
-            float py = cpos[i][1];
+            float py = positions[i][1];
             if (fy) {
                 py = -py;
             }
@@ -656,8 +655,8 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
             v->position[0] = (m[0] * px) + (m[4] * py) + tx;
             v->position[1] = (m[1] * px) + (m[5] * py) + ty;
             v->position[2] = (m[2] * px) + (m[6] * py) + tz;
-            v->texcoord[0] = vraw[i].atlas_u;
-            v->texcoord[1] = vraw[i].atlas_v;
+            v->texcoord[0] = uvs[i].atlas_u;
+            v->texcoord[1] = uvs[i].atlas_v;
             v->color[0] = cr;
             v->color[1] = cg;
             v->color[2] = cb;
@@ -693,7 +692,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
  * Row 0 is the local bottom and samples v_max: blob vertices are Y-up, atlas_v is PNG Y-down. */
 typedef struct {
     const nt_texture_region_t *region;
-    const nt_atlas_vertex_t *raw_vertices;
+    const nt_atlas_uv_t *uvs;
     const uint16_t *src_lrtb; /* source px: the UV cuts */
     float band_per_px;        /* slice9_scale / pixels_per_unit: source px -> w/h units */
     float w;                  /* local grid size */
@@ -706,7 +705,7 @@ typedef struct {
 } slice9_grid_t;
 
 /* UV bbox of a region's vertices, as {u_min, u_max, v_min, v_max} in u16 space. */
-static void region_uv_bounds(const nt_atlas_vertex_t *verts, uint8_t count, uint16_t out[4]) {
+static void region_uv_bounds(const nt_atlas_uv_t *verts, uint8_t count, uint16_t out[4]) {
     out[0] = UINT16_MAX;
     out[1] = 0;
     out[2] = UINT16_MAX;
@@ -749,7 +748,7 @@ static void slice9_build_splits(const slice9_grid_t *g, float lxs[4], float lys[
     lys[3] = g->h;
 
     uint16_t uv_bounds[4]; /* u_min, u_max, v_min, v_max */
-    region_uv_bounds(g->raw_vertices, g->region->vertex_count, uv_bounds);
+    region_uv_bounds(g->uvs, g->region->vertex_count, uv_bounds);
     const uint16_t u_range = (uint16_t)(uv_bounds[1] - uv_bounds[0]);
     const uint16_t v_range = (uint16_t)(uv_bounds[3] - uv_bounds[2]);
     /* Integer math avoids precision loss. */
@@ -880,7 +879,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     NT_ASSERT(resolved->region != NULL && "sprite render item: resolved region is NULL");
     NT_ASSERT(resolved->region->vertex_count != 0 && "sprite render item: region is tombstoned");
     const nt_texture_region_t *r = resolved->region;
-    NT_ASSERT(resolved->cached_pos != NULL && resolved->raw_vertices != NULL && resolved->indices != NULL);
+    NT_ASSERT(resolved->positions != NULL && resolved->uvs != NULL && resolved->indices != NULL);
     uint32_t page_tex = nt_resource_get(resolved->page_resource);
 
     const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
@@ -898,7 +897,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
         const slice9_grid_t grid = {
             .region = r,
-            .raw_vertices = resolved->raw_vertices,
+            .uvs = resolved->uvs,
             .src_lrtb = s9,
             .band_per_px = sv->slice9_scale[s_idx] * ipu,
             .w = (float)r->source_w * ipu,
@@ -913,7 +912,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         return;
     }
     // #endregion
-    emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
+    emit_region_resolved(r, resolved->positions, resolved->uvs, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
 }
 // #endregion
 
@@ -931,7 +930,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     if (h.region->vertex_count == 0U) {
         return; /* tombstone or out-of-range */
     }
-    emit_region_resolved(h.region, h.cached_pos, h.raw_vertices, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
+    emit_region_resolved(h.region, h.positions, h.uvs, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
 }
 // #endregion
 
@@ -978,8 +977,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     uint32_t sum_u = 0;
     uint32_t sum_v = 0;
     for (uint8_t i = 0; i < h.region->vertex_count; i++) {
-        sum_u += h.raw_vertices[i].atlas_u;
-        sum_v += h.raw_vertices[i].atlas_v;
+        sum_u += h.uvs[i].atlas_u;
+        sum_v += h.uvs[i].atlas_v;
     }
     const uint16_t shared_u = (uint16_t)(sum_u / h.region->vertex_count);
     const uint16_t shared_v = (uint16_t)(sum_v / h.region->vertex_count);
@@ -1058,7 +1057,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
     const slice9_grid_t grid = {
         .region = rh.region,
-        .raw_vertices = rh.raw_vertices,
+        .uvs = rh.uvs,
         .src_lrtb = (src_lrtb != NULL) ? src_lrtb : rh.region->slice9_lrtb,
         .band_per_px = slice9_scale * ipu,
         .w = w,

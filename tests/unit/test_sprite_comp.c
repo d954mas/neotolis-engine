@@ -20,14 +20,22 @@
 /* ---- Mock atlas blob builder (same pattern as test_atlas.c) ---- */
 
 typedef struct {
+    int16_t local_x;
+    int16_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} test_atlas_vertex_t;
+
+typedef struct {
     const NtAtlasRegion *regions;
     uint16_t region_count;
-    const NtAtlasVertex *vertices;
+    const test_atlas_vertex_t *vertices;
     uint32_t total_vertex_count;
     const uint16_t *indices;
     uint32_t total_index_count;
     const uint64_t *page_ids;
     uint16_t page_count;
+    float inverse_pixels_per_unit;
 } mock_atlas_spec_t;
 
 /* The validator rejects regions without a backing page; the texture id is
@@ -37,11 +45,13 @@ static const uint64_t k_mock_page_ids[1] = {0xFEED0001ULL};
 static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atlas_spec_t *spec) {
     const uint32_t page_bytes = (uint32_t)spec->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)spec->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    const uint32_t vertex_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    const uint32_t position_bytes = spec->total_vertex_count * (uint32_t)sizeof(float[2]);
+    const uint32_t uv_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasUv);
     const uint32_t index_bytes = spec->total_index_count * (uint32_t)sizeof(uint16_t);
 
     const uint32_t vertex_offset = (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes;
-    const uint32_t index_offset = vertex_offset + vertex_bytes;
+    const uint32_t uv_offset = vertex_offset + position_bytes;
+    const uint32_t index_offset = uv_offset + uv_bytes;
     const uint32_t total = index_offset + index_bytes;
 
     TEST_ASSERT_MESSAGE(total <= cap, "mock blob buffer too small");
@@ -57,6 +67,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     hdr->total_vertex_count = spec->total_vertex_count;
     hdr->index_offset = index_offset;
     hdr->total_index_count = spec->total_index_count;
+    hdr->inverse_pixels_per_unit = spec->inverse_pixels_per_unit > 0.0F ? spec->inverse_pixels_per_unit : 1.0F;
 
     if (page_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader), spec->page_ids, page_bytes);
@@ -64,8 +75,20 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    if (vertex_bytes > 0) {
-        memcpy(out + vertex_offset, spec->vertices, vertex_bytes);
+    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
+    for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
+        positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;
+        positions[i][1] = (float)spec->vertices[i].local_y * hdr->inverse_pixels_per_unit;
+        uvs[i] = (NtAtlasUv){spec->vertices[i].atlas_u, spec->vertices[i].atlas_v};
+    }
+    for (uint32_t i = 0; i < spec->region_count; i++) {
+        const NtAtlasRegion *r = &spec->regions[i];
+        for (uint32_t v = 0; v < r->vertex_count; v++) {
+            const uint32_t at = r->vertex_start + v;
+            positions[at][0] = ((float)spec->vertices[at].local_x + (float)r->trim_offset_x) * hdr->inverse_pixels_per_unit;
+            positions[at][1] = ((float)spec->vertices[at].local_y + (float)r->trim_offset_y) * hdr->inverse_pixels_per_unit;
+        }
     }
     if (index_bytes > 0) {
         memcpy(out + index_offset, spec->indices, index_bytes);
@@ -91,7 +114,7 @@ static uint8_t s_pack_blob_count;
 
 static uint32_t build_fixture_atlas_blob(uint8_t *atlas_blob, uint32_t cap, float r0_origin_x, float r0_origin_y, float r1_origin_x, float r1_origin_y) {
     // #region Build 2-region atlas blob (one mock page)
-    NtAtlasVertex verts[8];
+    test_atlas_vertex_t verts[8];
     uint16_t indices[12];
     for (uint16_t i = 0; i < 8; i++) {
         verts[i].local_x = (int16_t)(i * 10);
@@ -470,7 +493,7 @@ void test_sprite_sync_preserves_override_on_atlas_republish(void) {
 
 /* Build a single-region atlas blob containing only R0 — used to test tombstone-on-merge. */
 static uint32_t build_fixture_atlas_blob_r0_only(uint8_t *atlas_blob, uint32_t cap) {
-    NtAtlasVertex verts[4];
+    test_atlas_vertex_t verts[4];
     uint16_t indices[6];
     for (uint16_t i = 0; i < 4; i++) {
         verts[i].local_x = (int16_t)(i * 10);

@@ -33,24 +33,34 @@
 /* ---- Mock atlas blob builder (mirrors test_atlas / test_sprite_comp) ---- */
 
 typedef struct {
+    int16_t local_x;
+    int16_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} test_atlas_vertex_t;
+
+typedef struct {
     const NtAtlasRegion *regions;
     uint16_t region_count;
-    const NtAtlasVertex *vertices;
+    const test_atlas_vertex_t *vertices;
     uint32_t total_vertex_count;
     const uint16_t *indices;
     uint32_t total_index_count;
     const uint64_t *page_ids;
     uint16_t page_count;
+    float inverse_pixels_per_unit;
 } mock_atlas_spec_t;
 
 static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atlas_spec_t *spec) {
     const uint32_t page_bytes = (uint32_t)spec->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)spec->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    const uint32_t vertex_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    const uint32_t position_bytes = spec->total_vertex_count * (uint32_t)sizeof(float[2]);
+    const uint32_t uv_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasUv);
     const uint32_t index_bytes = spec->total_index_count * (uint32_t)sizeof(uint16_t);
 
     const uint32_t vertex_offset = (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes;
-    const uint32_t index_offset = vertex_offset + vertex_bytes;
+    const uint32_t uv_offset = vertex_offset + position_bytes;
+    const uint32_t index_offset = uv_offset + uv_bytes;
     const uint32_t total = index_offset + index_bytes;
 
     TEST_ASSERT_MESSAGE(total <= cap, "mock blob buffer too small");
@@ -66,6 +76,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     hdr->total_vertex_count = spec->total_vertex_count;
     hdr->index_offset = index_offset;
     hdr->total_index_count = spec->total_index_count;
+    hdr->inverse_pixels_per_unit = spec->inverse_pixels_per_unit > 0.0F ? spec->inverse_pixels_per_unit : 1.0F;
 
     if (page_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader), spec->page_ids, page_bytes);
@@ -73,8 +84,20 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    if (vertex_bytes > 0) {
-        memcpy(out + vertex_offset, spec->vertices, vertex_bytes);
+    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
+    for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
+        positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;
+        positions[i][1] = (float)spec->vertices[i].local_y * hdr->inverse_pixels_per_unit;
+        uvs[i] = (NtAtlasUv){spec->vertices[i].atlas_u, spec->vertices[i].atlas_v};
+    }
+    for (uint32_t i = 0; i < spec->region_count; i++) {
+        const NtAtlasRegion *r = &spec->regions[i];
+        for (uint32_t v = 0; v < r->vertex_count; v++) {
+            const uint32_t at = r->vertex_start + v;
+            positions[at][0] = ((float)spec->vertices[at].local_x + (float)r->trim_offset_x) * hdr->inverse_pixels_per_unit;
+            positions[at][1] = ((float)spec->vertices[at].local_y + (float)r->trim_offset_y) * hdr->inverse_pixels_per_unit;
+        }
     }
     if (index_bytes > 0) {
         memcpy(out + index_offset, spec->indices, index_bytes);
@@ -92,10 +115,10 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 #define FIXTURE_PAGE0_RID 0x7000ULL
 #define FIXTURE_PAGE1_RID 0x7001ULL
 
-static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
+static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap, float ppu) {
     /* Layout: [r0 verts: 4] [r1 verts: 4] [poly verts: 6] [rs9 verts: 4] = 18 verts
      *         [r0 idx: 6] [r1 idx: 6] [poly idx: 12] [rs9 idx: 6] = 30 indices */
-    NtAtlasVertex verts[18];
+    test_atlas_vertex_t verts[18];
     uint16_t indices[30];
     for (uint16_t i = 0; i < 18; i++) {
         verts[i].local_x = (int16_t)(i * 10);
@@ -206,6 +229,7 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
         .region_count = 4,
         .vertices = verts,
         .total_vertex_count = 18,
+        .inverse_pixels_per_unit = ppu > 0.0F ? 1.0F / ppu : 1.0F,
         .indices = indices,
         .total_index_count = 30,
         .page_ids = page_ids,
@@ -214,7 +238,7 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }
 
-/* ppu <= 0 leaves the pack without pixels_per_unit metadata (atlas ipu stays 1). */
+/* Metadata is optional; the atlas fixture already carries its scale. */
 static uint8_t *build_pack_blob_for_atlas_ppu(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size, float ppu, uint32_t *out_total) {
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
@@ -274,7 +298,7 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
 static nt_resource_t register_test_atlas_ppu(uint64_t atlas_rid, float ppu) {
     uint8_t atlas_blob[1024];
-    uint32_t atlas_blob_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob));
+    uint32_t atlas_blob_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob), ppu);
 
     uint32_t pack_total = 0;
     uint8_t *pack_blob = build_pack_blob_for_atlas_ppu(atlas_rid, atlas_blob, atlas_blob_size, ppu, &pack_total);
@@ -1473,10 +1497,43 @@ void test_sprite_renderer_custom_attr_emit_bakes_per_vertex(void) {
 /* ---- Test: FLIP_X / FLIP_Y mirror around the region pivot ---- */
 
 static void assert_pos_close(float ex, float ey, const float pos[3], const char *msg) {
-    if (fabsf(pos[0] - ex) > 1e-4F || fabsf(pos[1] - ey) > 1e-4F) {
+    if (!(fabsf(pos[0] - ex) <= 1e-4F && fabsf(pos[1] - ey) <= 1e-4F)) {
         char buf[160];
         (void)snprintf(buf, sizeof(buf), "%s (expected=(%g,%g) actual=(%g,%g))", msg, (double)ex, (double)ey, (double)pos[0], (double)pos[1]);
         TEST_FAIL_MESSAGE(buf);
+    }
+}
+
+void test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas_ppu(0xF2ULL, 3.0F);
+    nt_sprite_renderer_set_material(create_test_material());
+    const uint32_t region = nt_atlas_find_region(s_atlas_res, FIXTURE_R1_HASH);
+    const float matrix[16] = {2.0F, 1.0F, 0.5F, 0.0F, -1.0F, 3.0F, -0.25F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 7.0F, -5.0F, 11.0F, 1.0F};
+    for (uint8_t flip = 0; flip < 4; flip++) {
+        const uint8_t flags = (uint8_t)(((flip & 1U) != 0 ? NT_SPRITE_FLAG_FLIP_X : 0U) | ((flip & 2U) != 0 ? NT_SPRITE_FLAG_FLIP_Y : 0U));
+        nt_sprite_renderer_emit_region(s_atlas_res, region, matrix, 0.25F, 0.75F, 0xFFFFFFFFU, flags);
+        TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
+        TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_last_emit_index_count());
+        for (uint32_t v = 0; v < 4; v++) {
+            float x = (32.0F + (10.0F * (float)v)) / 3.0F;
+            float y = (44.0F + (20.0F * (float)v)) / 3.0F;
+            if ((flip & 1U) != 0) {
+                x = -x;
+            }
+            if ((flip & 2U) != 0) {
+                y = -y;
+            }
+            float position[3];
+            uint16_t uv[2];
+            nt_sprite_renderer_test_last_emit_position(v, position);
+            nt_sprite_renderer_test_last_emit_texcoord(v, uv);
+            assert_pos_close((2.0F * x) - y + 7.0F, x + (3.0F * y) - 5.0F, position, "scaled pivot/flip/world position");
+            TEST_ASSERT_TRUE(fabsf(position[2] - ((0.5F * x) - (0.25F * y) + 11.0F)) <= 1e-4F);
+            TEST_ASSERT_EQUAL_UINT16((4U + v) * 1000U, uv[0]);
+            TEST_ASSERT_EQUAL_UINT16((4U + v) * 2000U, uv[1]);
+        }
     }
 }
 
@@ -1495,7 +1552,7 @@ void test_sprite_renderer_flip_mirrors_around_pivot(void) {
 
     /* Region r0: 64x64 source, origin (0.5, 0.5) → pivot at source (32, 32).
      * 4 verts at source-space (i*10, i*20) for i=0..3 = (0,0),(10,20),(20,40),(30,60).
-     * ipu = 1.0 (no pixels_per_unit metadata in fixture).
+     * ipu = 1.0 in the fixture header.
      * Identity transform at entity world (0,0).
      * Expected world position (no flip) = source_xy - pivot.
      * FLIP_X negates pivot-relative x → world x = -(source_x - 32) = 32 - source_x.
@@ -1927,31 +1984,78 @@ void test_emit_slice9_pivot_centers_and_mirrors(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabsf(pos15[0] + 50.0F) < 0.5F && fabsf(pos15[1] + 50.0F) < 0.5F, "flip mirrors around the pivot, not away from it");
 }
 
-/* pixels_per_unit is what makes an SD -> HD atlas swap invisible: the denser
- * art has proportionally bigger borders in pixels, and the corner must still
- * come out the same size in the caller's units. */
+/* A denser replacement keeps destination borders while layout size and border scale remain independent. */
 void test_emit_slice9_bands_follow_pixels_per_unit(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-
-    s_atlas_res = register_test_atlas_ppu(0xB8ULL, 4.0F);
-    nt_material_t mat = create_test_material();
-    nt_sprite_renderer_set_material(mat);
-
-    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* baked 16/16/8/24 */
-    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, NT_MATH_MAT4_IDENTITY, 100.0F, 100.0F, 0.0F, 0.0F, NULL, 1.0F, 0xFFFFFFFFU, 0);
-
-    /* At ppu=4 the 16 px L border is 4 units, the 24 px B border is 6. */
-    float v1[3];
-    float r1[3];
-    nt_sprite_renderer_test_last_emit_position(1, v1);
-    nt_sprite_renderer_test_last_emit_position(4, r1);
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 4.0F) < 0.5F, "L band must convert 16 px to 4 units at ppu=4");
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(r1[1] - 6.0F) < 0.5F, "B band must convert 24 px to 6 units at ppu=4");
-    /* Only the bands convert: w/h are the caller's units and must not shrink. */
-    float v3[3];
-    nt_sprite_renderer_test_last_emit_position(3, v3);
-    TEST_ASSERT_TRUE_MESSAGE(fabsf(v3[0] - 100.0F) < 0.5F, "w stays in caller units at ppu=4");
+    nt_sprite_renderer_set_material(create_test_material());
+    const uint16_t source_sizes[2][2] = {{100, 80}, {200, 160}};
+    const uint16_t borders[2][4] = {{16, 8, 12, 20}, {32, 16, 24, 40}};
+    const float ppu[2] = {4.0F, 8.0F};
+    const float scales[2] = {1.0F, 1.5F};
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    const uint64_t page_id = FIXTURE_PAGE0_RID;
+    const uint16_t expected_us[4] = {1000, 10600, 56200, 61000};
+    const uint16_t expected_vs[4] = {62000, 47000, 11000, 2000};
+    uint32_t region_id = NT_ATLAS_INVALID_REGION;
+    for (uint32_t variant = 0; variant < 2; variant++) {
+        const int16_t width = (int16_t)source_sizes[variant][0];
+        const int16_t height = (int16_t)source_sizes[variant][1];
+        const test_atlas_vertex_t vertices[4] = {{0, 0, 1000, 62000}, {width, 0, 61000, 62000}, {width, height, 61000, 2000}, {0, height, 1000, 2000}};
+        NtAtlasRegion regions[2] = {0};
+        regions[variant] = (NtAtlasRegion){.name_hash = FIXTURE_R0_HASH, .source_w = (uint16_t)width, .source_h = (uint16_t)height, .vertex_count = 4, .index_count = 6};
+        regions[1U - variant] = (NtAtlasRegion){.name_hash = FIXTURE_RS9_HASH, .source_w = (uint16_t)width, .source_h = (uint16_t)height, .vertex_count = 4, .index_count = 6};
+        memcpy(regions[1U - variant].slice9_lrtb, borders[variant], sizeof(borders[variant]));
+        const mock_atlas_spec_t spec = {.regions = regions,
+                                        .region_count = 2,
+                                        .vertices = vertices,
+                                        .total_vertex_count = 4,
+                                        .indices = indices,
+                                        .total_index_count = 6,
+                                        .page_ids = &page_id,
+                                        .page_count = 1,
+                                        .inverse_pixels_per_unit = 1.0F / ppu[variant]};
+        uint8_t atlas_blob[512];
+        const uint32_t atlas_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
+        uint32_t pack_size = 0;
+        uint8_t *pack = build_pack_blob_for_atlas_ppu(0xB8ULL, atlas_blob, atlas_size, 0.0F, &pack_size);
+        TEST_ASSERT_TRUE(s_pack_blob_count < MAX_PACK_BLOBS);
+        s_pack_blobs[s_pack_blob_count++] = pack;
+        char pack_name[32];
+        (void)snprintf(pack_name, sizeof(pack_name), "atlas_pack_%u", s_vpack_counter++);
+        const nt_hash32_t pid = nt_hash32_str(pack_name);
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, (int16_t)variant));
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, pack, pack_size));
+        s_atlas_res = nt_resource_request((nt_hash64_t){0xB8ULL}, NT_ASSET_ATLAS);
+        nt_resource_step();
+        nt_resource_step();
+        TEST_ASSERT_TRUE(nt_resource_is_ready(s_atlas_res));
+        if (variant == 0) {
+            region_id = nt_atlas_find_region(s_atlas_res, FIXTURE_RS9_HASH);
+            TEST_ASSERT_EQUAL_UINT32(1, region_id);
+        }
+        TEST_ASSERT_EQUAL_UINT32(region_id, nt_atlas_find_region(s_atlas_res, FIXTURE_RS9_HASH));
+        const nt_texture_region_t *region = nt_atlas_get_region(s_atlas_res, region_id);
+        TEST_ASSERT_EQUAL_UINT16_ARRAY(borders[variant], region->slice9_lrtb, 4);
+        TEST_ASSERT_EQUAL_UINT16(source_sizes[variant][0], region->source_w);
+        TEST_ASSERT_EQUAL_UINT16(source_sizes[variant][1], region->source_h);
+        TEST_ASSERT_TRUE(fabsf(nt_atlas_get_pixels_per_unit(s_atlas_res) - ppu[variant]) <= 1e-6F);
+        for (uint32_t scale = 0; scale < 2; scale++) {
+            const float xs[4] = {0.0F, 4.0F * scales[scale], 137.0F - (2.0F * scales[scale]), 137.0F};
+            const float ys[4] = {0.0F, 5.0F * scales[scale], 91.0F - (3.0F * scales[scale]), 91.0F};
+            nt_sprite_renderer_emit_slice9(s_atlas_res, region_id, NT_MATH_MAT4_IDENTITY, 137.0F, 91.0F, 0.0F, 0.0F, NULL, scales[scale], 0xFFFFFFFFU, 0);
+            TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_emit_vertex_count());
+            for (uint32_t v = 0; v < 16; v++) {
+                float position[3];
+                uint16_t uv[2];
+                nt_sprite_renderer_test_last_emit_position(v, position);
+                nt_sprite_renderer_test_last_emit_texcoord(v, uv);
+                assert_pos_close(xs[v % 4U], ys[v / 4U], position, "SD/HD grid must keep caller size and scaled borders");
+                TEST_ASSERT_EQUAL_UINT16(expected_us[v % 4U], uv[0]);
+                TEST_ASSERT_EQUAL_UINT16(expected_vs[v / 4U], uv[1]);
+            }
+        }
+    }
 }
 
 /* Graceful degradation: when dst < border sum the corners must not overflow the
@@ -2054,6 +2158,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
+    RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_restore_retries_after_context_loss);
     RUN_TEST(test_sprite_renderer_restore_on_inactive_renderer_does_nothing);

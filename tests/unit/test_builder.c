@@ -23,6 +23,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 }
 
 /* clang-format off */
+#include "log/nt_log.h"
 #include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_builder.h"
@@ -841,6 +842,43 @@ void test_dump_valid_pack(void) {
     /* Dump should succeed */
     r = nt_builder_dump_pack(pack_path);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+}
+
+static void count_dump_regions(nt_log_level_t level, const char *domain, const char *message, void *user_data) {
+    (void)level;
+    (void)domain;
+    if (strstr(message, "] page:") != NULL) {
+        (*(uint32_t *)user_data)++;
+    }
+}
+
+void test_dump_truncated_atlas_page_table(void) {
+    const char *path = TMP_DIR "/dump_truncated_atlas.ntpack";
+    uint8_t bytes[sizeof(NtPackHeader) + sizeof(NtAssetEntry) + sizeof(NtAtlasHeader)] = {0};
+    NtPackHeader *pack = (NtPackHeader *)bytes;
+    pack->magic = NT_PACK_MAGIC;
+    pack->version = NT_PACK_VERSION;
+    pack->asset_count = 1;
+    pack->header_size = sizeof(NtPackHeader) + sizeof(NtAssetEntry);
+    pack->total_size = sizeof(bytes);
+    NtAssetEntry *entry = (NtAssetEntry *)(bytes + sizeof(NtPackHeader));
+    entry->resource_id = 1;
+    entry->offset = pack->header_size;
+    entry->size = sizeof(NtAtlasHeader);
+    entry->asset_type = NT_ASSET_ATLAS;
+    NtAtlasHeader *atlas = (NtAtlasHeader *)(bytes + entry->offset);
+    *atlas = (NtAtlasHeader){.magic = NT_ATLAS_MAGIC, .version = NT_ATLAS_VERSION, .region_count = 1, .page_count = 1, .inverse_pixels_per_unit = 1.0F};
+    pack->checksum = nt_crc32(bytes + pack->header_size, sizeof(NtAtlasHeader));
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(sizeof(bytes), fwrite(bytes, 1, sizeof(bytes), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    uint32_t regions = 0;
+    nt_log_add_sink(count_dump_regions, &regions);
+    const nt_build_result_t result = nt_builder_dump_pack(path);
+    nt_log_remove_sink(count_dump_regions, &regions);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, result);
+    TEST_ASSERT_EQUAL_UINT32(0, regions);
 }
 
 void test_dump_invalid_file_errors(void) {
@@ -6394,6 +6432,15 @@ void test_atlas_begin_nan_ppu_asserts_after_failed_pack(void) {
     EXPECT_BUILD_ASSERT(ctx, (void)nt_atlas_begin(ctx, "next", &bad));
 }
 
+void test_atlas_begin_unrepresentable_inverse_ppu_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_inverse_ppu_overflow.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_atlas_opts_t bad = nt_atlas_opts_defaults();
+    bad.pixels_per_unit = 1e-40F;
+    EXPECT_BUILD_ASSERT_MATCH(ctx, (void)nt_atlas_begin(ctx, "bad", &bad), "inverse_pixels_per_unit");
+}
+
 /* Cross-field validation still runs after an earlier failed commit. */
 void test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack(void) {
     (void)MKDIR(TMP_DIR);
@@ -6816,7 +6863,7 @@ void test_atlas_round_trip_vertices(void) {
     const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
 
     /* Read vertex/index arrays at their serialized offsets */
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(ablob + ahdr->vertex_offset + ((size_t)ahdr->total_vertex_count * sizeof(float[2])));
     const uint16_t *indices = (const uint16_t *)(ablob + ahdr->index_offset);
 
     /* All vertices must have valid atlas UVs in [0, 65535] */
@@ -6843,7 +6890,22 @@ void test_atlas_round_trip_vertices(void) {
 }
 
 static uint8_t *read_atlas_blob(const char *path, const NtAtlasRegion **out_regions, uint32_t *out_region_count);
-static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf);
+typedef struct {
+    const float (*positions)[2];
+    float ipu;
+} atlas_position_view_t;
+
+static atlas_position_view_t atlas_blob_vertices(const uint8_t *pack_buf);
+
+static Point2D atlas_local_vertex(atlas_position_view_t view, const NtAtlasRegion *region, uint32_t index) {
+    TEST_ASSERT_TRUE(isfinite(view.ipu) && view.ipu > 0.0F);
+    const float *position = view.positions[region->vertex_start + index];
+    const float x = roundf(position[0] / view.ipu);
+    const float y = roundf(position[1] / view.ipu);
+    TEST_ASSERT_TRUE(isfinite(x) && isfinite(y) && x >= 0.0F && x <= UINT16_MAX && y >= 0.0F && y <= UINT16_MAX);
+    TEST_ASSERT_TRUE(x * view.ipu == position[0] && y * view.ipu == position[1]);
+    return (Point2D){(int32_t)x - region->trim_offset_x, (int32_t)y - region->trim_offset_y};
+}
 
 void test_atlas_shape_concave_disjoint_sprite_uses_fallback_frontier(void) {
     (void)MKDIR(TMP_DIR);
@@ -6877,10 +6939,10 @@ void test_atlas_shape_concave_disjoint_sprite_uses_fallback_frontier(void) {
     TEST_ASSERT_EQUAL_UINT32(1, region_count);
     TEST_ASSERT_TRUE(regions[0].vertex_count >= 4);
     /* Fallback must select a tight covering band, not degrade to the 16x16 AABB (2A=512). */
-    const NtAtlasVertex *fallback_vertices = atlas_blob_vertices(buf);
+    const atlas_position_view_t fallback_vertices = atlas_blob_vertices(buf);
     Point2D fallback_poly[NT_POLYGON_MAX_VERTICES];
     for (uint32_t i = 0; i < regions[0].vertex_count; i++) {
-        fallback_poly[i] = (Point2D){fallback_vertices[regions[0].vertex_start + i].local_x, fallback_vertices[regions[0].vertex_start + i].local_y};
+        fallback_poly[i] = atlas_local_vertex(fallback_vertices, &regions[0], i);
     }
     TEST_ASSERT_TRUE(polygon_abs_twice_area(fallback_poly, regions[0].vertex_count) <= 80);
     free(buf);
@@ -7006,14 +7068,14 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     const uint8_t *ablob = buf + atlas_entry->offset;
     const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
     const NtAtlasRegion *region = (const NtAtlasRegion *)(ablob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
-    const NtAtlasVertex *vertices = (const NtAtlasVertex *)(ablob + header->vertex_offset);
+    const atlas_position_view_t vertices = {.positions = (const float(*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
     TEST_ASSERT_LESS_OR_EQUAL_UINT8(BUDGET, region->vertex_count);
 
     Point2D emitted[16];
     for (uint32_t i = 0; i < region->vertex_count; i++) {
-        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
-        emitted[i].x = vertex->local_x;
-        emitted[i].y = H - vertex->local_y;
+        const Point2D vertex = atlas_local_vertex(vertices, region, i);
+        emitted[i].x = vertex.x;
+        emitted[i].y = H - vertex.y;
     }
     double max_outside = polygon_max_outside_pixel_distance(emitted, region->vertex_count, binary, W, H);
     TEST_ASSERT_TRUE_MESSAGE(max_outside <= 0.0, "convex vertex budget dropped a retained pixel");
@@ -7024,7 +7086,7 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     (void)remove(repeat_path);
 }
 
-static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]);
+static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, atlas_position_view_t vertices, uint32_t trim_height, Point2D out[16]);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_detection(void) {
@@ -7075,7 +7137,7 @@ void test_atlas_duplicate_detection(void) {
     TEST_ASSERT_EQUAL(regions[0].page_index, regions[1].page_index);
 
     /* Vertex data should be identical (same atlas position) */
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(ablob + ahdr->vertex_offset + ((size_t)ahdr->total_vertex_count * sizeof(float[2])));
     TEST_ASSERT_EQUAL(regions[0].vertex_count, regions[1].vertex_count);
     for (uint32_t v = 0; v < regions[0].vertex_count; v++) {
         TEST_ASSERT_EQUAL(verts[regions[0].vertex_start + v].atlas_u, verts[regions[1].vertex_start + v].atlas_u);
@@ -7265,39 +7327,28 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL_UINT8(0, sprite_opts.alpha_threshold);
 }
 
-/* Builder writes pixels_per_unit as a 4-byte resource metadata blob keyed by
- * hash64_str("pixels_per_unit") for every atlas. Round-trip: build pack with
- * ppu=2.5, scan meta section, expect 4 B == 2.5F. This test validates the
- * builder side only — runtime side is covered by nt_atlas_get_pixels_per_unit
- * tests. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_builder_atlas_pixels_per_unit_metadata(void) {
+void test_builder_atlas_pixels_per_unit_header(void) {
     (void)MKDIR(TMP_DIR);
-    const char *pack_path = TMP_DIR "/atlas_ppu_meta.ntpack";
+    const char *pack_path = TMP_DIR "/atlas_ppu_header.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
-
+    uint8_t *sprite = make_test_sprite(16, 16, 200, 100, 50, 255);
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
     opts.pixels_per_unit = 2.5F;
-    NtAtlasBuild *atlas_build_5522 = nt_atlas_begin(ctx, "ppu_atlas", &opts);
-    nt_atlas_add_raw(atlas_build_5522, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
-    (void)nt_atlas_commit(atlas_build_5522);
-
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "ppu_atlas", &opts);
+    nt_atlas_add_raw(atlas, sprite, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_atlas_commit(atlas));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
-    free(s);
+    free(sprite);
 
-    /* Read pack and find atlas asset entry */
     uint32_t file_size = 0;
     uint8_t *buf = read_file_bytes(pack_path, &file_size);
     TEST_ASSERT_NOT_NULL(buf);
-
     const NtPackHeader *pack = (const NtPackHeader *)buf;
-    TEST_ASSERT_TRUE(pack->meta_count >= 1U);
-    TEST_ASSERT_TRUE(pack->meta_offset > 0U);
-
+    TEST_ASSERT_EQUAL_UINT16(0, pack->meta_count);
     const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
     const NtAssetEntry *atlas_entry = NULL;
     for (uint32_t i = 0; i < pack->asset_count; i++) {
@@ -7307,42 +7358,24 @@ void test_builder_atlas_pixels_per_unit_metadata(void) {
         }
     }
     TEST_ASSERT_NOT_NULL(atlas_entry);
-    TEST_ASSERT_TRUE(atlas_entry->meta_offset > 0U);
-
-    /* Walk meta entries from atlas_entry->meta_offset until resource_id changes
-     * (entries are grouped by resource_id, sorted contiguous). Find the entry
-     * with kind == hash64_str("pixels_per_unit"). */
-    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
-    bool found = false;
-    float ppu_value = 0.0F;
-    uint32_t walk_offset = atlas_entry->meta_offset;
-    for (uint32_t i = 0; i < pack->meta_count; i++) {
-        TEST_ASSERT_TRUE(walk_offset + sizeof(NtMetaEntryHeader) <= file_size);
-        const NtMetaEntryHeader *mh = (const NtMetaEntryHeader *)(buf + walk_offset);
-        if (mh->resource_id != atlas_entry->resource_id) {
-            break; /* entered a different asset's meta group */
-        }
-        if (mh->kind == kind_ppu) {
-            TEST_ASSERT_EQUAL_UINT32(sizeof(float), mh->size);
-            const uint8_t *payload = buf + walk_offset + sizeof(NtMetaEntryHeader);
-            TEST_ASSERT_TRUE(payload + sizeof(float) <= buf + file_size);
-            memcpy(&ppu_value, payload, sizeof(float));
-            found = true;
-            break;
-        }
-        /* Advance to next meta entry: header + payload, padded to 4 bytes. */
-        uint32_t padded_size = (mh->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
-        walk_offset += (uint32_t)sizeof(NtMetaEntryHeader) + padded_size;
+    TEST_ASSERT_EQUAL_UINT32(0, atlas_entry->meta_offset);
+    TEST_ASSERT_TRUE((uint64_t)atlas_entry->offset + atlas_entry->size <= file_size);
+    const uint8_t *blob = buf + atlas_entry->offset;
+    const NtAtlasHeader *header = (const NtAtlasHeader *)blob;
+    TEST_ASSERT_EQUAL_UINT32(32, sizeof(*header));
+    TEST_ASSERT_TRUE(fabsf(header->inverse_pixels_per_unit - 0.4F) <= 1e-7F);
+    TEST_ASSERT_EQUAL_UINT32(header->vertex_offset + (header->total_vertex_count * 12U), header->index_offset);
+    TEST_ASSERT_EQUAL_UINT32(4, header->total_vertex_count);
+    const float(*positions)[2] = (const float(*)[2])(blob + header->vertex_offset);
+    uint32_t corners = 0;
+    for (uint32_t i = 0; i < header->total_vertex_count; i++) {
+        TEST_ASSERT_TRUE(positions[i][0] == 0.0F || fabsf(positions[i][0] - 6.4F) <= 1e-6F);
+        TEST_ASSERT_TRUE(positions[i][1] == 0.0F || fabsf(positions[i][1] - 6.4F) <= 1e-6F);
+        const uint32_t corner = (positions[i][0] > 0.0F ? 1U : 0U) | (positions[i][1] > 0.0F ? 2U : 0U);
+        corners |= 1U << corner;
     }
-    TEST_ASSERT_TRUE(found);
-    TEST_ASSERT_TRUE(ppu_value > 2.4999F && ppu_value < 2.5001F);
-
-    /* Smoke-check: pack_dump must not crash on a pack carrying
-     * pixels_per_unit metadata. The new dump line ("pixels_per_unit: 2.500")
-     * is asserted as code presence by the plan's grep verify step rather
-     * than by stdout capture (NT_LOG_INFO routes through the log module). */
+    TEST_ASSERT_EQUAL_UINT32(15, corners);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_dump_pack(pack_path));
-
     free(buf);
 }
 
@@ -7378,17 +7411,17 @@ static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out
     return buf;
 }
 
-static const NtAtlasVertex *atlas_blob_vertices(const uint8_t *pack_buf) {
+static atlas_position_view_t atlas_blob_vertices(const uint8_t *pack_buf) {
     const NtPackHeader *pack = (const NtPackHeader *)pack_buf;
     const NtAssetEntry *entries = (const NtAssetEntry *)(pack_buf + sizeof(NtPackHeader));
     for (uint32_t i = 0; i < pack->asset_count; i++) {
         if (entries[i].asset_type == NT_ASSET_ATLAS) {
             const uint8_t *ablob = pack_buf + entries[i].offset;
             const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
-            return (const NtAtlasVertex *)(ablob + header->vertex_offset);
+            return (atlas_position_view_t){.positions = (const float(*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
         }
     }
-    return NULL;
+    return (atlas_position_view_t){0};
 }
 
 static const uint16_t *atlas_blob_indices(const uint8_t *pack_buf) {
@@ -7432,11 +7465,11 @@ static void build_convex_added_area_fixture(const char *path, const uint8_t *rgb
     nt_builder_free_pack(ctx);
 }
 
-static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, const NtAtlasVertex *vertices, uint32_t trim_height, Point2D out[16]) {
+static uint32_t decode_serialized_region_y_down(const NtAtlasRegion *region, atlas_position_view_t vertices, uint32_t trim_height, Point2D out[16]) {
     for (uint32_t i = 0; i < region->vertex_count; i++) {
-        const NtAtlasVertex *vertex = &vertices[region->vertex_start + i];
-        out[i].x = vertex->local_x;
-        out[i].y = (int32_t)trim_height - vertex->local_y;
+        const Point2D vertex = atlas_local_vertex(vertices, region, i);
+        out[i].x = vertex.x;
+        out[i].y = (int32_t)trim_height - vertex.y;
     }
     return region->vertex_count;
 }
@@ -7702,20 +7735,20 @@ static const NtAtlasRegion *find_atlas_region(const NtAtlasRegion *regions, uint
     return NULL;
 }
 
-static void assert_rect_local_size(const NtAtlasRegion *region, const NtAtlasVertex *vertices, int32_t expected_w, int32_t expected_h) {
+static void assert_rect_local_size(const NtAtlasRegion *region, atlas_position_view_t vertices, int32_t expected_w, int32_t expected_h) {
     TEST_ASSERT_NOT_NULL(region);
-    TEST_ASSERT_NOT_NULL(vertices);
+    TEST_ASSERT_NOT_NULL(vertices.positions);
     TEST_ASSERT_EQUAL_UINT8(4, region->vertex_count);
     int32_t min_x = INT32_MAX;
     int32_t min_y = INT32_MAX;
     int32_t max_x = INT32_MIN;
     int32_t max_y = INT32_MIN;
     for (uint32_t i = 0; i < region->vertex_count; i++) {
-        const NtAtlasVertex *v = &vertices[region->vertex_start + i];
-        min_x = v->local_x < min_x ? v->local_x : min_x;
-        min_y = v->local_y < min_y ? v->local_y : min_y;
-        max_x = v->local_x > max_x ? v->local_x : max_x;
-        max_y = v->local_y > max_y ? v->local_y : max_y;
+        const Point2D v = atlas_local_vertex(vertices, region, i);
+        min_x = v.x < min_x ? v.x : min_x;
+        min_y = v.y < min_y ? v.y : min_y;
+        max_x = v.x > max_x ? v.x : max_x;
+        max_y = v.y > max_y ? v.y : max_y;
     }
     TEST_ASSERT_EQUAL_INT32(expected_w, (int32_t)max_x - min_x);
     TEST_ASSERT_EQUAL_INT32(expected_h, (int32_t)max_y - min_y);
@@ -7832,8 +7865,8 @@ void test_sprite_alpha_threshold_controls_trim(void) {
     uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL_UINT32(2, region_count);
-    const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
-    TEST_ASSERT_NOT_NULL(vertices);
+    atlas_position_view_t vertices = atlas_blob_vertices(buf);
+    TEST_ASSERT_NOT_NULL(vertices.positions);
     assert_rect_local_size(find_atlas_region(regions, region_count, "inherited.png"), vertices, 8, 8);
     assert_rect_local_size(find_atlas_region(regions, region_count, "overridden.png"), vertices, 4, 4);
     free(buf);
@@ -7869,7 +7902,7 @@ void test_rect_ignores_tolerance_but_uses_sprite_threshold(void) {
     uint32_t region_count = 0;
     uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(buf);
-    const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
+    atlas_position_view_t vertices = atlas_blob_vertices(buf);
     assert_rect_local_size(&regions[0], vertices, 4, 4);
     TEST_ASSERT_EQUAL_INT16(2, regions[0].trim_offset_x);
     TEST_ASSERT_EQUAL_INT16(2, regions[0].trim_offset_y);
@@ -7930,7 +7963,7 @@ void test_alpha_threshold_zero_domain_and_compose(void) {
     uint8_t *buf = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL_UINT32(3, region_count);
-    const NtAtlasVertex *vertices = atlas_blob_vertices(buf);
+    atlas_position_view_t vertices = atlas_blob_vertices(buf);
     assert_rect_local_size(find_atlas_region(regions, region_count, "trimmed.png"), vertices, 2, 2);
     assert_rect_local_size(find_atlas_region(regions, region_count, "keep_all.png"), vertices, W, H);
     assert_rect_local_size(find_atlas_region(regions, region_count, "ghost.png"), vertices, 3, 3);
@@ -7971,13 +8004,13 @@ void test_alpha_threshold_zero_domain_and_compose(void) {
     free(pack);
 }
 
-static void assert_serialized_local_polygons_equal(const NtAtlasRegion *a, const NtAtlasRegion *b, const NtAtlasVertex *vertices) {
+static void assert_serialized_local_polygons_equal(const NtAtlasRegion *a, const NtAtlasRegion *b, atlas_position_view_t vertices) {
     TEST_ASSERT_EQUAL_UINT8(a->vertex_count, b->vertex_count);
     for (uint32_t i = 0; i < a->vertex_count; i++) {
-        const NtAtlasVertex *av = &vertices[a->vertex_start + i];
-        const NtAtlasVertex *bv = &vertices[b->vertex_start + i];
-        TEST_ASSERT_EQUAL_INT16(av->local_x, bv->local_x);
-        TEST_ASSERT_EQUAL_INT16(av->local_y, bv->local_y);
+        const Point2D av = atlas_local_vertex(vertices, a, i);
+        const Point2D bv = atlas_local_vertex(vertices, b, i);
+        TEST_ASSERT_EQUAL_INT32(av.x, bv.x);
+        TEST_ASSERT_EQUAL_INT32(av.y, bv.y);
     }
 }
 
@@ -8047,7 +8080,7 @@ void test_mixed_sprite_geometry_overrides_are_isolated(void) {
     uint8_t *pack = read_atlas_blob(path, &regions, &region_count);
     TEST_ASSERT_NOT_NULL(pack);
     TEST_ASSERT_EQUAL_UINT32(5, region_count);
-    const NtAtlasVertex *vertices = atlas_blob_vertices(pack);
+    atlas_position_view_t vertices = atlas_blob_vertices(pack);
     const NtAtlasRegion *inherited_a = find_atlas_region(regions, region_count, "inherited_a");
     const NtAtlasRegion *inherited_b = find_atlas_region(regions, region_count, "inherited_b");
     const NtAtlasRegion *tolerance = find_atlas_region(regions, region_count, "tolerance_override");
@@ -8881,7 +8914,7 @@ void test_atlas_failed_pack_builds_subsequent_atlas(void) {
     TEST_ASSERT_EQUAL_UINT32(2, ctx->pending_count);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ASSET_ATLAS, ctx->pending[0].kind);
     TEST_ASSERT_EQUAL_INT(NT_BUILD_ASSET_TEXTURE, ctx->pending[1].kind);
-    TEST_ASSERT_EQUAL_UINT32(1, ctx->meta_count);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx->meta_count);
     TEST_ASSERT_EQUAL_UINT32(1, ctx->atlas_region_count);
 
     uint32_t after_b = 0;
@@ -9352,6 +9385,7 @@ int main(void) {
 
     /* Dump utility */
     RUN_TEST(test_dump_valid_pack);
+    RUN_TEST(test_dump_truncated_atlas_page_table);
     RUN_TEST(test_dump_invalid_file_errors);
     RUN_TEST(test_dump_gzip_sizes);
     RUN_TEST(test_dump_name_resolution);
@@ -9552,6 +9586,7 @@ int main(void) {
     RUN_TEST(test_atlas_add_glob_cross_field_asserts_before_enumeration);
     RUN_TEST(test_atlas_begin_bad_ppu_asserts_after_failed_pack);
     RUN_TEST(test_atlas_begin_nan_ppu_asserts_after_failed_pack);
+    RUN_TEST(test_atlas_begin_unrepresentable_inverse_ppu_asserts);
     RUN_TEST(test_atlas_add_raw_slice9_nonrect_asserts_after_failed_pack);
     RUN_TEST(test_atlas_add_raw_slice9_nonidentity_transform_asserts);
     RUN_TEST(test_atlas_add_raw_extrude_nonrect_asserts_after_failed_pack);
@@ -9586,7 +9621,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
     RUN_TEST(test_atlas_added_area_percent_defaults_and_validation);
-    RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
+    RUN_TEST(test_builder_atlas_pixels_per_unit_header);
     RUN_TEST(test_atlas_long_name_page_resource_resolves);
 
     /* Atlas sprite opts + origin (Point 2 follow-up) */
