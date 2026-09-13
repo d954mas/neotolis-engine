@@ -362,12 +362,11 @@ typedef struct {
                                    * Setting false is supported but emits a warning — valid only for
                                    * NEAREST-filtered or fully opaque atlases. */
     float pixels_per_unit;        /* Atlas-level scale: source pixels per world unit.
-                                   * 1.0F = 1 source pixel per unit (default). Combined with the runtime
-                                   * cached_pos bake (ipu = 1 / pixels_per_unit), an HD pack with 3× source
-                                   * pixels renders at the same on-screen size as the matching SD pack
-                                   * sharing the same Transform. Stored as a 4-byte resource metadata blob
-                                   * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
-                                   * unchanged. Must be positive and finite. */
+                                   * 1.0F = 1 source pixel per unit (default). The builder bakes its inverse
+                                   * into source-space positions and stores it in the atlas header.
+                                   * Proportional source dimensions and PPU preserve the rendered size.
+                                   * PPU and its inverse must be positive and finite; scaled positions and
+                                   * source dimensions must fit finite float. Metadata cannot override it. */
     /* Default sampler state baked into the atlas page texture's V3 header
      * (NtTextureAssetHeader.default_*). The activator creates a sampler from
      * these and binds it alongside the texture; materials may override per

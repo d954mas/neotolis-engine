@@ -38,17 +38,13 @@ static inline nt_atlas_region_ref_t nt_atlas_ref_idx(nt_resource_t atlas, uint64
     return (nt_atlas_region_ref_t){.name_hash = name_hash, .atlas = atlas, .region = region};
 }
 
-/* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes, same field order).
- * Runtime stores it identically; nt_atlas precomputes float positions/UVs before sprite batching.
- * Update both structs together when changing fields. */
+/* UVs match NtAtlasUv in the serialized atlas. */
 typedef struct {
-    int16_t local_x;
-    int16_t local_y;
     uint16_t atlas_u;
     uint16_t atlas_v;
-} nt_atlas_vertex_t;
+} nt_atlas_uv_t;
 
-/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v7).
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v8).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
@@ -60,7 +56,7 @@ typedef struct {
  * Total: 48 bytes on 64-bit (uint64_t alignment drives 8-byte boundary). */
 typedef struct {
     uint64_t name_hash;      /*  0: xxh64 of region name (always a real hash at runtime) */
-    uint32_t vertex_start;   /*  8: index into nt_atlas_data_t.vertices[] */
+    uint32_t vertex_start;   /*  8: index into positions and UV arrays */
     uint32_t index_start;    /* 12: index into nt_atlas_data_t.indices[]  */
     float origin_x;          /* 16: normalized pivot 0..1 (may lie outside) */
     float origin_y;          /* 20 */
@@ -135,29 +131,25 @@ const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t ind
  * Out-of-range trips NT_ASSERT. */
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index);
 
-/* ---- Precomputed projections + pixels_per_unit ---- */
+/* ---- Builder-ready geometry ---- */
 
-/* Asserts atlas resolved; returns 1.0F if metadata absent (ipu == 0). */
+/* Atlas-level immutable scale from the winning blob. Asserts atlas resolved. */
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
-
-/* Returns 1/pixels_per_unit directly (the value the atlas stores internally
- * for cached_pos baking). Sprite renderer wants ipu and would otherwise do
- * 1/get_pixels_per_unit() = 1/(1/ipu) — two divisions for the same number. */
 float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas);
 
-/* Cached projections: 1/pixels_per_unit baked into pos. UVs are NOT cached
- * separately — atlas stores them as u16 0..65535 in the blob, sprite
- * vertex format uses USHORT2N (normalizes to [0,1] in shader at no cost),
- * so the renderer reads them straight from the raw vertex slice. */
-const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
-const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index);
+/* Borrowed snapshot slices; caller must not free. Valid until replacement or
+ * cleanup. Resolved atlas and valid region index are required; returns non-NULL,
+ * with length from the region counts. Positions are y-up source-space units
+ * with trim and PPU baked in; origin remains dynamic. */
+const float (*nt_atlas_get_region_positions(nt_resource_t atlas, uint32_t region_index))[2];
+const nt_atlas_uv_t *nt_atlas_get_region_uvs(nt_resource_t atlas, uint32_t region_index);
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
-/* One resolve + one region lookup; replaces six separate getters. */
+/* Borrowed snapshot pointers with the same lifetime as the geometry getters. */
 typedef struct {
     const nt_texture_region_t *region;
-    const float (*cached_pos)[2];
-    const nt_atlas_vertex_t *raw_vertices;
+    const float (*positions)[2];
+    const nt_atlas_uv_t *uvs;
     const uint16_t *indices;
     nt_resource_t page_resource;
     float ipu;
@@ -216,15 +208,10 @@ void nt_atlas_test_reset(void);
  * death-test harness. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
-/* Test-only accessors for cached arrays + raw vertex blob + ipu.
- * Tests using nt_atlas_test_drive_resolve (no resource system) need
- * direct access since the public getters require an nt_resource_t. */
-const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2];
-const nt_atlas_vertex_t *nt_atlas_test_raw_vertices(const struct nt_atlas_data *ad);
+/* Direct access to owned geometry and intrinsic scale without a resource slot. */
+const float (*nt_atlas_test_positions(const struct nt_atlas_data *ad))[2];
+const nt_atlas_uv_t *nt_atlas_test_uvs(const struct nt_atlas_data *ad);
 float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
-/* Test-only setter for ipu — used by direct-drive tests to simulate the
- * post_resolve metadata read path without standing up a resource system. */
-void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
 
 #endif
 // #endregion

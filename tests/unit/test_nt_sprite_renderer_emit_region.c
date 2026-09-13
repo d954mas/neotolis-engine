@@ -36,23 +36,33 @@
 #define FIXTURE_POLYGON_REGION_IDX 1u
 
 typedef struct {
+    int16_t local_x;
+    int16_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} test_atlas_vertex_t;
+
+typedef struct {
     const NtAtlasRegion *regions;
     uint16_t region_count;
-    const NtAtlasVertex *vertices;
+    const test_atlas_vertex_t *vertices;
     uint32_t total_vertex_count;
     const uint16_t *indices;
     uint32_t total_index_count;
     const uint64_t *page_ids;
     uint16_t page_count;
+    float inverse_pixels_per_unit;
 } atlas_blob_spec_t;
 
 static uint32_t build_atlas_blob(uint8_t *out, uint32_t cap, const atlas_blob_spec_t *spec) {
     const uint32_t page_bytes = (uint32_t)spec->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)spec->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    const uint32_t vertex_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    const uint32_t position_bytes = spec->total_vertex_count * (uint32_t)sizeof(float[2]);
+    const uint32_t uv_bytes = spec->total_vertex_count * (uint32_t)sizeof(NtAtlasUv);
     const uint32_t index_bytes = spec->total_index_count * (uint32_t)sizeof(uint16_t);
     const uint32_t vertex_offset = (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes;
-    const uint32_t index_offset = vertex_offset + vertex_bytes;
+    const uint32_t uv_offset = vertex_offset + position_bytes;
+    const uint32_t index_offset = uv_offset + uv_bytes;
     const uint32_t total = index_offset + index_bytes;
 
     TEST_ASSERT_MESSAGE(total <= cap, "atlas blob buffer too small");
@@ -68,6 +78,7 @@ static uint32_t build_atlas_blob(uint8_t *out, uint32_t cap, const atlas_blob_sp
     hdr->total_vertex_count = spec->total_vertex_count;
     hdr->index_offset = index_offset;
     hdr->total_index_count = spec->total_index_count;
+    hdr->inverse_pixels_per_unit = spec->inverse_pixels_per_unit > 0.0F ? spec->inverse_pixels_per_unit : 1.0F;
 
     if (page_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader), spec->page_ids, page_bytes);
@@ -75,8 +86,20 @@ static uint32_t build_atlas_blob(uint8_t *out, uint32_t cap, const atlas_blob_sp
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    if (vertex_bytes > 0) {
-        memcpy(out + vertex_offset, spec->vertices, vertex_bytes);
+    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
+    for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
+        positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;
+        positions[i][1] = (float)spec->vertices[i].local_y * hdr->inverse_pixels_per_unit;
+        uvs[i] = (NtAtlasUv){spec->vertices[i].atlas_u, spec->vertices[i].atlas_v};
+    }
+    for (uint32_t i = 0; i < spec->region_count; i++) {
+        const NtAtlasRegion *r = &spec->regions[i];
+        for (uint32_t v = 0; v < r->vertex_count; v++) {
+            const uint32_t at = r->vertex_start + v;
+            positions[at][0] = ((float)spec->vertices[at].local_x + (float)r->trim_offset_x) * hdr->inverse_pixels_per_unit;
+            positions[at][1] = ((float)spec->vertices[at].local_y + (float)r->trim_offset_y) * hdr->inverse_pixels_per_unit;
+        }
     }
     if (index_bytes > 0) {
         memcpy(out + index_offset, spec->indices, index_bytes);
@@ -88,7 +111,7 @@ static uint32_t build_atlas_blob(uint8_t *out, uint32_t cap, const atlas_blob_sp
 static uint32_t build_test_atlas(uint8_t *atlas_blob, uint32_t cap) {
     /* Layout: [white verts: 4] [poly verts: 6] = 10 verts
      *         [white idx: 6] [poly idx: 12] = 18 indices */
-    NtAtlasVertex verts[10];
+    test_atlas_vertex_t verts[10];
     uint16_t indices[18];
     for (uint16_t i = 0; i < 10; i++) {
         verts[i].local_x = (int16_t)(i * 10);
@@ -422,11 +445,11 @@ static void test_set_material_auto_flush_on_change(void) {
  * - known UV corners for predictable split math */
 static uint32_t build_slice9_atlas(uint8_t *atlas_blob, uint32_t cap) {
     /* 4-vert axis-aligned quad: source 64x64, UVs spanning a known range. */
-    NtAtlasVertex verts[4];
-    verts[0] = (NtAtlasVertex){.local_x = 0, .local_y = 0, .atlas_u = 1000, .atlas_v = 2000};
-    verts[1] = (NtAtlasVertex){.local_x = 64, .local_y = 0, .atlas_u = 5000, .atlas_v = 2000};
-    verts[2] = (NtAtlasVertex){.local_x = 64, .local_y = 64, .atlas_u = 5000, .atlas_v = 6000};
-    verts[3] = (NtAtlasVertex){.local_x = 0, .local_y = 64, .atlas_u = 1000, .atlas_v = 6000};
+    test_atlas_vertex_t verts[4];
+    verts[0] = (test_atlas_vertex_t){.local_x = 0, .local_y = 0, .atlas_u = 1000, .atlas_v = 2000};
+    verts[1] = (test_atlas_vertex_t){.local_x = 64, .local_y = 0, .atlas_u = 5000, .atlas_v = 2000};
+    verts[2] = (test_atlas_vertex_t){.local_x = 64, .local_y = 64, .atlas_u = 5000, .atlas_v = 6000};
+    verts[3] = (test_atlas_vertex_t){.local_x = 0, .local_y = 64, .atlas_u = 1000, .atlas_v = 6000};
 
     uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
 

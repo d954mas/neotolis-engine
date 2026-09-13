@@ -11,7 +11,7 @@
 /* clang-format off */
 #include "nt_builder.h"      /* NtAtlasBuild, nt_atlas_add_raw, sprite opts */
 #include "nt_pack_format.h"  /* NtPackHeader, NtAssetEntry, NT_ASSET_ATLAS */
-#include "nt_atlas_format.h" /* NtAtlasHeader, NtAtlasRegion, NtAtlasVertex */
+#include "nt_atlas_format.h" /* NtAtlasHeader, NtAtlasRegion, NtAtlasUv */
 /* clang-format on */
 
 typedef enum {
@@ -128,12 +128,13 @@ static inline bool atlas_transform_fixture_dump_regions(const void *pack_bytes, 
     }
     const uint64_t regions_off = sizeof(NtAtlasHeader) + ((uint64_t)ah->page_count * sizeof(uint64_t));
     const uint64_t regions_end = regions_off + ((uint64_t)ah->region_count * sizeof(NtAtlasRegion));
-    const uint64_t verts_end = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasVertex));
+    const uint64_t uv_offset = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(float[2]));
+    const uint64_t verts_end = uv_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasUv));
     if (regions_end > atlas->size || verts_end > atlas->size) {
         return false;
     }
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(ablob + regions_off);
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(ablob + uv_offset);
 
     for (uint16_t i = 0; i < ah->region_count; ++i) {
         const uint32_t vstart = regions[i].vertex_start;
@@ -146,7 +147,7 @@ static inline bool atlas_transform_fixture_dump_regions(const void *pack_bytes, 
         uint16_t vmin = UINT16_MAX;
         uint16_t vmax = 0;
         for (uint32_t j = 0; j < nv; ++j) {
-            const NtAtlasVertex *p = &verts[vstart + j];
+            const NtAtlasUv *p = &verts[vstart + j];
             if (p->atlas_u < umin) {
                 umin = p->atlas_u;
             }

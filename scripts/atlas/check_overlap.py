@@ -2,14 +2,13 @@
 """Verify polygon overlap in atlas blob.
 
 Reads NtAtlas blob + a page PNG, rasterizes each unique polygon hull
-(deduped by vertex_start) into a grid, counts overlapping cells.
+(deduped by page UV ring) into a grid, counts overlapping cells.
 
 Usage: python scripts/atlas/check_overlap.py <blob.ntpack> <page0.png>
 Returns exit 0 if no overlap, exit 1 if overlap detected.
 """
 import struct
 import sys
-from collections import defaultdict
 from PIL import Image
 
 
@@ -20,62 +19,48 @@ def main(blob_path, page_path):
     if idx < 0:
         print("ERROR: ATLS magic not found in blob")
         sys.exit(2)
-    hdr = data[idx : idx + 28]
-    _, _, region_count, page_count, _, voff, vcount, _, _ = struct.unpack(
-        "<IHHHHIIII", hdr
+    hdr = data[idx : idx + 32]
+    _, version, region_count, page_count, _, voff, vcount, _, _, _ = struct.unpack(
+        "<IHHHHIIIIf", hdr
     )
-    regions_off = idx + 28 + page_count * 8
-    verts_off = idx + voff
+    if version != 8:
+        print(f"ERROR: atlas version {version}, expected 8; rebuild the pack")
+        sys.exit(2)
+    regions_off = idx + 32 + page_count * 8
+    uvs_off = idx + voff + vcount * 8
 
     img = Image.open(page_path)
     page_w, page_h = img.size
 
-    verts = []
+    uvs = []
     for v in range(vcount):
-        vb = data[verts_off + v * 8 : verts_off + (v + 1) * 8]
-        verts.append(struct.unpack("<hhHH", vb))
+        uv = data[uvs_off + v * 4 : uvs_off + (v + 1) * 4]
+        uvs.append(struct.unpack("<HH", uv))
 
-    # NtAtlasRegion v3 layout (36 bytes, shared/include/nt_atlas_format.h):
-    #   name_hash     Q   @0
-    #   source_w      H   @8
-    #   source_h      H   @10
-    #   trim_offset_x h   @12
-    #   trim_offset_y h   @14
-    #   origin_x      f   @16
-    #   origin_y      f   @20
-    #   vertex_start  I   @24   (u32 in v3, was u16 in v2)
-    #   index_start   I   @28   (u32 in v3, was u16 in v2)
-    #   vertex_count  B   @32
-    #   page_index    B   @33
-    #   transform     B   @34
-    #   index_count   B   @35
-    REGION_FMT = "<QHHhhffIIBBBB"
+    # Read the geometry fields and skip flags, slice9 borders and reserved bytes.
+    REGION_FMT = "<QHHhhffIIBBBB12x"
     REGION_SIZE = struct.calcsize(REGION_FMT)
-    assert REGION_SIZE == 36, f"NtAtlasRegion v3 must be 36 bytes, got {REGION_SIZE}"
+    assert REGION_SIZE == 48, f"NtAtlasRegion must be 48 bytes, got {REGION_SIZE}"
 
-    # Group regions by vertex_start (duplicates share storage).
-    vstart_groups = defaultdict(list)
+    # Aliases can share a placement without sharing serialized geometry.
+    seen_rings = set()
+    unique_polys = []
     for i in range(region_count):
         r = data[regions_off + i * REGION_SIZE : regions_off + (i + 1) * REGION_SIZE]
-        f = struct.unpack(REGION_FMT, r)
-        vstart = f[7]
-        vstart_groups[vstart].append(f)
-
-    # One representative polygon per unique vertex_start.
-    unique_polys = []
-    for vstart, items in vstart_groups.items():
-        f = items[0]
-        vertex_count = f[9]
-        page_index = f[10]
-        if page_index != 0:  # only page 0 supported for overlap test
+        fields = struct.unpack(REGION_FMT, r)
+        vstart, vertex_count, page_index = fields[7], fields[9], fields[10]
+        if page_index != 0 or vertex_count == 0:
             continue
-        poly = [
-            (
-                verts[vstart + j][2] * page_w / 65535.0,
-                verts[vstart + j][3] * page_h / 65535.0,
-            )
-            for j in range(vertex_count)
-        ]
+        ring = tuple(uvs[vstart : vstart + vertex_count])
+        canonical = min(
+            ordered[j:] + ordered[:j]
+            for ordered in (ring, ring[::-1])
+            for j in range(len(ring))
+        )
+        if canonical in seen_rings:
+            continue
+        seen_rings.add(canonical)
+        poly = [(u * page_w / 65535.0, v * page_h / 65535.0) for u, v in ring]
         unique_polys.append((vstart, poly))
 
     print(f"unique polygons on page 0: {len(unique_polys)}")

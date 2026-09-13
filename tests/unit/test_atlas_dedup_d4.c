@@ -2,6 +2,7 @@
  * carry the dimension swap, or every later relative-transform assertion could
  * pass by symmetry instead of by correctness. */
 
+#include <math.h>
 #include <setjmp.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -62,8 +63,17 @@ static uint8_t *read_bin_file(const char *path, size_t *out_len) {
  * per-vertex and per-index bytes. Every offset is guarded with a hard if. */
 
 typedef struct {
+    int32_t local_x;
+    int32_t local_y;
+    uint16_t atlas_u;
+    uint16_t atlas_v;
+} decoded_atlas_vertex_t;
+
+typedef struct {
     const NtAtlasRegion *regions;
-    const NtAtlasVertex *verts;
+    const uint8_t *positions;
+    const NtAtlasUv *uvs;
+    float ipu;
     const uint16_t *indices;
     uint32_t region_count;
     uint32_t vertex_total;
@@ -81,18 +91,21 @@ static bool atlas_view_open(const void *pack_bytes, size_t pack_len, atlas_view_
         return false;
     }
     const NtAtlasHeader *ah = (const NtAtlasHeader *)ablob;
-    if (ah->magic != NT_ATLAS_MAGIC || ah->version != NT_ATLAS_VERSION) {
+    if (ah->magic != NT_ATLAS_MAGIC || ah->version != NT_ATLAS_VERSION || !isfinite(ah->inverse_pixels_per_unit) || ah->inverse_pixels_per_unit <= 0.0F) {
         return false;
     }
     const uint64_t regions_off = sizeof(NtAtlasHeader) + ((uint64_t)ah->page_count * sizeof(uint64_t));
     const uint64_t regions_end = regions_off + ((uint64_t)ah->region_count * sizeof(NtAtlasRegion));
-    const uint64_t verts_end = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasVertex));
+    const uint64_t uv_offset = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(float[2]));
+    const uint64_t verts_end = uv_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasUv));
     const uint64_t idx_end = (uint64_t)ah->index_offset + ((uint64_t)ah->total_index_count * sizeof(uint16_t));
     if (regions_end > asize || verts_end > asize || idx_end > asize) {
         return false;
     }
     out->regions = (const NtAtlasRegion *)(ablob + regions_off);
-    out->verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+    out->positions = ablob + ah->vertex_offset;
+    out->uvs = (const NtAtlasUv *)(ablob + uv_offset);
+    out->ipu = ah->inverse_pixels_per_unit;
     out->indices = (const uint16_t *)(ablob + ah->index_offset);
     out->region_count = ah->region_count;
     out->vertex_total = ah->total_vertex_count;
@@ -101,18 +114,28 @@ static bool atlas_view_open(const void *pack_bytes, size_t pack_len, atlas_view_
 }
 
 /* A region's own vertex and index spans, bounds-checked against the blob totals. */
-static bool atlas_view_region_spans(const atlas_view_t *v, uint32_t r, const NtAtlasVertex **out_verts, const uint16_t **out_indices) {
+static bool atlas_view_region_spans(const atlas_view_t *v, uint32_t r, decoded_atlas_vertex_t out_verts[NT_POLYGON_MAX_VERTICES], const uint16_t **out_indices) {
     if (r >= v->region_count) {
         return false;
     }
     const NtAtlasRegion *reg = &v->regions[r];
-    if ((uint64_t)reg->vertex_start + reg->vertex_count > v->vertex_total) {
+    if (reg->vertex_count > NT_POLYGON_MAX_VERTICES || (uint64_t)reg->vertex_start + reg->vertex_count > v->vertex_total) {
         return false;
     }
     if ((uint64_t)reg->index_start + reg->index_count > v->index_total) {
         return false;
     }
-    *out_verts = &v->verts[reg->vertex_start];
+    for (uint32_t i = 0; i < reg->vertex_count; i++) {
+        const uint32_t at = reg->vertex_start + i;
+        float position[2];
+        memcpy(position, v->positions + ((size_t)at * sizeof(position)), sizeof(position));
+        const float x = roundf(position[0] / v->ipu);
+        const float y = roundf(position[1] / v->ipu);
+        if (!isfinite(x) || !isfinite(y) || x < 0.0F || x > UINT16_MAX || y < 0.0F || y > UINT16_MAX || x * v->ipu != position[0] || y * v->ipu != position[1]) {
+            return false;
+        }
+        out_verts[i] = (decoded_atlas_vertex_t){(int32_t)x - reg->trim_offset_x, (int32_t)y - reg->trim_offset_y, v->uvs[at].atlas_u, v->uvs[at].atlas_v};
+    }
     *out_indices = &v->indices[reg->index_start];
     return true;
 }
@@ -353,7 +376,7 @@ static bool solve_plane(const double x[3], const double y[3], const double val[3
 }
 
 /* Solve the region's own local->UV map from the first non-collinear triple. */
-static bool solve_local_to_uv(const NtAtlasVertex *v, uint32_t n, local_to_uv_t *out) {
+static bool solve_local_to_uv(const decoded_atlas_vertex_t *v, uint32_t n, local_to_uv_t *out) {
     for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = i + 1; j < n; ++j) {
             for (uint32_t k = j + 1; k < n; ++k) {
@@ -414,9 +437,9 @@ static void assert_texel_round_trip(const uv_probe_t *probe, const uint8_t *src,
 static void assert_region_samples_image(const pack_file_t *pack, const atlas_view_t *view, uint32_t r, uint8_t label, const uint8_t *img, uint32_t iw, uint32_t ih) {
     const NtAtlasRegion *reg = &view->regions[r];
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, reg->vertex_count, "a RECT sprite must emit a 4-vertex quad");
-    const NtAtlasVertex *verts = NULL;
+    decoded_atlas_vertex_t verts[NT_POLYGON_MAX_VERTICES];
     const uint16_t *idx = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(view, r, &verts, &idx), "region spans outside the blob");
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(view, r, verts, &idx), "region spans outside the blob");
     uv_probe_t probe = {.page = NULL, .page_w = 0, .page_h = 0, .map = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}, .region = r, .transform = label};
     TEST_ASSERT_TRUE_MESSAGE(solve_local_to_uv(verts, reg->vertex_count, &probe.map), "the region's local->UV map is degenerate");
     TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_read_page_rgba(pack->bytes, pack->len, reg->page_index, &probe.page, &probe.page_w, &probe.page_h), "read the atlas page pixels");
@@ -859,28 +882,28 @@ static bool build_f_standalone_pack(const char *path, const char *name, uint8_t 
 
 /* Twice the signed ring area. local_y is y-up, so a builder PNG-CCW ring reads
  * CW here — the magnitude is what the triangulation must reproduce. */
-static int64_t ring_area2(const NtAtlasVertex *v, uint32_t n) {
+static int64_t ring_area2(const decoded_atlas_vertex_t *v, uint32_t n) {
     int64_t a2 = 0;
     for (uint32_t i = 0; i < n; ++i) {
-        const NtAtlasVertex *p = &v[i];
-        const NtAtlasVertex *q = &v[(i + 1U) % n];
+        const decoded_atlas_vertex_t *p = &v[i];
+        const decoded_atlas_vertex_t *q = &v[(i + 1U) % n];
         a2 += ((int64_t)p->local_x * q->local_y) - ((int64_t)q->local_x * p->local_y);
     }
     return a2 < 0 ? -a2 : a2;
 }
 
-static int64_t tri_area2(const NtAtlasVertex *a, const NtAtlasVertex *b, const NtAtlasVertex *c) {
+static int64_t tri_area2(const decoded_atlas_vertex_t *a, const decoded_atlas_vertex_t *b, const decoded_atlas_vertex_t *c) {
     return (((int64_t)b->local_x - a->local_x) * ((int64_t)c->local_y - a->local_y)) - (((int64_t)c->local_x - a->local_x) * ((int64_t)b->local_y - a->local_y));
 }
 
 /* The polygon as a ring, ignoring which vertex the builder happened to start at.
  * A hull inherited from the root would carry the root's coordinates and match at
  * no rotation. */
-static bool rings_match_up_to_rotation(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+static bool rings_match_up_to_rotation(const decoded_atlas_vertex_t *a, const decoded_atlas_vertex_t *b, uint32_t n) {
     for (uint32_t s = 0; s < n; ++s) {
         bool same = true;
         for (uint32_t i = 0; i < n && same; ++i) {
-            const NtAtlasVertex *bv = &b[(i + s) % n];
+            const decoded_atlas_vertex_t *bv = &b[(i + s) % n];
             same = (a[i].local_x == bv->local_x) && (a[i].local_y == bv->local_y);
         }
         if (same) {
@@ -893,7 +916,7 @@ static bool rings_match_up_to_rotation(const NtAtlasVertex *a, const NtAtlasVert
 /* Every emitted ring is rotated to its lexicographically smallest vertex, so an alias
  * and a standalone pack of the same image agree at rotation zero — not merely up to
  * one. This is what makes the index block, and therefore the render flags, agree. */
-static bool rings_match_exactly(const NtAtlasVertex *a, const NtAtlasVertex *b, uint32_t n) {
+static bool rings_match_exactly(const decoded_atlas_vertex_t *a, const decoded_atlas_vertex_t *b, uint32_t n) {
     for (uint32_t i = 0; i < n; ++i) {
         if (a[i].local_x != b[i].local_x || a[i].local_y != b[i].local_y) {
             return false;
@@ -904,7 +927,7 @@ static bool rings_match_exactly(const NtAtlasVertex *a, const NtAtlasVertex *b, 
 
 /* Blob triangles read world-CCW and must tile this region's own ring exactly —
  * an index block inherited from a differently-oriented root would not. */
-static void assert_indices_tile_ring(const NtAtlasVertex *v, uint32_t n, const uint16_t *idx, uint32_t idx_count, const char *what) {
+static void assert_indices_tile_ring(const decoded_atlas_vertex_t *v, uint32_t n, const uint16_t *idx, uint32_t idx_count, const char *what) {
     TEST_ASSERT_TRUE_MESSAGE(idx_count % 3U == 0U, "index_count must be a multiple of 3");
     int64_t sum = 0;
     for (uint32_t t = 0; t + 2U < idx_count; t += 3U) {
@@ -939,12 +962,12 @@ static void assert_region_pair_equivalent(const atlas_view_t *av, uint32_t ar, c
     assert_quad_flag_matches_counts(a);
     assert_quad_flag_matches_counts(b);
 
-    const NtAtlasVertex *avx = NULL;
+    decoded_atlas_vertex_t avx[NT_POLYGON_MAX_VERTICES];
     const uint16_t *aidx = NULL;
-    const NtAtlasVertex *bvx = NULL;
+    decoded_atlas_vertex_t bvx[NT_POLYGON_MAX_VERTICES];
     const uint16_t *bidx = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(av, ar, &avx, &aidx), "alias region spans outside the blob");
-    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(bv, br, &bvx, &bidx), "standalone region spans outside the blob");
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(av, ar, avx, &aidx), "alias region spans outside the blob");
+    TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(bv, br, bvx, &bidx), "standalone region spans outside the blob");
     TEST_ASSERT_TRUE_MESSAGE(rings_match_up_to_rotation(avx, bvx, a->vertex_count), what);
     TEST_ASSERT_TRUE_MESSAGE(rings_match_exactly(avx, bvx, a->vertex_count), "canonical rotation must make the two rings identical, not merely congruent");
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(bidx, aidx, (size_t)a->index_count * sizeof(uint16_t), "identical rings must triangulate identically");
@@ -1005,9 +1028,9 @@ void test_mirrored_alias_winding_is_world_ccw(void) {
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_open(pack.bytes, pack.len, &view), "open the produced atlas blob");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per mirror image");
     for (uint32_t r = 0; r < 4; ++r) {
-        const NtAtlasVertex *v = NULL;
+        decoded_atlas_vertex_t v[NT_POLYGON_MAX_VERTICES];
         const uint16_t *idx = NULL;
-        TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(&view, r, &v, &idx), "region spans outside the blob");
+        TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(&view, r, v, &idx), "region spans outside the blob");
         assert_indices_tile_ring(v, view.regions[r].vertex_count, idx, view.regions[r].index_count, "a mirrored alias triangle is not world-CCW");
         assert_quad_flag_matches_counts(&view.regions[r]);
     }

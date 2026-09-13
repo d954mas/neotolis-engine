@@ -15,7 +15,7 @@
 /* clang-format off */
 #include "nt_builder.h"        /* NtAtlasBuild, nt_atlas_add_raw, sprite opts */
 #include "nt_pack_format.h"    /* NtPackHeader, NtAssetEntry, NT_ASSET_ATLAS */
-#include "nt_atlas_format.h"   /* NtAtlasHeader, NtAtlasRegion, NtAtlasVertex */
+#include "nt_atlas_format.h"   /* NtAtlasHeader, NtAtlasRegion, NtAtlasUv */
 #include "nt_texture_format.h" /* NtTextureAssetHeader, RAW/RGBA8 constants */
 /* clang-format on */
 
@@ -160,7 +160,7 @@ typedef struct {
 /* Lexicographically smallest rotation over both traversal directions. Any
  * consistent total order works — both sides of a comparison canonicalize the
  * same way, so plain memcmp order is fine. */
-static inline void atlas_dedup_canonical_uv_ring(const NtAtlasVertex *verts, uint32_t vstart, uint32_t nv, uint16_t out[][2]) {
+static inline void atlas_dedup_canonical_uv_ring(const NtAtlasUv *verts, uint32_t vstart, uint32_t nv, uint16_t out[][2]) {
     uint16_t best[NT_ATLAS_DEDUP_MAX_RING][2];
     bool have = false;
     for (uint32_t dir = 0; dir < 2U; ++dir) {
@@ -234,7 +234,8 @@ static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pa
     }
     const uint64_t regions_off = sizeof(NtAtlasHeader) + ((uint64_t)ah->page_count * sizeof(uint64_t));
     const uint64_t regions_end = regions_off + ((uint64_t)ah->region_count * sizeof(NtAtlasRegion));
-    const uint64_t verts_end = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasVertex));
+    const uint64_t uv_offset = (uint64_t)ah->vertex_offset + ((uint64_t)ah->total_vertex_count * sizeof(float[2]));
+    const uint64_t verts_end = uv_offset + ((uint64_t)ah->total_vertex_count * sizeof(NtAtlasUv));
     if (regions_end > asize || verts_end > asize) {
         return false;
     }
@@ -242,7 +243,7 @@ static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pa
         return false;
     }
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(ablob + regions_off);
-    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ah->vertex_offset);
+    const NtAtlasUv *verts = (const NtAtlasUv *)(ablob + uv_offset);
 
     for (uint16_t i = 0; i < ah->region_count; ++i) {
         const uint32_t vstart = regions[i].vertex_start;
@@ -273,7 +274,7 @@ static inline bool atlas_dedup_collect_regions(const void *pack_bytes, size_t pa
         uint16_t vmin = UINT16_MAX;
         uint16_t vmax = 0;
         for (uint32_t j = 0; j < nv; ++j) {
-            const NtAtlasVertex *p = &verts[vstart + j];
+            const NtAtlasUv *p = &verts[vstart + j];
             umin = (p->atlas_u < umin) ? p->atlas_u : umin;
             umax = (p->atlas_u > umax) ? p->atlas_u : umax;
             vmin = (p->atlas_v < vmin) ? p->atlas_v : vmin;

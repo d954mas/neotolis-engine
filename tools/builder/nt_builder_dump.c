@@ -8,7 +8,7 @@
 #include "miniz.h"
 /* clang-format on */
 
-#include <string.h> /* memcpy for pixels_per_unit metadata read */
+#include <string.h>
 
 /* ---- Name resolution from .h file ---- */
 
@@ -244,57 +244,25 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
     NT_LOG_INFO("    chars: %s", chars);
 }
 
-/* ---- Atlas-specific detail printer ----
- *
- * The atlas blob itself does not carry pixels_per_unit — binary atlas format
- * v3 unchanged. The value lives in the pack-level metadata channel as a
- * 4-byte float keyed by hash64_str("pixels_per_unit"),
- * so the printer needs the full pack buffer + the asset entry's meta_offset
- * to resolve it. */
+/* ---- Atlas-specific detail printer ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size, const uint8_t *pack_buf, uint32_t pack_size, const NtAssetEntry *atlas_entry, uint32_t pack_meta_count) {
+static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) {
     if (!asset_data || asset_size < sizeof(NtAtlasHeader)) {
         return;
     }
     const NtAtlasHeader *ahdr = (const NtAtlasHeader *)asset_data;
-    if (ahdr->magic != NT_ATLAS_MAGIC) {
+    if (ahdr->magic != NT_ATLAS_MAGIC || ahdr->version != NT_ATLAS_VERSION) {
         return;
     }
 
-    // #region pixels_per_unit dump
-    /* Resolve pixels_per_unit from this asset's metadata group (default 1.0F
-     * if absent — keeps dumps from ancient packs readable). Walk meta entries
-     * forward from atlas_entry->meta_offset, stopping at first resource_id
-     * mismatch (entries are grouped contiguous by resource_id). */
-    float ppu = 1.0F;
-    if (pack_buf && atlas_entry && atlas_entry->meta_offset != 0 && pack_meta_count > 0) {
-        const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
-        uint32_t walk = atlas_entry->meta_offset;
-        for (uint32_t i = 0; i < pack_meta_count; i++) {
-            if (walk + sizeof(NtMetaEntryHeader) > pack_size) {
-                break;
-            }
-            const NtMetaEntryHeader *mh = (const NtMetaEntryHeader *)(pack_buf + walk);
-            if (mh->resource_id != atlas_entry->resource_id) {
-                break;
-            }
-            if (mh->kind == kind_ppu && mh->size == sizeof(float)) {
-                const uint8_t *payload = pack_buf + walk + sizeof(NtMetaEntryHeader);
-                if (payload + sizeof(float) <= pack_buf + pack_size) {
-                    memcpy(&ppu, payload, sizeof(float));
-                }
-                break;
-            }
-            uint32_t padded_size = (mh->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
-            walk += (uint32_t)sizeof(NtMetaEntryHeader) + padded_size;
-        }
-    }
+    const float ppu = 1.0F / ahdr->inverse_pixels_per_unit;
     NT_LOG_INFO("    regions: %u  pages: %u  vertices: %u  pixels_per_unit: %.3f", ahdr->region_count, ahdr->page_count, ahdr->total_vertex_count, (double)ppu);
-    // #endregion
 
-    /* Parse past texture resource IDs to reach regions */
-    const uint8_t *ptr = asset_data + sizeof(NtAtlasHeader);
-    ptr += (size_t)ahdr->page_count * sizeof(uint64_t);
+    const uint32_t page_bytes = (uint32_t)ahdr->page_count * (uint32_t)sizeof(uint64_t);
+    if (page_bytes > asset_size - (uint32_t)sizeof(*ahdr)) {
+        return;
+    }
+    const uint8_t *ptr = asset_data + sizeof(*ahdr) + page_bytes;
 
     /* Parse regions */
     const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
@@ -672,7 +640,7 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
 
         /* Atlas-specific detail line */
         if (e->asset_type == NT_ASSET_ATLAS && asset_data) {
-            print_atlas_details(asset_data, asset_size, buffer, file_size, e, header->meta_count);
+            print_atlas_details(asset_data, asset_size);
         }
 
         /* Accumulate per-type stats */

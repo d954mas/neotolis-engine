@@ -572,6 +572,9 @@ if(NOT EMSCRIPTEN)
         ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c
     )
     target_link_libraries(test_atlas_bench_parse PRIVATE unity)
+    if(NOT WIN32)
+        target_link_libraries(test_atlas_bench_parse PRIVATE m)
+    endif()
     target_include_directories(test_atlas_bench_parse PRIVATE
         ${CMAKE_SOURCE_DIR}/shared/include
         ${CMAKE_SOURCE_DIR}/tools/builder

@@ -87,10 +87,11 @@ const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
 const float *nt_sprite_comp_origin(nt_entity_t entity);
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 
+/* Borrows atlas snapshot data; refresh through resolve after snapshot replacement. */
 typedef struct {
     const nt_texture_region_t *region;
-    const float (*cached_pos)[2];
-    const nt_atlas_vertex_t *raw_vertices;
+    const float (*positions)[2];
+    const nt_atlas_uv_t *uvs;
     const uint16_t *indices;
     nt_resource_t page_resource;
 } nt_sprite_resolved_region_t;

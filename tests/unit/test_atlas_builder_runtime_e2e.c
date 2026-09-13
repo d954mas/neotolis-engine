@@ -2,6 +2,7 @@
  * test-side parser or feeds the runtime hand-built blobs, so a builder/runtime
  * format skew would stay invisible until a game loads a real pack. */
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,13 +64,13 @@ static uint8_t *read_bin_file(const char *path, size_t *out_len) {
 
 /* UV bbox straight off the runtime's raw vertex array — the fold observable. */
 static void runtime_region_uv_bbox(const struct nt_atlas_data *ad, const nt_texture_region_t *r, uint16_t out_bbox[4]) {
-    const nt_atlas_vertex_t *verts = nt_atlas_test_raw_vertices(ad);
+    const nt_atlas_uv_t *verts = nt_atlas_test_uvs(ad);
     out_bbox[0] = UINT16_MAX;
     out_bbox[1] = UINT16_MAX;
     out_bbox[2] = 0;
     out_bbox[3] = 0;
     for (uint32_t v = 0; v < r->vertex_count; ++v) {
-        const nt_atlas_vertex_t *p = &verts[r->vertex_start + v];
+        const nt_atlas_uv_t *p = &verts[r->vertex_start + v];
         out_bbox[0] = (p->atlas_u < out_bbox[0]) ? p->atlas_u : out_bbox[0];
         out_bbox[1] = (p->atlas_v < out_bbox[1]) ? p->atlas_v : out_bbox[1];
         out_bbox[2] = (p->atlas_u > out_bbox[2]) ? p->atlas_u : out_bbox[2];
@@ -163,20 +164,119 @@ void test_builder_pack_resolves_in_runtime_atlas(void) {
     TEST_ASSERT_TRUE_MESSAGE((NT_ATLAS_TRANSFORMS_ROTATIONS & (uint8_t)(1U << root->transform)) != 0U, "root transform escaped the build mask");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, filler->transform, "an unfolded lone sprite ships at identity");
 
-    /* cached_pos bake integration: with ipu pinned to 1, the baked position is
-     * local + trim offset — zero here, so it must equal the raw vertex. */
-    nt_atlas_test_set_ipu_and_recompute((struct nt_atlas_data *)s_user_data, 1.0F);
-    const nt_atlas_vertex_t *raw = &nt_atlas_test_raw_vertices(ad)[root->vertex_start];
-    const float(*cached)[2] = nt_atlas_test_cached_pos(ad);
-    /* Values are small exact integers; UNITY_EXCLUDE_FLOAT bars float asserts. */
-    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)raw->local_x, (int32_t)cached[root->vertex_start][0], "cached_pos X must bake local + zero trim at ipu 1");
-    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)raw->local_y, (int32_t)cached[root->vertex_start][1], "cached_pos Y must bake local + zero trim at ipu 1");
+    const float(*positions)[2] = nt_atlas_test_positions(ad);
+    uint32_t corner_mask = 0;
+    for (uint32_t v = 0; v < root->vertex_count; v++) {
+        const float *xy = positions[root->vertex_start + v];
+        const bool right = fabsf(xy[0] - (float)NT_ATLAS_F_W) <= 1e-6F;
+        const bool top = fabsf(xy[1] - (float)NT_ATLAS_F_H) <= 1e-6F;
+        TEST_ASSERT_TRUE_MESSAGE(right || fabsf(xy[0]) <= 1e-6F, "root x must reach a source edge");
+        TEST_ASSERT_TRUE_MESSAGE(top || fabsf(xy[1]) <= 1e-6F, "root y must reach a source edge");
+        corner_mask |= 1U << ((right ? 1U : 0U) + (top ? 2U : 0U));
+    }
+    TEST_ASSERT_EQUAL_UINT32(15, corner_mask);
 
     free(pack);
+}
+
+static bool build_scaled_pack(const char *path, const char *cache, float ppu) {
+    (void)MKDIR("build");
+    (void)MKDIR("build/tests");
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_set_threads(ctx, 1);
+    if (cache != NULL) {
+        (void)MKDIR(cache);
+        nt_builder_set_cache_dir(ctx, cache);
+    }
+    uint8_t pixels[19 * 13 * 4] = {0};
+    for (uint32_t y = 2; y < 9; y++) {
+        for (uint32_t x = 3; x < 14; x++) {
+            const uint32_t at = ((y * 19U) + x) * 4U;
+            pixels[at] = 80;
+            pixels[at + 1U] = 160;
+            pixels[at + 2U] = 240;
+            pixels[at + 3U] = 255;
+        }
+    }
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.allowed_transforms = NT_ATLAS_TRANSFORMS_IDENTITY;
+    opts.pixels_per_unit = ppu;
+    NtAtlasBuild *atlas = nt_atlas_begin(ctx, "e2e_scale", &opts);
+    nt_atlas_sprite_opts_t sprite = nt_atlas_sprite_opts_defaults();
+    sprite.name = "trimmed";
+    sprite.origin_x = 0.25F;
+    sprite.origin_y = 0.75F;
+    nt_atlas_add_raw(atlas, pixels, 19, 13, &sprite);
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, nt_atlas_commit(atlas));
+    uint32_t count = 0;
+    const nt_atlas_stats_t *stats = nt_builder_get_atlas_stats(ctx, &count);
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    TEST_ASSERT_NOT_NULL(stats);
+    const bool cache_hit = stats[0].cache_hit;
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    return cache_hit;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_builder_ready_positions_follow_ppu_on_cache_hit(void) {
+    const char *paths[3] = {TMP_DIR "/e2e_scale_cold.ntpack", TMP_DIR "/e2e_scale_seed.ntpack", TMP_DIR "/e2e_scale_hit.ntpack"};
+    nt_atlas_uv_t first_uvs[4];
+    for (uint32_t pass = 0; pass < 3; pass++) {
+        const float ppu = pass == 2 ? 6.0F : 3.0F;
+        const bool cache_hit = build_scaled_pack(paths[pass], pass == 0 ? NULL : TMP_DIR "/e2e_scale_cache", ppu);
+        if (pass == 0) {
+            TEST_ASSERT_FALSE(cache_hit);
+        } else if (pass == 2) {
+            TEST_ASSERT_TRUE_MESSAGE(cache_hit, "changing only PPU must reuse placement cache");
+        }
+        size_t pack_len = 0;
+        uint8_t *pack = read_bin_file(paths[pass], &pack_len);
+        TEST_ASSERT_NOT_NULL(pack);
+        uint32_t blob_size = 0;
+        const uint8_t *blob = atlas_dedup_find_asset(pack, pack_len, (uint8_t)NT_ASSET_ATLAS, 0, &blob_size);
+        TEST_ASSERT_NOT_NULL(blob);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_atlas_test_activate(blob, blob_size));
+        nt_atlas_test_drive_resolve(blob, blob_size, &s_user_data);
+        free(pack);
+
+        const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+        TEST_ASSERT_TRUE(fabsf(nt_atlas_test_ipu(ad) - (1.0F / ppu)) <= 1e-6F);
+        TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, nt_hash64_str("trimmed").value));
+        const nt_texture_region_t *r = find_runtime_region(ad, "trimmed");
+        TEST_ASSERT_EQUAL_UINT16(19, r->source_w);
+        TEST_ASSERT_EQUAL_UINT16(13, r->source_h);
+        TEST_ASSERT_EQUAL_INT16(3, r->trim_offset_x);
+        TEST_ASSERT_EQUAL_INT16(4, r->trim_offset_y);
+        TEST_ASSERT_TRUE(fabsf(r->origin_x - 0.25F) <= 1e-6F);
+        TEST_ASSERT_TRUE(fabsf(r->origin_y - 0.25F) <= 1e-6F);
+        TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
+        const float(*positions)[2] = nt_atlas_test_positions(ad);
+        const nt_atlas_uv_t *uvs = &nt_atlas_test_uvs(ad)[r->vertex_start];
+        uint32_t corner_mask = 0;
+        for (uint32_t v = 0; v < 4; v++) {
+            const float *xy = positions[r->vertex_start + v];
+            const bool right = fabsf(xy[0] - (14.0F / ppu)) <= 1e-5F;
+            const bool top = fabsf(xy[1] - (11.0F / ppu)) <= 1e-5F;
+            TEST_ASSERT_TRUE_MESSAGE(right || fabsf(xy[0] - (3.0F / ppu)) <= 1e-5F, "builder must bake source x and scale");
+            TEST_ASSERT_TRUE_MESSAGE(top || fabsf(xy[1] - (4.0F / ppu)) <= 1e-5F, "builder must bake bottom trim and scale");
+            corner_mask |= 1U << ((right ? 1U : 0U) + (top ? 2U : 0U));
+        }
+        TEST_ASSERT_EQUAL_UINT32(15, corner_mask);
+        if (pass == 0) {
+            memcpy(first_uvs, uvs, sizeof(first_uvs));
+        } else {
+            TEST_ASSERT_EQUAL_MEMORY(first_uvs, uvs, sizeof(first_uvs));
+        }
+    }
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_builder_pack_resolves_in_runtime_atlas);
+    RUN_TEST(test_builder_ready_positions_follow_ppu_on_cache_hit);
     return UNITY_END();
 }

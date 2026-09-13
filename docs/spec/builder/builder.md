@@ -378,27 +378,26 @@ nt_build_result_t atlas_result = nt_atlas_commit(atlas);
      set per bucket is exactly as strict as one per atlas.
    - **What is shared.** The placement rectangle and nothing else: every sprite
      still owns its vertex/index block, and whether two blocks share one byte
-     range in the blob is decided separately, by byte equality, in `serialize`.
+     range in the blob is decided separately in `serialize`.
 4. **geometry** — for each unique sprite, build the binary mask from the same effective alpha threshold and select the shape-specific geometry path. `RECT` emits the trim AABB. `CONVEX_HULL` starts from the opaque-pixel convex hull. `CONCAVE_CONTOUR` performs morphological closing when needed, traces the boundary, and evaluates concave simplifiers. Polygon candidates share full retained-cell coverage, topology, triangulation, area-budget, vertex-budget, and deterministic-selection checks described below.
 5. **pipeline_validate** — non-mutating pre-pack checks that report every bad sprite in one pass: empty-page fit, duplicate region names, region-count cap, and per-sprite trim-dimension limits. It still runs on surviving sprites after earlier content errors.
 6. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
 7. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
 8. **serialize** — build the atlas blob in transaction-owned storage.
-   - Every sprite's vertex/index block is emitted from its own geometry and its own
-     region transform; byte-identical blocks then share one range, first writer in
-     add order wins.
+   - Every sprite's integer geometry is proved before float conversion. Its block
+     includes local XY, baked UVs and triangle indices; equal blocks with equal
+     trim offsets share one range, first writer in add order wins. This key is
+     sufficient for equal serialized geometry at the atlas's single scale.
+   - The builder writes each unique block as contiguous float[2] source-space
+     positions `(local + trim) * inverse_pixels_per_unit`, a parallel packed u16
+     UV array, and indices. Origin remains dynamic. The positive finite inverse
+     PPU is intrinsic to the atlas header; no automatic PPU metadata is emitted.
    - Sprites on different pages can share a block — the page comes from
      `NtAtlasRegion.page_index`, not from the vertex data.
-   - Block identity additionally requires equal `trim_offset_x/y`, neither of which
-     is part of the block: the runtime bakes the trim offset into `cached_pos[]`,
-     indexed by `vertex_start`, so two regions on one byte range would overwrite
-     each other's precomputed positions and the later region would win. Post-trim
-     dedup is what made differing trim offsets reachable inside one group, so the
-     two rules ship together.
 9. **cache_write/debug_png** — persist optional successful-build artifacts after all recoverable work has succeeded.
-10. **publish** — register the atlas blob, page textures, metadata, and region codegen in the pack. Capacity, allocation, and resource-ID failures assert and terminate the build; they are not recoverable rollback paths.
+10. **publish** — register the atlas blob, page textures, and region codegen in the pack. Capacity, allocation, and resource-ID failures assert and terminate the build; they are not recoverable rollback paths.
 
-Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish the same output. Before a polygon candidate is accepted, its triangle union must continuously cover the full unit-square area of every retained pixel cell; centre-only coverage is not sufficient.
+Any content error collected during trim, geometry, or validation prevents packing and publication, but surviving sprites still pass through the non-mutating validation stages so the transaction reports related errors together. A failed transaction appends those errors to the pack and publishes nothing. Cache hits skip packing and compose, but still serialize and publish; changing PPU therefore bakes the new scale even on a placement-cache hit. Before a polygon candidate is accepted, its triangle union must continuously cover the full unit-square area of every retained pixel cell; centre-only coverage is not sufficient.
 
 ### Dedup statistics
 

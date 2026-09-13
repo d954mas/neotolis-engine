@@ -469,12 +469,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v7**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v8**):
 
 ```
-NtAtlasHeader (28 bytes)
+NtAtlasHeader (32 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (7)
+  version:             u16  (8)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -482,6 +482,7 @@ NtAtlasHeader (28 bytes)
   total_vertex_count:  u32
   index_offset:        u32  (byte offset from header start)
   total_index_count:   u32
+  inverse_pixels_per_unit: f32 (positive finite atlas scale)
 
 texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
@@ -501,9 +502,7 @@ NtAtlasRegion[region_count] (48 bytes each, v6+)
   origin_y:       f32   (pivot Y, normalized over source_h, in y-up source space.
                          v5 — 0.0 = bottom edge, 1.0 = top edge. Builder converts at write
                          time: origin_y = 1 - origin_y_png.)
-  vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2.
-                         Regions may share a span only when their trim_offset_x/y also
-                         match — v7, because the runtime bakes cached_pos per span.)
+  vertex_start:   u32   (index into positions and UV arrays; regions may share a span)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
   page_index:     u8    (which texture page)
@@ -527,19 +526,16 @@ NtAtlasRegion[region_count] (48 bytes each, v6+)
                          RECT shape.)
   _reserved2[2]:  u8    (must be zero)
 
-NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
-  local_x:   i16  (corner X in trim-rect local space, 0..trim_w.
-                   Polygon vertices use corner coordinates, not pixel centres.
-                   Source-image pos: local_x + trim_offset_x
-                   Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
-  local_y:   i16  (corner Y in trim-rect local space, y-up — 0 = bottom of trim,
-                   trim_h = top. v5 — was y-down in v4. Symmetric to local_x:
-                   pivot_relative_y = (local_y + trim_offset_y) - origin_y * source_h.
-                   Runtime cached_pos applies this directly with no Y-flip.)
+float positions[total_vertex_count][2] (8 bytes each, at vertex_offset)
+  Source-space corner coordinates in game units, y-up:
+    x = (local_x + trim_offset_x) * inverse_pixels_per_unit
+    y = (local_y + trim_offset_y) * inverse_pixels_per_unit
+  Trim and atlas scale are baked by the builder. Origin is not baked.
+
+NtAtlasUv[total_vertex_count] (4 bytes each, immediately after positions)
   atlas_u:   u16  (normalized 0..65535 over atlas page width)
-  atlas_v:   u16  (normalized 0..65535 over atlas page height. UV.v stays y-down because
-                   atlas page texture pixel data is uploaded top-row-first; UV.v=0 maps to
-                   PNG top, which is what the y-up sprite sees at its high-y vertex.)
+  atlas_v:   u16  (normalized 0..65535 over atlas page height, y-down;
+                   atlas page texture data is uploaded top-row-first)
 
 uint16[total_index_count] (at index_offset)
   Triangle list, indices local per region (0 .. vertex_count-1).
@@ -549,14 +545,20 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets indices by vertex_start when building GPU buffers.
 ```
 
-Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation is integer bounds checking only (magic, version, canonical section offsets, per-region vertex/index spans, and every region's `page_index` referencing a declared page — a region-bearing blob with no pages is rejected before publication); it runs once per blob change at activate and resolve, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, positions, UVs, indices, intrinsic scale, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. Validation checks the positive finite intrinsic scale and integer bounds (magic, version, canonical section offsets, per-region vertex/index spans, and every region's `page_index` referencing a declared page — a region-bearing blob with no pages is rejected before publication); it runs once per blob change at activate and resolve, never per frame. UVs are pre-normalized and triangles are pre-built by the builder using validated Clipper2 CDT; incomplete triangulation fails closed and the candidate is not published.
+
+The builder asserts that PPU, its reciprocal, baked positions, and source dimensions in game units are finite and representable. Runtime trusts the prebuilt coordinates without a per-vertex float scan. The intrinsic atlas scale is immutable; generic `pixels_per_unit` metadata does not change it. The renderer still applies origin, flip, and the game's transform. Slice9 uses the same intrinsic scale for border widths, independently of target size and `slice9_scale`.
+
+All geometry and scale are ready before publication. Geometry getters return borrowed slices owned by the atlas snapshot, valid until its replacement or cleanup. The runtime keeps no raw local XY and performs no geometry bake. First publication assigns region indices in blob order and inserts the names directly, without merge lookups or removal scans.
 
 Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
-- common regions update metadata in place and rewrite their copied vertex/index payload
+- positions, UVs, and indices are copied once as whole arrays; common regions update metadata in place
 - new regions append to the end
 - removed regions are marked dead in place (`vertex_count = index_count = 0`) but KEEP their `name_hash` and stay in the hash table, so a later merge that re-adds the name revives the SAME index — a resolved region index is therefore stable for the atlas lifetime
 - old records are marked, then each incoming name is looked up once and updated in place or appended; records still marked are cleared and WARNed, including names absent from previous winners
 - the hash table keeps live and dead names; appended names are inserted without rebuilding unless its capacity must grow
+
+Snapshot allocation and capacity growth still use heap during resolve; replacement within existing capacities reuses all buffers. This remains a known deviation from the strict hot-path memory policy.
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 
