@@ -555,7 +555,8 @@ Subsequent publications merge by `name_hash` to preserve stable region indices a
 - common regions update metadata in place and rewrite their copied vertex/index payload
 - new regions append to the end
 - removed regions are marked dead in place (`vertex_count = index_count = 0`) but KEEP their `name_hash` and stay in the hash table, so a later merge that re-adds the name revives the SAME index — a resolved region index is therefore stable for the atlas lifetime
-- the hash table is rebuilt from all named regions (live + dead) after each merge
+- old records are marked, then each incoming name is looked up once and updated in place or appended; records still marked are cleared and WARNed, including names absent from previous winners
+- the hash table keeps live and dead names; appended names are inserted without rebuilding unless its capacity must grow
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 

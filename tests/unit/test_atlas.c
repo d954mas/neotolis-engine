@@ -10,6 +10,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "atlas/nt_atlas.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
@@ -92,14 +93,31 @@ static uint32_t s_fake_texture_next_handle = 0x7000U;
  * This wrapper lets tearDown safely clean up on failure
  * mid-test. */
 static void *s_user_data;
+static uint32_t s_atlas_warning_count;
+static char s_atlas_warnings[2][NT_LOG_BUF_SIZE];
+
+static void capture_atlas_warnings(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)user;
+    if (level != NT_LOG_LEVEL_WARN || strcmp(domain, "atlas") != 0) {
+        return;
+    }
+    if (s_atlas_warning_count < 2U) {
+        (void)snprintf(s_atlas_warnings[s_atlas_warning_count], NT_LOG_BUF_SIZE, "%s", msg);
+    }
+    s_atlas_warning_count++;
+}
 
 void setUp(void) {
     nt_test_assert_install();
     s_user_data = NULL;
     s_fake_texture_next_handle = 0x7000U;
+    s_atlas_warning_count = 0;
+    memset(s_atlas_warnings, 0, sizeof(s_atlas_warnings));
+    nt_log_set_level(NT_LOG_LEVEL_INFO);
 }
 
 void tearDown(void) {
+    nt_log_remove_sink(capture_atlas_warnings, NULL);
     if (s_user_data != NULL) {
         nt_atlas_test_drive_cleanup(s_user_data);
         s_user_data = NULL;
@@ -445,11 +463,11 @@ typedef struct {
  * Generates synthetic vertices and indices tied to payload_seed so each
  * region's payload is visibly distinct. Returns bytes written. */
 static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_spec_t *specs, uint16_t region_count, const uint64_t *page_ids, uint16_t page_count) {
-    NtAtlasRegion regions_storage[8];
+    NtAtlasRegion regions_storage[16];
     NtAtlasVertex verts_storage[128];
     uint16_t indices_storage[256];
 
-    TEST_ASSERT_MESSAGE(region_count <= 8, "merge helper region_count cap");
+    TEST_ASSERT_MESSAGE(region_count <= 16, "merge helper region_count cap");
     uint32_t v_cursor = 0;
     uint32_t i_cursor = 0;
     for (uint16_t k = 0; k < region_count; k++) {
@@ -493,6 +511,124 @@ static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_
         .page_count = page_count,
     };
     return build_mock_atlas_blob(out, cap, &spec);
+}
+
+void test_atlas_merge_repeats_warnings_for_absent_names(void) {
+    merge_region_spec_t regions[3] = {
+        {.name_hash = 0xAAAULL, .vertex_count = 3, .index_count = 3, .source_w = 16, .page_index = 1, .payload_seed = 10},
+        {.name_hash = 0xBBBULL, .vertex_count = 3, .index_count = 3, .source_w = 24, .page_index = 1, .payload_seed = 20},
+        {.name_hash = 0xCCCULL, .vertex_count = 3, .index_count = 3, .source_w = 32, .page_index = 0, .payload_seed = 30},
+    };
+    uint8_t buf[512];
+    uint32_t size = build_merge_blob(buf, sizeof(buf), regions, 3, k_mock_page_ids, 2);
+    nt_log_add_sink(capture_atlas_warnings, NULL);
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    TEST_ASSERT_EQUAL_UINT32(0, s_atlas_warning_count);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    for (uint16_t pass = 0; pass < 3; pass++) {
+        regions[2].source_w = (uint16_t)(33U + pass);
+        size = build_merge_blob(buf, sizeof(buf), &regions[2], 1, k_mock_page_ids, 2);
+        s_atlas_warning_count = 0;
+        nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+        TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_atlas_warning_count);
+#if NT_LOG_MIN_LEVEL <= 1
+        TEST_ASSERT_EQUAL_STRING("atlas merge: region 0x0000000000000aaa removed (not in new blob)", s_atlas_warnings[0]);
+        TEST_ASSERT_EQUAL_STRING("atlas merge: region 0x0000000000000bbb removed (not in new blob)", s_atlas_warnings[1]);
+#endif
+        TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
+        for (uint32_t i = 0; i < 3; i++) {
+            TEST_ASSERT_EQUAL_UINT32(i, nt_atlas_test_find_region_raw(ad, regions[i].name_hash));
+            const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, i);
+            TEST_ASSERT_EQUAL_UINT16(regions[i].source_w, r->source_w);
+            if (i < 2) {
+                TEST_ASSERT_EQUAL_UINT32(0, r->vertex_start);
+                TEST_ASSERT_EQUAL_UINT32(0, r->index_start);
+                TEST_ASSERT_EQUAL_UINT8(0, r->vertex_count);
+                TEST_ASSERT_EQUAL_UINT8(0, r->index_count);
+                TEST_ASSERT_EQUAL_UINT8(0, r->page_index);
+            }
+        }
+    }
+}
+
+void test_atlas_merge_present_zero_geometry_does_not_warn(void) {
+    const merge_region_spec_t initial[2] = {
+        {.name_hash = 0xAAAULL, .vertex_count = 3, .index_count = 3, .source_w = 16, .page_index = 0, .payload_seed = 10},
+        {.name_hash = 0xBBBULL, .vertex_count = 0, .index_count = 0, .source_w = 24, .page_index = 1},
+    };
+    uint8_t buf[512];
+    uint32_t size = build_merge_blob(buf, sizeof(buf), initial, 2, k_mock_page_ids, 2);
+    nt_log_add_sink(capture_atlas_warnings, NULL);
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    merge_region_spec_t incoming[2] = {initial[1], initial[0]};
+
+    for (uint16_t pass = 0; pass < 2; pass++) {
+        incoming[0].source_w = (uint16_t)(40U + pass);
+        incoming[1].vertex_count = pass == 0 ? 3U : 0U;
+        incoming[1].index_count = pass == 0 ? 3U : 0U;
+        size = build_merge_blob(buf, sizeof(buf), incoming, 2, k_mock_page_ids, 2);
+        nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+        TEST_ASSERT_EQUAL_UINT32(0, s_atlas_warning_count);
+        TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_region_count(ad));
+        TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, initial[0].name_hash));
+        TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_find_region_raw(ad, initial[1].name_hash));
+        const nt_texture_region_t *empty = nt_atlas_test_get_region_raw(ad, 1);
+        TEST_ASSERT_EQUAL_UINT16(incoming[0].source_w, empty->source_w);
+        TEST_ASSERT_EQUAL_UINT8(0, empty->vertex_count);
+        TEST_ASSERT_EQUAL_UINT8(0, empty->index_count);
+        TEST_ASSERT_EQUAL_UINT8(1, empty->page_index);
+        TEST_ASSERT_EQUAL_UINT8(incoming[1].vertex_count, nt_atlas_test_get_region_raw(ad, 0)->vertex_count);
+    }
+}
+
+void test_atlas_collision_chain_grows_and_revives_stable_ids(void) {
+    merge_region_spec_t regions[9];
+    for (uint32_t i = 0; i < 9; i++) {
+        /* Equal low bits keep the probe chain crossing the table boundary. */
+        regions[i] = (merge_region_spec_t){.name_hash = 0x10000000FULL + (32ULL * i), .vertex_count = 3, .index_count = 3, .page_index = 0, .payload_seed = (int16_t)(10U * i)};
+    }
+    uint8_t buf[1024];
+    for (uint16_t count = 7; count <= 9; count++) {
+        for (uint32_t i = 0; i < count; i++) {
+            regions[i].source_w = (uint16_t)(20U + i + count);
+        }
+        const uint32_t size = build_merge_blob(buf, sizeof(buf), regions, count, k_mock_page_ids, 2);
+        nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+        const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+        TEST_ASSERT_EQUAL_UINT32(count, nt_atlas_test_region_count(ad));
+        for (uint32_t i = 0; i < count; i++) {
+            TEST_ASSERT_EQUAL_UINT32(i, nt_atlas_test_find_region_raw(ad, regions[i].name_hash));
+            TEST_ASSERT_EQUAL_UINT16(regions[i].source_w, nt_atlas_test_get_region_raw(ad, i)->source_w);
+        }
+    }
+
+    merge_region_spec_t removed = regions[3];
+    memmove(&regions[3], &regions[4], 5U * sizeof(regions[0]));
+    uint32_t size = build_merge_blob(buf, sizeof(buf), regions, 8, k_mock_page_ids, 2);
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    TEST_ASSERT_EQUAL_UINT32(9, nt_atlas_test_region_count(ad));
+    for (uint32_t i = 0; i < 9; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i, nt_atlas_test_find_region_raw(ad, 0x10000000FULL + (32ULL * i)));
+        TEST_ASSERT_EQUAL_UINT8(i == 3 ? 0U : 3U, nt_atlas_test_get_region_raw(ad, i)->vertex_count);
+    }
+
+    removed.source_w = 99;
+    removed.payload_seed = 999;
+    regions[8] = removed;
+    size = build_merge_blob(buf, sizeof(buf), regions, 9, k_mock_page_ids, 2);
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    TEST_ASSERT_EQUAL_UINT32(9, nt_atlas_test_region_count(ad));
+    for (uint32_t i = 0; i < 9; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i, nt_atlas_test_find_region_raw(ad, 0x10000000FULL + (32ULL * i)));
+        const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, i);
+        TEST_ASSERT_EQUAL_UINT16(i == 3 ? 99U : 29U + i, r->source_w);
+        TEST_ASSERT_EQUAL_UINT8(3, r->vertex_count);
+    }
+    const nt_texture_region_t *revived = nt_atlas_test_get_region_raw(ad, 3);
+    TEST_ASSERT_EQUAL_INT16(999, nt_atlas_test_raw_vertices(ad)[revived->vertex_start].local_x);
 }
 
 /* ---- Test 6: merge common region updates metadata in place ---- */
@@ -1467,7 +1603,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
 #include <math.h>
 static void assert_float_close(float expected, float actual, float tol, const char *msg) {
     float diff = fabsf(expected - actual);
-    if (diff > tol) {
+    if (!(diff <= tol)) {
         char buf[256];
         (void)snprintf(buf, sizeof(buf), "%s (expected=%g actual=%g diff=%g tol=%g)", msg, (double)expected, (double)actual, (double)diff, (double)tol);
         TEST_FAIL_MESSAGE(buf);
@@ -2272,6 +2408,9 @@ int main(void) {
     RUN_TEST(test_atlas_get_region_by_index_bounds_check);
     RUN_TEST(test_atlas_get_region_returns_field_passthrough);
     RUN_TEST(test_atlas_on_resolve_null_data_early_returns);
+    RUN_TEST(test_atlas_merge_repeats_warnings_for_absent_names);
+    RUN_TEST(test_atlas_merge_present_zero_geometry_does_not_warn);
+    RUN_TEST(test_atlas_collision_chain_grows_and_revives_stable_ids);
     RUN_TEST(test_atlas_merge_common_region_updates_in_place);
     RUN_TEST(test_atlas_merge_preserves_shared_payload_slices);
     RUN_TEST(test_atlas_merge_new_region_appends_with_fresh_index);

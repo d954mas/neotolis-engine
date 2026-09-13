@@ -30,8 +30,7 @@ static struct {
  * distinguishable from an EMPTY slot. The 1-based form is collapsed back
  * to the 0-based index on lookup.
  *
- * The table is rebuilt from scratch after each parse/merge — no DELETED
- * sentinel, no incremental growth, no load-factor tracking. */
+ * Removed names keep their entries so they can revive at the same index. */
 #define NT_ATLAS_HT_EMPTY ((uint32_t)0)
 
 typedef struct {
@@ -56,10 +55,9 @@ typedef struct nt_atlas_data {
     uint32_t index_count; /* append cursor */
     uint32_t index_capacity;
 
-    /* Open-addressing hash table — power-of-two, linear probing.
-     * Rebuilt from scratch on each parse/merge — no incremental growth. */
+    /* Open-addressing hash table — power-of-two, linear probing. */
     nt_atlas_hash_entry_t *hash_table;
-    uint32_t hash_capacity; /* pow2, >= next_pow2(live_region_count * 2) */
+    uint32_t hash_capacity; /* pow2, >= next_pow2(region_count * 2) */
 
     // Page texture ids + cached resource handles.
     // on_resolve stores raw ids. on_post_resolve builds the slots after the
@@ -122,26 +120,25 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-/* Free the old hash table and rebuild from all named regions. Dead-but-named
- * slots (vertex_count==0) stay in the table so a removed name still resolves to
- * its stable index and revives in place on re-add. */
-static void hash_rebuild(nt_atlas_data_t *ad) {
-    free(ad->hash_table);
-
-    /* Every runtime slot carries a real name (removal keeps name_hash). */
+/* Insert appended names; rebuild only when the table must grow. */
+static void hash_update(nt_atlas_data_t *ad, uint32_t first_new) {
     uint32_t cap = next_pow2(ad->region_count * 2U);
     if (cap < 16U) {
         cap = 16U;
     }
 
-    ad->hash_table = (nt_atlas_hash_entry_t *)calloc(cap, sizeof(nt_atlas_hash_entry_t));
-    NT_ASSERT(ad->hash_table);
-    ad->hash_capacity = cap;
+    if (cap > ad->hash_capacity) {
+        free(ad->hash_table);
+        ad->hash_table = (nt_atlas_hash_entry_t *)calloc(cap, sizeof(nt_atlas_hash_entry_t));
+        NT_ASSERT(ad->hash_table);
+        ad->hash_capacity = cap;
+        first_new = 0;
+    }
 
-    const uint32_t mask = cap - 1;
-    for (uint32_t i = 0; i < ad->region_count; i++) {
+    const uint32_t mask = ad->hash_capacity - 1;
+    for (uint32_t i = first_new; i < ad->region_count; i++) {
         uint32_t pos = (uint32_t)(ad->regions[i].name_hash & mask);
-        for (uint32_t steps = 0; steps < cap; steps++) {
+        for (uint32_t steps = 0; steps < ad->hash_capacity; steps++) {
             nt_atlas_hash_entry_t *e = &ad->hash_table[pos];
             if (e->region_index == NT_ATLAS_HT_EMPTY) {
                 e->name_hash = ad->regions[i].name_hash;
@@ -452,101 +449,64 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         ad->region_count = hdr->region_count;
         atlas_bump_revision(ad);
 
-        hash_rebuild(ad);
+        hash_update(ad, 0);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-        /* The cached_pos bake is deferred to atlas_on_post_resolve where
-         * ipu is finalized from pixels_per_unit metadata. The resource module
-         * fires resolve and post_resolve in pairs within a single nt_resource_step,
-         * so no caller can observe the unbaked state. */
+        /* Bake in post-resolve after winner metadata becomes available. */
 
         *user_data = ad;
         return;
     }
     // #endregion
 
-    /* ---- Merge path — diff new blob against existing regions by name_hash.
-     * Stable-index semantics:
-     *   - payload arrays replaced wholesale from new blob
-     *   - common: update metadata in place
-     *   - new:    append region with fresh index
-     *   - removed: tombstone (name_hash = TOMBSTONE_HASH, vertex_count = 0)
-     * Region indices for surviving regions NEVER shift. */
-
     // #region merge
     const NtAtlasHeader *hdr = view.hdr;
-    const NtAtlasRegion *new_regions = view.regions;
     replace_payload_buffers(ad, &view);
 
-    // #region grow regions
-    uint32_t new_only_count = 0;
-    for (uint32_t i = 0; i < hdr->region_count; i++) {
-        if (hash_find(ad, new_regions[i].name_hash) == NT_ATLAS_INVALID_REGION) {
-            new_only_count++;
-        }
-    }
-    if (ad->region_count + new_only_count > ad->region_capacity) {
-        uint32_t new_cap = ad->region_capacity == 0 ? 16U : ad->region_capacity * 2U;
-        while (new_cap < ad->region_count + new_only_count) {
-            new_cap *= 2U;
-        }
-        nt_texture_region_t *new_buf = (nt_texture_region_t *)realloc(ad->regions, new_cap * sizeof(nt_texture_region_t));
-        NT_ASSERT(new_buf);
-        memset(new_buf + ad->region_capacity, 0, (new_cap - ad->region_capacity) * sizeof(nt_texture_region_t));
-        ad->regions = new_buf;
-        ad->region_capacity = new_cap;
-    }
-    // #endregion
-
-    /* Seen-bitset: track which existing regions appear in the new blob.
-     * Filled during pass 1 (common hits), consumed in pass 2 (unseen → tombstone). */
     const uint32_t pre_merge_count = ad->region_count;
-    uint8_t *seen = (uint8_t *)calloc(1, ((pre_merge_count + 7U) / 8U) + 1U);
-    NT_ASSERT(seen);
+    for (uint32_t i = 0; i < pre_merge_count; i++) {
+        ad->regions[i].vertex_start = UINT32_MAX;
+    }
 
-    // #region pass 1: common+new
+    // #region update and append
     for (uint32_t i = 0; i < hdr->region_count; i++) {
-        const NtAtlasRegion *nr = &new_regions[i];
-        const uint64_t h = nr->name_hash;
-        const uint32_t existing_idx = hash_find(ad, h);
-
-        if (existing_idx != NT_ATLAS_INVALID_REGION) {
-            seen[existing_idx / 8U] |= (uint8_t)(1U << (existing_idx % 8U));
-            translate_region(&ad->regions[existing_idx], nr);
-        } else {
-            const uint32_t new_idx = ad->region_count++;
-            translate_region(&ad->regions[new_idx], nr);
+        const NtAtlasRegion *nr = &view.regions[i];
+        uint32_t index = hash_find(ad, nr->name_hash);
+        if (index == NT_ATLAS_INVALID_REGION) {
+            if (ad->region_count == ad->region_capacity) {
+                uint32_t new_cap = ad->region_capacity * 2U;
+                while (new_cap < hdr->region_count) {
+                    new_cap *= 2U;
+                }
+                nt_texture_region_t *new_buf = (nt_texture_region_t *)realloc(ad->regions, (size_t)new_cap * sizeof(nt_texture_region_t));
+                NT_ASSERT(new_buf);
+                ad->regions = new_buf;
+                ad->region_capacity = new_cap;
+            }
+            index = ad->region_count++;
         }
+        translate_region(&ad->regions[index], nr);
     }
     // #endregion
 
-    // #region pass 2: tombstone-reclaim
-    /* Removed regions keep their name_hash and stay in the hash table (dead via
-     * vertex_count==0). A later merge that re-adds the name revives the SAME
-     * index in pass 1, so a resolved region index is stable for the atlas life. */
+    // #region missing names
     for (uint32_t i = 0; i < pre_merge_count; i++) {
         nt_texture_region_t *r = &ad->regions[i];
-        if (r->vertex_count == 0) {
-            continue;
-        }
-        const bool still_present = (seen[i / 8U] >> (i % 8U)) & 1U;
-        if (!still_present) {
+        if (r->vertex_start == UINT32_MAX) {
             NT_LOG_WARN("atlas merge: region 0x%016llx removed (not in new blob)", (unsigned long long)r->name_hash);
             r->vertex_start = 0;
             r->index_start = 0;
             r->vertex_count = 0;
             r->index_count = 0;
-            /* A page-shrinking merge would otherwise leave a stale page_index the
-             * validated invariant page_index < page_count no longer covers. */
             r->page_index = 0;
         }
     }
     // #endregion
 
-    free(seen);
-
     atlas_bump_revision(ad);
-    hash_rebuild(ad);
+    if (ad->region_count != pre_merge_count) {
+        hash_update(ad, pre_merge_count);
+    }
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
     /* The cached_pos bake is deferred to atlas_on_post_resolve once ipu is
