@@ -255,8 +255,8 @@ static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) 
         return;
     }
 
-    const float ppu = 1.0F / ahdr->inverse_pixels_per_unit;
-    NT_LOG_INFO("    regions: %u  pages: %u  vertices: %u  pixels_per_unit: %.3f", ahdr->region_count, ahdr->page_count, ahdr->total_vertex_count, (double)ppu);
+    const double ppu = 1.0 / (double)ahdr->inverse_pixels_per_unit;
+    NT_LOG_INFO("    regions: %u  pages: %u  vertices: %u  pixels_per_unit: %.3f", ahdr->region_count, ahdr->page_count, ahdr->total_vertex_count, ppu);
 
     const uint32_t page_bytes = (uint32_t)ahdr->page_count * (uint32_t)sizeof(uint64_t);
     if (page_bytes > asset_size - (uint32_t)sizeof(*ahdr)) {

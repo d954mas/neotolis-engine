@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Verify polygon overlap in atlas blob.
+"""Check overlap between distinct UV contours on atlas page 0.
 
 Reads NtAtlas blob + a page PNG, rasterizes each unique polygon hull
 (deduped by page UV ring) into a grid, counts overlapping cells.
+Coincident contours are treated as aliases; the blob cannot prove that sharing
+is intentional, so incorrect fully coincident placements are not detected.
 
 Usage: python scripts/atlas/check_overlap.py <blob.ntpack> <page0.png>
-Returns exit 0 if no overlap, exit 1 if overlap detected.
+Returns exit 0 if distinct contours do not overlap, exit 1 otherwise.
 """
 import struct
 import sys
@@ -109,7 +111,7 @@ def main(blob_path, page_path):
         for (a, b), cnt in sorted(overlap_pairs.items(), key=lambda x: -x[1])[:5]:
             print(f"  vstart {a} <-> vstart {b}: {cnt} cells")
         sys.exit(1)
-    print("PASS: no polygon overlap")
+    print("PASS: no overlap between distinct UV contours; coincident contours are not verified")
     sys.exit(0)
 
 
