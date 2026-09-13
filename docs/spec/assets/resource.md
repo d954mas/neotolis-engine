@@ -552,13 +552,13 @@ The builder asserts that PPU, its reciprocal, baked positions, and source dimens
 All geometry and scale are ready before publication. Geometry getters return borrowed slices owned by the atlas snapshot, valid until its replacement or cleanup. The runtime keeps no raw local XY and performs no geometry bake. First publication assigns region indices in blob order and inserts the names directly, without merge lookups or removal scans.
 
 Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
-- positions, UVs, and indices are copied once as whole arrays; common regions update metadata in place
+- positions, UVs, and indices occupy one owned contiguous allocation and are copied together; their slices are updated on every publication, including capacity reuse; common regions update metadata in place
 - new regions append to the end
 - removed regions are marked dead in place (`vertex_count = index_count = 0`) but KEEP their `name_hash` and stay in the hash table, so a later merge that re-adds the name revives the SAME index — a resolved region index is therefore stable for the atlas lifetime
 - old records are marked, then each incoming name is looked up once and updated in place or appended; records still marked are cleared and WARNed, including names absent from previous winners
 - the hash table keeps live and dead names; appended names are inserted without rebuilding unless its capacity must grow
 
-Snapshot allocation and capacity growth still use heap during resolve; replacement within existing capacities reuses all buffers. This remains a known deviation from the strict hot-path memory policy.
+Snapshot allocation and capacity growth still use heap during resolve; replacement within existing capacities reuses all buffers. Geometry uses one byte capacity; growth discards the old allocation because its complete contents are replaced. Empty geometry retains a minimal allocation so the documented non-NULL slices remain valid. This remains a known deviation from the strict hot-path memory policy.
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 

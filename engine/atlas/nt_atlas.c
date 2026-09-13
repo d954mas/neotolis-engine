@@ -46,16 +46,11 @@ typedef struct nt_atlas_data {
     uint32_t region_capacity; /* allocated size of regions[] */
     uint32_t revision;        /* owned snapshot generation */
 
-    /* Owned geometry, replaced wholesale on publication. */
+    /* One owned allocation: positions, then UVs and indices. */
     float (*positions)[2];
     nt_atlas_uv_t *uvs;
-    uint32_t vertex_count;
-    uint32_t vertex_capacity;
-
-    /* Owned index buffer */
     uint16_t *indices;
-    uint32_t index_count;
-    uint32_t index_capacity;
+    uint32_t geometry_capacity; /* bytes */
 
     /* Open-addressing hash table — power-of-two, linear probing. */
     nt_atlas_hash_entry_t *hash_table;
@@ -206,8 +201,6 @@ typedef struct {
     const uint8_t *page_ids_bytes;
     const NtAtlasRegion *regions;
     const uint8_t *positions_bytes;
-    const uint8_t *uvs_bytes;
-    const uint8_t *indices_bytes;
     uint32_t page_bytes;
     uint32_t position_bytes;
     uint32_t uv_bytes;
@@ -307,8 +300,6 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     out->page_ids_bytes = page_ids_bytes;
     out->regions = regions;
     out->positions_bytes = data + hdr->vertex_offset;
-    out->uvs_bytes = data + uv_offset;
-    out->indices_bytes = (hdr->total_index_count > 0) ? data + hdr->index_offset : NULL;
     out->page_bytes = page_bytes;
     out->position_bytes = position_bytes;
     out->uv_bytes = uv_bytes;
@@ -326,35 +317,22 @@ static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
 }
 
 /* Keep shared spans as serialized; every live element is overwritten before publication. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
-    const NtAtlasHeader *hdr = v->hdr;
-    if (hdr->total_vertex_count > ad->vertex_capacity) {
-        float(*positions)[2] = (float(*)[2])realloc(ad->positions, (size_t)hdr->total_vertex_count * sizeof(float[2]));
-        NT_ASSERT(positions);
-        ad->positions = positions;
-        nt_atlas_uv_t *uvs = (nt_atlas_uv_t *)realloc(ad->uvs, (size_t)hdr->total_vertex_count * sizeof(nt_atlas_uv_t));
-        NT_ASSERT(uvs);
-        ad->uvs = uvs;
-        ad->vertex_capacity = hdr->total_vertex_count;
+static void replace_geometry(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
+    const uint32_t bytes = v->position_bytes + v->uv_bytes + v->index_bytes;
+    /* Empty regions still expose non-NULL slices. */
+    const uint32_t capacity = bytes < sizeof(float[2]) ? (uint32_t)sizeof(float[2]) : bytes;
+    if (capacity > ad->geometry_capacity) {
+        free(ad->positions);
+        ad->positions = (float(*)[2])malloc(capacity);
+        NT_ASSERT(ad->positions);
+        ad->geometry_capacity = capacity;
     }
-    if (hdr->total_index_count > ad->index_capacity) {
-        uint16_t *new_buf = (uint16_t *)realloc(ad->indices, (size_t)hdr->total_index_count * sizeof(uint16_t));
-        NT_ASSERT(new_buf);
-        ad->indices = new_buf;
-        ad->index_capacity = hdr->total_index_count;
+    if (bytes > 0) {
+        memcpy(ad->positions, v->positions_bytes, bytes);
     }
-
-    if (v->position_bytes > 0) {
-        memcpy(ad->positions, v->positions_bytes, v->position_bytes);
-        memcpy(ad->uvs, v->uvs_bytes, v->uv_bytes);
-    }
-    if (v->index_bytes > 0) {
-        memcpy(ad->indices, v->indices_bytes, v->index_bytes);
-    }
-    ad->vertex_count = hdr->total_vertex_count;
-    ad->index_count = hdr->total_index_count;
-    ad->ipu = hdr->inverse_pixels_per_unit;
+    ad->uvs = (nt_atlas_uv_t *)((uint8_t *)ad->positions + v->position_bytes);
+    ad->indices = (uint16_t *)((uint8_t *)ad->uvs + v->uv_bytes);
+    ad->ipu = v->hdr->inverse_pixels_per_unit;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -388,19 +366,9 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         ad->region_capacity = (hdr->region_count == 0) ? 16U : (uint32_t)hdr->region_count;
         ad->regions = (nt_texture_region_t *)malloc((size_t)ad->region_capacity * sizeof(nt_texture_region_t));
         NT_ASSERT(ad->regions);
-
-        ad->vertex_capacity = (hdr->total_vertex_count == 0) ? 64U : hdr->total_vertex_count;
-        ad->positions = (float(*)[2])malloc((size_t)ad->vertex_capacity * sizeof(float[2]));
-        NT_ASSERT(ad->positions);
-        ad->uvs = (nt_atlas_uv_t *)malloc((size_t)ad->vertex_capacity * sizeof(nt_atlas_uv_t));
-        NT_ASSERT(ad->uvs);
-
-        ad->index_capacity = (hdr->total_index_count == 0) ? 128U : hdr->total_index_count;
-        ad->indices = (uint16_t *)malloc(ad->index_capacity * sizeof(uint16_t));
-        NT_ASSERT(ad->indices);
         // #endregion
 
-        replace_payload_buffers(ad, &view);
+        replace_geometry(ad, &view);
 
         for (uint32_t i = 0; i < hdr->region_count; i++) {
             translate_region(&ad->regions[i], &view.regions[i]);
@@ -418,7 +386,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
 
     // #region merge
     const NtAtlasHeader *hdr = view.hdr;
-    replace_payload_buffers(ad, &view);
+    replace_geometry(ad, &view);
 
     const uint32_t pre_merge_count = ad->region_count;
     for (uint32_t i = 0; i < pre_merge_count; i++) {
@@ -475,8 +443,6 @@ static void atlas_on_cleanup(void *user_data) {
     }
     nt_atlas_data_t *ad = (nt_atlas_data_t *)user_data;
     free(ad->regions);
-    free(ad->uvs);
-    free(ad->indices);
     free(ad->hash_table);
     free(ad->positions);
     free(ad);
@@ -642,16 +608,6 @@ const nt_texture_region_t *nt_atlas_test_get_region_raw(const struct nt_atlas_da
 uint32_t nt_atlas_test_region_count(const struct nt_atlas_data *ad) {
     NT_ASSERT(ad != NULL);
     return ad->region_count;
-}
-
-uint32_t nt_atlas_test_vertex_count(const struct nt_atlas_data *ad) {
-    NT_ASSERT(ad != NULL);
-    return ad->vertex_count;
-}
-
-uint32_t nt_atlas_test_index_count(const struct nt_atlas_data *ad) {
-    NT_ASSERT(ad != NULL);
-    return ad->index_count;
 }
 
 uint8_t nt_atlas_test_page_count(const struct nt_atlas_data *ad) {

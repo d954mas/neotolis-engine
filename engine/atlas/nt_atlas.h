@@ -180,8 +180,6 @@ const nt_texture_region_t *nt_atlas_test_get_region_raw(const struct nt_atlas_da
 /* Test-only accessors for internal counters so tests can assert buffer state
  * without reaching into the private struct layout. */
 uint32_t nt_atlas_test_region_count(const struct nt_atlas_data *ad);
-uint32_t nt_atlas_test_vertex_count(const struct nt_atlas_data *ad);
-uint32_t nt_atlas_test_index_count(const struct nt_atlas_data *ad);
 uint8_t nt_atlas_test_page_count(const struct nt_atlas_data *ad);
 uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t page_index);
 

@@ -306,8 +306,9 @@ void test_atlas_parse_valid_blob(void) {
 
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(12, nt_atlas_test_vertex_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(18, nt_atlas_test_index_count(ad));
+    const NtAtlasHeader *header = (const NtAtlasHeader *)buf;
+    TEST_ASSERT_EQUAL_MEMORY(buf + header->vertex_offset, nt_atlas_test_positions(ad), 12U * sizeof(float[2]));
+    TEST_ASSERT_EQUAL_MEMORY(buf + header->vertex_offset + (12U * sizeof(float[2])), nt_atlas_test_uvs(ad), 12U * sizeof(NtAtlasUv));
     TEST_ASSERT_EQUAL_UINT8(2, nt_atlas_test_page_count(ad));
 }
 
@@ -437,7 +438,7 @@ void test_atlas_on_resolve_null_data_early_returns(void) {
     void *before = s_user_data;
     const struct nt_atlas_data *ad_before = (const struct nt_atlas_data *)before;
     const uint32_t region_count_before = nt_atlas_test_region_count(ad_before);
-    const uint32_t vertex_count_before = nt_atlas_test_vertex_count(ad_before);
+    const float(*positions_before)[2] = nt_atlas_test_positions(ad_before);
 
     /* Drive with NULL data — should early-return without touching state. */
     nt_atlas_test_drive_resolve(NULL, 0, &s_user_data);
@@ -445,7 +446,7 @@ void test_atlas_on_resolve_null_data_early_returns(void) {
 
     const struct nt_atlas_data *ad_after = (const struct nt_atlas_data *)s_user_data;
     TEST_ASSERT_EQUAL_UINT32(region_count_before, nt_atlas_test_region_count(ad_after));
-    TEST_ASSERT_EQUAL_UINT32(vertex_count_before, nt_atlas_test_vertex_count(ad_after));
+    TEST_ASSERT_EQUAL_PTR(positions_before, nt_atlas_test_positions(ad_after));
 
     /* Also drive with size==0 on valid pointer — same early return. */
     nt_atlas_test_drive_resolve(buf, 0, &s_user_data);
@@ -665,8 +666,6 @@ void test_atlas_merge_common_region_updates_in_place(void) {
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_region_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_vertex_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(6, nt_atlas_test_index_count(ad));
 
     /* Merge */
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
@@ -681,9 +680,7 @@ void test_atlas_merge_common_region_updates_in_place(void) {
     TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
     TEST_ASSERT_EQUAL_UINT8(6, r->index_count);
 
-    /* Cursors reset on merge — no fragmentation, exact fit */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_vertex_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(6, nt_atlas_test_index_count(ad));
+    /* Common regions use the replacement blob spans. */
     TEST_ASSERT_EQUAL_UINT32(0, r->vertex_start);
     TEST_ASSERT_EQUAL_UINT32(0, r->index_start);
 }
@@ -786,8 +783,9 @@ void test_atlas_merge_preserves_shared_payload_slices(void) {
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
 
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(7, nt_atlas_test_vertex_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(9, nt_atlas_test_index_count(ad));
+    const NtAtlasHeader *header = (const NtAtlasHeader *)buf2;
+    TEST_ASSERT_EQUAL_MEMORY(buf2 + header->vertex_offset, nt_atlas_test_positions(ad), 7U * sizeof(float[2]));
+    TEST_ASSERT_EQUAL_MEMORY(buf2 + header->vertex_offset + (7U * sizeof(float[2])), nt_atlas_test_uvs(ad), 7U * sizeof(NtAtlasUv));
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, 0xAAAULL));
     TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
     TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_find_region_raw(ad, 0xCCCULL));
@@ -2017,6 +2015,69 @@ void test_atlas_tombstone_has_empty_position_span(void) {
     TEST_ASSERT_NOT_NULL(pos); /* buffer still allocated, slice length is 0 */
 }
 
+void test_atlas_geometry_replacement_changes_section_sizes(void) {
+    const uint8_t counts[][2] = {{0, 0}, {8, 18}, {4, 42}, {6, 9}, {0, 0}, {12, 30}, {3, 3}};
+    uint8_t *packs[7] = {0};
+    const float(*previous_positions)[2] = NULL;
+    nt_resource_init(NULL);
+    nt_atlas_init();
+    for (uint32_t pass = 0; pass < 7; pass++) {
+        const uint8_t vertex_count = counts[pass][0];
+        const uint8_t index_count = counts[pass][1];
+        test_atlas_vertex_t vertices[12];
+        uint16_t indices[42];
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            vertices[v] = (test_atlas_vertex_t){(int16_t)(pass + v), (int16_t)(3U * v), (uint16_t)((100U * pass) + v), (uint16_t)(2000U + v)};
+        }
+        for (uint32_t i = 0; i < index_count; i++) {
+            indices[i] = (uint16_t)(i % vertex_count);
+        }
+        const NtAtlasRegion region = {.name_hash = 0xB0FFULL, .source_w = 32, .source_h = 40, .trim_offset_x = 3, .trim_offset_y = 5, .vertex_count = vertex_count, .index_count = index_count};
+        const mock_atlas_spec_t spec = {.regions = &region,
+                                        .region_count = 1,
+                                        .vertices = vertices,
+                                        .total_vertex_count = vertex_count,
+                                        .indices = indices,
+                                        .total_index_count = index_count,
+                                        .page_ids = k_mock_page_ids,
+                                        .page_count = 1,
+                                        .inverse_pixels_per_unit = 0.25F};
+        uint8_t blob[512];
+        const uint32_t blob_size = build_mock_atlas_blob(blob, sizeof(blob), &spec);
+        const NtAtlasHeader *header = (const NtAtlasHeader *)blob;
+        uint32_t pack_size = 0;
+        packs[pass] = build_single_atlas_pack(0xB0FF01ULL, blob, blob_size, 0.0F, &pack_size);
+        const nt_hash32_t pid = {0xB0FF00U + pass};
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, (int16_t)pass));
+        TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, packs[pass], pack_size));
+        const nt_resource_t atlas = nt_resource_request((nt_hash64_t){0xB0FF01ULL}, NT_ASSET_ATLAS);
+        nt_resource_step();
+        TEST_ASSERT_TRUE(nt_resource_is_ready(atlas));
+        TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_find_region(atlas, region.name_hash));
+        nt_atlas_region_handles_t view;
+        nt_atlas_get_region_handles(atlas, 0, &view);
+        TEST_ASSERT_NOT_NULL(view.positions);
+        TEST_ASSERT_NOT_NULL(view.uvs);
+        TEST_ASSERT_NOT_NULL(view.indices);
+        TEST_ASSERT_EQUAL_UINT8(vertex_count, view.region->vertex_count);
+        TEST_ASSERT_EQUAL_UINT8(index_count, view.region->index_count);
+        if (vertex_count > 0) {
+            TEST_ASSERT_EQUAL_MEMORY(blob + header->vertex_offset, view.positions, vertex_count * sizeof(float[2]));
+            TEST_ASSERT_EQUAL_MEMORY(blob + header->vertex_offset + (vertex_count * sizeof(float[2])), view.uvs, vertex_count * sizeof(NtAtlasUv));
+            TEST_ASSERT_EQUAL_UINT16_ARRAY(indices, view.indices, index_count);
+        }
+        if (pass == 2 || pass == 3 || pass == 4 || pass == 6) {
+            TEST_ASSERT_EQUAL_PTR(previous_positions, view.positions);
+        }
+        previous_positions = view.positions;
+    }
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
+    for (uint32_t i = 0; i < 7; i++) {
+        free(packs[i]);
+    }
+}
+
 void test_atlas_sd_hd_merge_stable_region_indices(void) {
     const uint64_t hashes[2] = {0x5D001ULL, 0x5D002ULL};
     const int16_t local[2][2][4][2] = {
@@ -2266,6 +2327,7 @@ int main(void) {
     RUN_TEST(test_atlas_merge_origin_keeps_positions);
     RUN_TEST(test_atlas_tombstone_has_empty_position_span);
     RUN_TEST(test_atlas_sd_hd_merge_stable_region_indices);
+    RUN_TEST(test_atlas_geometry_replacement_changes_section_sizes);
 
     /* Slice9 */
     RUN_TEST(test_atlas_slice9_roundtrip);
