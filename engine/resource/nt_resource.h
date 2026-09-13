@@ -43,10 +43,8 @@ typedef enum {
     NT_PACK_STATE_FAILED,      /* load failed (may retry) */
 } nt_pack_state_t;
 
-/* ---- Stable resource handle ----
- * id is a slot index, valid from request until resource shutdown.
- * Unmount/reload changes the provider, not this identity. Never retain handles
- * across shutdown/init; indices may be assigned to different names after reinit. */
+/* Stable slot index from request until resource shutdown; unmount/reload changes only the provider.
+ * Never retain handles across shutdown/init: an index may be assigned to a different name. */
 
 typedef struct {
     uint32_t id;
@@ -97,11 +95,9 @@ typedef struct {
     uint8_t behavior_flags;
 } nt_resource_type_desc_t;
 
-/* Copies the complete desc; its pointer is required and borrowed only during this call.
- * Register each type once, before the first successful file or virtual mount.
- * Repeated or later
- * registration asserts until resource shutdown/init.
- * AUX_BACKED requires resolve + cleanup. Simple virtual providers and BLOB need no registration. */
+/* Copies non-NULL desc; pointer borrowed only for this call. Register once per type after resource init, before the first successful file or virtual mount.
+ * Duplicate or late registration asserts. on_resolve requires on_cleanup; AUX_BACKED requires both.
+ * Simple virtual providers and BLOB need no registration. Full contract: docs/spec/assets/resource.md. */
 void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t *desc);
 
 /* ---- Descriptor ---- */
@@ -144,14 +140,9 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 
 /* ---- Pack parsing ---- */
 
-/* Requires a file mount not yet successfully parsed; repeat parses return NT_ERR_INVALID_ARG.
- * Unknown manifest types reject the pack.
- * Non-BLOB types require an activator registered before
- * mounting.
- * Missing activators assert before records or blob ownership change.
- * Without resource-managed I/O, borrows the blob until unmount/shutdown.
- * Keep borrowed bytes valid and unchanged.
- * Remount to replace parsed data. */
+/* A file mount accepts one parse; repeats and unknown manifest types return NT_ERR_INVALID_ARG. Remount to replace data.
+ * Missing non-BLOB activators assert before records or ownership change; register them before mounting.
+ * Without resource-managed I/O, success borrows blob until unmount/shutdown: caller keeps it valid and unchanged. Failure retains nothing. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
@@ -190,13 +181,9 @@ const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_
 
 /* ---- Virtual packs ---- */
 
-/* Virtual packs publish caller-created runtime handles. The resource system stores the
- * handle value but does not own/destroy the runtime object; virtual unregister/unmount
- * never call the asset deactivator. Resolve cleanup callbacks may still release
- * per-slot user_data. Register/unregister require a nonzero resource_id.
- * A PIN_BLOB type rejects virtual providers before mutation.
- * Unregister is virtual-only; file assets are removed by
- * whole-pack unmount. */
+/* Virtual packs store caller-owned runtime handles; unregister/unmount never deactivate their objects. Cleanup callbacks may still release per-slot user_data.
+ * Register/unregister assert on zero resource_id; registering a PIN_BLOB provider asserts before mutation.
+ * Unregister is virtual-only; file assets leave through whole-pack unmount. */
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
 nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);
@@ -239,10 +226,8 @@ void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t t
 
 /* ---- Context loss recovery ---- */
 
-/* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts:
- * raw bytes have no activation to repeat. On
- * context_restored, discard earlier render state and wait for a later
- * resource_step. */
+/* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts: raw bytes have no activation to repeat.
+ * On context_restored, discard earlier render state and wait for a later resource_step. */
 void nt_resource_invalidate(uint8_t asset_type);
 
 /* ---- Debug: dump loaded pack contents to log ---- */

@@ -206,16 +206,8 @@ static uint32_t atlas_activate(const uint8_t *data, uint32_t size);
 /* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
-/* Blob views carved out of raw bytes once the header has been validated.
- *
- * Pack asset alignment (NT_PACK_ASSET_ALIGN, 4) does NOT guarantee 8-byte or
- * 16-byte alignment of the inner atlas payload, so types with stricter
- * alignment than pack-1 (uint64_t page_ids, uint16_t indices) are kept as
- * raw byte pointers. Consumers read them via memcpy into an aligned
- * destination — this avoids UBSan -fsanitize=alignment trips on the
- * data pointer that Phase D hands to the resolve callback. The packed
- * NtAtlasRegion / NtAtlasVertex structs have alignof==1 thanks to
- * pragma pack(1), so pointer casts over those are legal. */
+/* Pack data may lack uint64_t alignment, so page IDs and indices are read via memcpy.
+ * Packed atlas headers, regions and vertices have byte alignment and can be viewed directly. */
 typedef struct {
     const NtAtlasHeader *hdr;
     const uint8_t *page_ids_bytes;

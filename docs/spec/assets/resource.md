@@ -179,6 +179,8 @@ exists; parsing and publication do not change type descriptions.
 
 Font and atlas init register their descriptions, and the game registers the gfx
 activators it uses. Complete those module initializations before mounting packs.
+`nt_font_shutdown()` does not remove the FONT type registration: initializing
+font again requires a new resource shutdown/init lifecycle first.
 Simple virtual providers use the empty default without explicit registration.
 BLOB readiness is built in and needs no activator. Other file asset types require
 a configured activator: missing one is a configuration error asserted during
@@ -218,7 +220,7 @@ Behavior flags:
 - `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
 - `NT_RESOURCE_BEHAVIOR_PIN_BLOB`: the published winner PINs its pack blob so a zero-copy consumer can read the live bytes at any time (see [Blob pinning](#blob-pinning)). Mutually independent of `AUX_BACKED` — a copy-out consumer never needs it, a zero-copy consumer always does.
 
-**on_resolve** fires in Phase D for the published winner when:
+**on_resolve** fires during publication for the published winner when:
 - published asset identity changes
 - published `runtime_handle` changes (re-activation / invalidate / context loss)
 - or an aux-backed asset is being published but its `user_data` has not yet been synchronized to that asset
@@ -252,11 +254,11 @@ Two consumption models exist for asset types that derive state from pack bytes:
 **Pin count (`NtPackMeta.blob_pins`).** Each pack carries the aggregate count of published winners (across all slots) pinning its blob. The resolve pass resets every pack's count to zero, then increments it once per published `PIN_BLOB` winner. Rebuilding from the selected winners avoids maintaining separate pin ownership on each slot. Consumers never pin/unpin themselves. Eviction checks the previous pass's count and skips pinned blobs: pins are normal residency state, not an invariant violation.
 
 **Eviction vs. the pin (`NT_BLOB_AUTO`).**
-- **Timer-freeze (D-06):** while `blob_pins > 0`, Phase-C eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
-- **AUTO-as-KEEP (D-07):** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
+- **Timer-freeze:** while `blob_pins > 0`, blob eviction is skipped *and* `blob_last_access_ms` is refreshed each step. Zero-copy reads never bump last-access, so freezing the clock means a fresh full TTL grace begins only once the pin drops to 0.
+- **AUTO-as-KEEP:** a pinned `NT_BLOB_AUTO` pack behaves as `NT_BLOB_KEEP`. This is not an error; it is reported once via an edge-triggered log (re-armed when `blob_pins` returns to 0), never per frame.
 - **Plain assets (copy-out) recover via invalidate:** for a plain asset (texture/mesh) the GPU `runtime_handle` is self-contained after activation, so rendering continues with `blob == NULL`. Recovery after GPU context loss is game-driven: the game calls `nt_resource_invalidate(asset_type)` (contract: "game must re-create resources" on `context_restored`), which deactivates + marks assets back to `REGISTERED` (Pass 1) and, for any pack whose `AUTO`-evicted blob is now `NULL`, resets `pack_state` to re-issue the download (Pass 2) — so the next `resource_step()` re-downloads and re-activates. `AUTO` is therefore recoverable for plain assets; no source is permanently lost as long as the game invalidates on context restore. With explicit pack-level lifetime, `AUTO` for plain assets is mostly a memory optimization (unmount already bounds the blob).
 
-**Unmount override (D-08).** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
+**Unmount override.** Explicit `nt_resource_unmount` overrides the pin: it proceeds (developer intent wins), emits a one-shot error log if `blob_pins > 0`, and preserves the deactivate-before-free ordering. Teardown zeroes `blob_pins`; the next resolve rebuilds it from the current winners, and the unmounted pack (no longer a winner) is simply not counted — no stale pin, no double-free. The zero-copy consumer loses its provider **synchronously, before the blob is freed**: unmount walks the `PIN_BLOB` slots whose published winner resolves to this pack and runs `on_cleanup` + clears `user_data` first — otherwise a font read between the unmount and the next resolve pass would dereference freed memory. Copy-out consumers without `PIN_BLOB` are **not** severed — their `user_data` is self-contained. The severed consumer degrades to its fallback (a font renders tofu, then clears metrics once no provider remains). Invariant: **every blob-freeing path is reconciled with the pin — eviction respects it (skip), unmount overrides it (proceed + log).**
 
 The per-asset pin (the published winner of a pinning slot) is exposed for diagnostics as `nt_resource_asset_info_t.blob_pins` and surfaced in the devapi `resource.list` group.
 

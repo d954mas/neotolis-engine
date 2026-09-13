@@ -1414,10 +1414,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(atlas_res.id != 0);
 
-    /* Step: Phase B activates atlas + page textures, Phase D resolves atlas,
-     * atlas_on_post_resolve requests page slots, and the follow-up resolve pass
-     * resolves those slots in the same
-     * nt_resource_step(). */
+    /* Post-resolve requests page slots; they must publish in the same step as the atlas. */
     nt_resource_step();
 
     /* Assert resource is ready */

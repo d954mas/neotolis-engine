@@ -17,7 +17,7 @@
  *   1 / 2 / 3       shape (cube / sphere / capsule)
  *   4 / 5 / 6 / 7   speed (stop / slow / medium / fast)
  *   F1              toggle debug overlay (player pose + nt_debug_overlay)
- *   F2              UI inspector (sidebar; see issue #197 for 3D ctx limits)
+ *   F2              UI inspector (sidebar)
  *   Esc             quit (native) */
 
 // #region includes

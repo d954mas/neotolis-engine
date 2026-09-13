@@ -1756,7 +1756,7 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
      * only when the freeze actually refreshed the timer and fails if the freeze is deleted. */
     TEST_ASSERT_TRUE(nt_resource_test_pack_blob_last_access(0) > access_before);
 
-    /* (2) Drop the winner -> ref returns to 0 (Phase C that frame still saw ref>0 and refreshed) */
+    /* Eviction sees the previous pin count; resolve drops the pin afterward. */
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));

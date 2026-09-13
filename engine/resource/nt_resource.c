@@ -244,12 +244,12 @@ static void resource_resolve_pass(void) {
     NtResolveTemp *resolve_temp = s_resource.resolve_temp;
     memset(resolve_temp, 0, (s_resource.slot_count + 1U) * sizeof(*resolve_temp));
 
-    /* PIN_BLOB pin count is rebuilt from the published winners in D.4 below — clear it first. */
+    /* Publication rebuilds pins from its winners, so discard the previous counts first. */
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
         s_resource.packs[pi].blob_pins = 0;
     }
 
-    /* D.1: Prepare per-pass transient candidates */
+    // #region prepare resolve candidates
     for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
         NtResolveTemp *tmp = &resolve_temp[si];
         tmp->target_prio = INT16_MIN;
@@ -258,8 +258,9 @@ static void resource_resolve_pass(void) {
         tmp->candidate_asset_idx = UINT16_MAX;
         tmp->scan_state = NT_ASSET_STATE_REGISTERED;
     }
+    // #endregion
 
-    /* D.2: Single pass over assets -- O(A) via slot_map lookup */
+    // #region select target and publishable winners
     for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
         NtAssetMeta *meta = &s_resource.assets[ai];
         if (meta->resource_id == 0) {
@@ -314,8 +315,9 @@ static void resource_resolve_pass(void) {
             tmp->candidate_asset_idx = (uint16_t)ai;
         }
     }
+    // #endregion
 
-    /* D.3: Texture placeholder fallback -- publish placeholder only if no READY asset exists */
+    // #region texture placeholder fallback
     if (s_resource.placeholder_texture != 0) {
         uint32_t ph_si = slot_map_find(s_resource.placeholder_texture);
         uint32_t ph_handle = 0;
@@ -336,8 +338,9 @@ static void resource_resolve_pass(void) {
             }
         }
     }
+    // #endregion
 
-    // #region D.4: Publish the best usable winner and run resolve/cleanup hooks
+    // #region publish winners and synchronize auxiliary data
     for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         NtResolveTemp *tmp = &resolve_temp[si];
@@ -415,7 +418,7 @@ static void resource_resolve_pass(void) {
     }
     // #endregion
 
-    // #region D.5: Fire on_post_resolve callbacks after the resolve iteration
+    // #region post-resolve callbacks
     for (uint32_t si = 1; si <= s_resource.slot_count; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         const NtResolveTemp *tmp = &resolve_temp[si];
@@ -538,9 +541,7 @@ void nt_resource_step(void) {
     /* Native http transfers advance only when pumped (no-op on web/stub) */
     nt_http_update();
 
-    /* ===================================================
-     *  Phase A: Poll I/O for loading packs + retry
-     * =================================================== */
+    // #region poll loading packs and retry
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
         NtPackMeta *pack = &s_resource.packs[pi];
         if (!pack->mounted) {
@@ -645,10 +646,9 @@ void nt_resource_step(void) {
             }
         }
     }
+    // #endregion
 
-    /* ===================================================
-     *  Phase B: Activate assets within time budget
-     * =================================================== */
+    // #region activate assets within time budget
     {
         double t_start = nt_time_now();
         float budget_ms = s_resource.activate_time_budget_ms;
@@ -720,10 +720,9 @@ void nt_resource_step(void) {
         }
 #endif
     }
+    // #endregion
 
-    /* ===================================================
-     *  Phase C: Blob eviction (NT_BLOB_AUTO)
-     * =================================================== */
+    // #region evict expired AUTO blobs
     {
         uint32_t now_ms = resource_get_time_ms();
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
@@ -764,11 +763,9 @@ void nt_resource_step(void) {
             }
         }
     }
+    // #endregion
 
-    /* ===================================================
-     *  Phase D: Resolve slots (priority-based winner)
-     * =================================================== */
-
+    // #region resolve requested slots
     if (!s_resource.needs_resolve) {
         goto step_done; /* O(1) fast path when nothing changed */
     }
@@ -782,6 +779,7 @@ void nt_resource_step(void) {
     }
 
     NT_ASSERT(!s_resource.needs_resolve && "resource resolve pass limit exceeded");
+    // #endregion
 step_done:;
 #if NT_RESOURCE_TIMING_ENABLED
     s_resource.step_ms = (float)((nt_time_now() - step_start) * 1000.0);
