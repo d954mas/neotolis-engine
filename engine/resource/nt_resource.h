@@ -222,6 +222,8 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
 
 /* ---- Blob policy ---- */
 
+/* AUTO eviction applies only to resource-managed FS/HTTP blobs. Direct parse_pack
+ * borrows the caller's bytes until unmount/shutdown, regardless of this policy. */
 void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t ttl_ms);
 
 /* ---- Context loss recovery ---- */

@@ -727,7 +727,7 @@ void nt_resource_step(void) {
         uint32_t now_ms = resource_get_time_ms();
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
             NtPackMeta *pack = &s_resource.packs[pi];
-            if (!pack->mounted || pack->blob == NULL) {
+            if (!pack->mounted || pack->blob == NULL || pack->io_type == NT_IO_NONE) {
                 continue;
             }
             if (pack->blob_policy != NT_BLOB_AUTO) {
@@ -753,11 +753,7 @@ void nt_resource_step(void) {
                 if (pack->activate_cursor < s_resource.asset_hwm) {
                     continue;
                 }
-                /* Only free blobs owned by resource system (loaded via I/O).
-                 * Caller-owned blobs (parse_pack direct) have io_type == NT_IO_NONE. */
-                if (pack->io_type != NT_IO_NONE) {
-                    free((void *)pack->blob);
-                }
+                free((void *)pack->blob);
                 pack->blob = NULL;
                 /* Preserve the parsed-pack marker and expected reload size. */
             }
@@ -1613,25 +1609,9 @@ void nt_resource_invalidate(uint8_t asset_type) {
         meta->runtime_handle = 0;
     }
 
-    /* Pass 2: Check file packs for blob eviction + re-download trigger */
+    /* Reload evicted file-pack blobs through their original I/O source. */
     for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
-        NtPackMeta *pack = &s_resource.packs[i];
-        if (!pack->mounted || pack->pack_type == NT_PACK_VIRTUAL) {
-            continue;
-        }
-        if (pack->pack_state != NT_PACK_STATE_READY) {
-            continue;
-        }
-        if (pack->blob != NULL) {
-            continue; /* blob still available, resource_step will re-activate from it */
-        }
-        /* Blob was evicted -- need to re-download to re-activate assets.
-         * Set pack_state to NONE so resource_step's retry logic re-issues the download.
-         * io_type and load_path are preserved from the original load call. */
-        pack->pack_state = NT_PACK_STATE_NONE;
-        pack->retry_delay_ms = 0; /* immediate, not exponential backoff */
-        pack->retry_time_ms = 1;  /* non-zero triggers retry on next resource_step() */
-        pack->attempt_count = 0;  /* reset attempt count for re-download */
+        schedule_pack_redownload_if_needed(&s_resource.packs[i]);
     }
 
     s_resource.needs_resolve = true;

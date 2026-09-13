@@ -32,9 +32,8 @@ typedef enum {
 
 typedef enum {
     NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
-    /* Auto-evict blob after TTL since last access. Re-downloaded on demand: nt_resource_invalidate()
-     * resets an evicted pack to re-issue I/O, so re-activation (e.g. after GPU context loss) recovers it.
-     * Zero-copy (PIN_BLOB) blobs stay resident via the pin. */
+    /* Auto-evict resource-managed I/O blobs after TTL; invalidation reloads them on demand.
+     * Caller-owned blobs and published PIN_BLOB sources stay resident. */
     NT_BLOB_AUTO = 1,
 } nt_blob_policy_t;
 
