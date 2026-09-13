@@ -113,6 +113,8 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, flo
 void nt_font_measure_invalidate_cache(void);
 void nt_font_measure_invalidate(nt_font_t font);
 
+/* Call after nt_resource_init(), before its first successful file or virtual mount.
+ * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration. */
 nt_result_t nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
 /* Call after gfx begin_frame and outside a pass: recovery replaces GPU textures. */

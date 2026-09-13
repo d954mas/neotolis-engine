@@ -3920,8 +3920,8 @@ int main(int argc, char *argv[]) {
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
 
-    nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
-    nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
+    nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
     /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region = 8. */

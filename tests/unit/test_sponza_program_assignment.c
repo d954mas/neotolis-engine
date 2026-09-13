@@ -143,7 +143,7 @@ void setUp(void) {
     nt_fs_init();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_resource_set_activate_time_budget(0);
-    nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
+    nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_material_init(&(nt_material_desc_t){.max_materials = TEST_NODE_COUNT});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = TEST_NODE_COUNT});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = TEST_NODE_COUNT});

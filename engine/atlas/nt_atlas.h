@@ -83,8 +83,8 @@ typedef struct {
 
 /* ---- Public API ---- */
 
-/* Register NT_ASSET_ATLAS activator + resolve callbacks with nt_resource.
- * Call after nt_resource_init(). Must be called exactly once. */
+/* Registers the ATLAS type once; repeated calls assert.
+ * Call after nt_resource_init(), before its first successful file or virtual mount. */
 nt_result_t nt_atlas_init(void);
 
 /* Monotonic snapshot revision. Increments whenever the owned atlas snapshot

@@ -539,28 +539,40 @@ void test_sprite_renderer_init_retries_after_buffer_creation_failure(void) {
  * accidentally relaxed (it would still catch the breakage in CI). */
 void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_sprite_vertex_t)); }
 
-void test_sprite_renderer_batch_key_packs_material_and_page_slots(void) {
-    nt_material_t material = {.id = 0xABCD1234U};
-    nt_resource_t page_resource = {.id = 0x43215678U};
-
-    TEST_ASSERT_EQUAL_HEX32(0x12345678U, nt_sprite_renderer_batch_key(material, page_resource));
+void test_sprite_renderer_batch_key_packs_material_and_texture_slots(void) {
+    for (uint64_t i = 1; i <= 8; i++) {
+        nt_resource_request((nt_hash64_t){i}, NT_ASSET_TEXTURE);
+    }
+    nt_material_t material = create_test_material();
+    nt_resource_t page = nt_resource_request((nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(9, page.id);
+    TEST_ASSERT_EQUAL_HEX32(0x00010001U, nt_sprite_renderer_batch_key(material, page));
 }
 
-void test_sprite_renderer_batch_key_ignores_handle_generations(void) {
-    nt_material_t material_a = {.id = 0x00011234U};
-    nt_material_t material_b = {.id = 0xFFFF1234U};
-    nt_resource_t page_a = {.id = 0x00015678U};
-    nt_resource_t page_b = {.id = 0xFFFF5678U};
-
-    TEST_ASSERT_EQUAL_HEX32(nt_sprite_renderer_batch_key(material_a, page_a), nt_sprite_renderer_batch_key(material_b, page_b));
+void test_sprite_renderer_batch_key_groups_names_of_same_texture(void) {
+    nt_material_t material = create_test_material();
+    nt_resource_t page = nt_resource_request((nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    nt_hash32_t pack = nt_hash32_str("sprite_renderer_pages");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){0xF00}, NT_ASSET_TEXTURE, nt_resource_get(page)));
+    nt_resource_t alias = nt_resource_request((nt_hash64_t){0xF00}, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_NOT_EQUAL(page.id, alias.id);
+    TEST_ASSERT_EQUAL_HEX32(nt_sprite_renderer_batch_key(material, page), nt_sprite_renderer_batch_key(material, alias));
 }
 
-void test_sprite_renderer_batch_key_distinguishes_page_slots(void) {
-    nt_material_t material = {.id = 0x00010001U};
-    nt_resource_t page_a = {.id = 0x00010001U};
-    nt_resource_t page_b = {.id = 0x00010002U};
-
-    TEST_ASSERT_NOT_EQUAL(nt_sprite_renderer_batch_key(material, page_a), nt_sprite_renderer_batch_key(material, page_b));
+void test_sprite_renderer_batch_key_distinguishes_neighbouring_materials_and_textures(void) {
+    nt_material_t materials[2] = {create_test_material(), create_test_material()};
+    nt_resource_t pages[2] = {nt_resource_request((nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE), nt_resource_request((nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE)};
+    nt_resource_step();
+    uint32_t keys[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        keys[i] = nt_sprite_renderer_batch_key(materials[i / 2], pages[i % 2]);
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT_NOT_EQUAL(keys[j], keys[i]);
+        }
+    }
 }
 
 void test_sprite_renderer_draw_list_null_items_asserts_when_nonempty(void) {
@@ -897,6 +909,76 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(1));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
+}
+
+void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xF10ULL);
+    nt_material_t sampled = create_test_material();
+    nt_material_t textureless = create_test_material_textureless();
+    nt_entity_t entities[2] = {create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, sampled), create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, sampled)};
+    nt_resource_t pages[2] = {nt_atlas_get_page_resource(s_atlas_res, 0), nt_atlas_get_page_resource(s_atlas_res, 1)};
+    uint32_t textures[2] = {nt_resource_get(pages[0]), nt_resource_get(pages[1])};
+    const nt_hash32_t page_pack = nt_hash32_str("sprite_renderer_pages");
+    nt_resource_unregister(page_pack, (nt_hash64_t){FIXTURE_PAGE0_RID});
+    nt_resource_unregister(page_pack, (nt_hash64_t){FIXTURE_PAGE1_RID});
+    nt_resource_step();
+    nt_render_item_t items[2] = {{.entity = entities[0].id}, {.entity = entities[1].id}};
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(pages[i]));
+        items[i].batch_key = sprite_batch_key(entities[i], sampled);
+    }
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+
+    for (uint32_t i = 0; i < 2; i++) {
+        *nt_material_comp_handle(entities[i]) = textureless;
+        items[i].batch_key = sprite_batch_key(entities[i], textureless);
+    }
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+
+    nt_texture_t placeholder = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8});
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pack, (nt_hash64_t){0xF11}, NT_ASSET_TEXTURE, placeholder.id));
+    nt_resource_set_placeholder_texture((nt_hash64_t){0xF11});
+    nt_resource_step();
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_FALSE(nt_resource_is_ready(pages[i]));
+        *nt_material_comp_handle(entities[i]) = sampled;
+        items[i].batch_key = sprite_batch_key(entities[i], sampled);
+    }
+    TEST_ASSERT_EQUAL_HEX32(items[0].batch_key, items[1].batch_key);
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(placeholder), nt_gfx_fake_bound_texture_at(0));
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pack, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, textures[0]));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pack, (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, textures[1]));
+    nt_resource_step();
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_TRUE(nt_resource_is_ready(pages[i]));
+        items[i].batch_key = sprite_batch_key(entities[i], sampled);
+    }
+    TEST_ASSERT_NOT_EQUAL(items[0].batch_key, items[1].batch_key);
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+    for (uint32_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){textures[i]}), nt_gfx_fake_bound_texture_at(i));
+    }
+
+    uint32_t old_key = items[0].batch_key;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack((nt_hash32_t){0xF12}, 200));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register((nt_hash32_t){0xF12}, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, placeholder.id));
+    nt_resource_step();
+    items[0].batch_key = sprite_batch_key(entities[0], sampled);
+    TEST_ASSERT_NOT_EQUAL(old_key, items[0].batch_key);
+    nt_gfx_fake_reset();
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(placeholder), nt_gfx_fake_bound_texture_at(0));
 }
 
 /* A material that declares no textures never takes the page, so crossing pages
@@ -1940,9 +2022,9 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_init_shutdown);
     RUN_TEST(test_sprite_renderer_init_retries_after_buffer_creation_failure);
     RUN_TEST(test_sprite_renderer_vertex_size_assert);
-    RUN_TEST(test_sprite_renderer_batch_key_packs_material_and_page_slots);
-    RUN_TEST(test_sprite_renderer_batch_key_ignores_handle_generations);
-    RUN_TEST(test_sprite_renderer_batch_key_distinguishes_page_slots);
+    RUN_TEST(test_sprite_renderer_batch_key_packs_material_and_texture_slots);
+    RUN_TEST(test_sprite_renderer_batch_key_groups_names_of_same_texture);
+    RUN_TEST(test_sprite_renderer_batch_key_distinguishes_neighbouring_materials_and_textures);
     RUN_TEST(test_sprite_renderer_draw_list_null_items_asserts_when_nonempty);
     RUN_TEST(test_sprite_renderer_draw_list_asserts_on_unresolved_sprite_item);
     RUN_TEST(test_sprite_renderer_pipeline_cache);
@@ -1955,6 +2037,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);
+    RUN_TEST(test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages);
     RUN_TEST(test_sprite_renderer_textureless_material_ignores_page_change);
     RUN_TEST(test_sprite_renderer_textureless_material_emits_without_page);
     RUN_TEST(test_sprite_renderer_dead_material_cmd_binds_on_program_unit);

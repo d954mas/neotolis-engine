@@ -1403,7 +1403,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     /* --- Resource system init --- */
     nt_resource_init(NULL);
     nt_atlas_init();
-    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_texture_activate, fake_texture_deactivate);
+    nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = fake_texture_activate, .deactivate = fake_texture_deactivate});
 
     /* Mount pack, parse, request */
     nt_hash32_t pid = nt_hash32_str("atlas_integ_pack");
@@ -1414,10 +1414,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
     nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(atlas_res.id != 0);
 
-    /* Step: Phase B activates atlas + page textures, Phase D resolves atlas,
-     * atlas_on_post_resolve requests page slots, and the follow-up resolve pass
-     * resolves those slots in the same
-     * nt_resource_step(). */
+    /* Post-resolve requests page slots; they must publish in the same step as the atlas. */
     nt_resource_step();
 
     /* Assert resource is ready */

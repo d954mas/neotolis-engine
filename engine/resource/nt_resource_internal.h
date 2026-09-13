@@ -51,13 +51,9 @@ typedef enum {
 #define NT_RESOURCE_MAX_ASSET_TYPES 8
 
 typedef struct {
-    nt_activate_fn activate;
-    nt_deactivate_fn deactivate;
-    nt_resolve_fn on_resolve;
-    nt_cleanup_fn on_cleanup;
-    nt_post_resolve_fn on_post_resolve;
-    uint8_t behavior_flags;
-} NtActivatorEntry;
+    nt_resource_type_desc_t desc;
+    bool registered;
+} NtResourceTypeEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */
 
@@ -98,7 +94,7 @@ typedef struct {
     /* I/O request linkage */
     uint32_t io_request_id;         /* nt_http or nt_fs handle.id */
     uint8_t io_type;                /* nt_io_type_t */
-    uint8_t blob_evict_skip_logged; /* edge-trigger: Phase C runs every frame — log AUTO-as-KEEP skip once, re-arm when pins reach 0 */
+    uint8_t blob_evict_skip_logged; /* log pinned AUTO skip once; re-arm when pins reach zero */
     /* Retry state */
     uint16_t attempt_count;
     uint32_t retry_delay_ms;
@@ -106,7 +102,7 @@ typedef struct {
     /* Blob eviction */
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    uint32_t blob_pins;       /* published PIN_BLOB winners pinning this pack's blob; rebuilt from winners each resolve pass, gates Phase-C eviction */
+    uint32_t blob_pins;       /* published PIN_BLOB winners; rebuilt each resolve pass, prevents eviction */
     uint32_t activate_cursor; /* no activation-eligible owner lies below this registry index */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];
@@ -120,7 +116,6 @@ typedef struct {
 typedef struct {
     uint64_t resource_id;         /* nt_hash64 value */
     uint32_t runtime_handle;      /* published winner's runtime handle (what game sees) */
-    uint16_t generation;          /* stale-handle detection; incremented on slot reuse */
     uint16_t resolve_asset_idx;   /* index into assets[] of published winner */
     uint16_t user_data_asset_idx; /* asset idx last used to build user_data (aux sync check) */
     uint8_t asset_type;           /* nt_asset_type_t */

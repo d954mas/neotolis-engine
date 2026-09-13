@@ -73,7 +73,8 @@ The runtime additionally caches:
 
 - **Resolved region index** — `uint16_t` index into the atlas region table.
 - **Resolved region data** — atlas geometry pointers and the actual page
-  resource used by the renderer and its batch key.
+  resource used by the renderer. The batch-key helper resolves this stable
+  resource index to the currently published GPU texture in O(1).
 - **Atlas revision snapshot** — `uint32_t`, used to detect republish.
 - **Effective origin** — `float[2]`, either authored from the region or
   overridden by the game.
@@ -113,8 +114,9 @@ game-side render-item construction excludes it by checking
 Each sprite carries an effective origin (`float[2]`). By default it tracks
 the region's authored origin from the atlas. The game may override it with
 `set_origin(x, y)`, which sets the `ORIGIN_OV` flag and pins the value across
-subsequent atlas republishes. `reset_origin()` clears the override and
-restores the authored value on the next sync.
+subsequent atlas republishes. `reset_origin()` clears the override and restores
+the authored value immediately for a resolved sprite. An unresolved sprite gets
+`{0, 0}` until resource sync resolves its region and applies the authored origin.
 
 Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
 They are pure state — no resolve, no atlas interaction. The renderer mirrors

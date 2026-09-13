@@ -206,6 +206,10 @@ Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a materia
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
 handles, and every sprite command submits the complete semantic set once. The
+sprite batch key packs the material pool slot and the currently published GPU
+texture pool slot, resolved from the stable page resource index. Both bindings
+remain live and unchanged from list construction through draw completion; a new
+list resolves the current publication again. The
 gfx front-end maps names to the bound program's canonical units,
 ignores inactive declarations, validates complete active coverage, and calls the
 backend only after the whole set resolves. The backend GL cache drops repeated
