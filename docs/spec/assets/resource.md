@@ -107,7 +107,12 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 
 **Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
 
-`NT_BLOB_AUTO` eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
+`NT_BLOB_AUTO` applies only to blobs loaded through resource-managed FS/HTTP I/O.
+Direct `nt_resource_parse_pack` borrows the caller's bytes without copying; the
+registry retains that pointer until unmount/shutdown regardless of the blob
+policy. The caller keeps those bytes valid and unchanged for that lifetime.
+
+Eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
 - simple assets stay usable from the runtime handle alone
 - aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
