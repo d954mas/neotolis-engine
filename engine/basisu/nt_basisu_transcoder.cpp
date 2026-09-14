@@ -39,6 +39,22 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     out_info->codec = codec;
     out_info->width = image_info.m_orig_width;
     out_info->height = image_info.m_orig_height;
+    /* Upstream accepts a level whose width shrank within the same block count and
+       then writes it with its own row stride; the activator derives sizes from
+       level 0, so every level must be exactly the halved chain. */
+    for (uint32_t level = 1; level < image_info.m_total_levels; level++) {
+        uint32_t level_w = 0;
+        uint32_t level_h = 0;
+        uint32_t level_blocks = 0;
+        if (!s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level, level_w, level_h, level_blocks)) {
+            return false;
+        }
+        const uint32_t expect_w = image_info.m_orig_width >> level;
+        const uint32_t expect_h = image_info.m_orig_height >> level;
+        if (level_w != (expect_w > 0 ? expect_w : 1) || level_h != (expect_h > 0 ? expect_h : 1)) {
+            return false;
+        }
+    }
     out_info->level_count = image_info.m_total_levels;
     out_info->has_alpha = image_info.m_alpha_flag;
     return true;

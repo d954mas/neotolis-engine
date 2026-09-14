@@ -1690,6 +1690,11 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
  * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = glGetError();
+    /* WebGL reports a loss once through glGetError; between two mip uploads that
+       is a recoverable outcome the caller rolls back, not a programmer error. */
+    if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost()) {
+        return false;
+    }
     NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);

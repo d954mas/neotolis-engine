@@ -237,10 +237,11 @@ test('basis fixture: the transcoded atlas keeps its format and texels across a c
   });
   expect(hasExtension, 'WEBGL_lose_context unavailable').toBe(true);
   await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready(), null, { timeout: 10_000 });
-  await page.evaluate(() => window.__ntLossExtension!.restoreContext());
-  // The invalidation has to land first: without this edge the readiness poll
-  // could still be answering for the pre-loss texture.
+  // Observe the lost edge before restoring: gfx clears texture backends on loss,
+  // so readiness is false here and true again only after re-activation. Polling
+  // for the false edge after restore could miss it if the runner pauses.
   await page.waitForFunction(() => !window.__nt!.basis_ready(), null, { timeout: 30_000 });
+  await page.evaluate(() => window.__ntLossExtension!.restoreContext());
   await page.waitForFunction(() => window.__nt!.programs_ready(), null, { timeout: 30_000 });
 
   // Re-activation runs off the same pack blob, so the transcode is bit-identical.
