@@ -78,7 +78,6 @@ typedef struct {
     uint16_t height;
     uint8_t format;    /* nt_texture_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
-    bool compressed;   /* true for Basis/GPU-compressed textures */
     bool render_target_owned;
     /* Sampler bound automatically by bind_texture. Always non-zero in
      * normal runtime (make_texture / activator assert this). Reset to
@@ -423,7 +422,6 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
     s_gfx.texture_metas[slot].height = desc->height;
     s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
     s_gfx.texture_metas[slot].mip_count = 1;
-    s_gfx.texture_metas[slot].compressed = false;
     s_gfx.texture_metas[slot].render_target_owned = true;
     nt_sampler_desc_t sampler_desc = {
         .min_filter = desc->min_filter,
@@ -1014,6 +1012,51 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     return result;
 }
 
+/* floor(log2(max(w, h))) + 1 -- levels down to 1x1. */
+static uint8_t texture_full_chain_levels(uint16_t width, uint16_t height) {
+    uint16_t max_dim = width > height ? width : height;
+    uint8_t levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1;
+        levels++;
+    }
+    return levels;
+}
+
+static bool texture_compressed_format_supported(nt_texture_format_t format) {
+    switch (format) {
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return g_nt_gfx.gpu_caps.has_etc2;
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return g_nt_gfx.gpu_caps.has_bc7;
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return g_nt_gfx.gpu_caps.has_astc;
+    default:
+        return true;
+    }
+}
+
+/* Publishes a fully uploaded texture: desc->level_count is the resolved count. */
+static void texture_commit(uint32_t slot, const nt_texture_desc_t *desc, uint32_t backend) {
+    s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].width = desc->width;
+    s_gfx.texture_metas[slot].height = desc->height;
+    s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
+    s_gfx.texture_metas[slot].mip_count = desc->level_count;
+
+    nt_sampler_desc_t sd = {
+        .min_filter = desc->min_filter,
+        .mag_filter = desc->mag_filter,
+        .wrap_u = desc->wrap_u,
+        .wrap_v = desc->wrap_v,
+        .label = NULL,
+    };
+    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
+    NT_ASSERT(default_sampler.id != 0 && "texture_commit: default sampler creation failed");
+    s_gfx.texture_metas[slot].default_sampler = default_sampler;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     nt_texture_t result = {0};
@@ -1044,6 +1087,26 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
+    if (local_desc.data != NULL) {
+        NT_ASSERT(nt_texture_level_bytes(local_desc.format, local_desc.width, local_desc.height) != 0 && "make_texture: format has no defined upload size");
+    }
+    if (nt_texture_format_is_compressed(local_desc.format)) {
+        NT_ASSERT(local_desc.data != NULL && "make_texture: compressed format requires data");
+        NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: compressed format cannot generate mipmaps");
+        if (!texture_compressed_format_supported(local_desc.format)) {
+#ifdef NT_DEBUG
+            NT_ASSERT(0 && "make_texture: compressed format is not supported by the GPU");
+#endif
+            NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
+            return result;
+        }
+    }
+    if (local_desc.level_count > 1) {
+        NT_ASSERT(local_desc.data != NULL && "make_texture: level_count > 1 requires data");
+        NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: level_count > 1 cannot be combined with gen_mipmaps");
+        NT_ASSERT(local_desc.level_count <= texture_full_chain_levels(local_desc.width, local_desc.height) && "make_texture: level_count exceeds the full mip chain");
+    }
+
     /* Integer textures: NEAREST only, no mipmaps */
     if (local_desc.format == NT_TEXTURE_FORMAT_RG16UI) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
@@ -1055,6 +1118,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST min_filter without compare mode");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
         NT_ASSERT(!local_desc.gen_mipmaps && "depth texture mipmaps are not supported");
+        NT_ASSERT(local_desc.level_count <= 1 && "depth texture mip levels are not supported");
     }
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA32F) {
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || !texture_filter_uses_linear(local_desc.min_filter)) && "RGBA32F min_filter requires float texture linear support");
@@ -1064,10 +1128,19 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
                   "RGBA32F mipmaps require float filtering and rendering support");
     }
 
-    /* Mipmap min_filter requires gen_mipmaps */
-    NT_ASSERT((local_desc.gen_mipmaps || local_desc.min_filter <= NT_FILTER_LINEAR) && "make_texture: mipmap filter requires gen_mipmaps");
     /* mag_filter: only NEAREST or LINEAR allowed */
     NT_ASSERT(local_desc.mag_filter <= NT_FILTER_LINEAR && "make_texture: mag_filter must be NEAREST or LINEAR");
+
+    /* Levels the caller supplies in `data`; gen_mipmaps leaves 1 and GL fills the rest. */
+    uint8_t supplied_levels = local_desc.level_count > 1 ? local_desc.level_count : 1;
+    /* The backend mirrors a resolved count, never a policy: 0 is only the zero-init spelling. */
+    if (supplied_levels > 1) {
+        local_desc.level_count = supplied_levels;
+    } else if (local_desc.gen_mipmaps && local_desc.data) {
+        local_desc.level_count = texture_full_chain_levels(local_desc.width, local_desc.height);
+    } else {
+        local_desc.level_count = 1;
+    }
     // #endregion
 
     // #region allocate
@@ -1081,37 +1154,25 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         nt_pool_free(&s_gfx.texture_pool, id);
         return result;
     }
-    // #endregion
 
-    // #region store meta
-    uint32_t slot = nt_pool_slot_index(id);
-    s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_metas[slot].width = local_desc.width;
-    s_gfx.texture_metas[slot].height = local_desc.height;
-    s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
-    s_gfx.texture_metas[slot].mip_count = 1;
-    if (local_desc.gen_mipmaps && local_desc.data) {
-        /* floor(log2(max(w,h))) + 1 */
-        uint16_t max_dim = local_desc.width > local_desc.height ? local_desc.width : local_desc.height;
-        uint8_t levels = 1;
-        while (max_dim > 1) {
-            max_dim >>= 1;
-            levels++;
+    /* Levels 1..N-1 follow level 0 in `data` with no padding. */
+    uint64_t offset = nt_texture_level_bytes(local_desc.format, local_desc.width, local_desc.height);
+    for (uint8_t level = 1; level < supplied_levels; level++) {
+        uint16_t level_w = (uint16_t)(local_desc.width >> level);
+        uint16_t level_h = (uint16_t)(local_desc.height >> level);
+        level_w = level_w > 0 ? level_w : 1;
+        level_h = level_h > 0 ? level_h : 1;
+        if (!nt_gfx_backend_upload_texture_level(backend, level, level_w, level_h, local_desc.format, (const uint8_t *)local_desc.data + offset)) {
+            NT_LOG_ERROR("backend texture level %u upload failed", (unsigned)level);
+            nt_gfx_backend_destroy_texture(backend);
+            nt_pool_free(&s_gfx.texture_pool, id);
+            return result;
         }
-        s_gfx.texture_metas[slot].mip_count = levels;
+        offset += nt_texture_level_bytes(local_desc.format, level_w, level_h);
     }
-
-    nt_sampler_desc_t sd = {
-        .min_filter = local_desc.min_filter,
-        .mag_filter = local_desc.mag_filter,
-        .wrap_u = local_desc.wrap_u,
-        .wrap_v = local_desc.wrap_v,
-        .label = NULL,
-    };
-    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
-    NT_ASSERT(default_sampler.id != 0 && "nt_gfx_make_texture: default sampler creation failed");
-    s_gfx.texture_metas[slot].default_sampler = default_sampler;
     // #endregion
+
+    texture_commit(nt_pool_slot_index(id), &local_desc, backend);
 
     result.id = id;
     return result;
@@ -1493,16 +1554,6 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
     nt_gfx_backend_bind_vertex_input(slot);
 }
 
-static bool texture_has_complete_mip_chain(const nt_gfx_texture_meta_t *meta) {
-    uint16_t max_dim = meta->width > meta->height ? meta->width : meta->height;
-    uint8_t required_levels = 1;
-    while (max_dim > 1) {
-        max_dim >>= 1;
-        required_levels++;
-    }
-    return meta->mip_count >= required_levels;
-}
-
 static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_desc_t *desc) {
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
     uint8_t format = meta->format;
@@ -1523,8 +1574,9 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
     if (format == (uint8_t)NT_TEXTURE_FORMAT_RGBA32F && !g_nt_gfx.gpu_caps.has_float_texture_linear && (texture_filter_uses_linear(desc->min_filter) || desc->mag_filter != NT_FILTER_NEAREST)) {
         return false;
     }
-    bool mipmap_filter = desc->min_filter > NT_FILTER_LINEAR;
-    return !mipmap_filter || texture_has_complete_mip_chain(meta);
+    /* Mip filters need no gate: GL_TEXTURE_MAX_LEVEL is set from the level
+     * count at creation, so every live texture is mip-complete. */
+    return true;
 }
 
 static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sampler_desc_t *sampler, uint8_t sampler_class) {
@@ -2175,7 +2227,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     }
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
-    NT_ASSERT(!s_gfx.texture_metas[slot].compressed && "update_texture: compressed textures cannot be sub-updated");
+    NT_ASSERT(!nt_texture_format_is_compressed((nt_texture_format_t)stored_format) && "update_texture: compressed textures cannot be sub-updated");
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
     bool is_depth = nt_texture_format_is_depth((nt_texture_format_t)stored_format);
     NT_ASSERT(!is_depth && "update_texture: depth texture updates are not supported");
@@ -2209,6 +2261,25 @@ static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAsset
     NT_ASSERT(s.id != 0 && "texture_attach_default_sampler: sampler creation failed");
     uint32_t slot = nt_pool_slot_index(tex_id);
     s_gfx.texture_metas[slot].default_sampler = s;
+}
+
+/* Texture meta records the storage format the GPU actually holds; the
+ * transcoder's wrapper enum is a second identity for the same formats. */
+static nt_texture_format_t basis_target_storage_format(nt_basisu_format_t target) {
+    switch (target) {
+    case NT_BASISU_FORMAT_BC7_RGBA:
+        return NT_TEXTURE_FORMAT_BC7_RGBA;
+    case NT_BASISU_FORMAT_ASTC_4x4_RGBA:
+        return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
+    case NT_BASISU_FORMAT_ETC2_RGBA:
+        return NT_TEXTURE_FORMAT_ETC2_RGBA8;
+    case NT_BASISU_FORMAT_ETC1_RGB:
+        return NT_TEXTURE_FORMAT_ETC2_RGB8;
+    case NT_BASISU_FORMAT_RGBA32:
+        return NT_TEXTURE_FORMAT_RGBA8;
+    }
+    NT_ASSERT(0 && "activate_texture: unknown transcode target");
+    return NT_TEXTURE_FORMAT_INVALID;
 }
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
@@ -2344,7 +2415,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     s_gfx.texture_metas[slot].width = (uint16_t)hdr2->width;
     s_gfx.texture_metas[slot].height = (uint16_t)hdr2->height;
     s_gfx.texture_metas[slot].mip_count = (uint8_t)(levels > 255 ? 255 : levels);
-    s_gfx.texture_metas[slot].compressed = true;
+    s_gfx.texture_metas[slot].format = (uint8_t)basis_target_storage_format(target);
     texture_attach_default_sampler(id, hdr2);
     return id;
 }

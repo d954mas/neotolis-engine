@@ -70,6 +70,16 @@ uint32_t nt_gfx_fake_last_index_buffer_hash(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 void nt_gfx_fake_fail_texture_creates(uint8_t mask);
+/* Per-level uploads: one mask bit per call, consumed in order (like creates). */
+void nt_gfx_fake_fail_texture_level_uploads(uint8_t mask);
+uint32_t nt_gfx_fake_texture_level_upload_count(void);
+uint32_t nt_gfx_fake_last_texture_level_backend(void);
+uint8_t nt_gfx_fake_last_texture_level(void);
+uint16_t nt_gfx_fake_last_texture_level_width(void);
+uint16_t nt_gfx_fake_last_texture_level_height(void);
+uint32_t nt_gfx_fake_texture_destroy_count(void);
+nt_texture_format_t nt_gfx_fake_last_texture_level_format(void);
+const void *nt_gfx_fake_last_texture_level_data(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
 void nt_gfx_fake_fail_next_backend_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);

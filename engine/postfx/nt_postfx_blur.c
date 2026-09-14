@@ -284,20 +284,6 @@ static bool validate_targets_ready(const nt_postfx_blur_pass_t *pass) {
     return temp_ready && dest_ready;
 }
 
-static bool blur_source_format_valid(nt_texture_format_t format) {
-    switch (format) {
-    case NT_TEXTURE_FORMAT_RGBA8:
-    case NT_TEXTURE_FORMAT_RGB8:
-    case NT_TEXTURE_FORMAT_RG8:
-    case NT_TEXTURE_FORMAT_R8:
-    case NT_TEXTURE_FORMAT_RGBA16F:
-    case NT_TEXTURE_FORMAT_RGBA32F:
-        return true;
-    default:
-        return false;
-    }
-}
-
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
     targets->temp_color = nt_gfx_render_target_color(pass->temp);
     targets->temp_depth = nt_gfx_render_target_depth(pass->temp);
@@ -305,7 +291,7 @@ static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_ta
     bool source_ready = nt_gfx_texture_ready(pass->source);
     bool colors_valid = targets->temp_color.id != 0 && targets->dest_color.id != 0;
     nt_texture_format_t source_format = nt_gfx_texture_format(pass->source);
-    bool source_format_valid = blur_source_format_valid(source_format);
+    bool source_format_valid = nt_texture_format_is_sampled_color(source_format);
     NT_ASSERT(source_ready && "nt_postfx_blur_gaussian: source texture is not ready");
     NT_ASSERT(source_format_valid && "nt_postfx_blur_gaussian: source must use a sampler2D color format");
     NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: target color attachment is invalid");

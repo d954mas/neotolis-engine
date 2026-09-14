@@ -216,6 +216,62 @@ static void test_integer_source_asserts_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
+static void test_compressed_source_blurs(void) {
+    static const uint8_t block[16] = {0};
+    g_nt_gfx.gpu_caps.has_bc7 = true;
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 64,
+        .height = 32,
+        .data = block,
+        .format = NT_TEXTURE_FORMAT_BC7_RGBA,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .label = "bc7_source",
+    });
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_BC7_RGBA, nt_gfx_texture_format(source));
+
+    nt_gfx_begin_frame();
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = source,
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    });
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+}
+
+static void test_depth_source_asserts_without_draw(void) {
+    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
+    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
+    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
+    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 64,
+        .height = 32,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .min_filter = NT_FILTER_NEAREST,
+        .mag_filter = NT_FILTER_NEAREST,
+        .label = "depth_source",
+    });
+
+    nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = source,
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+}
+
 static void test_blur_outside_frame_asserts_without_draw(void) {
     nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
     nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
@@ -445,6 +501,8 @@ int main(void) {
     RUN_TEST(test_depth_feedback_alias_asserts_without_draw);
     RUN_TEST(test_stale_source_asserts_without_draw);
     RUN_TEST(test_integer_source_asserts_without_draw);
+    RUN_TEST(test_compressed_source_blurs);
+    RUN_TEST(test_depth_source_asserts_without_draw);
     RUN_TEST(test_blur_outside_frame_asserts_without_draw);
     RUN_TEST(test_blur_inside_active_pass_asserts_without_closing_it);
     RUN_TEST(test_incomplete_targets_assert_without_draw);

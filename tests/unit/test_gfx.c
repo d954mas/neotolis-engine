@@ -1473,18 +1473,308 @@ void test_gfx_make_texture_gen_mipmaps(void) {
     nt_gfx_destroy_texture(tex);
 }
 
-/* ---- Texture: mipmap min_filter rejected when gen_mipmaps=false ---- */
+/* ---- Texture: a single-level texture may carry a mipmap min_filter ---- */
 
 void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
-    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .data = s_test_pixels_4x4,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = false,
-    }));
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = tex, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+    end_texture_binding_test_pass();
+    nt_gfx_destroy_texture(tex);
 }
+
+// #region compressed and multi-level textures
+
+/* 16 bytes = one 4x4 block of BC7/ASTC/ETC2_RGBA8; ETC2_RGB8 needs only 8. */
+static const uint8_t s_test_block_16[16] = {0};
+
+static const nt_texture_format_t s_compressed_formats[] = {
+    NT_TEXTURE_FORMAT_ETC2_RGB8,
+    NT_TEXTURE_FORMAT_ETC2_RGBA8,
+    NT_TEXTURE_FORMAT_BC7_RGBA,
+    NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,
+};
+
+static void enable_compressed_caps(void) {
+    g_nt_gfx.gpu_caps.has_etc2 = true;
+    g_nt_gfx.gpu_caps.has_bc7 = true;
+    g_nt_gfx.gpu_caps.has_astc = true;
+}
+
+static nt_texture_t make_compressed_texture(nt_texture_format_t format) {
+    return nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_block_16,
+        .format = format,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+    });
+}
+
+void test_gfx_make_texture_compressed_reports_storage_format(void) {
+    enable_compressed_caps();
+    for (size_t i = 0; i < sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]); i++) {
+        nt_texture_t tex = make_compressed_texture(s_compressed_formats[i]);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+        TEST_ASSERT_EQUAL_INT(s_compressed_formats[i], nt_gfx_texture_format(tex));
+        TEST_ASSERT_EQUAL_UINT8(1, nt_gfx_fake_last_texture_desc().level_count);
+        EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_block_16));
+        nt_gfx_destroy_texture(tex);
+    }
+}
+
+void test_gfx_make_texture_compressed_binds_with_color_samplers(void) {
+    enable_compressed_caps();
+    const uint8_t uint_class = NT_GFX_SAMPLER_CLASS_UINT;
+    nt_sampler_t linear = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    nt_sampler_t mipmapped = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    nt_sampler_t comparison = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .compare_func = NT_COMPARE_LESS});
+
+    const size_t format_count = sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]);
+    nt_texture_t textures[sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0])];
+    for (size_t i = 0; i < format_count; i++) {
+        textures[i] = make_compressed_texture(s_compressed_formats[i]);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
+    }
+
+    nt_program_t color_program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    begin_texture_binding_test_pass(color_program);
+    for (size_t i = 0; i < format_count; i++) {
+        nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = textures[i], .sampler = linear};
+        apply_texture_set(&binding, 1);
+        binding.sampler = mipmapped;
+        apply_texture_set(&binding, 1);
+        binding.sampler = comparison;
+        EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    }
+    end_texture_binding_test_pass();
+
+    nt_program_t uint_program = nt_gfx_fake_make_program_typed((const char *const[]){"u_ids"}, &uint_class, 1);
+    begin_texture_binding_test_pass(uint_program);
+    for (size_t i = 0; i < format_count; i++) {
+        nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_ids"), .texture = textures[i], .sampler = linear};
+        EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    }
+    end_texture_binding_test_pass();
+
+    for (size_t i = 0; i < format_count; i++) {
+        nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+void test_gfx_make_texture_resolves_level_count_for_the_backend(void) {
+    nt_texture_t generated = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .gen_mipmaps = true,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, generated.id);
+    TEST_ASSERT_EQUAL_UINT8(5, nt_gfx_fake_last_texture_desc().level_count);
+
+    static uint8_t chain[(16 * 16 * 4) + (8 * 8 * 4) + (4 * 4 * 4)];
+    nt_texture_t declared = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .data = chain,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .level_count = 3,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, declared.id);
+    TEST_ASSERT_EQUAL_UINT8(3, nt_gfx_fake_last_texture_desc().level_count);
+    /* mip_count follows the resolved level count: sub-updates stay rejected. */
+    EXPECT_ASSERT(nt_gfx_update_texture(declared, 0, 0, 4, 4, chain));
+
+    nt_texture_t base_only = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .data = chain,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, base_only.id);
+    TEST_ASSERT_EQUAL_UINT8(1, nt_gfx_fake_last_texture_desc().level_count);
+
+    nt_gfx_destroy_texture(generated);
+    nt_gfx_destroy_texture(declared);
+    nt_gfx_destroy_texture(base_only);
+}
+
+void test_gfx_make_texture_rejects_bad_level_counts_before_allocation(void) {
+    enable_compressed_caps();
+    uint32_t creates = nt_gfx_fake_texture_create_count();
+
+    /* 16x16 has a five-level chain; six declared levels cannot exist. */
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .level_count = 6,
+    }));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .data = s_test_pixels_4x4,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .level_count = 3,
+        .gen_mipmaps = true,
+    }));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .level_count = 3,
+    }));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_block_16,
+        .format = NT_TEXTURE_FORMAT_BC7_RGBA,
+        .gen_mipmaps = true,
+    }));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_TEXTURE_FORMAT_BC7_RGBA,
+    }));
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 16,
+        .height = 16,
+        .format = NT_TEXTURE_FORMAT_DEPTH24,
+        .level_count = 2,
+    }));
+
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
+    /* Nothing reached the pool: all eight slots are still free. */
+    nt_texture_t textures[8];
+    for (int i = 0; i < 8; i++) {
+        textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
+    }
+    for (int i = 0; i < 8; i++) {
+        nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+void test_gfx_make_texture_compressed_requires_gpu_caps(void) {
+    /* Fake caps report no compressed support. */
+    nt_texture_t tex = {0};
+#ifdef NT_DEBUG
+    EXPECT_ASSERT(tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA));
+#else
+    tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA);
+#endif
+    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+
+    nt_texture_t textures[8];
+    for (int i = 0; i < 8; i++) {
+        textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
+    }
+    for (int i = 0; i < 8; i++) {
+        nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+/* 13x7 RGB8 chain: 273 + 54 + 9 + 3 bytes for 13x7, 6x3, 3x1, 1x1. */
+static uint8_t s_rgb8_chain_13x7[339];
+
+void test_gfx_make_texture_uploads_contiguous_mip_chain(void) {
+    const struct {
+        uint8_t level_count;
+        uint16_t width;
+        uint16_t height;
+        uint32_t offset;
+    } cases[] = {{2, 6, 3, 273}, {3, 3, 1, 327}, {4, 1, 1, 336}};
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        nt_gfx_fake_reset();
+        nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+            .width = 13,
+            .height = 7,
+            .data = s_rgb8_chain_13x7,
+            .format = NT_TEXTURE_FORMAT_RGB8,
+            .level_count = cases[i].level_count,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+        TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)cases[i].level_count - 1U, nt_gfx_fake_texture_level_upload_count());
+        TEST_ASSERT_EQUAL_UINT8(cases[i].level_count - 1, nt_gfx_fake_last_texture_level());
+        TEST_ASSERT_EQUAL_UINT16(cases[i].width, nt_gfx_fake_last_texture_level_width());
+        TEST_ASSERT_EQUAL_UINT16(cases[i].height, nt_gfx_fake_last_texture_level_height());
+        TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGB8, nt_gfx_fake_last_texture_level_format());
+        TEST_ASSERT_EQUAL_PTR(s_rgb8_chain_13x7 + cases[i].offset, nt_gfx_fake_last_texture_level_data());
+        TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(tex), nt_gfx_fake_last_texture_level_backend());
+        nt_gfx_destroy_texture(tex);
+    }
+}
+
+void test_gfx_make_texture_level_upload_failure_leaves_no_texture(void) {
+    nt_gfx_fake_reset();
+    nt_gfx_fake_fail_texture_level_uploads(2); /* second upload = level 2 */
+
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 13,
+        .height = 7,
+        .data = s_rgb8_chain_13x7,
+        .format = NT_TEXTURE_FORMAT_RGB8,
+        .level_count = 4,
+    });
+    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_level_upload_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+
+    nt_texture_t textures[8];
+    for (int i = 0; i < 8; i++) {
+        textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = s_test_pixels_4x4});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, textures[i].id);
+    }
+    for (int i = 0; i < 8; i++) {
+        nt_gfx_destroy_texture(textures[i]);
+    }
+}
+
+void test_gfx_make_texture_consecutive_handles_differ_by_one_field(void) {
+    enable_compressed_caps();
+    nt_texture_t first = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_block_16,
+        .format = NT_TEXTURE_FORMAT_BC7_RGBA,
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+    });
+    nt_texture_t second = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_block_16,
+        .format = NT_TEXTURE_FORMAT_ETC2_RGBA8, /* the single changed field */
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+    });
+
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, second.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(first), nt_gfx_test_texture_backend_id(second));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_BC7_RGBA, nt_gfx_texture_format(first));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_ETC2_RGBA8, nt_gfx_texture_format(second));
+
+    nt_gfx_destroy_texture(first);
+    nt_gfx_destroy_texture(second);
+}
+// #endregion
 
 /* ---- Texture: destroy and reuse slot ---- */
 
@@ -2915,6 +3205,14 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_mag_filter_rejects_mipmap);
     RUN_TEST(test_gfx_make_texture_gen_mipmaps);
     RUN_TEST(test_gfx_make_texture_mipmap_filter_no_mipmaps);
+    RUN_TEST(test_gfx_make_texture_compressed_reports_storage_format);
+    RUN_TEST(test_gfx_make_texture_compressed_binds_with_color_samplers);
+    RUN_TEST(test_gfx_make_texture_resolves_level_count_for_the_backend);
+    RUN_TEST(test_gfx_make_texture_rejects_bad_level_counts_before_allocation);
+    RUN_TEST(test_gfx_make_texture_compressed_requires_gpu_caps);
+    RUN_TEST(test_gfx_make_texture_uploads_contiguous_mip_chain);
+    RUN_TEST(test_gfx_make_texture_level_upload_failure_leaves_no_texture);
+    RUN_TEST(test_gfx_make_texture_consecutive_handles_differ_by_one_field);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
     RUN_TEST(test_gfx_double_destroy_texture);
     RUN_TEST(test_gfx_buffer_pool_full_asserts);

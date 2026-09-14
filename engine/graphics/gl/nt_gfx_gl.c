@@ -1637,30 +1637,53 @@ typedef struct {
     GLenum format;   /* upload layout: GL_RGBA, GL_RG_INTEGER, ... */
     GLenum type;     /* component type: GL_UNSIGNED_BYTE, GL_HALF_FLOAT, ... */
     bool align4;     /* true if rows are naturally 4-byte aligned */
+    bool compressed; /* upload through glCompressedTexImage2D, sized in bytes */
 } nt_gfx_gl_fmt_t;
+
+/* ES 3.0 core, desktop ARB and KHR extension spellings differ per header. */
+#ifndef GL_COMPRESSED_RGB8_ETC2
+#define GL_COMPRESSED_RGB8_ETC2 0x9274
+#endif
+#ifndef GL_COMPRESSED_RGBA8_ETC2_EAC
+#define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
+#endif
+#ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
+#define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
+#endif
+#ifndef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+#define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
+#endif
 
 static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGB8:
-        return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_RG8:
-        return (nt_gfx_gl_fmt_t){GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_R8:
-        return (nt_gfx_gl_fmt_t){GL_R8, GL_RED, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_R8, GL_RED, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_RGBA16F:
-        return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_RG16UI:
-        return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true};
+        return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true, false};
     case NT_TEXTURE_FORMAT_RGBA32F:
-        return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH16:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH24:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH32F:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_RGBA8:
-        return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGB8_ETC2, GL_RGB, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA8_ETC2_EAC, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_BPTC_UNORM, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_ASTC_4x4_KHR, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
     case NT_TEXTURE_FORMAT_INVALID:
     default:
         NT_ASSERT(0 && "unsupported texture format");
@@ -1721,20 +1744,17 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         return 0;
     }
 
-    if (!gl.align4) {
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    }
-
-    /* Upload pixel data (may be NULL for storage-only allocation) */
-    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, gl.format, gl.type, desc->data);
-    if (!gl.align4) {
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    }
-    GLenum upload_error = glGetError();
-    if (upload_error != GL_NO_ERROR) {
-        NT_LOG_ERROR("glTexImage2D failed: GL error 0x%04X", (unsigned)upload_error);
-        glDeleteTextures(1, &tex);
-        return 0;
+    if (gl.compressed) {
+        glCompressedTexImage2D(GL_TEXTURE_2D, 0, gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, (GLsizei)nt_texture_level_bytes(desc->format, desc->width, desc->height), desc->data);
+    } else {
+        if (!gl.align4) {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        }
+        /* Upload pixel data (may be NULL for storage-only allocation) */
+        glTexImage2D(GL_TEXTURE_2D, 0, (GLint)gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, gl.format, gl.type, desc->data);
+        if (!gl.align4) {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        }
     }
 
     /* Generate mipmaps after base level upload if requested and data present */
@@ -1742,7 +1762,56 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
 
+    /* RT resize staging builds its own desc and reaches here with level_count 0. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)((desc->level_count ? desc->level_count : 1) - 1));
+
+    GLenum first_error = GL_NO_ERROR;
+    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+        if (first_error == GL_NO_ERROR) {
+            first_error = e;
+        }
+    }
+    if (first_error != GL_NO_ERROR) {
+        NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+
     return tex;
+}
+
+bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && "backend_upload_texture_level: invalid handle");
+    GLuint tex = s_texture_gl[backend_handle];
+    NT_ASSERT(tex != 0 && "backend_upload_texture_level: no GL texture at handle");
+    if (!nt_gfx_gl_begin_texture_upload(tex)) {
+        return false;
+    }
+
+    nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(format);
+    if (gl.compressed) {
+        glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)w, (GLsizei)h, 0, (GLsizei)nt_texture_level_bytes(format, w, h), data);
+    } else {
+        if (!gl.align4) {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        }
+        glTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)w, (GLsizei)h, 0, gl.format, gl.type, data);
+        if (!gl.align4) {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        }
+    }
+
+    GLenum first_error = GL_NO_ERROR;
+    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+        if (first_error == GL_NO_ERROR) {
+            first_error = e;
+        }
+    }
+    if (first_error != GL_NO_ERROR) {
+        NT_LOG_ERROR("texture level %u upload failed: GL error 0x%04X", (unsigned)level, (unsigned)first_error);
+        return false;
+    }
+    return true;
 }
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
