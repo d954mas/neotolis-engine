@@ -11,7 +11,10 @@ declare global {
       hide_probe(mode: number): void;
       basis_ready(): boolean;
       basis_format(): number;
+      basis_rgb_format(): number;
       basis_caps(): number;
+      basis_build_targets(): number;
+      basis_build_codecs(): number;
       basis_sample(level: number): number;
       basis_single_pixel_format(): number;
     };
@@ -182,42 +185,59 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
 
 
 
-// nt_texture_format_t values the activator can pick for the UASTC bunny atlas (it has alpha).
+// nt_texture_format_t values the activator can pick for the fixture textures.
 const FORMAT_RGBA8 = 1;
+const FORMAT_ETC2_RGB8 = 11;
 const FORMAT_ETC2_RGBA8 = 12;
 const FORMAT_BC7_RGBA = 13;
 const FORMAT_ASTC_4x4_RGBA = 14;
 
-// The activator's fixed candidate order, applied to the caps bitmask the app reports.
-function expectedBasisFormat(caps: number): number {
-  if (caps & 1) return FORMAT_BC7_RGBA;
-  if (caps & 2) return FORMAT_ASTC_4x4_RGBA;
-  if (caps & 4) return FORMAT_ETC2_RGBA8;
+// The activator's fixed candidate order over the formats both the GPU reports and the build
+// admits (NT_BASISU_TARGETS); an opaque texture takes ETC2 RGB8. RGBA8 is always the last candidate.
+function expectedBasisFormat(caps: number, buildTargets: number, hasAlpha: boolean): number {
+  const admitted = caps & buildTargets;
+  if (admitted & 1) return FORMAT_BC7_RGBA;
+  if (admitted & 2) return FORMAT_ASTC_4x4_RGBA;
+  if (admitted & 4) return hasAlpha ? FORMAT_ETC2_RGBA8 : FORMAT_ETC2_RGB8;
   return FORMAT_RGBA8;
 }
 
-function unpackAlpha(sample: number): number {
-  return (sample >>> 24) & 0xff;
+function unpack(sample: number): number[] {
+  return [sample & 0xff, (sample >>> 8) & 0xff, (sample >>> 16) & 0xff, (sample >>> 24) & 0xff];
 }
 
-async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; last: number }> {
+function expectTexel(sample: number, expected: number[], tolerance: number, label: string): void {
+  const actual = unpack(sample);
+  for (let c = 0; c < 4; c++) {
+    expect(Math.abs(actual[c] - expected[c]), `${label}: channel ${c} of rgba(${actual}) vs (${expected})`).toBeLessThanOrEqual(tolerance);
+  }
+}
+
+// The RGBA fixture is 128x128: left half (200,40,40,255), right half (40,40,200,128). Levels 0 and 3
+// sample texel (0,0) inside the left half; the 1x1 level 7 is the linear average of both halves.
+// Compressed targets approximate solid blocks, hence the tolerances.
+const FIXTURE_LEFT = [200, 40, 40, 255];
+const FIXTURE_AVERAGE = [120, 40, 120, 191];
+
+async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number }> {
   await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
+  const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
   const format = await page.evaluate(() => window.__nt!.basis_format());
+  const rgbFormat = await page.evaluate(() => window.__nt!.basis_rgb_format());
   const corner = await page.evaluate(() => window.__nt!.basis_sample(0));
-  const last = await page.evaluate(() => window.__nt!.basis_sample(1));
-  console.log(`[basis ${label}] caps=${caps} format=${format} corner=0x${corner.toString(16)} last=0x${last.toString(16)}`);
-  expect(format, `${label}: transcode target for caps bitmask ${caps}`).toBe(expectedBasisFormat(caps));
-  // The atlas margin keeps texel (0,0) empty; premultiplied alpha makes it a zero texel.
-  expect(unpackAlpha(corner), `${label}: level-0 corner is atlas padding`).toBeLessThanOrEqual(1);
-  // The 1x1 last level averages the whole atlas: partial bunny coverage over empty space.
-  expect(unpackAlpha(last), `${label}: last level mixes covered and empty texels`).toBeGreaterThan(0);
-  expect(unpackAlpha(last), `${label}: last level mixes covered and empty texels`).toBeLessThan(255);
-  expect(last & 0xffffff, `${label}: last level carries colour, not an empty mip`).toBeGreaterThan(0);
-  return { corner, last };
+  const middle = await page.evaluate(() => window.__nt!.basis_sample(3));
+  const last = await page.evaluate(() => window.__nt!.basis_sample(7));
+  console.log(`[basis ${label}] caps=${caps} build_targets=${buildTargets} format=${format} rgb_format=${rgbFormat} corner=0x${corner.toString(16)} middle=0x${middle.toString(16)} last=0x${last.toString(16)}`);
+  expect(format, `${label}: transcode target for caps ${caps} and build targets ${buildTargets}`).toBe(expectedBasisFormat(caps, buildTargets, true));
+  expect(rgbFormat, `${label}: opaque transcode target for caps ${caps} and build targets ${buildTargets}`).toBe(expectedBasisFormat(caps, buildTargets, false));
+  expectTexel(corner, FIXTURE_LEFT, 12, `${label}: level-0 corner texel`);
+  expectTexel(middle, FIXTURE_LEFT, 12, `${label}: level-3 corner texel`);
+  expectTexel(last, FIXTURE_AVERAGE, 20, `${label}: 1x1 last level`);
+  return { corner, middle, last };
 }
 
-test('basis fixture: the transcoded atlas keeps its format and texels across a context loss', async ({ page }) => {
+test('basis fixture: the transcoded textures keep their format and texels across a context loss', async ({ page }) => {
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -260,10 +280,14 @@ test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({
   });
   await page.goto('/index.html');
   await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+  const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
+  const buildCodecs = await page.evaluate(() => window.__nt!.basis_build_codecs());
+  // The embedded blob is UASTC and the restriction under test is BC7's.
+  test.skip((buildTargets & 1) === 0 || (buildCodecs & 2) === 0, 'build admits no BC7 target or no UASTC codec');
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);
   const format = await page.evaluate(() => window.__nt!.basis_single_pixel_format());
-  const expected = (caps & 2) ? FORMAT_ASTC_4x4_RGBA : (caps & 4) ? FORMAT_ETC2_RGBA8 : FORMAT_RGBA8;
+  const expected = expectedBasisFormat(caps & ~1, buildTargets, true);
   expect(errors, 'single-pixel Basis activation must not emit WebGL errors').toEqual([]);
   expect(format, 'single-pixel Basis activation selects the next supported target').toBe(expected);
 });

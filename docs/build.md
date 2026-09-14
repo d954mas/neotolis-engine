@@ -198,11 +198,19 @@ Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 `tests/browser/app` (`window.__nt` hooks), not the showcase.
 
-That app reuses two prebuilt packs: `ui_showcase.ntpack` (target
-`ui_showcase_packs`) and `bunnymark_sd.ntpack` (target `bunnymark_demo_packs`,
-the UASTC Basis fixture). Build both with a native preset before configuring
-wasm — the copy rules are configure-time, so a pack produced later is missing
-from the app's `assets/` until the next configure.
+That app reuses the prebuilt `ui_showcase.ntpack` (target `ui_showcase_packs`)
+and builds its own Basis fixture, `basis_fixture.ntpack` (target
+`browser_smoke_packs`, producer `tests/browser/app/build_fixture_pack.c`): one
+RGBA and one opaque RGB texture per codec in `NT_BASISU_CODECS`, written to
+`build/tests/browser/fixtures/<set tag>/` so a wasm configure only ever copies
+the pack of its own admission set. Build both with a native preset of the same
+`NT_BASISU_*` values before configuring wasm — the showcase copy rule is
+configure-time, so a pack produced later is missing from the app's `assets/`
+until the next configure. The Playwright spec `context_loss.spec.ts` derives the
+expected transcode target from the GPU caps and the build's targets and checks
+texels of levels 0, 3 and 7; a `NT_BASISU_TARGETS=` (RGBA8-only) pair is the
+portable row, compressed rows on the SwiftShader runner prove upload and
+sampling but not hardware decoding.
 
 Verify font geometry changes with `NT_FONT_EMBOLDEN_ENABLED` OFF and ON. The ON
 mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label` and all
