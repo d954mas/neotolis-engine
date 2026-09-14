@@ -88,6 +88,15 @@ preference symbols from the executable, without per-frame engine work.
 the release builder. Native unit tests are excluded under Emscripten; on WASM,
 `NT_BUILD_TESTS` gates the registered test targets. `native-release-test` compiles
 test translation units under NDEBUG; the production `native-release` does not.
+`NT_TEST_ACCESS` also exposes `nt_gfx_test_stage_size` / `nt_gfx_test_stage_ptr`,
+the capacity and base pointer of the shared activation staging buffer.
+
+Basis coverage splits by backend. `test_gfx_basis_activate` drives the texture
+activator on the fake backend with the real transcoder and the builder's encoder.
+`test_nt_gfx_basis_native` (label `native`, `RESOURCE_LOCK gl_display`) uploads and
+samples real compressed storage through GL; the `native-debug-test` and
+`native-release-test` ctest runs both cover it, and a format the host GPU lacks
+reports as ctest-ignored rather than passing silently.
 
 Measure performance in Release with the required timing flag explicitly ON.
 Timing producers do not require metrics. `NT_LOG_MIN_LEVEL=3` uses the existing

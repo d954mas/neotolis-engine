@@ -1769,6 +1769,10 @@ uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 
 uint8_t nt_gfx_test_texture_set_state(void) { return s_gfx.texture_set_state; }
+
+uint32_t nt_gfx_test_stage_size(void) { return s_stage_size; }
+
+const void *nt_gfx_test_stage_ptr(void) { return s_stage_buf; }
 #endif
 
 /* ---- Sampler (deduplicated cache) ---- */

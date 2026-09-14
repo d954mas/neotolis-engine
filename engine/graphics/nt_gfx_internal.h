@@ -181,6 +181,10 @@ uint8_t nt_gfx_test_texture_set_state(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);
+/* Activation staging buffer: current capacity and base pointer (0 / NULL once
+ * the idle timer has freed it). Mesh decode and Basis transcode share it. */
+uint32_t nt_gfx_test_stage_size(void);
+const void *nt_gfx_test_stage_ptr(void);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

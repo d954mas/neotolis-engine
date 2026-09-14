@@ -323,6 +323,12 @@ if(NOT EMSCRIPTEN)
     set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
 
     # Real OpenGL shape-renderer ring: multi-flush uploads at ring offsets render pixel-correct.
+    # Real GL + real transcoder + builder encoder. No nt_gfx_fake here: it bundles nt_gfx.c.
+    add_executable(test_nt_gfx_basis_native unit/test_nt_gfx_basis_native.c)
+    target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_basisu_transcoder nt_window nt_input_stub nt_log unity glad nt_meshwire nt_builder)
+    nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
+    set_tests_properties(test_nt_gfx_basis_native PROPERTIES LABELS "native")
+
     add_executable(test_shape_renderer_ring_native unit/test_shape_renderer_ring_native.c)
     target_link_libraries(test_shape_renderer_ring_native PRIVATE nt_shape_renderer nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_shape_renderer_ring_native)
@@ -1055,6 +1061,12 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
+
+    # --- Basis activation on the fake backend: real transcoder + builder encoder ---
+    # Transcoder first for the same single-shared-basisu-TU reason as above.
+    add_executable(test_gfx_basis_activate unit/test_gfx_basis_activate.c)
+    target_link_libraries(test_gfx_basis_activate PRIVATE nt_basisu_transcoder nt_gfx_fake nt_builder nt_log_stub unity nt_meshwire)
+    nt_setup_test_target(test_gfx_basis_activate TIMEOUT 300)
 
     # --- basisu stub loud-fail contract: every entry point asserts ---
     add_executable(test_basisu_stub unit/test_basisu_stub.c unit/test_helpers/nt_assert_trap.c)
