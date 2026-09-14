@@ -67,7 +67,9 @@ function(nt_example_packs)
         # creates it — then the same edge copies it, no reconfigure needed.
         set(_copy_list ${PACKS_PACKS})
         if(EXISTS "${PACKS_PACK_DIR}/.basisu_codecs")
-            file(STRINGS "${PACKS_PACK_DIR}/.basisu_codecs" _pack_codecs LIMIT_COUNT 1)
+            # file(READ), not file(STRINGS): the latter escapes the list's semicolons.
+            file(READ "${PACKS_PACK_DIR}/.basisu_codecs" _pack_codecs)
+            string(STRIP "${_pack_codecs}" _pack_codecs)
             if(NOT "${_pack_codecs}" STREQUAL "${NT_BASISU_CODECS}")
                 message(FATAL_ERROR "${PACKS_NAME}: packs in ${PACKS_PACK_DIR} were built with"
                     " NT_BASISU_CODECS='${_pack_codecs}' but this configure decodes '${NT_BASISU_CODECS}';"

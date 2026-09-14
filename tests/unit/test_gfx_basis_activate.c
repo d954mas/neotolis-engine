@@ -135,6 +135,34 @@ static NtTextureAssetHeader *fixture_header(basis_fixture_t *fixture) { return (
 
 // #region probes
 
+/* The selector's contract: the first of BC7 -> ASTC -> ETC2 that the GPU
+ * reports and NT_BASISU_TARGETS admits, RGBA8 otherwise. */
+static nt_texture_format_t first_admitted(bool bc7, bool astc, bool etc2, bool alpha) {
+    (void)bc7;
+    (void)astc;
+    (void)etc2;
+    (void)alpha;
+#if NT_BASISU_HAS_BC7
+    if (bc7) {
+        return NT_TEXTURE_FORMAT_BC7_RGBA;
+    }
+#endif
+#if NT_BASISU_HAS_ASTC
+    if (astc) {
+        return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
+    }
+#endif
+#if NT_BASISU_HAS_ETC2
+    if (etc2) {
+        return alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+    }
+#endif
+    return NT_TEXTURE_FORMAT_RGBA8;
+}
+
+/* A codec inside NT_BASISU_CODECS for the tests that are not about the codec. */
+#define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
+
 static void set_caps(bool bc7, bool astc, bool etc2) {
     g_nt_gfx.gpu_caps.has_bc7 = bc7;
     g_nt_gfx.gpu_caps.has_astc = astc;
@@ -233,13 +261,13 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     basis_fixture_t opaque_rgba = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGBA8);
 
     set_caps(true, true, true);
-    check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&alpha, first_admitted(true, true, true, true));
     set_caps(false, true, true);
-    check_target(&alpha, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+    check_target(&alpha, first_admitted(false, true, true, true));
     set_caps(false, false, true);
-    check_target(&alpha, NT_TEXTURE_FORMAT_ETC2_RGBA8);
-    check_target(&rgb, NT_TEXTURE_FORMAT_ETC2_RGB8);
-    check_target(&opaque_rgba, NT_TEXTURE_FORMAT_ETC2_RGB8);
+    check_target(&alpha, first_admitted(false, false, true, true));
+    check_target(&rgb, first_admitted(false, false, true, false));
+    check_target(&opaque_rgba, first_admitted(false, false, true, false));
     set_caps(false, false, false);
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
 
@@ -248,8 +276,12 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     fixture_free(&opaque_rgba);
 }
 
+#if NT_BASISU_HAS_ETC1S
 void test_etc1s_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_ETC1S); }
+#endif
+#if NT_BASISU_HAS_UASTC
 void test_uastc_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
+#endif
 
 static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
     static const uint16_t dimensions[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};
@@ -260,12 +292,12 @@ static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
 
         /* WebGL BPTC requires both base dimensions to be multiples of four. */
         set_caps(true, true, true);
-        check_target(&alpha, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
-        check_target(&rgb, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+        check_target(&alpha, first_admitted(false, true, true, true));
+        check_target(&rgb, first_admitted(false, true, true, false));
         set_caps(true, false, true);
-        check_target(&alpha, NT_TEXTURE_FORMAT_ETC2_RGBA8);
-        check_target(&rgb, NT_TEXTURE_FORMAT_ETC2_RGB8);
-        check_target(&opaque_rgba, NT_TEXTURE_FORMAT_ETC2_RGB8);
+        check_target(&alpha, first_admitted(false, false, true, true));
+        check_target(&rgb, first_admitted(false, false, true, false));
+        check_target(&opaque_rgba, first_admitted(false, false, true, false));
         set_caps(true, false, false);
         check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
         check_target(&rgb, NT_TEXTURE_FORMAT_RGBA8);
@@ -276,11 +308,31 @@ static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
     }
 }
 
+#if NT_BASISU_HAS_ETC1S
 void test_etc1s_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_ETC1S); }
+#endif
+#if NT_BASISU_HAS_UASTC
 void test_uastc_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
+#endif
+
+#if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
+/* The native encoder still emits the codec outside NT_BASISU_CODECS; the
+ * activator must fail the asset at the blob check, before any staging. */
+void test_blob_of_a_codec_outside_the_set_fails_before_staging(void) {
+    const nt_basisu_codec_t outside = NT_BASISU_HAS_ETC1S ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S;
+    basis_fixture_t alpha = fixture_encode(16, 8, outside, true, NT_TEXTURE_FORMAT_RGBA8);
+    set_caps(true, true, true);
+    nt_gfx_fake_reset();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(alpha.blob, alpha.size));
+    TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_create_count());
+    expect_full_pool_available();
+    fixture_free(&alpha);
+}
+#endif
 
 void test_single_pixel_blob_activates_as_one_level(void) {
-    basis_fixture_t one = fixture_encode(1, 1, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t one = fixture_encode(1, 1, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(1, one.mip_count);
     set_caps(true, false, false);
     check_target(&one, NT_TEXTURE_FORMAT_RGBA8);
@@ -288,10 +340,10 @@ void test_single_pixel_blob_activates_as_one_level(void) {
 }
 
 void test_asymmetric_blob_activates_with_a_full_chain(void) {
-    basis_fixture_t big = fixture_encode(96, 64, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t big = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(7, big.mip_count);
     set_caps(true, false, false);
-    check_target(&big, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&big, first_admitted(true, false, false, true));
     fixture_free(&big);
 }
 
@@ -300,7 +352,7 @@ void test_asymmetric_blob_activates_with_a_full_chain(void) {
 // #region uncompressed fallback contract
 
 void test_rgba8_fallback_rejects_sub_updates(void) {
-    basis_fixture_t alpha = fixture_encode(13, 7, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t alpha = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     set_caps(false, false, false);
     uint32_t handle = activate_expecting(&alpha, NT_TEXTURE_FORMAT_RGBA8);
     nt_texture_t tex = {.id = handle};
@@ -317,7 +369,7 @@ void test_rgba8_fallback_rejects_sub_updates(void) {
 
 void test_header_boundaries_reject_without_touching_the_pool(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(13, 7, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t alpha = fixture_encode(13, 7, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     const NtTextureAssetHeader good = *fixture_header(&alpha);
 
     fixture_header(&alpha)->mip_count = (uint16_t)(good.mip_count + 1);
@@ -362,6 +414,7 @@ void test_header_boundaries_reject_without_touching_the_pool(void) {
     fixture_free(&alpha);
 }
 
+#if NT_BASISU_HAS_ETC1S
 void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(96, 64, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
@@ -374,9 +427,10 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
     fixture_free(&alpha);
 
     basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
-    check_target(&good, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&good, first_admitted(true, false, false, true));
     fixture_free(&good);
 }
+#endif
 
 // #endregion
 
@@ -384,7 +438,7 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
 
 void test_backend_failure_leaves_no_texture_and_allows_a_retry(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(96, 64, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t alpha = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(7, alpha.mip_count);
 
     nt_gfx_fake_reset();
@@ -397,13 +451,13 @@ void test_backend_failure_leaves_no_texture_and_allows_a_retry(void) {
     expect_full_pool_available();
 
     nt_gfx_fake_fail_texture_creates(0);
-    check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&alpha, first_admitted(true, false, false, true));
     fixture_free(&alpha);
 }
 
 void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(16, 8, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     nt_gfx_fake_reset();
     nt_gfx_fake_fail_next_sampler_create();
     nt_assert_handler = test_assert_handler;
@@ -422,7 +476,7 @@ void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
     expect_transcoder_reusable(&alpha);
     expect_full_pool_available();
 
-    check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&alpha, first_admitted(true, false, false, true));
     fixture_free(&alpha);
 }
 
@@ -432,8 +486,9 @@ void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
 
 void test_reactivation_after_context_restore_yields_the_same_storage(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(16, 8, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
-    uint32_t first = activate_expecting(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
+    const nt_texture_format_t target = first_admitted(true, false, false, true);
+    uint32_t first = activate_expecting(&alpha, target);
     nt_gfx_deactivate_texture(first);
 
     nt_gfx_fake_set_context_lost(true);
@@ -445,7 +500,7 @@ void test_reactivation_after_context_restore_yields_the_same_storage(void) {
     /* The re-probe wiped the caps this test injected; the game re-activates. */
     set_caps(true, false, false);
 
-    uint32_t second = activate_expecting(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    uint32_t second = activate_expecting(&alpha, target);
     nt_gfx_deactivate_texture(second);
     fixture_free(&alpha);
 }
@@ -454,6 +509,9 @@ void test_reactivation_after_context_restore_yields_the_same_storage(void) {
 
 // #region staging lifecycle
 
+/* The mesh size is tuned against the BC7 chain, so the staging tests need
+ * BC7 in NT_BASISU_TARGETS. */
+#if NT_BASISU_HAS_BC7
 static void idle_frames(uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         nt_gfx_begin_frame();
@@ -491,7 +549,7 @@ void test_staging_is_shared_grown_and_evicted(void) {
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_stage_size());
 
-    basis_fixture_t small = fixture_encode(96, 64, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t small = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
     const void *first_ptr = nt_gfx_test_stage_ptr();
     uint32_t first_size = nt_gfx_test_stage_size();
@@ -517,7 +575,7 @@ void test_staging_is_shared_grown_and_evicted(void) {
     TEST_ASSERT_EQUAL_UINT32(mesh_size, nt_gfx_test_stage_size());
     nt_gfx_deactivate_texture(handle);
 
-    basis_fixture_t large = fixture_encode(128, 128, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t large = fixture_encode(128, 128, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     handle = activate_expecting(&large, NT_TEXTURE_FORMAT_BC7_RGBA);
     TEST_ASSERT_EQUAL_UINT32(chain_bytes(NT_TEXTURE_FORMAT_BC7_RGBA, 128, 128), nt_gfx_test_stage_size());
     TEST_ASSERT_GREATER_THAN_UINT32(first_size, nt_gfx_test_stage_size());
@@ -546,7 +604,7 @@ void test_staging_is_shared_grown_and_evicted(void) {
 
 void test_shutdown_releases_a_live_staging_buffer(void) {
     set_caps(true, false, false);
-    basis_fixture_t small = fixture_encode(96, 64, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t small = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
     TEST_ASSERT_NOT_NULL(nt_gfx_test_stage_ptr());
     nt_gfx_deactivate_texture(handle);
@@ -557,6 +615,7 @@ void test_shutdown_releases_a_live_staging_buffer(void) {
     fixture_free(&small);
     setUp(); /* tearDown's shutdown must be the only one left to run */
 }
+#endif
 
 // #endregion
 
@@ -564,19 +623,28 @@ int main(void) {
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
+#if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_caps_matrix_picks_the_first_supported_target);
-    RUN_TEST(test_uastc_caps_matrix_picks_the_first_supported_target);
     RUN_TEST(test_etc1s_unaligned_dimensions_skip_bc7);
+    RUN_TEST(test_corrupted_payload_is_rejected_and_a_good_blob_still_activates);
+#endif
+#if NT_BASISU_HAS_UASTC
+    RUN_TEST(test_uastc_caps_matrix_picks_the_first_supported_target);
     RUN_TEST(test_uastc_unaligned_dimensions_skip_bc7);
+#endif
+#if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
+    RUN_TEST(test_blob_of_a_codec_outside_the_set_fails_before_staging);
+#endif
     RUN_TEST(test_single_pixel_blob_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);
     RUN_TEST(test_header_boundaries_reject_without_touching_the_pool);
-    RUN_TEST(test_corrupted_payload_is_rejected_and_a_good_blob_still_activates);
     RUN_TEST(test_backend_failure_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_sampler_failure_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);
+#if NT_BASISU_HAS_BC7
     RUN_TEST(test_staging_is_shared_grown_and_evicted);
     RUN_TEST(test_shutdown_releases_a_live_staging_buffer);
+#endif
     return UNITY_END();
 }

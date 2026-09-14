@@ -1062,6 +1062,28 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
 
+    # --- Basis goldens: native encoder + full transcoder produce, the trimmed
+    # mirror (WASM defines compiled natively) consumes byte-for-byte. The
+    # golden dir is preset-independent so the WASM consumer under Node reads
+    # the same files. ---
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    file(MAKE_DIRECTORY "${NT_BASISU_GOLDEN_DIR}")
+    add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)
+    target_link_libraries(test_basisu_golden_produce PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
+    if(NOT WIN32)
+        target_link_libraries(test_basisu_golden_produce PRIVATE m)
+    endif()
+    target_include_directories(test_basisu_golden_produce PRIVATE ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench)
+    target_compile_definitions(test_basisu_golden_produce PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+    nt_setup_test_target(test_basisu_golden_produce WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 300)
+    set_tests_properties(test_basisu_golden_produce PROPERTIES FIXTURES_SETUP basisu_golden)
+
+    add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
+    target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder_trimmed_test nt_core nt_log_stub unity)
+    target_compile_definitions(test_basisu_trimmed PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+    nt_setup_test_target(test_basisu_trimmed)
+    set_tests_properties(test_basisu_trimmed PROPERTIES FIXTURES_REQUIRED basisu_golden)
+
     # --- Basis activation on the fake backend: real transcoder + builder encoder ---
     # Consumers before the archives that define their symbols: GNU ld and
     # Emscripten resolve a static link left to right.
@@ -1397,6 +1419,28 @@ if(EMSCRIPTEN)
         )
     else()
         message(STATUS "Node.js not found; skipping CTest registration for test_wasm_smoke")
+    endif()
+
+    # --- The real WASM transcoder against the native goldens (NODERAWFS reads
+    # the host directory written by a native test_basisu_golden_produce run) ---
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
+    target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder nt_core nt_log_stub unity)
+    target_compile_definitions(test_basisu_trimmed PRIVATE NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+    nt_set_warning_flags(test_basisu_trimmed)
+    nt_set_sanitizer_flags(test_basisu_trimmed)
+    set_target_properties(test_basisu_trimmed PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    target_link_options(test_basisu_trimmed PRIVATE
+        "SHELL:-sENVIRONMENT=node"
+        "SHELL:-sNODERAWFS=1"
+        "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    )
+    if(NT_NODE_EXECUTABLE)
+        add_test(NAME test_basisu_trimmed COMMAND "${NT_NODE_EXECUTABLE}" "$<TARGET_FILE:test_basisu_trimmed>")
+    else()
+        message(STATUS "Node.js not found; skipping CTest registration for test_basisu_trimmed")
     endif()
 endif()
 
