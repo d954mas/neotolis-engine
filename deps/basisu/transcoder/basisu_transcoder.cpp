@@ -20,7 +20,9 @@
 
 #define BASISU_ASTC_HELPERS_IMPLEMENTATION
 #include "basisu_astc_helpers.h"
+#if !defined(BASISD_SUPPORT_XUASTC) || BASISD_SUPPORT_XUASTC
 #include "basisu_xbc7_decoder.h"
+#endif // !defined(BASISD_SUPPORT_XUASTC) || BASISD_SUPPORT_XUASTC
 
 #include <limits.h>
 
@@ -101,6 +103,16 @@
 #endif
 
 // Set BASISD_SUPPORT_UASTC to 0 to completely disable support for transcoding UASTC files.
+// Set BASISD_SUPPORT_ETC1S to 0 to remove the ETC1S decoder (UASTC-only builds).
+#ifndef BASISD_SUPPORT_ETC1S
+	#define BASISD_SUPPORT_ETC1S 1
+#endif
+
+// Set BASISD_SUPPORT_16BPP_FORMATS to 0 to remove the RGB565/BGR565/RGBA4444 output paths.
+#ifndef BASISD_SUPPORT_16BPP_FORMATS
+	#define BASISD_SUPPORT_16BPP_FORMATS 1
+#endif
+
 #ifndef BASISD_SUPPORT_UASTC
 	#define BASISD_SUPPORT_UASTC 1
 #endif
@@ -250,12 +262,14 @@ namespace basist
 	}
 	
 	// Used by arith encoder/decoder
+#if BASISD_SUPPORT_XUASTC
 	namespace arith_fastbits_f32
 	{
 		bool  g_initialized;
 		float g_lut_edge[TABLE_SIZE + 1]; // samples at m = 1 + i/TABLE_SIZE (for linear)
 
 	} // namespace arith_fastbits_f32
+#endif // BASISD_SUPPORT_XUASTC
 
 	inline uint16_t byteswap_uint16(uint16_t v)
 	{
@@ -8248,6 +8262,7 @@ namespace basist
 
 	//------------------------------------------------------------------------------------------------
 
+#if BASISD_SUPPORT_ETC1S
 	basisu_lowlevel_etc1s_transcoder::basisu_lowlevel_etc1s_transcoder() :
 		m_pGlobal_codebook(nullptr),
 		m_selector_history_buf_size(0)
@@ -9182,6 +9197,7 @@ namespace basist
 
 					break;
 				}
+#if BASISD_SUPPORT_16BPP_FORMATS
 				case block_format::cRGB565:
 				case block_format::cBGR565:
 				{
@@ -9226,6 +9242,8 @@ namespace basist
 
 					break;
 				}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 				case block_format::cRGBA4444_COLOR:
 				{
 					assert(sizeof(uint16_t) == output_block_or_pixel_stride_in_bytes);
@@ -9266,6 +9284,8 @@ namespace basist
 
 					break;
 				}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 				case block_format::cRGBA4444_COLOR_OPAQUE:
 				{
 					assert(sizeof(uint16_t) == output_block_or_pixel_stride_in_bytes);
@@ -9297,6 +9317,8 @@ namespace basist
 
 					break;
 				}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 				case block_format::cRGBA4444_ALPHA:
 				{
 					assert(sizeof(uint16_t) == output_block_or_pixel_stride_in_bytes);
@@ -9330,6 +9352,7 @@ namespace basist
 
 					break;
 				}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 				case block_format::cETC2_EAC_R11:
 				{
 #if BASISD_SUPPORT_ETC2_EAC_RG11
@@ -9384,6 +9407,7 @@ namespace basist
 		return true;
 	}
 
+#endif // BASISD_SUPPORT_ETC1S
 	bool basis_validate_output_buffer_size(
 		transcoder_texture_format target_format,
 		uint32_t output_blocks_buf_size_in_blocks_or_pixels,
@@ -9471,6 +9495,7 @@ namespace basist
 
 		return total_dst_blocks * bytes_per_block;
 	}
+#if BASISD_SUPPORT_ETC1S
 
 	bool basisu_lowlevel_etc1s_transcoder::transcode_image(
 			transcoder_texture_format target_format,
@@ -9947,6 +9972,7 @@ namespace basist
 
 			break;
 		}
+#if BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFRGB565:
 		case transcoder_texture_format::cTFBGR565:
 		{
@@ -9961,6 +9987,8 @@ namespace basist
 
 			break;
 		}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFRGBA4444:
 		{
 			// Raw 16bpp pixels, decoded in the usual raster order (NOT block order) into an image in memory.
@@ -9988,6 +10016,7 @@ namespace basist
 
 			break;
 		}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFFXT1_RGB:
 		{
 #if !BASISD_SUPPORT_FXT1
@@ -10067,6 +10096,7 @@ namespace basist
 
 		return status;
 	}
+#endif // BASISD_SUPPORT_ETC1S
 
 	//------------------------------------------------------------------------------------------------
 	// UASTC LDR 4x4 transcoder
@@ -10162,16 +10192,21 @@ namespace basist
 						status = transcode_uastc_to_etc2_rgba(*pSource_block, pDst_block);
 						break;
 					}
+#if BASISD_SUPPORT_DXT1
 					case block_format::cBC1:
 					{
 						status = transcode_uastc_to_bc1(*pSource_block, pDst_block, high_quality);
 						break;
 					}
+#endif // BASISD_SUPPORT_DXT1
+#if BASISD_SUPPORT_DXT1 && BASISD_SUPPORT_DXT5A
 					case block_format::cBC3:
 					{
 						status = transcode_uastc_to_bc3(*pSource_block, pDst_block, high_quality);
 						break;
 					}
+#endif // BASISD_SUPPORT_DXT1 && BASISD_SUPPORT_DXT5A
+#if BASISD_SUPPORT_DXT5A
 					case block_format::cBC4:
 					{
 						if (channel0 < 0) 
@@ -10179,6 +10214,8 @@ namespace basist
 						status = transcode_uastc_to_bc4(*pSource_block, pDst_block, high_quality, channel0);
 						break;
 					}
+#endif // BASISD_SUPPORT_DXT5A
+#if BASISD_SUPPORT_DXT5A
 					case block_format::cBC5:
 					{
 						if (channel0 < 0)
@@ -10188,6 +10225,7 @@ namespace basist
 						status = transcode_uastc_to_bc5(*pSource_block, pDst_block, high_quality, channel0, channel1);
 						break;
 					}
+#endif // BASISD_SUPPORT_DXT5A
 					case block_format::cBC7:
 					case block_format::cBC7_M5_COLOR: // for consistently with ETC1S
 					{
@@ -10243,6 +10281,7 @@ namespace basist
 
 						break;
 					}
+#if BASISD_SUPPORT_16BPP_FORMATS
 					case block_format::cRGB565:
 					case block_format::cBGR565:
 					{
@@ -10273,6 +10312,8 @@ namespace basist
 
 						break;
 					}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 					case block_format::cRGBA4444:
 					{
 						color32 block_pixels[4][4];
@@ -10300,6 +10341,7 @@ namespace basist
 						}
 						break;
 					}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 					default:
 						assert(0);
 						break;
@@ -10550,6 +10592,7 @@ namespace basist
 			}
 			break;
 		}
+#if BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFRGB565:
 		{
 			status = transcode_slice(pOutput_blocks, num_blocks_x, num_blocks_y, pCompressed_data + slice_offset, slice_length, block_format::cRGB565,
@@ -10560,6 +10603,8 @@ namespace basist
 			}
 			break;
 		}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFBGR565:
 		{
 			status = transcode_slice(pOutput_blocks, num_blocks_x, num_blocks_y, pCompressed_data + slice_offset, slice_length, block_format::cBGR565,
@@ -10570,6 +10615,8 @@ namespace basist
 			}
 			break;
 		}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
+#if BASISD_SUPPORT_16BPP_FORMATS
 		case transcoder_texture_format::cTFRGBA4444:
 		{
 			status = transcode_slice(pOutput_blocks, num_blocks_x, num_blocks_y, pCompressed_data + slice_offset, slice_length, block_format::cRGBA4444,
@@ -10580,6 +10627,7 @@ namespace basist
 			}
 			break;
 		}
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 		default:
 		{
 			assert(0);
@@ -12604,6 +12652,7 @@ namespace basist
 		const basis_file_header* pHeader = reinterpret_cast<const basis_file_header*>(pData);
 		const uint8_t* pDataU8 = static_cast<const uint8_t*>(pData);
 
+#if BASISD_SUPPORT_ETC1S
 		if (pHeader->m_tex_format == (int)basis_tex_format::cETC1S)
 		{
 			if (m_lowlevel_etc1s_decoder.m_local_endpoints.size())
@@ -12700,6 +12749,13 @@ namespace basist
 				m_lowlevel_etc1s_decoder.clear();
 			}
 		}
+#else
+		if (pHeader->m_tex_format == (int)basis_tex_format::cETC1S)
+		{
+			BASISU_DEVEL_ERROR("basisu_transcoder::start_transcoding: ETC1S support disabled\n");
+			return false;
+		}
+#endif // BASISD_SUPPORT_ETC1S
 		
 		m_ready_to_transcode = true;
 
@@ -12708,7 +12764,9 @@ namespace basist
 
 	bool basisu_transcoder::stop_transcoding()
 	{
+#if BASISD_SUPPORT_ETC1S
 		m_lowlevel_etc1s_decoder.clear();
+#endif // BASISD_SUPPORT_ETC1S
 
 		m_ready_to_transcode = false;
 		
@@ -12887,10 +12945,15 @@ namespace basist
 				return false;
 			}
 						
+#if BASISD_SUPPORT_ETC1S
 			return m_lowlevel_etc1s_decoder.transcode_slice(pOutput_blocks, slice_desc.m_num_blocks_x, slice_desc.m_num_blocks_y,
 				pDataU8 + slice_desc.m_file_ofs, slice_desc.m_file_size,
 				fmt, output_block_or_pixel_stride_in_bytes, (decode_flags & cDecodeFlagsBC1ForbidThreeColorBlocks) == 0, *pHeader, slice_desc, output_row_pitch_in_blocks_or_pixels, pState,
 				(decode_flags & cDecodeFlagsOutputHasAlphaIndices) != 0, pAlpha_blocks, output_rows_in_pixels);
+#else
+			BASISU_DEVEL_ERROR("basisu_transcoder::transcode_slice: ETC1S support disabled\n");
+			return false;
+#endif // BASISD_SUPPORT_ETC1S
 		}
 	}
 
@@ -13217,12 +13280,17 @@ namespace basist
 			}
 
 			// Use the container independent image transcode method.
+#if BASISD_SUPPORT_ETC1S
 			status = m_lowlevel_etc1s_decoder.transcode_image(fmt,
 				pOutput_blocks, output_blocks_buf_size_in_blocks_or_pixels,
 				(const uint8_t *)pData, data_size, pSlice_desc->m_num_blocks_x, pSlice_desc->m_num_blocks_y, pSlice_desc->m_orig_width, pSlice_desc->m_orig_height, pSlice_desc->m_level_index,
 				pSlice_desc->m_file_ofs, pSlice_desc->m_file_size,
 				(pAlpha_slice_desc != nullptr) ? (uint32_t)pAlpha_slice_desc->m_file_ofs : 0U, (pAlpha_slice_desc != nullptr) ? (uint32_t)pAlpha_slice_desc->m_file_size : 0U,
 				decode_flags, basis_file_has_alpha_slices, pHeader->m_tex_type == cBASISTexTypeVideoFrames, output_row_pitch_in_blocks_or_pixels, pState, output_rows_in_pixels);
+#else
+			BASISU_DEVEL_ERROR("basisu_transcoder::transcode_image_level: ETC1S support disabled\n");
+			return false;
+#endif // BASISD_SUPPORT_ETC1S
 
 		} // if (pHeader->m_tex_format == (int)basis_tex_format::cUASTC4x4)
       
@@ -14024,6 +14092,21 @@ namespace basist
 			case transcoder_texture_format::cTFASTC_LDR_10x10_RGBA:
 			case transcoder_texture_format::cTFASTC_LDR_12x10_RGBA:
 			case transcoder_texture_format::cTFASTC_LDR_12x12_RGBA:
+#if !BASISD_SUPPORT_DXT1
+			case transcoder_texture_format::cTFBC1_RGB:
+#endif
+#if !(BASISD_SUPPORT_DXT1 && BASISD_SUPPORT_DXT5A)
+			case transcoder_texture_format::cTFBC3_RGBA:
+#endif
+#if !BASISD_SUPPORT_DXT5A
+			case transcoder_texture_format::cTFBC4_R:
+			case transcoder_texture_format::cTFBC5_RG:
+#endif
+#if !BASISD_SUPPORT_16BPP_FORMATS
+			case transcoder_texture_format::cTFRGB565:
+			case transcoder_texture_format::cTFBGR565:
+			case transcoder_texture_format::cTFRGBA4444:
+#endif
 				return false;
 			default:
 				return true;
@@ -14050,9 +14133,11 @@ namespace basist
 			case transcoder_texture_format::cTFPVRTC1_4_RGBA:
 			// Uncompressed formats
 			case transcoder_texture_format::cTFRGBA32:
+#if BASISD_SUPPORT_16BPP_FORMATS
 			case transcoder_texture_format::cTFRGB565:
 			case transcoder_texture_format::cTFBGR565:
 			case transcoder_texture_format::cTFRGBA4444:
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 				return true;
 			default:
 				break;
@@ -14184,9 +14269,11 @@ namespace basist
 			case transcoder_texture_format::cTFPVRTC1_4_RGBA:
 			// Uncompressed formats
 			case transcoder_texture_format::cTFRGBA32:
+#if BASISD_SUPPORT_16BPP_FORMATS
 			case transcoder_texture_format::cTFRGB565:
 			case transcoder_texture_format::cTFBGR565:
 			case transcoder_texture_format::cTFRGBA4444:
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 				return true;
 			default:
 				break;
@@ -14195,15 +14282,20 @@ namespace basist
 		}
 		else
 		{
+#if !BASISD_SUPPORT_ETC1S
+			return false;
+#endif
 			// ETC1S
 			switch (tex_type)
 			{
 			// ETC1 and uncompressed are always supported.
 			case transcoder_texture_format::cTFETC1_RGB:
 			case transcoder_texture_format::cTFRGBA32:
+#if BASISD_SUPPORT_16BPP_FORMATS
 			case transcoder_texture_format::cTFRGB565:
 			case transcoder_texture_format::cTFBGR565:
 			case transcoder_texture_format::cTFRGBA4444:
+#endif // BASISD_SUPPORT_16BPP_FORMATS
 				return true;
 #if BASISD_SUPPORT_DXT1
 			case transcoder_texture_format::cTFBC1_RGB:
@@ -14267,6 +14359,7 @@ namespace basist
 	// UASTC LDR 4x4
 	// ------------------------------------------------------------------------------------------------------ 
 
+	const uint32_t g_bc7_weights2[4] = { 0, 21, 43, 64 }; // moved out of BASISD_SUPPORT_UASTC: BC7 mode 5 (ETC1S->BC7) needs it too
 #if BASISD_SUPPORT_UASTC
 	const astc_bc7_common_partition2_desc g_astc_bc7_common_partitions2[TOTAL_ASTC_BC7_COMMON_PARTITIONS2] =
 	{
@@ -14580,7 +14673,6 @@ namespace basist
 
 	// BC7 - Various BC7 tables/helpers
 	const uint32_t g_bc7_weights1[2] = { 0, 64 };
-	const uint32_t g_bc7_weights2[4] = { 0, 21, 43, 64 };
 	const uint32_t g_bc7_weights3[8] = { 0, 9, 18, 27, 37, 46, 55, 64 };
 	const uint32_t g_bc7_weights4[16] = { 0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64 };
 	const uint32_t g_astc_weights4[16] = { 0, 4, 8, 12, 17, 21, 25, 29, 35, 39, 43, 47, 52, 56, 60, 64 };
@@ -42974,6 +43066,7 @@ static inline bool blocks_same_solid_colors(const astc_helpers::log_astc_block& 
 	return true;
 }
 
+#if BASISD_SUPPORT_XUASTC
 static inline bool blocks_same_single_subset_endpoints(const astc_helpers::log_astc_block& a, const astc_helpers::log_astc_block& b, uint32_t tol)
 {
 	if (a.m_solid_color_flag_ldr || b.m_solid_color_flag_ldr)
@@ -43020,6 +43113,7 @@ static inline bool blocks_same_single_subset_endpoints(const astc_helpers::log_a
 
 	return true;
 }
+#endif // BASISD_SUPPORT_XUASTC
 
 static inline bool block_has_alpha(const astc_helpers::log_astc_block& a)
 {
@@ -45956,7 +46050,9 @@ bool basisu_lowlevel_xubc7_transcoder::transcode_image(
 } // namespace basist
 
 // XUBC7/XBC7 decoder source code
+#if BASISD_SUPPORT_XUASTC
 #include "basisu_xbc7_decoder.inl"
+#endif // BASISD_SUPPORT_XUASTC
 
 // Plain BC1/3/4/5 block unpackers (basist::bcu) and the DDS reader/transcoder (basist::dds_transcoder).
 #include "basisu_dds_transcoder.inl"
