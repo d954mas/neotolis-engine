@@ -130,6 +130,14 @@ before encoding.
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
+Activation cross-checks that count against the blob and the header and rejects
+any asset that disagrees.
+
+An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
+the encoder checks the actual pixels, not the declared channel count. The
+runtime treats that as legal: an `RGBA8` header over an alpha-less blob simply
+selects the opaque target format. The reverse, an `RGB8` header over a blob
+carrying alpha, is rejected at activation.
 
 ## Builder stages
 

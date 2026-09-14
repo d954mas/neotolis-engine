@@ -334,15 +334,23 @@ value proportional to the passing comparisons, so consumers may rely on the
 proportionality but not on specific weights. Comparison itself is core in
 GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
-Sampler overrides with a mipmap minification filter require complete mip
-storage for the bound texture. A 1x1 base level is already a complete chain.
+Mip completeness needs no bind-time gate: `GL_TEXTURE_MAX_LEVEL` is set to
+`mip_count - 1` when the storage is created, so a texture's levels `0..MAX_LEVEL`
+all exist by the time its handle is published. A sampler override with a mipmap
+minification filter is therefore always valid, and over a single-level texture
+it samples level 0.
+
+Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
+`ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
+`sampler2D`, and the comparison and integer classes reject it — comparison needs
+depth storage, `usampler2D` needs integer storage.
 
 `gpu_caps.has_float_texture_linear` exposes `OES_texture_float_linear` on WebGL 2
 and core float filtering on desktop GL. It is probed and enabled at initialization
 and context restore, alongside the other GPU capabilities. `RGBA32F` texture
 defaults and sampler overrides require it for any linear filtering. Without it,
-`NEAREST` remains valid; sampler overrides may also use `NEAREST_MIPMAP_NEAREST`
-with a complete chain. Unsupported filter choices assert without silently
+`NEAREST` remains valid; sampler overrides may also use
+`NEAREST_MIPMAP_NEAREST`. Unsupported filter choices assert without silently
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.

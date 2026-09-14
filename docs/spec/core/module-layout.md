@@ -105,7 +105,13 @@ exist and `nt_resource_load_auto` routes to `nt_http`.
 
 `nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
 Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a
-texture-less executable C-only. The builder (`tools/builder`) and
+texture-less executable C-only. Its C API is a codec and nothing more —
+`nt_basisu_info`, `nt_basisu_start_transcoding`, `nt_basisu_transcode_level`,
+`nt_basisu_stop_transcoding` — speaking `nt_texture_format_t` and
+`nt_basisu_codec_t`, with no GPU enum or GL constant of its own. The texture
+activator in `nt_gfx` owns the policy (target format, session, staging) and
+hands the GL backend finished bytes, so the backend neither links nor calls
+Basis. The builder (`tools/builder`) and
 `test_basisu_roundtrip` link the real impl directly — they are executables
 picking an impl, not engine modules, so the no-real-impl gate does not apply.
 
@@ -129,8 +135,10 @@ borrows ready source, temp, and destination handles for each call; their
 dimensions must match. The helper owns its shader stages, program, pipeline, and
 fullscreen primitive, but it does not allocate, resize, destroy, or retain
 caller handles.
-The source uses a `sampler2D` color format (`R8`, `RG8`, `RGB8`, `RGBA8`,
-`RGBA16F`, or `RGBA32F`); integer and depth formats are invalid. `temp` and
+The source uses any `sampler2D` color format — the uncompressed set (`R8`,
+`RG8`, `RGB8`, `RGBA8`, `RGBA16F`, `RGBA32F`) and the block-compressed set
+(`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`, `ASTC_4x4_RGBA`); integer and depth
+formats are invalid. `temp` and
 `dest` are distinct ready `RGBA8` targets matching the source size. Scissor
 must be disabled for the call. The helper leaves scissor disabled and does not
 restore prior graphics bindings.
