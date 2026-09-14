@@ -248,7 +248,7 @@ be uploaded, never generated. Each needs its capability bit (`has_etc2`,
 `has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` precedent —
 assert in Debug, error log, invalid handle, no storage created. Compressed
 storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
-`nt_gfx_update_texture` rejects it, since a sub-rectangle of blocks is not a
+`nt_gfx_update_texture` asserts on it, since a sub-rectangle of blocks is not a
 sub-rectangle of texels.
 
 `BC7_RGBA` additionally requires both base dimensions to be multiples of 4,
@@ -269,13 +269,14 @@ texture and no pool slot.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
 every published texture is complete for every minification filter. Descriptors the
-engine builds for render-target attachments ship `level_count == 0`, which the
-backend reads as one level. A `glGenerateMipmap` that fails fails the creation:
+engine builds for render-target attachments ship `level_count == 0`; `0` or `1`
+both mean base level only, and the backend applies the same rule. A
+`glGenerateMipmap` that fails fails the creation:
 no texture is published. A mipmap
 filter over a single-level texture is therefore legal in both the descriptor and
-a sampler override; it samples level 0. `nt_gfx_update_texture` also rejects a
-texture with more than one level; whole levels are replaced by recreating the
-texture.
+a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
+or multi-level texture asserts, then returns without touching storage; whole
+levels are replaced by recreating the texture.
 
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
 both in the texture descriptor and in sampler overrides. Without it, both allow
@@ -332,21 +333,24 @@ dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, and a
 constructor unchanged.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
-blob's own dimensions must equal the header's; its level count must equal both
-`mip_count` and the full chain down to 1x1; an `RGB8` header over a blob that
-carries alpha is rejected, while an `RGBA8` header over an alpha-less blob is
-legal — the encoder drops alpha slices for a fully opaque source. Every
-mismatch is a recoverable rejection with a log.
+blob's own dimensions must equal the header's, and its level count must equal
+both `mip_count` and the full chain down to 1x1. Every mismatch is a recoverable
+rejection with a log. The header's `format` field is not consulted on this path:
+alpha and codec come from the blob, because the encoder drops alpha slices for a
+fully opaque source.
 
 The target format is the first entry the GPU supports of `BC7_RGBA`,
 `ASTC_4x4_RGBA`, `ETC2_RGBA8` or `ETC2_RGB8` (by the blob's alpha), then `RGBA8`
 as the always-available fallback. `BC7_RGBA` is eligible only when both base
 dimensions are multiples of 4; otherwise selection continues with ASTC, ETC2,
 then RGBA8. `nt_gfx_texture_format` reports that choice.
-The activator transcodes and uploads one level at a time and publishes the
-handle after the last one and default sampler acquisition. Any failure —
-transcode, upload, staging, sampler creation — publishes
-nothing: no handle, no pool slot, no open transcoder session.
+The activator transcodes the whole chain into the shared staging buffer and then
+creates the texture through `nt_gfx_make_texture`, which is the single path to
+storage — there is no internal create/upload pair. Any failure — transcode,
+staging, storage creation, sampler creation — publishes nothing: no handle, no
+pool slot, no open transcoder session. Texture pool exhaustion during activation
+is an asserted precondition, exactly as in `nt_gfx_make_texture`, not a
+rejection.
 
 ### Render-target handles
 

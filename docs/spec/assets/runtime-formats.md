@@ -27,13 +27,19 @@ Runtime must validate: magic, version, type, sizes/offsets. Required attributes 
 A RAW texture uploads the pixels that follow its header as they lie. For a BASIS
 texture the activator in `nt_gfx` owns everything above the GL call: it
 cross-checks the blob against the header, picks the GPU target format from
-`nt_gfx_gpu_caps()`, opens one transcoder session, and per mip level transcodes
-into the shared staging buffer and hands the backend those bytes with the
-concrete `nt_texture_format_t` ([API contracts](../core/api-contracts.md)). The
-backend never sees a Basis blob and never picks a format; the transcoder is a
-codec with no GPU knowledge. That staging buffer is the same one mesh activation
-re-interleaves SoA vertices through — one grow-on-demand allocation, freed once
-it goes idle.
+`nt_gfx_gpu_caps()`, opens one transcoder session, and transcodes the whole mip
+chain back to back into the shared staging buffer. It then creates the texture
+through the public `nt_gfx_make_texture`, so the backend receives one descriptor
+carrying every level in a concrete `nt_texture_format_t`
+([API contracts](../core/api-contracts.md)). The backend never sees a Basis blob
+and never picks a format; the transcoder is a codec with no GPU knowledge. That
+staging buffer is the same one mesh activation re-interleaves SoA vertices
+through — one grow-on-demand allocation, freed once it goes idle.
+
+The builder rejects a RAW texture whose min filter asks for mipmaps without
+`gen_mipmaps` at build time; the runtime itself accepts a single-level texture
+under any min filter, because `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage
+is mip-complete.
 
 ## Mesh format strategy
 
