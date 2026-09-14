@@ -715,13 +715,17 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      # browser_smoke reuses the ui_showcase pack (same assets); produce it via the
-      # build-graph pack target, then the wasm build copies it into assets/.
+      # browser_smoke reuses two example packs (same assets): ui_showcase (RAW atlas) and
+      # bunnymark_sd (UASTC atlas, the Basis fixture). Produce both via their build-graph pack
+      # targets before ANY wasm configure below — the copy rules are configure-time — then the wasm
+      # builds copy them into assets/.
       - name: Configure native debug
         run: cmake --preset native-debug
 
-      - name: Build ui_showcase packs
-        run: cmake --build --preset native-debug --target ui_showcase_packs
+      - name: Build browser_smoke example packs
+        run: |
+          cmake --build --preset native-debug --target ui_showcase_packs
+          cmake --build --preset native-debug --target bunnymark_demo_packs
 
       - name: Build browser_smoke wasm (debug)
         run: |

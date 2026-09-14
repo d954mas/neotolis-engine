@@ -9,6 +9,10 @@ declare global {
       float_texture_linear(): boolean;
       field_css(): { x: number; y: number; w: number; h: number };
       hide_probe(mode: number): void;
+      basis_ready(): boolean;
+      basis_format(): number;
+      basis_caps(): number;
+      basis_sample(level: number): number;
     };
     __ntLossExtension?: WEBGL_lose_context;
     __ntBlockFloatLinear?: boolean;
@@ -176,6 +180,71 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
 });
 
 
+
+// nt_texture_format_t values the activator can pick for the UASTC bunny atlas (it has alpha).
+const FORMAT_RGBA8 = 1;
+const FORMAT_ETC2_RGBA8 = 12;
+const FORMAT_BC7_RGBA = 13;
+const FORMAT_ASTC_4x4_RGBA = 14;
+
+// The activator's fixed candidate order, applied to the caps bitmask the app reports.
+function expectedBasisFormat(caps: number): number {
+  if (caps & 1) return FORMAT_BC7_RGBA;
+  if (caps & 2) return FORMAT_ASTC_4x4_RGBA;
+  if (caps & 4) return FORMAT_ETC2_RGBA8;
+  return FORMAT_RGBA8;
+}
+
+function unpackAlpha(sample: number): number {
+  return (sample >>> 24) & 0xff;
+}
+
+async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; last: number }> {
+  await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
+  const caps = await page.evaluate(() => window.__nt!.basis_caps());
+  const format = await page.evaluate(() => window.__nt!.basis_format());
+  const corner = await page.evaluate(() => window.__nt!.basis_sample(0));
+  const last = await page.evaluate(() => window.__nt!.basis_sample(1));
+  console.log(`[basis ${label}] caps=${caps} format=${format} corner=0x${corner.toString(16)} last=0x${last.toString(16)}`);
+  expect(format, `${label}: transcode target for caps bitmask ${caps}`).toBe(expectedBasisFormat(caps));
+  // The atlas margin keeps texel (0,0) empty; premultiplied alpha makes it a zero texel.
+  expect(unpackAlpha(corner), `${label}: level-0 corner is atlas padding`).toBeLessThanOrEqual(1);
+  // The 1x1 last level averages the whole atlas: partial bunny coverage over empty space.
+  expect(unpackAlpha(last), `${label}: last level mixes covered and empty texels`).toBeGreaterThan(0);
+  expect(unpackAlpha(last), `${label}: last level mixes covered and empty texels`).toBeLessThan(255);
+  expect(last & 0xffffff, `${label}: last level carries colour, not an empty mip`).toBeGreaterThan(0);
+  return { corner, last };
+}
+
+test('basis fixture: the transcoded atlas keeps its format and texels across a context loss', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text === 'ERROR [gfx] WebGL context lost') return;
+    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+  });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+  const before = await checkBasisFixture(page, 'initial');
+
+  const hasExtension = await page.evaluate(() => {
+    const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+    window.__ntLossExtension = gl.getExtension('WEBGL_lose_context') ?? undefined;
+    window.__ntLossExtension?.loseContext();
+    return window.__ntLossExtension !== undefined;
+  });
+  expect(hasExtension, 'WEBGL_lose_context unavailable').toBe(true);
+  await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready(), null, { timeout: 10_000 });
+  await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+  await page.waitForFunction(() => window.__nt!.programs_ready(), null, { timeout: 30_000 });
+
+  // Re-activation runs off the same pack blob, so the transcode is bit-identical.
+  const after = await checkBasisFixture(page, 'after restore');
+  expect(after, 'texels after re-activation').toEqual(before);
+  expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});
 
 test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
   await page.addInitScript(() => {
