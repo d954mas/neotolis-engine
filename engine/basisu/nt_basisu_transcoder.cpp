@@ -57,11 +57,8 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     return true;
 }
 
-bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) { return s_transcoder.start_transcoding(basis_data, basis_size); }
-
-void nt_basisu_stop_transcoding(void) { s_transcoder.stop_transcoding(); }
-
-bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t capacity_bytes, nt_texture_format_t format) {
+bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
+    NT_ASSERT(info != nullptr);
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
     switch (format) {
@@ -87,13 +84,31 @@ bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint
         unit_bytes = 4;
         break;
     default:
-        NT_ASSERT(0 && "transcode_level: format is not a Basis transcode target");
+        NT_ASSERT(0 && "transcode_chain: format is not a Basis transcode target");
         return false;
     }
 
-    NT_ASSERT(capacity_bytes != 0 && capacity_bytes % unit_bytes == 0 && "transcode_level: capacity must be whole blocks/pixels");
+    /* The short-buffer contract is recoverable and covers the whole chain, so
+       the total has to be known before the first level is written. */
+    uint64_t chain_bytes = 0;
+    for (uint32_t level = 0; level < info->level_count; level++) {
+        chain_bytes += nt_texture_level_bytes(format, nt_texture_level_extent(info->width, level), nt_texture_level_extent(info->height, level));
+    }
+    if (chain_bytes > capacity_bytes) {
+        return false;
+    }
 
-    /* Upstream counts blocks (pixels for RGBA32) and rejects a short buffer
-       before writing anything. */
-    return s_transcoder.transcode_image_level(basis_data, basis_size, 0, level_index, output, capacity_bytes / unit_bytes, target);
+    if (!s_transcoder.start_transcoding(basis_data, basis_size)) {
+        return false;
+    }
+    bool ok = true;
+    uint32_t offset = 0;
+    for (uint32_t level = 0; level < info->level_count && ok; level++) {
+        const uint32_t level_bytes = (uint32_t)nt_texture_level_bytes(format, nt_texture_level_extent(info->width, level), nt_texture_level_extent(info->height, level));
+        /* Upstream counts blocks (pixels for RGBA32). */
+        ok = s_transcoder.transcode_image_level(basis_data, basis_size, 0, level, (uint8_t *)output + offset, level_bytes / unit_bytes, target);
+        offset += level_bytes;
+    }
+    s_transcoder.stop_transcoding();
+    return ok;
 }

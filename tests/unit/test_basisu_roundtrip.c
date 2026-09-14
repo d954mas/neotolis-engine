@@ -35,27 +35,37 @@ static void check_pixels(const uint8_t *src, const uint8_t *out, uint32_t bytes)
 
 static const nt_texture_format_t s_targets[] = {NT_TEXTURE_FORMAT_ETC2_RGB8, NT_TEXTURE_FORMAT_ETC2_RGBA8, NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, NT_TEXTURE_FORMAT_RGBA8};
 
-static void check_outputs(const nt_basisu_encode_result_t *enc, uint32_t level, uint32_t w, uint32_t h, const uint8_t *src) {
+/* Bytes of the whole chain, levels back to back with no padding. */
+static uint32_t chain_bytes(nt_texture_format_t format, uint32_t width, uint32_t height, uint32_t levels) {
+    uint32_t total = 0;
+    for (uint32_t level = 0; level < levels; level++) {
+        total += (uint32_t)nt_texture_level_bytes(format, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
+    }
+    return total;
+}
+
+/* RGBA8 is the widest output: its chain is 4/3 of its base level. */
+#define MAX_CHAIN_BYTES (((MAX_W * MAX_H * 4U) * 4U / 3U) + 64U)
+static uint8_t s_out[MAX_CHAIN_BYTES + 16U];
+
+static void check_outputs(const nt_basisu_encode_result_t *enc, const nt_basisu_info_t *info, const uint8_t *src) {
     for (uint32_t f = 0; f < sizeof(s_targets) / sizeof(s_targets[0]); f++) {
-        uint8_t out[(MAX_W * MAX_H * 4) + 16];
-        memset(out, 0xCD, sizeof(out));
-        const uint32_t bytes = (uint32_t)nt_texture_level_bytes(s_targets[f], w, h);
-        TEST_ASSERT_TRUE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes, s_targets[f]));
+        const uint32_t bytes = chain_bytes(s_targets[f], info->width, info->height, info->level_count);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_out) - 16U, bytes);
+        memset(s_out, 0xCD, sizeof(s_out));
+        TEST_ASSERT_TRUE(nt_basisu_transcode_chain(enc->data, enc->size, info, s_targets[f], s_out, bytes));
+        /* The chain ends exactly where the per-level sizes say it does. */
         for (uint32_t i = bytes; i < bytes + 16; i++) {
-            TEST_ASSERT_EQUAL_HEX8(0xCD, out[i]);
+            TEST_ASSERT_EQUAL_HEX8(0xCD, s_out[i]);
         }
-        if (s_targets[f] == NT_TEXTURE_FORMAT_RGBA8 && level == 0) {
-            check_pixels(src, out, bytes);
+        if (s_targets[f] == NT_TEXTURE_FORMAT_RGBA8) {
+            check_pixels(src, s_out, (uint32_t)nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, info->width, info->height));
         }
-        /* One block (pixel for RGBA8) short must be refused with nothing written;
-         * a fractional capacity is a programmer error the wrapper asserts on. */
-        const uint32_t unit = (uint32_t)nt_texture_level_bytes(s_targets[f], 1, 1);
-        if (bytes > unit) {
-            memset(out, 0xCD, sizeof(out));
-            TEST_ASSERT_FALSE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes - unit, s_targets[f]));
-            for (uint32_t i = 0; i < sizeof(out); i++) {
-                TEST_ASSERT_EQUAL_HEX8(0xCD, out[i]);
-            }
+        /* One byte short must be refused with no level written at all. */
+        memset(s_out, 0xCD, sizeof(s_out));
+        TEST_ASSERT_FALSE(nt_basisu_transcode_chain(enc->data, enc->size, info, s_targets[f], s_out, bytes - 1U));
+        for (uint32_t i = 0; i < sizeof(s_out); i++) {
+            TEST_ASSERT_EQUAL_HEX8(0xCD, s_out[i]);
         }
     }
 }
@@ -81,13 +91,7 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     TEST_ASSERT_EQUAL_UINT32(levels, info.level_count);
     TEST_ASSERT_EQUAL(alpha, info.has_alpha);
 
-    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(enc.data, enc.size));
-    for (uint32_t level = 0; level < levels; level++) {
-        uint32_t w = (width >> level) ? (width >> level) : 1U;
-        uint32_t h = (height >> level) ? (height >> level) : 1U;
-        check_outputs(&enc, level, w, h, src);
-    }
-    nt_basisu_stop_transcoding();
+    check_outputs(&enc, &info, src);
     nt_basisu_encode_free(&enc);
 }
 
@@ -200,14 +204,15 @@ static void check_premultiplied_mip(nt_basisu_codec_t codec) {
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
     nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 8, 8, true, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
-    uint8_t mip[4] = {0};
-    bool started = nt_basisu_start_transcoding(enc.data, enc.size);
-    bool decoded = started && nt_basisu_transcode_level(enc.data, enc.size, 3, mip, sizeof(mip), NT_TEXTURE_FORMAT_RGBA8);
-    if (started) {
-        nt_basisu_stop_transcoding();
-    }
+    nt_basisu_info_t info = {0};
+    TEST_ASSERT_TRUE(nt_basisu_info(enc.data, enc.size, &info));
+    /* 8x8 -> 4x4 -> 2x2 -> 1x1: the 4 RGBA8 bytes at the end are the tail level. */
+    uint8_t chain[((8 * 8) + (4 * 4) + (2 * 2) + 1) * 4] = {0};
+    bool decoded = nt_basisu_transcode_chain(enc.data, enc.size, &info, NT_TEXTURE_FORMAT_RGBA8, chain, (uint32_t)sizeof(chain));
     nt_basisu_encode_free(&enc);
+    TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
     TEST_ASSERT_TRUE(decoded);
+    const uint8_t *mip = chain + sizeof(chain) - 4;
     /* Equal opaque-white and transparent-black coverage averages every channel to 128. */
     for (uint32_t c = 0; c < 4; c++) {
         TEST_ASSERT_INT_WITHIN(8, 128, mip[c]);
@@ -257,13 +262,17 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
             levels++;
         }
         TEST_ASSERT_EQUAL_UINT32(levels, header.mip_count);
-        TEST_ASSERT_TRUE(nt_basisu_start_transcoding(basis, header.data_size));
+        TEST_ASSERT_EQUAL_UINT32(levels, info.level_count);
+        uint8_t chain[32 * 32 * 4 * 2];
+        const uint32_t bytes = chain_bytes(NT_TEXTURE_FORMAT_RGBA8, header.width, header.height, levels);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(chain), bytes);
+        TEST_ASSERT_TRUE(nt_basisu_transcode_chain(basis, header.data_size, &info, NT_TEXTURE_FORMAT_RGBA8, chain, bytes));
+        uint32_t offset = 0;
         for (uint32_t level = 0; level < levels; level++) {
             uint32_t w = (header.width >> level) ? (header.width >> level) : 1U;
             uint32_t h = (header.height >> level) ? (header.height >> level) : 1U;
-            uint8_t rgba[32 * 32 * 4];
-            TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(rgba) / 4, w * h);
-            TEST_ASSERT_TRUE(nt_basisu_transcode_level(basis, header.data_size, level, rgba, w * h * 4, NT_TEXTURE_FORMAT_RGBA8));
+            const uint8_t *rgba = chain + offset;
+            offset += w * h * 4;
             if (atlas_page && level == 0) {
                 uint32_t alpha_sum = 0;
                 for (uint32_t pixel = 0; pixel < w * h; pixel++) {
@@ -278,7 +287,6 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
                 }
             }
         }
-        nt_basisu_stop_transcoding();
     }
     (void)fclose(file);
     TEST_ASSERT_EQUAL_UINT32(texture_count, textures);

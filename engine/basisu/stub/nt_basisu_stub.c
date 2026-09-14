@@ -18,22 +18,13 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     return false;
 }
 
-bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
+bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
     (void)basis_data;
     (void)basis_size;
-    NT_BASISU_STUB_TRAP();
-    return false;
-}
-
-void nt_basisu_stop_transcoding(void) { NT_BASISU_STUB_TRAP(); }
-
-bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t capacity_bytes, nt_texture_format_t format) {
-    (void)basis_data;
-    (void)basis_size;
-    (void)level_index;
+    (void)info;
+    (void)format;
     (void)output;
     (void)capacity_bytes;
-    (void)format;
     NT_BASISU_STUB_TRAP();
     return false;
 }

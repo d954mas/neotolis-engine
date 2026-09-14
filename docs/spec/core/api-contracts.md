@@ -345,9 +345,10 @@ The target format is the first entry the GPU supports of `BC7_RGBA`,
 as the always-available fallback. `BC7_RGBA` is eligible only when both base
 dimensions are multiples of 4; otherwise selection continues with ASTC, ETC2,
 then RGBA8. `nt_gfx_texture_format` reports that choice.
-The activator transcodes the whole chain into the shared staging buffer and then
-creates the texture through `nt_gfx_make_texture`, which is the single path to
-storage — there is no internal create/upload pair. Any failure — transcode,
+The activator transcodes the whole chain into the shared staging buffer with one
+codec call and then creates the texture through `nt_gfx_make_texture`, which is
+the single path to storage — there is no internal create/upload pair. The codec
+call opens and closes its own transcoder session. Any failure — transcode,
 staging, storage creation, sampler creation — publishes nothing: no handle, no
 pool slot, no open transcoder session. Texture pool exhaustion during activation
 is an asserted precondition, exactly as in `nt_gfx_make_texture`, not a

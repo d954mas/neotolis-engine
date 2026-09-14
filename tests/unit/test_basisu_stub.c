@@ -19,18 +19,15 @@ static void test_stub_info_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_basisu_info(fake_basis, sizeof(fake_basis), &info));
 }
 
-static void test_stub_start_transcoding_asserts(void) { NT_TEST_EXPECT_ASSERT((void)nt_basisu_start_transcoding(fake_basis, sizeof(fake_basis))); }
-
-static void test_stub_stop_transcoding_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_basisu_stop_transcoding()); }
-
-static void test_stub_transcode_level_asserts(void) { NT_TEST_EXPECT_ASSERT((void)nt_basisu_transcode_level(fake_basis, sizeof(fake_basis), 0, out_buf, sizeof(out_buf), NT_TEXTURE_FORMAT_RGBA8)); }
+static void test_stub_transcode_chain_asserts(void) {
+    const nt_basisu_info_t info = {.codec = NT_BASISU_CODEC_UASTC_LDR, .width = 2, .height = 2, .level_count = 2, .has_alpha = false};
+    NT_TEST_EXPECT_ASSERT((void)nt_basisu_transcode_chain(fake_basis, sizeof(fake_basis), &info, NT_TEXTURE_FORMAT_RGBA8, out_buf, sizeof(out_buf)));
+}
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stub_global_init_asserts);
     RUN_TEST(test_stub_info_asserts);
-    RUN_TEST(test_stub_start_transcoding_asserts);
-    RUN_TEST(test_stub_stop_transcoding_asserts);
-    RUN_TEST(test_stub_transcode_level_asserts);
+    RUN_TEST(test_stub_transcode_chain_asserts);
     return UNITY_END();
 }

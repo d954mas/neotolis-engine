@@ -28,14 +28,11 @@ void nt_basisu_transcoder_global_init(void);
  * max(1, width >> L) x max(1, height >> L). */
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
-/* Begin/end a transcoding session. Call start once, transcode levels, then stop. */
-bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size);
-void nt_basisu_stop_transcoding(void);
-
-/* Transcode one mip level of image 0 into `output`, which must hold
- * capacity_bytes; short capacity is rejected before anything is written.
- * `format` must be one of the four compressed outputs or RGBA8. */
-bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t capacity_bytes, nt_texture_format_t format);
+/* Transcode every level of image 0 into `output`, levels 0..N-1 back to back
+ * with no padding (level L is max(1, w >> L) x max(1, h >> L)), N and dims from
+ * `info`. capacity_bytes must hold the whole chain in `format`; a short buffer
+ * is rejected before anything is written. Opens and closes the session itself. */
+bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
 
 #ifdef __cplusplus
 }

@@ -160,6 +160,30 @@ static void expect_rejected(basis_fixture_t *fixture, uint32_t size, const char 
     expect_full_pool_available();
 }
 
+/* Bytes the activator stages: the whole transcoded chain, back to back. */
+static uint32_t chain_bytes(nt_texture_format_t format, uint16_t w, uint16_t h) {
+    uint32_t total = 0;
+    for (uint8_t level = 0; level < full_chain_levels(w, h); level++) {
+        total += (uint32_t)nt_texture_level_bytes(format, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level));
+    }
+    return total;
+}
+
+/* A rejected activation left no transcoder session open: a whole fresh chain
+ * still transcodes. */
+static void expect_transcoder_reusable(basis_fixture_t *fixture) {
+    const uint8_t *payload = fixture->blob + sizeof(NtTextureAssetHeader);
+    const uint32_t payload_size = fixture->size - (uint32_t)sizeof(NtTextureAssetHeader);
+    nt_basisu_info_t info = {0};
+    TEST_ASSERT_TRUE(nt_basisu_info(payload, payload_size, &info));
+    const uint32_t bytes = chain_bytes(NT_TEXTURE_FORMAT_RGBA8, fixture->width, fixture->height);
+    uint8_t *out = (uint8_t *)malloc(bytes);
+    TEST_ASSERT_NOT_NULL(out);
+    bool transcoded = nt_basisu_transcode_chain(payload, payload_size, &info, NT_TEXTURE_FORMAT_RGBA8, out, bytes);
+    free(out);
+    TEST_ASSERT_TRUE(transcoded);
+}
+
 /* The header's sampler defaults, resolved through the deduplicating cache: an
  * equal id means the activator baked exactly these filters and wraps. */
 static nt_sampler_t header_default_sampler(void) {
@@ -370,9 +394,7 @@ void test_backend_failure_leaves_no_texture_and_allows_a_retry(void) {
     /* A failed create never minted a name, so there is nothing to destroy. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
-    /* The transcoder session closed: a fresh one still starts. */
-    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(alpha.blob + sizeof(NtTextureAssetHeader), alpha.size - (uint32_t)sizeof(NtTextureAssetHeader)));
-    nt_basisu_stop_transcoding();
+    expect_transcoder_reusable(&alpha);
     expect_full_pool_available();
 
     nt_gfx_fake_fail_texture_creates(0);
@@ -398,8 +420,7 @@ void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
     /* The attempt's own GL name, not handle 0 -- the storage really went back. */
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_destroyed_texture());
-    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(alpha.blob + sizeof(NtTextureAssetHeader), alpha.size - (uint32_t)sizeof(NtTextureAssetHeader)));
-    nt_basisu_stop_transcoding();
+    expect_transcoder_reusable(&alpha);
     expect_full_pool_available();
 
     check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
@@ -465,15 +486,6 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
 }
 
 #define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + MESH_VERTEX_BYTES + 6)
-
-/* Bytes the activator stages: the whole transcoded chain, back to back. */
-static uint32_t chain_bytes(nt_texture_format_t format, uint16_t w, uint16_t h) {
-    uint32_t total = 0;
-    for (uint8_t level = 0; level < full_chain_levels(w, h); level++) {
-        total += (uint32_t)nt_texture_level_bytes(format, nt_texture_level_extent(w, level), nt_texture_level_extent(h, level));
-    }
-    return total;
-}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one staging observation per step of one lifecycle
 void test_staging_is_shared_grown_and_evicted(void) {

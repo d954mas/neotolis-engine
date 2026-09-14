@@ -33,10 +33,11 @@
 static uint8_t s_src[SRC_W * SRC_H * 4];
 static uint8_t s_blob[sizeof(NtTextureAssetHeader) + ((size_t)SRC_W * SRC_H * 4)];
 static uint8_t s_chain[SRC_W * SRC_H * 8];
-static uint8_t s_reference[SRC_W * SRC_H * 4];
+static uint8_t s_reference[SRC_W * SRC_H * 8]; /* the whole RGBA8 chain */
+static const uint8_t *s_reference_level;
 static uint8_t s_readback[SRC_W * SRC_H * 4];
 static uint32_t s_blob_size;
-static uint8_t s_mip_count;
+static nt_basisu_info_t s_info;
 
 void setUp(void) {
     TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
@@ -98,8 +99,11 @@ static void build_fixture(nt_basisu_codec_t codec) {
     hdr->data_size = enc.size;
     memcpy(s_blob + sizeof(*hdr), enc.data, enc.size);
     s_blob_size = (uint32_t)sizeof(*hdr) + enc.size;
-    s_mip_count = (uint8_t)enc.mip_count;
+    uint32_t payload_size = enc.size;
     nt_basisu_encode_free(&enc);
+
+    TEST_ASSERT_TRUE(nt_basisu_info(s_blob + sizeof(*hdr), payload_size, &s_info));
+    TEST_ASSERT_EQUAL_UINT32(SRC_LEVELS, s_info.level_count);
 }
 
 static const uint8_t *fixture_payload(void) { return s_blob + sizeof(NtTextureAssetHeader); }
@@ -110,32 +114,32 @@ static uint16_t level_dim(uint32_t base, uint32_t level) {
     return (uint16_t)(value > 0 ? value : 1);
 }
 
+/* Bytes of the whole chain in `format`, levels back to back with no padding. */
+static uint32_t chain_bytes(nt_texture_format_t format) {
+    uint32_t total = 0;
+    for (uint32_t level = 0; level < s_info.level_count; level++) {
+        total += (uint32_t)nt_texture_level_bytes(format, level_dim(SRC_W, level), level_dim(SRC_H, level));
+    }
+    return total;
+}
+
 /* What the GPU should be showing: the transcoder's own RGBA32 decode of the
  * level under test, so the comparison isolates upload and sampling. */
 static void decode_reference(uint32_t level) {
-    uint16_t w = level_dim(SRC_W, level);
-    uint16_t h = level_dim(SRC_H, level);
-    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(fixture_payload(), fixture_payload_size()));
-    bool ok = nt_basisu_transcode_level(fixture_payload(), fixture_payload_size(), level, s_reference, (uint32_t)w * h * 4U, NT_TEXTURE_FORMAT_RGBA8);
-    nt_basisu_stop_transcoding();
-    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_TRUE(nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, NT_TEXTURE_FORMAT_RGBA8, s_reference, (uint32_t)sizeof(s_reference)));
+    uint32_t offset = 0;
+    for (uint32_t below = 0; below < level; below++) {
+        offset += (uint32_t)nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, level_dim(SRC_W, below), level_dim(SRC_H, below));
+    }
+    s_reference_level = s_reference + offset;
 }
 
 /* Transcodes the whole chain into one contiguous KTX/DDS-style buffer. */
 static uint32_t transcode_chain(nt_texture_format_t format) {
-    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(fixture_payload(), fixture_payload_size()));
-    uint32_t offset = 0;
-    for (uint32_t level = 0; level < s_mip_count; level++) {
-        uint32_t bytes = (uint32_t)nt_texture_level_bytes(format, level_dim(SRC_W, level), level_dim(SRC_H, level));
-        TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_chain), offset + bytes);
-        if (!nt_basisu_transcode_level(fixture_payload(), fixture_payload_size(), level, s_chain + offset, bytes, format)) {
-            nt_basisu_stop_transcoding();
-            TEST_FAIL_MESSAGE("transcode_level failed for a caps-supported format");
-        }
-        offset += bytes;
-    }
-    nt_basisu_stop_transcoding();
-    return offset;
+    const uint32_t total = chain_bytes(format);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_chain), total);
+    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_transcode_chain(fixture_payload(), fixture_payload_size(), &s_info, format, s_chain, total), "transcode failed for a caps-supported format");
+    return total;
 }
 
 // #endregion
@@ -204,7 +208,7 @@ static void check_against_reference(uint32_t level, uint8_t tolerance, bool opaq
     for (uint32_t ry = 0; ry < h; ry++) {
         for (uint32_t rx = 0; rx < w; rx++) {
             const uint8_t *got = &s_readback[(((size_t)ry * w) + rx) * 4];
-            const uint8_t *want = &s_reference[((((size_t)h - 1U - ry) * w) + rx) * 4];
+            const uint8_t *want = &s_reference_level[((((size_t)h - 1U - ry) * w) + rx) * 4];
             TEST_ASSERT_UINT8_WITHIN(tolerance, want[0], got[0]);
             TEST_ASSERT_UINT8_WITHIN(tolerance, want[1], got[1]);
             TEST_ASSERT_UINT8_WITHIN(tolerance, want[2], got[2]);
@@ -245,7 +249,7 @@ static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance) {
     nt_texture_t tex = {.id = handle};
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
     TEST_ASSERT_EQUAL_INT(expected_target(), nt_gfx_texture_format(tex));
-    TEST_ASSERT_EQUAL_INT(s_mip_count - 1, texture_max_level(tex));
+    TEST_ASSERT_EQUAL_INT((int)s_info.level_count - 1, texture_max_level(tex));
 
     /* Level 0 through the asset's own LINEAR_MIPMAP_LINEAR default sampler. */
     decode_reference(0);
@@ -255,9 +259,9 @@ static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance) {
     /* One pixel of viewport forces the LOD past the end of the chain, so
      * NEAREST_MIPMAP_NEAREST clamps to MAX_LEVEL: the 1x1 tail. */
     nt_sampler_t tail = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST, .mag_filter = NT_FILTER_NEAREST});
-    decode_reference(s_mip_count - 1U);
+    decode_reference(s_info.level_count - 1U);
     render_sampled(tex, tail, SRC_W, SRC_H, 1, 1);
-    check_against_reference(s_mip_count - 1U, tolerance, false);
+    check_against_reference(s_info.level_count - 1U, tolerance, false);
 
     nt_gfx_deactivate_texture(handle);
 }
@@ -283,20 +287,20 @@ static void check_prepared_upload(nt_texture_format_t format, uint8_t tolerance)
         .mag_filter = NT_FILTER_NEAREST,
         .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .level_count = s_mip_count,
+        .level_count = (uint8_t)s_info.level_count,
     });
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
     TEST_ASSERT_EQUAL_INT(format, nt_gfx_texture_format(tex));
-    TEST_ASSERT_EQUAL_INT(s_mip_count - 1, texture_max_level(tex));
+    TEST_ASSERT_EQUAL_INT((int)s_info.level_count - 1, texture_max_level(tex));
 
     decode_reference(0);
     render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, SRC_W, SRC_H);
     check_against_reference(0, tolerance, format == NT_TEXTURE_FORMAT_ETC2_RGB8);
 
     /* The declared chain really reaches GL: the tail level is sampled too. */
-    decode_reference(s_mip_count - 1U);
+    decode_reference(s_info.level_count - 1U);
     render_sampled(tex, NT_SAMPLER_DEFAULT, SRC_W, SRC_H, 1, 1);
-    check_against_reference(s_mip_count - 1U, tolerance, format == NT_TEXTURE_FORMAT_ETC2_RGB8);
+    check_against_reference(s_info.level_count - 1U, tolerance, format == NT_TEXTURE_FORMAT_ETC2_RGB8);
 
     nt_gfx_destroy_texture(tex);
 }

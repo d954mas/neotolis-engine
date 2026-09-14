@@ -2352,23 +2352,8 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region transcode the whole chain into staging
-    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
-        NT_LOG_ERROR("activate_texture: Basis start_transcoding failed");
-        return 0;
-    }
-    uint32_t offset = 0;
-    bool ok = true;
-    for (uint32_t level = 0; level < info.level_count; level++) {
-        uint32_t level_bytes = (uint32_t)nt_texture_level_bytes(target, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
-        if (!nt_basisu_transcode_level(basis_data, basis_size, level, stage + offset, level_bytes, target)) {
-            NT_LOG_ERROR("activate_texture: transcode of level %u failed", (unsigned)level);
-            ok = false;
-            break;
-        }
-        offset += level_bytes;
-    }
-    nt_basisu_stop_transcoding();
-    if (!ok) {
+    if (!nt_basisu_transcode_chain(basis_data, basis_size, &info, target, stage, (uint32_t)chain_bytes)) {
+        NT_LOG_ERROR("activate_texture: Basis transcode of the %u-level chain failed", (unsigned)info.level_count);
         return 0;
     }
     // #endregion
