@@ -336,8 +336,6 @@ bool nt_gfx_backend_is_context_lost(void) { return s_fake_context_lost || s_fake
 
 void nt_gfx_backend_begin_frame(void) {}
 
-void nt_gfx_backend_end_frame(void) {}
-
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
     (void)desc;
     s_fake_last_pass_target = render_target_backend;
@@ -499,21 +497,6 @@ bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level,
     bool fail = (s_fake_fail_texture_level_uploads & 1U) != 0;
     s_fake_fail_texture_level_uploads >>= 1U;
     return !fail;
-}
-
-uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
-                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
-    (void)basis_data;
-    (void)basis_size;
-    (void)base_width;
-    (void)base_height;
-    (void)level_count;
-    (void)min_filter;
-    (void)mag_filter;
-    (void)wrap_u;
-    (void)wrap_v;
-    (void)transcode_target;
-    return ++s_fake_next_texture_backend;
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {

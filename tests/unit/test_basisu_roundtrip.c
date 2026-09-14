@@ -33,18 +33,20 @@ static void check_pixels(const uint8_t *src, const uint8_t *out, uint32_t bytes)
     }
 }
 
-static void check_outputs(const nt_basisu_encode_result_t *enc, uint32_t level, uint32_t w, uint32_t h, uint32_t blocks, const uint8_t *src) {
-    const nt_basisu_format_t formats[] = {NT_BASISU_FORMAT_ETC1_RGB, NT_BASISU_FORMAT_ETC2_RGBA, NT_BASISU_FORMAT_BC7_RGBA, NT_BASISU_FORMAT_ASTC_4x4_RGBA, NT_BASISU_FORMAT_RGBA32};
-    for (uint32_t f = 0; f < sizeof(formats) / sizeof(formats[0]); f++) {
+static const nt_texture_format_t s_targets[] = {NT_TEXTURE_FORMAT_ETC2_RGB8, NT_TEXTURE_FORMAT_ETC2_RGBA8, NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, NT_TEXTURE_FORMAT_RGBA8};
+
+static void check_outputs(const nt_basisu_encode_result_t *enc, uint32_t level, uint32_t w, uint32_t h, const uint8_t *src) {
+    for (uint32_t f = 0; f < sizeof(s_targets) / sizeof(s_targets[0]); f++) {
         uint8_t out[(MAX_W * MAX_H * 4) + 16];
         memset(out, 0xCD, sizeof(out));
-        const uint32_t count = formats[f] == NT_BASISU_FORMAT_RGBA32 ? w * h : blocks;
-        const uint32_t bytes = count * nt_basisu_bytes_per_block(formats[f]);
-        TEST_ASSERT_TRUE(nt_basisu_transcode_level(enc->data, enc->size, level, out, count, formats[f]));
+        const uint32_t bytes = (uint32_t)nt_texture_level_bytes(s_targets[f], w, h);
+        TEST_ASSERT_TRUE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes, s_targets[f]));
         for (uint32_t i = bytes; i < bytes + 16; i++) {
             TEST_ASSERT_EQUAL_HEX8(0xCD, out[i]);
         }
-        if (formats[f] == NT_BASISU_FORMAT_RGBA32 && level == 0) {
+        /* One byte short of a whole block (pixel for RGBA8) must be refused. */
+        TEST_ASSERT_FALSE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes - 1, s_targets[f]));
+        if (s_targets[f] == NT_TEXTURE_FORMAT_RGBA8 && level == 0) {
             check_pixels(src, out, bytes);
         }
     }
@@ -56,23 +58,26 @@ static void roundtrip(uint32_t width, uint32_t height, nt_basisu_codec_t codec, 
     nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
     nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, width, height, alpha, &opts);
     TEST_ASSERT_NOT_NULL(enc.data);
-    TEST_ASSERT_TRUE(nt_basisu_validate_header(enc.data, enc.size));
     uint32_t levels = 1;
     for (uint32_t size = width > height ? width : height; size > 1; size >>= 1U) {
         levels++;
     }
     TEST_ASSERT_EQUAL_UINT32(levels, enc.mip_count);
-    TEST_ASSERT_EQUAL_UINT32(levels, nt_basisu_get_level_count(enc.data, enc.size));
+
+    nt_basisu_info_t info = {0};
+    TEST_ASSERT_TRUE(nt_basisu_info(enc.data, enc.size, &info));
+    TEST_ASSERT_EQUAL_INT(codec, info.codec);
+    /* Unpadded dimensions: 13x7 stays 13x7, not the 16x8 block padding. */
+    TEST_ASSERT_EQUAL_UINT32(width, info.width);
+    TEST_ASSERT_EQUAL_UINT32(height, info.height);
+    TEST_ASSERT_EQUAL_UINT32(levels, info.level_count);
+    TEST_ASSERT_EQUAL(alpha, info.has_alpha);
+
     TEST_ASSERT_TRUE(nt_basisu_start_transcoding(enc.data, enc.size));
     for (uint32_t level = 0; level < levels; level++) {
-        uint32_t w = 0;
-        uint32_t h = 0;
-        uint32_t blocks = 0;
-        TEST_ASSERT_TRUE(nt_basisu_get_level_desc(enc.data, enc.size, level, &w, &h, &blocks));
-        TEST_ASSERT_EQUAL_UINT32((width >> level) ? (width >> level) : 1U, w);
-        TEST_ASSERT_EQUAL_UINT32((height >> level) ? (height >> level) : 1U, h);
-        TEST_ASSERT_EQUAL_UINT32(((w + 3U) / 4U) * ((h + 3U) / 4U), blocks);
-        check_outputs(&enc, level, w, h, blocks, src);
+        uint32_t w = (width >> level) ? (width >> level) : 1U;
+        uint32_t h = (height >> level) ? (height >> level) : 1U;
+        check_outputs(&enc, level, w, h, src);
     }
     nt_basisu_stop_transcoding();
     nt_basisu_encode_free(&enc);
@@ -92,7 +97,24 @@ void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 void test_reject_non_basis_header(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
-    TEST_ASSERT_FALSE(nt_basisu_validate_header(pixels, sizeof(pixels)));
+    nt_basisu_info_t info = {0};
+    TEST_ASSERT_FALSE(nt_basisu_info(pixels, sizeof(pixels), &info));
+}
+
+/* An RGBA source the encoder finds fully opaque loses its alpha slices, so the
+ * blob -- not the asset header -- decides whether a target needs alpha. */
+void test_opaque_rgba_source_reports_no_alpha(void) {
+    uint8_t pixels[16 * 8 * 4];
+    fill_pixels(pixels, 16, 8, false);
+    nt_basisu_encode_opts_t codecs[] = {nt_tex_compress_etc1s_high(), nt_tex_compress_uastc_default()};
+    for (uint32_t i = 0; i < 2; i++) {
+        nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, true, &codecs[i]);
+        TEST_ASSERT_NOT_NULL(enc.data);
+        nt_basisu_info_t info = {0};
+        TEST_ASSERT_TRUE(nt_basisu_info(enc.data, enc.size, &info));
+        nt_basisu_encode_free(&enc);
+        TEST_ASSERT_FALSE(info.has_alpha);
+    }
 }
 
 static void check_premultiplied_mip(nt_basisu_codec_t codec) {
@@ -108,7 +130,7 @@ static void check_premultiplied_mip(nt_basisu_codec_t codec) {
     TEST_ASSERT_NOT_NULL(enc.data);
     uint8_t mip[4] = {0};
     bool started = nt_basisu_start_transcoding(enc.data, enc.size);
-    bool decoded = started && nt_basisu_transcode_level(enc.data, enc.size, 3, mip, 1, NT_BASISU_FORMAT_RGBA32);
+    bool decoded = started && nt_basisu_transcode_level(enc.data, enc.size, 3, mip, sizeof(mip), NT_TEXTURE_FORMAT_RGBA8);
     if (started) {
         nt_basisu_stop_transcoding();
     }
@@ -153,9 +175,9 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(basis), header.data_size);
         TEST_ASSERT_EQUAL(header.data_size, fread(basis, 1, header.data_size, file));
         TEST_ASSERT_EQUAL(NT_TEXTURE_COMPRESSION_BASIS, header.compression);
-        /* basis_file_header.m_tex_format is byte 20: ETC1S=0, UASTC LDR=1. */
-        TEST_ASSERT_GREATER_THAN_UINT32(20, header.data_size);
-        TEST_ASSERT_EQUAL_UINT8(codec == NT_BASISU_CODEC_ETC1S ? 0 : 1, basis[20]);
+        nt_basisu_info_t info = {0};
+        TEST_ASSERT_TRUE(nt_basisu_info(basis, header.data_size, &info));
+        TEST_ASSERT_EQUAL_INT(codec, info.codec);
         TEST_ASSERT_FALSE(header.flags & NT_TEXTURE_FLAG_GEN_MIPMAPS);
         TEST_ASSERT_EQUAL(NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR, header.default_min_filter);
         uint32_t levels = 1;
@@ -165,15 +187,11 @@ static void check_public_pack(const char *path, uint32_t texture_count, const ui
         TEST_ASSERT_EQUAL_UINT32(levels, header.mip_count);
         TEST_ASSERT_TRUE(nt_basisu_start_transcoding(basis, header.data_size));
         for (uint32_t level = 0; level < levels; level++) {
-            uint32_t w = 0;
-            uint32_t h = 0;
-            uint32_t blocks = 0;
-            TEST_ASSERT_TRUE(nt_basisu_get_level_desc(basis, header.data_size, level, &w, &h, &blocks));
-            TEST_ASSERT_EQUAL_UINT32((header.width >> level) ? (header.width >> level) : 1, w);
-            TEST_ASSERT_EQUAL_UINT32((header.height >> level) ? (header.height >> level) : 1, h);
+            uint32_t w = (header.width >> level) ? (header.width >> level) : 1U;
+            uint32_t h = (header.height >> level) ? (header.height >> level) : 1U;
             uint8_t rgba[32 * 32 * 4];
             TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(rgba) / 4, w * h);
-            TEST_ASSERT_TRUE(nt_basisu_transcode_level(basis, header.data_size, level, rgba, w * h, NT_BASISU_FORMAT_RGBA32));
+            TEST_ASSERT_TRUE(nt_basisu_transcode_level(basis, header.data_size, level, rgba, w * h * 4, NT_TEXTURE_FORMAT_RGBA8));
             if (atlas_page && level == 0) {
                 uint32_t alpha_sum = 0;
                 for (uint32_t pixel = 0; pixel < w * h; pixel++) {
@@ -283,6 +301,7 @@ int main(void) {
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_reject_non_basis_header);
+    RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
     RUN_TEST(test_etc1s_premultiplied_mip);
     RUN_TEST(test_uastc_premultiplied_mip);
     RUN_TEST(test_public_basis_single_pixel_full_mip_chain);

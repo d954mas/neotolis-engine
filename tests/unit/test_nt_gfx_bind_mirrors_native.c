@@ -1,7 +1,6 @@
 /* Real-GL coverage for VI switching, isolated EBO data operations, orphaning,
  * and binding preservation across rejected or failed operations. */
 
-#include "basisu/nt_basisu_transcoder.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "unity.h"
@@ -45,63 +44,6 @@ static const float s_empty[6] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 static const uint16_t s_tri_indices[3] = {0, 1, 2};
 static const uint16_t s_degenerate_indices[3] = {0, 0, 0};
 
-/* Transcoder fake in place of the loud-fail stub: level 0 describes cleanly and
- * the session then refuses, the shape of corrupt basis data and the only way to
- * fail a compressed create AFTER the backend bound its new texture. */
-void nt_basisu_transcoder_global_init(void) {}
-
-bool nt_basisu_validate_header(const void *basis_data, uint32_t basis_size) {
-    (void)basis_data;
-    (void)basis_size;
-    return true;
-}
-
-uint32_t nt_basisu_get_level_count(const void *basis_data, uint32_t basis_size) {
-    (void)basis_data;
-    (void)basis_size;
-    return 1;
-}
-
-bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint32_t level_index, uint32_t *out_width, uint32_t *out_height, uint32_t *out_total_blocks) {
-    (void)basis_data;
-    (void)basis_size;
-    if (level_index != 0) {
-        return false;
-    }
-    *out_width = 4;
-    *out_height = 4;
-    *out_total_blocks = 1;
-    return true;
-}
-
-bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
-    (void)basis_data;
-    (void)basis_size;
-    return false;
-}
-
-void nt_basisu_stop_transcoding(void) {}
-
-bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t output_blocks, nt_basisu_format_t format) {
-    (void)basis_data;
-    (void)basis_size;
-    (void)level_index;
-    (void)output;
-    (void)output_blocks;
-    (void)format;
-    return false;
-}
-
-uint32_t nt_basisu_bytes_per_block(nt_basisu_format_t format) {
-    (void)format;
-    return 16;
-}
-
-uint32_t nt_basisu_gl_internal_format(nt_basisu_format_t format) {
-    (void)format;
-    return 0;
-}
-
 void setUp(void) {
     TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
@@ -113,11 +55,13 @@ void setUp(void) {
 }
 
 static void remove_state_counters(void);
+static void disarm_get_error_poison(void);
 
 void tearDown(void) {
     /* A failed assert inside a counting window longjmps past the restore; leaked
      * glad pointers would then outlive this test's GL context. */
     remove_state_counters();
+    disarm_get_error_poison();
     nt_gfx_shutdown();
     nt_window_shutdown();
 }
@@ -611,10 +555,52 @@ static void backend_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, ui
     nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(effective), unit);
 }
 
-/* A compressed create that fails after binding its own texture uploads on the
- * scratch unit, so slot 0 still holds A in GL and in the cache: re-binding A
- * costs nothing and a draw still samples A. */
-static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
+/* Reports GL_INVALID_VALUE on one chosen glGetError call and forwards the rest,
+ * so a texture upload fails exactly where a driver rejection would. */
+static uint32_t s_get_error_calls;
+static uint32_t s_poisoned_call;
+static PFNGLGETERRORPROC s_saved_get_error;
+
+static GLenum GLAD_API_PTR poisoned_get_error(void) {
+    s_get_error_calls++;
+    GLenum real = s_saved_get_error();
+    return s_get_error_calls == s_poisoned_call ? (GLenum)GL_INVALID_VALUE : real;
+}
+
+/* nt_gfx_init reloads glad, so this must run after the init under test. */
+static void arm_get_error_poison(uint32_t nth_call) {
+    s_get_error_calls = 0;
+    s_poisoned_call = nth_call;
+    s_saved_get_error = glad_glGetError;
+    glad_glGetError = poisoned_get_error;
+}
+
+/* Idempotent: tearDown undoes an arm that a failed assert jumped over. */
+static void disarm_get_error_poison(void) {
+    if (s_saved_get_error == NULL) {
+        return;
+    }
+    glad_glGetError = s_saved_get_error;
+    s_saved_get_error = NULL;
+    s_poisoned_call = 0;
+}
+
+/* A compressed upload that fails after the backend bound its own texture
+ * uploads on the scratch unit, so slot 0 still holds A in GL and in the cache:
+ * re-binding A costs nothing and a draw still samples A.
+ *
+ * glGetError sequence of a BC7 8x8 make_texture with level_count 2:
+ *   1 create: begin_texture_upload drains
+ *   2 create: post-upload drain loop reads (a poison here ends the create;
+ *             the loop then reads once more, 3 calls in total)
+ *   3 level 1: begin_texture_upload drains
+ *   4 level 1: post-upload drain loop reads (poison -> one more read, 5 total)
+ * So call 2 fails the level-0 create and call 4 fails the level-1 upload after
+ * a real level 0 exists -- which the total call count then proves. */
+static void check_failed_compressed_upload_keeps_texture_cache_truthful(uint32_t poisoned_call, uint32_t expected_calls) {
+    if (!nt_gfx_gpu_caps()->has_bc7) {
+        TEST_IGNORE_MESSAGE("BC7 unsupported on this host");
+    }
     static const uint8_t pixel[4] = {255, 0, 0, 255};
     nt_texture_t tex_a = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 1,
@@ -629,10 +615,20 @@ static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &name_a);
     TEST_ASSERT_NOT_EQUAL_INT(0, name_a);
 
-    static const uint8_t fake_basis[8] = {0};
-    uint32_t failed = nt_gfx_backend_create_texture_compressed(fake_basis, sizeof(fake_basis), 4, 4, 1, NT_FILTER_NEAREST, NT_FILTER_NEAREST, NT_WRAP_CLAMP_TO_EDGE, NT_WRAP_CLAMP_TO_EDGE,
-                                                               (uint32_t)NT_BASISU_FORMAT_RGBA32);
-    TEST_ASSERT_EQUAL_UINT32(0, failed);
+    /* 8x8 BC7 = 4 blocks, then a 4x4 level of 1 block. */
+    static const uint8_t bc7_chain[(4 * 16) + 16] = {0};
+    arm_get_error_poison(poisoned_call);
+    nt_texture_t failed = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 8,
+        .height = 8,
+        .data = bc7_chain,
+        .format = NT_TEXTURE_FORMAT_BC7_RGBA,
+        .level_count = 2,
+    });
+    uint32_t calls = s_get_error_calls;
+    disarm_get_error_poison();
+    TEST_ASSERT_EQUAL_UINT32(0, failed.id);
+    TEST_ASSERT_EQUAL_UINT32(expected_calls, calls);
 
     install_state_counters();
     backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
@@ -643,6 +639,10 @@ static void test_failed_compressed_upload_keeps_texture_cache_truthful(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_INT(name_a, bound);
 }
+
+static void test_failed_compressed_create_keeps_texture_cache_truthful(void) { check_failed_compressed_upload_keeps_texture_cache_truthful(2, 3); }
+
+static void test_failed_compressed_level_upload_keeps_texture_cache_truthful(void) { check_failed_compressed_upload_keeps_texture_cache_truthful(4, 5); }
 
 /* Ground state is real GL calls, so scissor left enabled by a previous gfx
  * lifetime cannot survive into the next one on the same native context. */
@@ -1536,7 +1536,8 @@ int main(void) {
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
-    RUN_TEST(test_failed_compressed_upload_keeps_texture_cache_truthful);
+    RUN_TEST(test_failed_compressed_create_keeps_texture_cache_truthful);
+    RUN_TEST(test_failed_compressed_level_upload_keeps_texture_cache_truthful);
     RUN_TEST(test_ground_state_disables_scissor);
     RUN_TEST(test_identical_second_frame_issues_no_bind_calls);
     RUN_TEST(test_state_change_mid_frame_still_emits);

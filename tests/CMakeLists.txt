@@ -311,10 +311,8 @@ if(NOT EMSCRIPTEN)
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
     # Real OpenGL: a rejected bind must clear the backend slot mirrors (stub cannot show it).
-    # No nt_basisu_transcoder_stub: the test TU supplies a transcoder fake whose
-    # failure lands mid-upload, which the loud-fail stub cannot reach.
     add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
-    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
 
@@ -1067,7 +1065,7 @@ if(NOT EMSCRIPTEN)
     # Stub recompiled with NT_ASSERT_MODE=0: proves the failure-return safety
     # net behind the asserts (nt_gfx's activate error path stays reachable).
     add_executable(test_basisu_stub_off unit/test_basisu_stub_off.c unit/test_helpers/nt_basisu_stub_assert_off_tu.c)
-    target_link_libraries(test_basisu_stub_off PRIVATE nt_core unity)
+    target_link_libraries(test_basisu_stub_off PRIVATE nt_core nt_basisu_transcoder_interface unity)
     nt_setup_test_target(test_basisu_stub_off)
 
     # --- meshwire real impl: SOA re-interleave + index-decode rejection ---

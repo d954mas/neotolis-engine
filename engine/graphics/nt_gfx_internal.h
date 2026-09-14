@@ -41,7 +41,6 @@ void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
 
 void nt_gfx_backend_begin_frame(void);
-void nt_gfx_backend_end_frame(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 
@@ -132,11 +131,6 @@ void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices,
 void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type);
 
 bool nt_gfx_backend_recreate_all_resources(void);
-
-/* Compressed texture creation (per-mip transcode + glCompressedTexImage2D upload) */
-uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
-                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v,
-                                                  uint32_t transcode_target /* nt_basisu_format_t cast to uint32_t */);
 
 /* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
