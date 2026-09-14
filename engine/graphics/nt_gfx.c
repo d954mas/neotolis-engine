@@ -1037,13 +1037,7 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
 }
 
 /* Publishes a fully uploaded texture: desc->level_count is the resolved count. */
-static void texture_commit(uint32_t slot, const nt_texture_desc_t *desc, uint32_t backend) {
-    s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_metas[slot].width = desc->width;
-    s_gfx.texture_metas[slot].height = desc->height;
-    s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
-    s_gfx.texture_metas[slot].mip_count = desc->level_count;
-
+static uint32_t texture_commit(uint32_t id, const nt_texture_desc_t *desc, uint32_t backend) {
     nt_sampler_desc_t sd = {
         .min_filter = desc->min_filter,
         .mag_filter = desc->mag_filter,
@@ -1052,8 +1046,20 @@ static void texture_commit(uint32_t slot, const nt_texture_desc_t *desc, uint32_
         .label = NULL,
     };
     nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
-    NT_ASSERT(default_sampler.id != 0 && "texture_commit: default sampler creation failed");
+    if (default_sampler.id == 0) {
+        nt_gfx_backend_destroy_texture(backend);
+        nt_pool_free(&s_gfx.texture_pool, id);
+        return 0;
+    }
+
+    uint32_t slot = nt_pool_slot_index(id);
+    s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].width = desc->width;
+    s_gfx.texture_metas[slot].height = desc->height;
+    s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
+    s_gfx.texture_metas[slot].mip_count = desc->level_count;
     s_gfx.texture_metas[slot].default_sampler = default_sampler;
+    return id;
 }
 
 /* Checks a caller's descriptor and resolves level_count in place. Shared by
@@ -1087,6 +1093,8 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
     if (nt_texture_format_is_compressed(local_desc.format)) {
         NT_ASSERT(local_desc.data != NULL && "make_texture: compressed format requires data");
         NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: compressed format cannot generate mipmaps");
+        /* WebGL BPTC requires block-aligned base dimensions, including tiny textures. */
+        NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
         if (!texture_compressed_format_supported(local_desc.format)) {
 #ifdef NT_DEBUG
             NT_ASSERT(0 && "make_texture: compressed format is not supported by the GPU");
@@ -1177,9 +1185,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         offset += nt_texture_level_bytes(local_desc.format, level_w, level_h);
     }
 
-    texture_commit(nt_pool_slot_index(id), &local_desc, backend);
-
-    result.id = id;
+    result.id = texture_commit(id, &local_desc, backend);
     return result;
 }
 
@@ -2363,7 +2369,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     // #region target and staging
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     nt_texture_format_t target;
-    if (caps->has_bc7) {
+    if (caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
         target = NT_TEXTURE_FORMAT_BC7_RGBA;
     } else if (caps->has_astc) {
         target = NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
@@ -2451,8 +2457,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     }
     // #endregion
 
-    texture_commit(nt_pool_slot_index(id), &desc, backend);
-    return id;
+    return texture_commit(id, &desc, backend);
 }
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {

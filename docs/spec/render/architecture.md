@@ -349,8 +349,8 @@ depth storage, `usampler2D` needs integer storage.
 and core float filtering on desktop GL. It is probed and enabled at initialization
 and context restore, alongside the other GPU capabilities. `RGBA32F` texture
 defaults and sampler overrides require it for any linear filtering. Without it,
-`NEAREST` remains valid; sampler overrides may also use
-`NEAREST_MIPMAP_NEAREST`. Unsupported filter choices assert without silently
+both allow `NEAREST` or `NEAREST_MIPMAP_NEAREST` minification and require
+`NEAREST` magnification. Unsupported filter choices assert without silently
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.

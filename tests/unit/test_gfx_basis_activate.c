@@ -216,11 +216,11 @@ static void check_target(basis_fixture_t *fixture, nt_texture_format_t expect) {
 // #region caps matrix
 
 static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
-    basis_fixture_t alpha = fixture_encode(13, 7, codec, true, NT_TEXTURE_FORMAT_RGBA8);
-    basis_fixture_t rgb = fixture_encode(13, 7, codec, false, NT_TEXTURE_FORMAT_RGB8);
+    basis_fixture_t alpha = fixture_encode(16, 8, codec, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t rgb = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGB8);
     /* An RGBA8 header over opaque pixels: the encoder drops the alpha slices,
      * so an ETC2-only device gets the 8-byte-per-block ETC2_RGB8 storage. */
-    basis_fixture_t opaque_rgba = fixture_encode(13, 7, codec, false, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t opaque_rgba = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGBA8);
 
     set_caps(true, true, true);
     check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
@@ -241,11 +241,39 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
 void test_etc1s_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_ETC1S); }
 void test_uastc_caps_matrix_picks_the_first_supported_target(void) { caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
 
+static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
+    static const uint16_t dimensions[][2] = {{13, 7}, {1, 1}, {8, 2}, {2, 8}};
+    for (size_t i = 0; i < sizeof(dimensions) / sizeof(dimensions[0]); i++) {
+        basis_fixture_t alpha = fixture_encode(dimensions[i][0], dimensions[i][1], codec, true, NT_TEXTURE_FORMAT_RGBA8);
+        basis_fixture_t rgb = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGB8);
+        basis_fixture_t opaque_rgba = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGBA8);
+
+        /* WebGL BPTC requires both base dimensions to be multiples of four. */
+        set_caps(true, true, true);
+        check_target(&alpha, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+        check_target(&rgb, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+        set_caps(true, false, true);
+        check_target(&alpha, NT_TEXTURE_FORMAT_ETC2_RGBA8);
+        check_target(&rgb, NT_TEXTURE_FORMAT_ETC2_RGB8);
+        check_target(&opaque_rgba, NT_TEXTURE_FORMAT_ETC2_RGB8);
+        set_caps(true, false, false);
+        check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
+        check_target(&rgb, NT_TEXTURE_FORMAT_RGBA8);
+
+        fixture_free(&alpha);
+        fixture_free(&rgb);
+        fixture_free(&opaque_rgba);
+    }
+}
+
+void test_etc1s_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_ETC1S); }
+void test_uastc_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_codec(NT_BASISU_CODEC_UASTC_LDR); }
+
 void test_single_pixel_blob_activates_as_one_level(void) {
     basis_fixture_t one = fixture_encode(1, 1, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(1, one.mip_count);
     set_caps(true, false, false);
-    check_target(&one, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&one, NT_TEXTURE_FORMAT_RGBA8);
     fixture_free(&one);
 }
 
@@ -339,7 +367,7 @@ void test_header_boundaries_reject_without_touching_the_pool(void) {
     *fixture_header(&alpha) = good;
 
     /* The unmutated fixture still activates: the rejections above were the mutations. */
-    check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
     fixture_free(&alpha);
 }
 
@@ -354,7 +382,7 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
     expect_rejected(&alpha, alpha.size, "corrupted Basis payload");
     fixture_free(&alpha);
 
-    basis_fixture_t good = fixture_encode(13, 7, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
     check_target(&good, NT_TEXTURE_FORMAT_BC7_RGBA);
     fixture_free(&good);
 }
@@ -400,13 +428,39 @@ void test_backend_failures_leave_no_texture_and_allow_a_retry(void) {
     fixture_free(&alpha);
 }
 
+void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
+    set_caps(true, false, false);
+    basis_fixture_t alpha = fixture_encode(16, 8, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    nt_gfx_fake_reset();
+    nt_gfx_fake_fail_next_sampler_create();
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) != 0) {
+        nt_assert_handler = NULL;
+        fixture_free(&alpha);
+        TEST_FAIL_MESSAGE("Sampler backend failure must reject activation without asserting");
+    }
+    uint32_t handle = nt_gfx_activate_texture(alpha.blob, alpha.size);
+    nt_assert_handler = NULL;
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_create_count());
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)alpha.mip_count - 1U, nt_gfx_fake_texture_level_upload_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_texture_level_backend(), nt_gfx_fake_last_destroyed_texture());
+    TEST_ASSERT_TRUE(nt_basisu_start_transcoding(alpha.blob + sizeof(NtTextureAssetHeader), alpha.size - (uint32_t)sizeof(NtTextureAssetHeader)));
+    nt_basisu_stop_transcoding();
+    expect_full_pool_available();
+
+    check_target(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
+    fixture_free(&alpha);
+}
+
 // #endregion
 
 // #region context loss
 
 void test_reactivation_after_context_restore_yields_the_same_storage(void) {
     set_caps(true, false, false);
-    basis_fixture_t alpha = fixture_encode(13, 7, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    basis_fixture_t alpha = fixture_encode(16, 8, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
     uint32_t first = activate_expecting(&alpha, NT_TEXTURE_FORMAT_BC7_RGBA);
     nt_gfx_deactivate_texture(first);
 
@@ -541,6 +595,8 @@ int main(void) {
     nt_basisu_encoder_init();
     RUN_TEST(test_etc1s_caps_matrix_picks_the_first_supported_target);
     RUN_TEST(test_uastc_caps_matrix_picks_the_first_supported_target);
+    RUN_TEST(test_etc1s_unaligned_dimensions_skip_bc7);
+    RUN_TEST(test_uastc_unaligned_dimensions_skip_bc7);
     RUN_TEST(test_single_pixel_blob_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);
@@ -548,6 +604,7 @@ int main(void) {
     RUN_TEST(test_header_boundaries_reject_without_touching_the_pool);
     RUN_TEST(test_corrupted_payload_is_rejected_and_a_good_blob_still_activates);
     RUN_TEST(test_backend_failures_leave_no_texture_and_allow_a_retry);
+    RUN_TEST(test_sampler_failure_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);
     RUN_TEST(test_staging_is_shared_grown_and_evicted);
     RUN_TEST(test_shutdown_releases_a_live_staging_buffer);

@@ -251,6 +251,11 @@ storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
 `nt_gfx_update_texture` rejects it, since a sub-rectangle of blocks is not a
 sub-rectangle of texels.
 
+`BC7_RGBA` additionally requires both base dimensions to be multiples of 4,
+including textures smaller than one block. This is the portable WebGL BPTC
+upload contract and asserts before storage creation on every backend. Other
+compressed formats allow partial edge blocks.
+
 `level_count` declares how many mip levels `data` carries. `0` and `1` both mean
 base level only, `0` being the zero-init spelling. `N > 1` means levels `0..N-1`
 lie back to back in `data` with no padding (the KTX/DDS layout); level `L`
@@ -258,9 +263,9 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 `nt_texture_level_bytes` of that size. Any count from 1 to the full chain
 (`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
-shot: the handle is published only after the last declared level uploaded, so a
-caller never observes a half-built texture, and a failed level leaves no texture
-and no pool slot.
+shot: the handle is published only after the last declared level uploaded and
+the default sampler was acquired. A failed upload or sampler creation leaves no
+texture and no pool slot.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
 every published texture is complete for every minification filter. Descriptors the
@@ -273,9 +278,9 @@ texture with more than one level; whole levels are replaced by recreating the
 texture.
 
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
-both in the texture descriptor and in sampler overrides. Without it, texture
-descriptors require `NEAREST` minification and magnification and no generated
-mipmaps. Sampler overrides may additionally use `NEAREST_MIPMAP_NEAREST`.
+both in the texture descriptor and in sampler overrides. Without it, both allow
+`NEAREST` or `NEAREST_MIPMAP_NEAREST` minification, require `NEAREST`
+magnification, and forbid generated mipmaps.
 Creating mipmaps requires
 both `has_float_texture_linear` and `has_float_render_target`, because WebGL
 generation requires filterable, color-renderable storage. Unsupported combinations
@@ -335,9 +340,12 @@ mismatch is a recoverable rejection with a log.
 
 The target format is the first entry the GPU supports of `BC7_RGBA`,
 `ASTC_4x4_RGBA`, `ETC2_RGBA8` or `ETC2_RGB8` (by the blob's alpha), then `RGBA8`
-as the always-available fallback; `nt_gfx_texture_format` reports that choice.
+as the always-available fallback. `BC7_RGBA` is eligible only when both base
+dimensions are multiples of 4; otherwise selection continues with ASTC, ETC2,
+then RGBA8. `nt_gfx_texture_format` reports that choice.
 The activator transcodes and uploads one level at a time and publishes the
-handle after the last one. Any failure — transcode, upload, staging — publishes
+handle after the last one and default sampler acquisition. Any failure —
+transcode, upload, staging, sampler creation — publishes
 nothing: no handle, no pool slot, no open transcoder session.
 
 ### Render-target handles
