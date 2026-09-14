@@ -125,6 +125,70 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     }
 }
 
+/* Byte offsets inside basist::basis_file_header and basist::basis_slice_desc
+ * (deps/basisu/transcoder/basisu_file_headers.h, both #pragma pack(1) with
+ * little-endian packed_uint fields). basis_file_header runs
+ * m_sig(2) m_ver(2) m_header_size(2) m_header_crc16(2) m_data_size(4)
+ * m_data_crc16(2) m_total_slices(3) m_total_images(3) m_tex_format(1)
+ * m_flags(2) m_tex_type(1) m_us_per_frame(3) m_reserved(4) m_userdata0(4)
+ * m_userdata1(4) m_total_endpoints(2) m_endpoint_cb_file_ofs(4)
+ * m_endpoint_cb_file_size(3) m_total_selectors(2) m_selector_cb_file_ofs(4)
+ * m_selector_cb_file_size(3) m_tables_file_ofs(4) m_tables_file_size(4)
+ * m_slice_desc_file_ofs(4) ...; basis_slice_desc runs m_image_index(3)
+ * m_level_index(1) m_flags(1) m_orig_width(2) m_orig_height(2)
+ * m_num_blocks_x(2) m_num_blocks_y(2) m_file_ofs(4) m_file_size(4)
+ * m_slice_data_crc16(2). */
+#define BASIS_HEADER_TOTAL_SLICES_OFS 14U
+#define BASIS_HEADER_SLICE_DESC_OFS_OFS 65U
+#define BASIS_SLICE_DESC_BYTES 23U
+#define BASIS_SLICE_LEVEL_INDEX_OFS 3U
+#define BASIS_SLICE_ORIG_WIDTH_OFS 5U
+
+static uint32_t read_le(const uint8_t *p, uint32_t bytes) {
+    uint32_t value = 0;
+    for (uint32_t i = 0; i < bytes; i++) {
+        value |= (uint32_t)p[i] << (8U * i);
+    }
+    return value;
+}
+
+/* A level whose stored width shrank inside the same block count: upstream
+ * accepts it (m_num_blocks_x still matches) and would then write that level
+ * with its own row stride, so nt_basisu_info has to reject the chain itself.
+ * validate_header re-checks no CRC over the slice array, so the patch survives. */
+void test_reject_mip_level_with_a_shrunken_stored_width(void) {
+    uint8_t pixels[13 * 7 * 4];
+    fill_pixels(pixels, 13, 7, false);
+    nt_basisu_encode_opts_t opts = nt_tex_compress_uastc_default();
+    /* Opaque UASTC: exactly one slice per level, so level 1 has its own desc. */
+    nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 13, 7, false, &opts);
+    TEST_ASSERT_NOT_NULL(enc.data);
+
+    nt_basisu_info_t info = {0};
+    TEST_ASSERT_TRUE(nt_basisu_info(enc.data, enc.size, &info));
+    TEST_ASSERT_EQUAL_UINT32(4, info.level_count);
+
+    uint8_t *blob = enc.data;
+    const uint32_t total_slices = read_le(blob + BASIS_HEADER_TOTAL_SLICES_OFS, 3);
+    TEST_ASSERT_EQUAL_UINT32(info.level_count, total_slices);
+    uint8_t *slices = blob + read_le(blob + BASIS_HEADER_SLICE_DESC_OFS_OFS, 4);
+
+    uint8_t *level1 = NULL;
+    for (uint32_t i = 0; i < total_slices; i++) {
+        uint8_t *slice = slices + ((size_t)i * BASIS_SLICE_DESC_BYTES);
+        if (slice[BASIS_SLICE_LEVEL_INDEX_OFS] == 1) {
+            level1 = slice;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(level1);
+    /* Level 1 of 13x7 is 6x3 -- two 4x4 blocks wide, exactly as 5x3 would be. */
+    TEST_ASSERT_EQUAL_UINT32(6, read_le(level1 + BASIS_SLICE_ORIG_WIDTH_OFS, 2));
+    level1[BASIS_SLICE_ORIG_WIDTH_OFS] = 5;
+
+    TEST_ASSERT_FALSE(nt_basisu_info(enc.data, enc.size, &info));
+    nt_basisu_encode_free(&enc);
+}
+
 static void check_premultiplied_mip(nt_basisu_codec_t codec) {
     uint8_t pixels[8 * 8 * 4];
     for (uint32_t y = 0; y < 8; y++) {
@@ -310,6 +374,7 @@ int main(void) {
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_reject_non_basis_header);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
+    RUN_TEST(test_reject_mip_level_with_a_shrunken_stored_width);
     RUN_TEST(test_etc1s_premultiplied_mip);
     RUN_TEST(test_uastc_premultiplied_mip);
     RUN_TEST(test_public_basis_single_pixel_full_mip_chain);

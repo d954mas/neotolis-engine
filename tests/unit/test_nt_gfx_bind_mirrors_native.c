@@ -585,19 +585,17 @@ static void disarm_get_error_poison(void) {
     s_poisoned_call = 0;
 }
 
-/* A compressed upload that fails after the backend bound its own texture
+/* A compressed create that fails after the backend bound its own texture
  * uploads on the scratch unit, so slot 0 still holds A in GL and in the cache:
  * re-binding A costs nothing and a draw still samples A.
  *
  * glGetError sequence of a BC7 8x8 make_texture with level_count 2:
- *   1 create: begin_texture_upload drains
- *   2 create: post-upload drain loop reads (a poison here ends the create;
- *             the loop then reads once more, 3 calls in total)
- *   3 level 1: begin_texture_upload drains
- *   4 level 1: post-upload drain loop reads (poison -> one more read, 5 total)
- * So call 2 fails the level-0 create and call 4 fails the level-1 upload after
- * a real level 0 exists -- which the total call count then proves. */
-static void check_failed_compressed_upload_keeps_texture_cache_truthful(uint32_t poisoned_call, uint32_t expected_calls) {
+ *   1 begin_texture_upload drains before both levels go up
+ *   2 post-upload drain loop reads (the poison lands here and ends the create)
+ *   3 the same loop reads once more and sees a clean queue
+ * So the create fails after two real glCompressedTexImage2D calls, which the
+ * total call count then proves. */
+static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
     if (!nt_gfx_gpu_caps()->has_bc7) {
         TEST_IGNORE_MESSAGE("BC7 unsupported on this host");
     }
@@ -617,7 +615,7 @@ static void check_failed_compressed_upload_keeps_texture_cache_truthful(uint32_t
 
     /* 8x8 BC7 = 4 blocks, then a 4x4 level of 1 block. */
     static const uint8_t bc7_chain[(4 * 16) + 16] = {0};
-    arm_get_error_poison(poisoned_call);
+    arm_get_error_poison(2);
     nt_texture_t failed = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 8,
         .height = 8,
@@ -628,7 +626,7 @@ static void check_failed_compressed_upload_keeps_texture_cache_truthful(uint32_t
     uint32_t calls = s_get_error_calls;
     disarm_get_error_poison();
     TEST_ASSERT_EQUAL_UINT32(0, failed.id);
-    TEST_ASSERT_EQUAL_UINT32(expected_calls, calls);
+    TEST_ASSERT_EQUAL_UINT32(3, calls);
 
     install_state_counters();
     backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
@@ -639,10 +637,6 @@ static void check_failed_compressed_upload_keeps_texture_cache_truthful(uint32_t
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_INT(name_a, bound);
 }
-
-static void test_failed_compressed_create_keeps_texture_cache_truthful(void) { check_failed_compressed_upload_keeps_texture_cache_truthful(2, 3); }
-
-static void test_failed_compressed_level_upload_keeps_texture_cache_truthful(void) { check_failed_compressed_upload_keeps_texture_cache_truthful(4, 5); }
 
 /* Ground state is real GL calls, so scissor left enabled by a previous gfx
  * lifetime cannot survive into the next one on the same native context. */
@@ -1537,7 +1531,6 @@ int main(void) {
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
     RUN_TEST(test_failed_compressed_create_keeps_texture_cache_truthful);
-    RUN_TEST(test_failed_compressed_level_upload_keeps_texture_cache_truthful);
     RUN_TEST(test_ground_state_disables_scissor);
     RUN_TEST(test_identical_second_frame_issues_no_bind_calls);
     RUN_TEST(test_state_change_mid_frame_still_emits);

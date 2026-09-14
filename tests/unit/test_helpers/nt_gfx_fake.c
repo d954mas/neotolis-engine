@@ -108,14 +108,6 @@ static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
 static bool s_fake_backend_missing;
 static uint8_t s_fake_fail_texture_creates;
-static uint8_t s_fake_fail_texture_level_uploads;
-static uint32_t s_fake_texture_level_upload_count;
-static uint32_t s_fake_last_texture_level_backend;
-static uint8_t s_fake_last_texture_level;
-static uint16_t s_fake_last_texture_level_width;
-static uint16_t s_fake_last_texture_level_height;
-static nt_texture_format_t s_fake_last_texture_level_format;
-static const void *s_fake_last_texture_level_data;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
@@ -186,16 +178,8 @@ void nt_gfx_fake_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_texture_creates = mask;
 }
-void nt_gfx_fake_fail_texture_level_uploads(uint8_t mask) { s_fake_fail_texture_level_uploads = mask; }
-uint32_t nt_gfx_fake_texture_level_upload_count(void) { return s_fake_texture_level_upload_count; }
-uint32_t nt_gfx_fake_last_texture_level_backend(void) { return s_fake_last_texture_level_backend; }
-uint8_t nt_gfx_fake_last_texture_level(void) { return s_fake_last_texture_level; }
-uint16_t nt_gfx_fake_last_texture_level_width(void) { return s_fake_last_texture_level_width; }
-uint16_t nt_gfx_fake_last_texture_level_height(void) { return s_fake_last_texture_level_height; }
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
 uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
-nt_texture_format_t nt_gfx_fake_last_texture_level_format(void) { return s_fake_last_texture_level_format; }
-const void *nt_gfx_fake_last_texture_level_data(void) { return s_fake_last_texture_level_data; }
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_buffer_creates = mask;
@@ -257,16 +241,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_context_lost = false;
     s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
-    s_fake_fail_texture_level_uploads = 0;
-    s_fake_texture_level_upload_count = 0;
-    s_fake_last_texture_level_backend = 0;
-    s_fake_last_texture_level = 0;
-    s_fake_last_texture_level_width = 0;
-    s_fake_last_texture_level_height = 0;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
-    s_fake_last_texture_level_format = NT_TEXTURE_FORMAT_INVALID;
-    s_fake_last_texture_level_data = NULL;
     s_fake_fail_buffer_creates = 0;
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
@@ -478,6 +454,9 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_hand
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     s_fake_last_texture_desc = *desc;
     s_fake_texture_create_count++;
+    if (s_fake_context_lost) {
+        return 0; /* glGenTextures returns no name on a lost context */
+    }
     /* One bit per create, consumed in order: mask 1 fails the first, 2 the
      * second, 3 both. */
     bool fail = (s_fake_fail_texture_creates & 1U) != 0;
@@ -486,20 +465,6 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
         return 0;
     }
     return ++s_fake_next_texture_backend;
-}
-
-bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
-    s_fake_last_texture_level_backend = backend_handle;
-    s_fake_last_texture_level = level;
-    s_fake_last_texture_level_width = w;
-    s_fake_last_texture_level_height = h;
-    s_fake_last_texture_level_format = format;
-    s_fake_last_texture_level_data = data;
-    s_fake_texture_level_upload_count++;
-    /* One bit per upload, consumed in order, like the create mask. */
-    bool fail = (s_fake_fail_texture_level_uploads & 1U) != 0;
-    s_fake_fail_texture_level_uploads >>= 1U;
-    return !fail;
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {

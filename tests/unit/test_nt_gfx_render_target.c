@@ -551,7 +551,8 @@ static void test_render_target_color_accepts_mipmap_sampler_override(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
-    TEST_ASSERT_EQUAL_UINT8(1, nt_gfx_fake_last_texture_desc().level_count);
+    /* The attachment desc keeps the zero-init spelling; the backend reads it as one level. */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_gfx_fake_last_texture_desc().level_count);
 
     begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
     apply_one_texture(nt_gfx_render_target_color(rt), mipmap_sampler);
