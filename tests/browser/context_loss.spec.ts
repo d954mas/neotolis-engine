@@ -13,6 +13,7 @@ declare global {
       basis_format(): number;
       basis_caps(): number;
       basis_sample(level: number): number;
+      basis_single_pixel_format(): number;
     };
     __ntLossExtension?: WEBGL_lose_context;
     __ntBlockFloatLinear?: boolean;
@@ -248,6 +249,23 @@ test('basis fixture: the transcoded atlas keeps its format and texels across a c
   const after = await checkBasisFixture(page, 'after restore');
   expect(after, 'texels after re-activation').toEqual(before);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});
+
+test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+  });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+  const caps = await page.evaluate(() => window.__nt!.basis_caps());
+  expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);
+  const format = await page.evaluate(() => window.__nt!.basis_single_pixel_format());
+  const expected = (caps & 2) ? FORMAT_ASTC_4x4_RGBA : (caps & 4) ? FORMAT_ETC2_RGBA8 : FORMAT_RGBA8;
+  expect(errors, 'single-pixel Basis activation must not emit WebGL errors').toEqual([]);
+  expect(format, 'single-pixel Basis activation selects the next supported target').toBe(expected);
 });
 
 test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
