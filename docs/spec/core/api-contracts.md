@@ -272,11 +272,9 @@ without a sampler.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
 every published texture is complete for every minification filter. Descriptors the
-engine builds for render-target attachments ship `level_count == 0`; `0` or `1`
-both mean base level only, and the backend applies the same rule. A
-`glGenerateMipmap` that fails fails the creation:
-no texture is published. A mipmap
-filter over a single-level texture is therefore legal in both the descriptor and
+engine builds for render-target attachments ship `level_count == 0`. A
+`glGenerateMipmap` that fails fails the creation: no texture is published. A
+mipmap filter over a single-level texture is therefore legal in both the descriptor and
 a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
 or multi-level texture asserts, then returns without touching storage; whole
 levels are replaced by recreating the texture.
@@ -331,9 +329,11 @@ the public texture formats cannot satisfy them.
 Pack bytes are untrusted, so `nt_gfx_activate_texture` rejects a bad header
 instead of asserting on it: it logs and returns an invalid handle for an
 out-of-range pixel format, sampler defaults outside the filter/wrap enums,
-dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, and a
-`data_size` longer than the blob. RAW assets then go through the public
-constructor unchanged.
+dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, a
+`data_size` longer than the blob, an unknown `compression`, and a RAW
+`data_size` shorter than `width * height * bpp`. Magic, version and the minimum
+blob size are checked before the header is read. RAW assets then go through
+the public constructor unchanged.
 
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal

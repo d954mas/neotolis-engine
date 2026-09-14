@@ -12,10 +12,9 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
-/* Shared activation staging: grow-on-demand, reused sequentially by mesh
- * decode (VBO then IBO) and by Basis transcode output (the whole mip chain),
- * freed after NT_STAGE_IDLE_FRAMES without use -- no per-activation heap
- * traffic while a pack streams in. */
+/* Activation staging shared by mesh decode (VBO then IBO) and the transcoded
+ * Basis chain: grows on demand, freed after NT_STAGE_IDLE_FRAMES idle -- no
+ * per-activation heap traffic while a pack streams in. */
 #define NT_STAGE_IDLE_FRAMES 60 /* ~1s at 60fps */
 static uint8_t *s_stage_buf = NULL;
 static uint32_t s_stage_size = 0;
@@ -79,9 +78,9 @@ typedef struct {
     uint8_t format;    /* nt_texture_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool render_target_owned;
-    /* Sampler bound automatically by bind_texture. Always non-zero in
-     * normal runtime (make_texture / activator assert this). Reset to
-     * NT_SAMPLER_INVALID transiently during context-loss recovery. */
+    /* Sampler bound automatically by bind_texture. Always non-zero for a live
+     * texture: make_texture rejects the texture when the sampler cannot be
+     * created. Reset to NT_SAMPLER_INVALID transiently during context-loss recovery. */
     nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
 
@@ -2208,7 +2207,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     if (is_compressed) {
         return;
     }
-    NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
+    NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: multi-level textures cannot be sub-updated -- recreate the texture");
     if (s_gfx.texture_metas[slot].mip_count > 1) {
         return;
     }
@@ -2234,9 +2233,8 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
-    /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
-     * Emscripten's module-global GL.lastError, which survives context
-     * recreation and would trip the next upload's pending-error assert. */
+    /* make_texture would refuse the result anyway; bail before transcoding
+     * the whole chain into staging. */
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
         return 0;
     }

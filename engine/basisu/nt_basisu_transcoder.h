@@ -28,10 +28,9 @@ void nt_basisu_transcoder_global_init(void);
  * max(1, width >> L) x max(1, height >> L). */
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
-/* Transcode every level of image 0 into `output`, levels 0..N-1 back to back
- * with no padding (level L is max(1, w >> L) x max(1, h >> L)), N and dims from
- * `info`. capacity_bytes must hold the whole chain in `format`; a short buffer
- * is rejected before anything is written. Opens and closes the session itself. */
+/* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
+ * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info`. A
+ * capacity short of the whole chain is rejected before anything is written. */
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
 
 #ifdef __cplusplus

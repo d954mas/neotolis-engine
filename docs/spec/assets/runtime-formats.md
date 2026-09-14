@@ -36,10 +36,9 @@ and never picks a format; the transcoder is a codec with no GPU knowledge. That
 staging buffer is the same one mesh activation re-interleaves SoA vertices
 through — one grow-on-demand allocation, freed once it goes idle.
 
-The builder rejects a RAW texture whose min filter asks for mipmaps without
-`gen_mipmaps` at build time; the runtime itself accepts a single-level texture
-under any min filter, because `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage
-is mip-complete.
+The runtime accepts a single-level texture under any min filter, because
+`GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder
+asserts on that combination for RAW assets ([builder](../builder/builder.md)).
 
 ## Mesh format strategy
 

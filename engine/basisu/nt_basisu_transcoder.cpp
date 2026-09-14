@@ -14,8 +14,8 @@ void nt_basisu_transcoder_global_init(void) { basist::basisu_transcoder_init(); 
 
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info) {
     NT_ASSERT(out_info != nullptr);
-    /* get_basis_tex_format reads the header without validating it and answers
-       cETC1S for garbage, so the header check has to come first. */
+    /* get_basis_tex_format answers cETC1S for a header it rejects, indistinguishable
+       from a real ETC1S file, so the full header check has to come first. */
     if (!s_transcoder.validate_header(basis_data, basis_size)) {
         return false;
     }

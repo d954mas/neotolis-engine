@@ -315,7 +315,6 @@ void test_rgba8_fallback_rejects_sub_updates(void) {
 
 // #region boundary rejections
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one independent header mutation per block
 void test_header_boundaries_reject_without_touching_the_pool(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(13, 7, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
@@ -487,7 +486,6 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
 
 #define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + MESH_VERTEX_BYTES + 6)
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one staging observation per step of one lifecycle
 void test_staging_is_shared_grown_and_evicted(void) {
     set_caps(true, false, false);
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());

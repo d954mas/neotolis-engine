@@ -168,8 +168,8 @@ typedef enum {
  *
  * format field serves double duty:
  *   RAW: pixel layout (RGBA8, RGB8, RG8, R8)
- *   BASIS: the builder-side source channel layout, informational only -- the
- *          runtime reads alpha and codec from the Basis blob itself
+ *   BASIS: range-checked like every header field, but it does not pick the
+ *          target -- alpha and codec come from the Basis blob itself
  *
  * flags field:
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
@@ -185,9 +185,6 @@ typedef enum {
  *   samples with the asset's intended filter unless a material overrides.
  *   Pixel-art atlases typically pick LINEAR/NEAREST + REPEAT; downscaled
  *   3D textures want LINEAR_MIPMAP_LINEAR.
- *
- * Bump from V2 to V3: added 4 sampler-default bytes. Older V2 packs need
- * to be rebuilt — no compat shim, this is a feature-branch change.
  *
  * No mip_sizes[] array: RAW mips are calculable from dimensions,
  * BASIS mip boundaries are parsed internally by the transcoder.

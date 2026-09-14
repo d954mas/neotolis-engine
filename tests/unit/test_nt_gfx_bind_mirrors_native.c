@@ -587,14 +587,7 @@ static void disarm_get_error_poison(void) {
 
 /* A compressed create that fails after the backend bound its own texture
  * uploads on the scratch unit, so slot 0 still holds A in GL and in the cache:
- * re-binding A costs nothing and a draw still samples A.
- *
- * glGetError sequence of a BC7 8x8 make_texture with level_count 2:
- *   1 begin_texture_upload drains before both levels go up
- *   2 post-upload drain loop reads (the poison lands here and ends the create)
- *   3 the same loop reads once more and sees a clean queue
- * So the create fails after two real glCompressedTexImage2D calls, which the
- * total call count then proves. */
+ * re-binding A costs nothing and a draw still samples A. */
 static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
     if (!nt_gfx_gpu_caps()->has_bc7) {
         TEST_IGNORE_MESSAGE("BC7 unsupported on this host");
@@ -615,7 +608,7 @@ static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
 
     /* 8x8 BC7 = 4 blocks, then a 4x4 level of 1 block. */
     static const uint8_t bc7_chain[(4 * 16) + 16] = {0};
-    arm_get_error_poison(2);
+    arm_get_error_poison(2); /* 1: pre-upload drain, 2: post-upload drain (poisoned, ends the create after both level uploads), 3: clean re-read */
     nt_texture_t failed = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 8,
         .height = 8,

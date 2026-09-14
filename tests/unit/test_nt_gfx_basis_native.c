@@ -21,11 +21,9 @@
 #define SRC_H 64U
 #define SRC_LEVELS 7U /* 96x64 -> 48x32 -> 24x16 -> 12x8 -> 6x4 -> 3x2 -> 1x1 */
 
-/* Codec tolerances on a smooth ramp, in 0..255 steps, measured against the
- * transcoder's own RGBA32 output of the same level: UASTC round-trips a ramp
- * tightly, ETC1S quantizes to a 4-colour block palette plus a separate alpha
- * slice. Loose enough for the codec, tight enough that a channel swap, a
- * vertical flip (alpha ramps over y, RGB over x) or a wrong mip level fails. */
+/* Tolerances vs the transcoder's own RGBA32 decode of the same level, in 0..255
+ * steps: UASTC round-trips a ramp tightly, ETC1S quantizes to a 4-colour block
+ * palette. Loose for the codec, tight enough that a channel swap, a flip or a wrong level fails. */
 #define TOL_UASTC 24
 #define TOL_ETC1S 44
 #define TOL_EXACT 2
@@ -398,8 +396,8 @@ void test_partial_chain_caps_max_level_and_samples_its_last_level(void) {
     nt_gfx_destroy_texture(tex);
 }
 
-/* The resize staging path builds its own descriptor and is the one GL name
- * creator that sees level_count == 0, which must still cap at one level. */
+/* The resize path builds its descriptor inside the backend, bypassing
+ * make_texture; the recreated attachment must still cap at one level. */
 void test_resized_render_target_color_caps_max_level(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 16,

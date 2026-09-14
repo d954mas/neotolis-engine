@@ -1617,7 +1617,7 @@ typedef struct {
     bool compressed; /* upload through glCompressedTexImage2D, sized in bytes */
 } nt_gfx_gl_fmt_t;
 
-/* ES 3.0 core, desktop ARB and KHR extension spellings differ per header. */
+/* Not every GL header defines all four tokens; the values are spec-fixed. */
 #ifndef GL_COMPRESSED_RGB8_ETC2
 #define GL_COMPRESSED_RGB8_ETC2 0x9274
 #endif

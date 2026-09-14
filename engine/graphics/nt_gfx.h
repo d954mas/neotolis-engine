@@ -734,7 +734,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
-/* ---- Texture update (non-mipmapped, non-depth textures only, level 0) ---- */
+/* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 

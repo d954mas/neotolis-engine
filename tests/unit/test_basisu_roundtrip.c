@@ -129,19 +129,8 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     }
 }
 
-/* Byte offsets inside basist::basis_file_header and basist::basis_slice_desc
- * (deps/basisu/transcoder/basisu_file_headers.h, both #pragma pack(1) with
- * little-endian packed_uint fields). basis_file_header runs
- * m_sig(2) m_ver(2) m_header_size(2) m_header_crc16(2) m_data_size(4)
- * m_data_crc16(2) m_total_slices(3) m_total_images(3) m_tex_format(1)
- * m_flags(2) m_tex_type(1) m_us_per_frame(3) m_reserved(4) m_userdata0(4)
- * m_userdata1(4) m_total_endpoints(2) m_endpoint_cb_file_ofs(4)
- * m_endpoint_cb_file_size(3) m_total_selectors(2) m_selector_cb_file_ofs(4)
- * m_selector_cb_file_size(3) m_tables_file_ofs(4) m_tables_file_size(4)
- * m_slice_desc_file_ofs(4) ...; basis_slice_desc runs m_image_index(3)
- * m_level_index(1) m_flags(1) m_orig_width(2) m_orig_height(2)
- * m_num_blocks_x(2) m_num_blocks_y(2) m_file_ofs(4) m_file_size(4)
- * m_slice_data_crc16(2). */
+/* Byte offsets into basist::basis_file_header / basis_slice_desc
+ * (deps/basisu/transcoder/basisu_file_headers.h; pack(1), little-endian). */
 #define BASIS_HEADER_TOTAL_SLICES_OFS 14U
 #define BASIS_HEADER_SLICE_DESC_OFS_OFS 65U
 #define BASIS_SLICE_DESC_BYTES 23U
