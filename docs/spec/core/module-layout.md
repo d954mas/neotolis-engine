@@ -106,7 +106,8 @@ exist and `nt_resource_load_auto` routes to `nt_http`.
 `nt_basisu_transcoder` is the size-motivated pair: the real impl is the C++
 Basis Universal transcoder (plus the C++ stdlib on wasm), the stub keeps a
 texture-less executable C-only. Its C API is a codec and nothing more —
-`nt_basisu_info`, `nt_basisu_start_transcoding`, `nt_basisu_transcode_level`,
+`nt_basisu_transcoder_global_init`, `nt_basisu_info`,
+`nt_basisu_start_transcoding`, `nt_basisu_transcode_level`,
 `nt_basisu_stop_transcoding` — speaking `nt_texture_format_t` and
 `nt_basisu_codec_t`, with no GPU enum or GL constant of its own. The texture
 activator in `nt_gfx` owns the policy (target format, session, staging) and

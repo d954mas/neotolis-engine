@@ -135,9 +135,10 @@ any asset that disagrees.
 
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
-runtime treats that as legal: an `RGBA8` header over an alpha-less blob simply
-selects the opaque target format. The reverse, an `RGB8` header over a blob
-carrying alpha, is rejected at activation.
+runtime treats that as legal: an `RGBA8` header over an alpha-less blob selects
+`ETC2_RGB8` on an ETC2 host, where the opaque block is half the size; BC7, ASTC
+and the RGBA8 fallback have no opaque variant and are unaffected. The reverse,
+an `RGB8` header over a blob carrying alpha, is rejected at activation.
 
 ## Builder stages
 

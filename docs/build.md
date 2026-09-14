@@ -95,8 +95,9 @@ Basis coverage splits by backend. `test_gfx_basis_activate` drives the texture
 activator on the fake backend with the real transcoder and the builder's encoder.
 `test_nt_gfx_basis_native` (label `native`, `RESOURCE_LOCK gl_display`) uploads and
 samples real compressed storage through GL; the `native-debug-test` and
-`native-release-test` ctest runs both cover it, and a format the host GPU lacks
-reports as ctest-ignored rather than passing silently.
+`native-release-test` ctest runs both cover it. A format the host GPU lacks is
+reported as IGNORE in the Unity test log; ctest still counts the executable as
+passed, so read the log rather than the ctest summary for per-format coverage.
 
 Measure performance in Release with the required timing flag explicitly ON.
 Timing producers do not require metrics. `NT_LOG_MIN_LEVEL=3` uses the existing

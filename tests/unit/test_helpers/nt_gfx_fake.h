@@ -78,6 +78,8 @@ uint8_t nt_gfx_fake_last_texture_level(void);
 uint16_t nt_gfx_fake_last_texture_level_width(void);
 uint16_t nt_gfx_fake_last_texture_level_height(void);
 uint32_t nt_gfx_fake_texture_destroy_count(void);
+/* Backend handle of the last destroyed texture; handle 0 is a no-op, as on GL. */
+uint32_t nt_gfx_fake_last_destroyed_texture(void);
 nt_texture_format_t nt_gfx_fake_last_texture_level_format(void);
 const void *nt_gfx_fake_last_texture_level_data(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);

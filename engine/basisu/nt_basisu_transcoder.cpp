@@ -2,11 +2,7 @@
 
 #include "basisu_transcoder.h"
 
-/* The engine's core headers are C; without this the C++ TU would reference a
-   mangled nt_assert_handler that nt_core never defines. */
-extern "C" {
 #include "core/nt_assert.h"
-}
 
 /* ---- Static transcoder instance ---- */
 
@@ -94,6 +90,8 @@ bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint
         NT_ASSERT(0 && "transcode_level: format is not a Basis transcode target");
         return false;
     }
+
+    NT_ASSERT(capacity_bytes != 0 && capacity_bytes % unit_bytes == 0 && "transcode_level: capacity must be whole blocks/pixels");
 
     /* Upstream counts blocks (pixels for RGBA32) and rejects a short buffer
        before writing anything. */

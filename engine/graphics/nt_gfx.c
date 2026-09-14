@@ -1084,9 +1084,6 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
-    if (local_desc.data != NULL) {
-        NT_ASSERT(nt_texture_level_bytes(local_desc.format, local_desc.width, local_desc.height) != 0 && "make_texture: format has no defined upload size");
-    }
     if (nt_texture_format_is_compressed(local_desc.format)) {
         NT_ASSERT(local_desc.data != NULL && "make_texture: compressed format requires data");
         NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: compressed format cannot generate mipmaps");
@@ -1097,6 +1094,14 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
             NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
             return false;
         }
+    }
+    /* Ahead of the generic level rule so the depth-specific message wins. */
+    if (nt_texture_format_is_depth(local_desc.format)) {
+        NT_ASSERT(local_desc.data == NULL && "depth texture upload is not supported");
+        NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST min_filter without compare mode");
+        NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
+        NT_ASSERT(!local_desc.gen_mipmaps && "depth texture mipmaps are not supported");
+        NT_ASSERT(local_desc.level_count <= 1 && "depth texture mip levels are not supported");
     }
     if (local_desc.level_count > 1) {
         NT_ASSERT(local_desc.data != NULL && "make_texture: level_count > 1 requires data");
@@ -1109,13 +1114,8 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
         NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
-    }
-    if (nt_texture_format_is_depth(local_desc.format)) {
-        NT_ASSERT(local_desc.data == NULL && "depth texture upload is not supported");
-        NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST min_filter without compare mode");
-        NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
-        NT_ASSERT(!local_desc.gen_mipmaps && "depth texture mipmaps are not supported");
-        NT_ASSERT(local_desc.level_count <= 1 && "depth texture mip levels are not supported");
+        /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
+        NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA32F) {
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || !texture_filter_uses_linear(local_desc.min_filter)) && "RGBA32F min_filter requires float texture linear support");
@@ -2236,8 +2236,15 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     }
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
-    NT_ASSERT(!nt_texture_format_is_compressed((nt_texture_format_t)stored_format) && "update_texture: compressed textures cannot be sub-updated");
+    bool is_compressed = nt_texture_format_is_compressed((nt_texture_format_t)stored_format);
+    NT_ASSERT(!is_compressed && "update_texture: compressed textures cannot be sub-updated");
+    if (is_compressed) {
+        return;
+    }
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
+    if (s_gfx.texture_metas[slot].mip_count > 1) {
+        return;
+    }
     bool is_depth = nt_texture_format_is_depth((nt_texture_format_t)stored_format);
     NT_ASSERT(!is_depth && "update_texture: depth texture updates are not supported");
     if (is_depth) {
@@ -2283,6 +2290,12 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     /* Subtraction safe -- caller verified size >= sizeof header */
     if (hdr2->data_size > size - sizeof(NtTextureAssetHeaderV2)) {
         NT_LOG_ERROR("activate_texture: v2 blob truncated");
+        return 0;
+    }
+    /* The builder only encodes RGBA8/RGB8 sources into Basis, so any other
+     * header format over a Basis blob is a corrupt pack. */
+    if (hdr2->compression == NT_TEXTURE_COMPRESSION_BASIS && hdr2->format != NT_TEXTURE_FORMAT_RGBA8 && hdr2->format != NT_TEXTURE_FORMAT_RGB8) {
+        NT_LOG_ERROR("activate_texture: Basis blob with header format %u (RGBA8 or RGB8 required)", hdr2->format);
         return 0;
     }
     const uint16_t width = (uint16_t)hdr2->width;
@@ -2371,7 +2384,6 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: staging allocation of %u bytes failed", (uint32_t)bytes0);
         return 0;
     }
-
     nt_texture_desc_t desc = {
         .width = width,
         .height = height,
@@ -2385,6 +2397,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         .gen_mipmaps = false,
         .label = NULL,
     };
+    /* Cannot fail here: the target came from caps and the dims passed the boundary block. */
     if (!texture_desc_validate(&desc)) {
         return 0;
     }
@@ -2394,6 +2407,9 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     /* Pool slot before the session: an assert on a full pool must not leave one open. */
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
     NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
+    if (id == 0) {
+        return 0;
+    }
 
     if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
         NT_LOG_ERROR("activate_texture: Basis start_transcoding failed");

@@ -190,6 +190,11 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(rt);
+    nt_gfx_destroy_vertex_input(vi);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
 }
 
 /* read_pixels hands back top-left rows; GL row 0 is the source's row 0. */
@@ -389,6 +394,25 @@ void test_partial_chain_caps_max_level_and_samples_its_last_level(void) {
     nt_gfx_destroy_texture(tex);
 }
 
+/* The resize staging path builds its own descriptor and is the one GL name
+ * creator that sees level_count == 0, which must still cap at one level. */
+void test_resized_render_target_color_caps_max_level(void) {
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 16,
+        .height = 16,
+        .color_format = NT_TEXTURE_FORMAT_RGBA8,
+        .color_min_filter = NT_FILTER_NEAREST,
+        .color_mag_filter = NT_FILTER_NEAREST,
+        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_storage = NT_RT_DEPTH_NONE,
+    });
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 32, 24));
+    TEST_ASSERT_EQUAL_INT(0, texture_max_level(nt_gfx_render_target_color(rt)));
+    nt_gfx_destroy_render_target(rt);
+}
+
 // #endregion
 
 int main(void) {
@@ -404,5 +428,6 @@ int main(void) {
     RUN_TEST(test_prepared_upload_etc2_rgb8);
     RUN_TEST(test_single_level_texture_caps_max_level_and_still_samples);
     RUN_TEST(test_partial_chain_caps_max_level_and_samples_its_last_level);
+    RUN_TEST(test_resized_render_target_color_caps_max_level);
     return UNITY_END();
 }

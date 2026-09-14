@@ -44,10 +44,18 @@ static void check_outputs(const nt_basisu_encode_result_t *enc, uint32_t level, 
         for (uint32_t i = bytes; i < bytes + 16; i++) {
             TEST_ASSERT_EQUAL_HEX8(0xCD, out[i]);
         }
-        /* One byte short of a whole block (pixel for RGBA8) must be refused. */
-        TEST_ASSERT_FALSE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes - 1, s_targets[f]));
         if (s_targets[f] == NT_TEXTURE_FORMAT_RGBA8 && level == 0) {
             check_pixels(src, out, bytes);
+        }
+        /* One block (pixel for RGBA8) short must be refused with nothing written;
+         * a fractional capacity is a programmer error the wrapper asserts on. */
+        const uint32_t unit = (uint32_t)nt_texture_level_bytes(s_targets[f], 1, 1);
+        if (bytes > unit) {
+            memset(out, 0xCD, sizeof(out));
+            TEST_ASSERT_FALSE(nt_basisu_transcode_level(enc->data, enc->size, level, out, bytes - unit, s_targets[f]));
+            for (uint32_t i = 0; i < sizeof(out); i++) {
+                TEST_ASSERT_EQUAL_HEX8(0xCD, out[i]);
+            }
         }
     }
 }

@@ -237,9 +237,9 @@ false without mutating the material.
 ### Texture descriptors
 
 `nt_texture_desc_t.format` is required and names the real storage format.
-`RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
-and `DEPTH32F` require the same, plus `data == NULL`, no mipmaps and
-`level_count <= 1`.
+`RG16UI` requires `NEAREST` minification and magnification, and `level_count <= 1`
+because integer storage is never sampled through a mip filter. `DEPTH16`, `DEPTH24`,
+and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
 `ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA` and `ASTC_4x4_RGBA` are block-compressed
 color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
@@ -263,7 +263,10 @@ caller never observes a half-built texture, and a failed level leaves no texture
 and no pool slot.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
-every published texture is complete for every minification filter. A mipmap
+every published texture is complete for every minification filter. Descriptors the
+engine builds for render-target attachments ship `level_count == 0`, which the
+backend reads as one level. A `glGenerateMipmap` that fails fails the creation:
+no texture is published. A mipmap
 filter over a single-level texture is therefore legal in both the descriptor and
 a sampler override; it samples level 0. `nt_gfx_update_texture` also rejects a
 texture with more than one level; whole levels are replaced by recreating the

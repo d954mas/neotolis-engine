@@ -117,6 +117,7 @@ static uint16_t s_fake_last_texture_level_height;
 static nt_texture_format_t s_fake_last_texture_level_format;
 static const void *s_fake_last_texture_level_data;
 static uint32_t s_fake_texture_destroy_count;
+static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
@@ -192,6 +193,7 @@ uint8_t nt_gfx_fake_last_texture_level(void) { return s_fake_last_texture_level;
 uint16_t nt_gfx_fake_last_texture_level_width(void) { return s_fake_last_texture_level_width; }
 uint16_t nt_gfx_fake_last_texture_level_height(void) { return s_fake_last_texture_level_height; }
 uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
+uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
 nt_texture_format_t nt_gfx_fake_last_texture_level_format(void) { return s_fake_last_texture_level_format; }
 const void *nt_gfx_fake_last_texture_level_data(void) { return s_fake_last_texture_level_data; }
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
@@ -262,6 +264,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_texture_level_width = 0;
     s_fake_last_texture_level_height = 0;
     s_fake_texture_destroy_count = 0;
+    s_fake_last_destroyed_texture = 0;
     s_fake_last_texture_level_format = NT_TEXTURE_FORMAT_INVALID;
     s_fake_last_texture_level_data = NULL;
     s_fake_fail_buffer_creates = 0;
@@ -500,7 +503,10 @@ bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level,
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
-    (void)backend_handle;
+    if (backend_handle == 0) {
+        return;
+    }
+    s_fake_last_destroyed_texture = backend_handle;
     s_fake_texture_destroy_count++;
 }
 

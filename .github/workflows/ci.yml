@@ -731,6 +731,9 @@ jobs:
         run: |
           emcmake cmake --preset wasm-debug
           cmake --build --preset wasm-debug --target browser_smoke
+          # A missing pack must fail here, not as a 30 s Playwright timeout.
+          test -f build/tests/browser/app/wasm-debug/assets/ui_showcase.ntpack
+          test -f build/tests/browser/app/wasm-debug/assets/bunnymark_sd.ntpack
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -757,6 +760,8 @@ jobs:
             name="diagnostics-web-ui-$ui-gpu-$gpu"
             emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
             cmake --build "build/_cmake/$name" --target browser_smoke
+            test -f "build/tests/browser/app/$name/assets/ui_showcase.ntpack"
+            test -f "build/tests/browser/app/$name/assets/bunnymark_sd.ntpack"
             (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
           done
 

@@ -273,6 +273,20 @@ void test_rgba8_fallback_rejects_sub_updates(void) {
     fixture_free(&alpha);
 }
 
+void test_single_level_rgba8_fallback_accepts_a_sub_update(void) {
+    basis_fixture_t one = fixture_encode(1, 1, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    TEST_ASSERT_EQUAL_UINT8(1, one.mip_count);
+    set_caps(false, false, false);
+    uint32_t handle = activate_expecting(&one, NT_TEXTURE_FORMAT_RGBA8);
+    nt_texture_t tex = {.id = handle};
+    static const uint8_t texel[4] = {9, 8, 7, 6};
+    uint32_t before = nt_gfx_fake_update_texture_count();
+    nt_gfx_update_texture(tex, 0, 0, 1, 1, texel);
+    TEST_ASSERT_EQUAL_UINT32(before + 1U, nt_gfx_fake_update_texture_count());
+    nt_gfx_deactivate_texture(handle);
+    fixture_free(&one);
+}
+
 // #endregion
 
 // #region boundary rejections
@@ -355,8 +369,15 @@ static void check_backend_failure(basis_fixture_t *fixture, uint8_t create_mask,
     nt_gfx_fake_fail_texture_creates(create_mask);
     nt_gfx_fake_fail_texture_level_uploads(upload_mask);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(fixture->blob, fixture->size));
-    /* The failed attempt deleted its GL name and closed its session. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+    /* The failed attempt deleted its own GL name and closed its session. */
+    if (create_mask != 0) {
+        /* A failed create never minted a name, so there is nothing to destroy. */
+        TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
+    } else {
+        TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+        /* The failing upload named this attempt's backend id; that is the one deleted. */
+        TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_texture_level_backend(), nt_gfx_fake_last_destroyed_texture());
+    }
     TEST_ASSERT_TRUE(nt_basisu_start_transcoding(fixture->blob + sizeof(NtTextureAssetHeader), fixture->size - (uint32_t)sizeof(NtTextureAssetHeader)));
     nt_basisu_stop_transcoding();
     expect_full_pool_available();
@@ -414,15 +435,21 @@ static void idle_frames(uint32_t count) {
     }
 }
 
+/* One float3 stream: the SOA plane layout is the interleaved layout, so the
+ * re-interleave through staging is a pure copy of MESH_VERTEX_BYTES. */
+#define MESH_VERTEX_COUNT 600U
+#define MESH_VERTEX_BYTES ((size_t)MESH_VERTEX_COUNT * 12U)
+
 static void fill_valid_mesh_blob(uint8_t *blob) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->magic = NT_MESH_MAGIC;
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 1;
     hdr->index_type = 1;
-    hdr->vertex_count = 1;
+    hdr->vertex_wire = NT_MESH_WIRE_VTX_SOA;
+    hdr->vertex_count = MESH_VERTEX_COUNT;
     hdr->index_count = 3;
-    hdr->vertex_data_size = 12;
+    hdr->vertex_data_size = MESH_VERTEX_BYTES;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd->name_hash = 0x12345678;
@@ -430,7 +457,7 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
     sd->count = 3;
 }
 
-#define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6)
+#define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + MESH_VERTEX_BYTES + 6)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one staging observation per step of one lifecycle
 void test_staging_is_shared_grown_and_evicted(void) {
@@ -445,20 +472,23 @@ void test_staging_is_shared_grown_and_evicted(void) {
     TEST_ASSERT_NOT_NULL(first_ptr);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)nt_texture_level_bytes(NT_TEXTURE_FORMAT_BC7_RGBA, 96, 64), first_size);
 
-    /* Mesh decode reuses the same buffer: it needs less than one BC7 level 0. */
+    /* Mesh SOA decode takes the same buffer and outgrows one BC7 level 0. */
     uint8_t mesh_blob[MESH_BLOB_BYTES];
     memset(mesh_blob, 0, sizeof(mesh_blob));
     fill_valid_mesh_blob(mesh_blob);
     uint32_t mesh = nt_gfx_activate_mesh(mesh_blob, (uint32_t)sizeof(mesh_blob));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, mesh);
-    TEST_ASSERT_EQUAL_PTR(first_ptr, nt_gfx_test_stage_ptr());
-    TEST_ASSERT_EQUAL_UINT32(first_size, nt_gfx_test_stage_size());
+    const void *mesh_ptr = nt_gfx_test_stage_ptr();
+    uint32_t mesh_size = nt_gfx_test_stage_size();
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)MESH_VERTEX_BYTES, mesh_size);
+    TEST_ASSERT_GREATER_THAN_UINT32(first_size, mesh_size);
     nt_gfx_deactivate_mesh(mesh);
 
+    /* The texture then transcodes into the buffer the mesh grew. */
     nt_gfx_deactivate_texture(handle);
     handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
-    TEST_ASSERT_EQUAL_PTR(first_ptr, nt_gfx_test_stage_ptr());
-    TEST_ASSERT_EQUAL_UINT32(first_size, nt_gfx_test_stage_size());
+    TEST_ASSERT_EQUAL_PTR(mesh_ptr, nt_gfx_test_stage_ptr());
+    TEST_ASSERT_EQUAL_UINT32(mesh_size, nt_gfx_test_stage_size());
     nt_gfx_deactivate_texture(handle);
 
     basis_fixture_t large = fixture_encode(128, 128, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
@@ -484,16 +514,23 @@ void test_staging_is_shared_grown_and_evicted(void) {
     idle_frames(61);
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
 
-    /* Shutdown releases a live buffer. */
-    handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
+    fixture_free(&small);
+    fixture_free(&large);
+}
+
+/* Runs last: it shuts gfx down mid-test, so tearDown is the only shutdown the
+ * other cases see. */
+void test_shutdown_releases_a_live_staging_buffer(void) {
+    set_caps(true, false, false);
+    basis_fixture_t small = fixture_encode(96, 64, NT_BASISU_CODEC_UASTC_LDR, true, NT_TEXTURE_FORMAT_RGBA8);
+    uint32_t handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
     TEST_ASSERT_NOT_NULL(nt_gfx_test_stage_ptr());
     nt_gfx_deactivate_texture(handle);
+
     nt_gfx_shutdown();
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_stage_size());
-
     fixture_free(&small);
-    fixture_free(&large);
 }
 
 // #endregion
@@ -507,10 +544,12 @@ int main(void) {
     RUN_TEST(test_single_pixel_blob_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);
     RUN_TEST(test_rgba8_fallback_rejects_sub_updates);
+    RUN_TEST(test_single_level_rgba8_fallback_accepts_a_sub_update);
     RUN_TEST(test_header_boundaries_reject_without_touching_the_pool);
     RUN_TEST(test_corrupted_payload_is_rejected_and_a_good_blob_still_activates);
     RUN_TEST(test_backend_failures_leave_no_texture_and_allow_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);
     RUN_TEST(test_staging_is_shared_grown_and_evicted);
+    RUN_TEST(test_shutdown_releases_a_live_staging_buffer);
     return UNITY_END();
 }
