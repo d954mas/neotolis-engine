@@ -3,6 +3,12 @@
 
 #include <stdint.h>
 
+/* The admission set NT_BASISU_CODECS / NT_BASISU_TARGETS arrives as 0/1
+ * definitions on nt_shared; an undefined macro would read as "off" silently. */
+#if !defined(NT_BASISU_HAS_ETC1S) || !defined(NT_BASISU_HAS_UASTC) || !defined(NT_BASISU_HAS_ETC2) || !defined(NT_BASISU_HAS_BC7) || !defined(NT_BASISU_HAS_ASTC)
+#error "NT_BASISU_HAS_* are missing: link nt_shared (the root CMakeLists.txt defines them from NT_BASISU_CODECS / NT_BASISU_TARGETS)"
+#endif
+
 typedef enum {
     NT_BASISU_CODEC_NONE = 0, /* Builder RAW path; not a Basis file codec. */
     NT_BASISU_CODEC_ETC1S = 1,

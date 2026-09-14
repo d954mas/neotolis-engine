@@ -111,7 +111,10 @@ texture-less executable C-only. Its C API is a codec and nothing more —
 `nt_basisu_codec_t`, with no GPU enum or GL constant of its own. The transcoder
 session lives entirely inside `nt_basisu_transcode_chain`; the texture activator
 in `nt_gfx` owns the policy (target format, staging) and hands the GL backend
-finished bytes, so the backend neither links nor calls Basis. The builder (`tools/builder`) and
+finished bytes, so the backend neither links nor calls Basis. Which codecs and
+compressed targets the real impl accepts is a configure-time set
+(`NT_BASISU_CODECS`/`NT_BASISU_TARGETS`, delivered as `NT_BASISU_HAS_*` on
+`nt_shared`); the stub is the only "no Basis at all" composition. The builder (`tools/builder`) and
 `test_basisu_roundtrip` link the real impl directly — they are executables
 picking an impl, not engine modules, so the no-real-impl gate does not apply.
 

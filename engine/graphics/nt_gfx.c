@@ -2230,6 +2230,32 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* ---- Asset activators ---- */
 
+/* Basis transcode target: BC7 -> ASTC -> ETC2 -> RGBA8, skipping formats the
+ * GPU lacks and formats outside NT_BASISU_TARGETS. RGBA8 is always available. */
+static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, bool has_alpha, uint32_t width, uint32_t height) {
+    (void)caps;
+    (void)has_alpha;
+    (void)width;
+    (void)height;
+#if NT_BASISU_HAS_BC7
+    /* WebGL BPTC requires block-aligned base dimensions; a halved chain then aligns every level it can. */
+    if (caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
+        return NT_TEXTURE_FORMAT_BC7_RGBA;
+    }
+#endif
+#if NT_BASISU_HAS_ASTC
+    if (caps->has_astc) {
+        return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
+    }
+#endif
+#if NT_BASISU_HAS_ETC2
+    if (caps->has_etc2) {
+        return has_alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+    }
+#endif
+    return NT_TEXTURE_FORMAT_RGBA8;
+}
+
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
@@ -2321,17 +2347,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region target and staging
-    const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
-    nt_texture_format_t target;
-    if (caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
-        target = NT_TEXTURE_FORMAT_BC7_RGBA;
-    } else if (caps->has_astc) {
-        target = NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
-    } else if (caps->has_etc2) {
-        target = info.has_alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
-    } else {
-        target = NT_TEXTURE_FORMAT_RGBA8;
-    }
+    const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.has_alpha, width, height);
 
     uint64_t chain_bytes = 0;
     for (uint32_t level = 0; level < info.level_count; level++) {

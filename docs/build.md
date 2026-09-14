@@ -67,6 +67,8 @@ covers the common options; module specs own detailed ON/OFF behavior.
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
 | `NT_DEVAPI_ENABLED` | OFF | Group switches are dormant while the master gate is OFF. |
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
+| `NT_BASISU_CODECS` | `ETC1S;UASTC_LDR` | Basis codecs the builder emits and the runtime decodes. Empty is a configure error. See [Basis Universal admission](#basis-universal-admission). |
+| `NT_BASISU_TARGETS` | `ETC2;BC7;ASTC_LDR` | Compressed GPU formats Basis textures may transcode to; RGBA8 is always available, empty leaves only RGBA8. |
 
 Contracts and less common options:
 
@@ -74,6 +76,41 @@ Contracts and less common options:
 - [Resource measurements and resident bytes](spec/assets/resource.md#optional-measurements-and-resident-bytes).
 - [Font synthesis and rich markup](spec/ui/rich-text.md), [Clay debug view](spec/ui/nt-ui.md).
 - [WASM build variants](../README.md#wasm-requires-emsdk-activated).
+
+### Basis Universal admission
+
+`NT_BASISU_CODECS` and `NT_BASISU_TARGETS` are CMake lists (`;`-separated) of
+the tokens above; unknown or duplicate tokens and an empty codec list are
+configure errors. A build without Basis textures links
+`nt_basisu_transcoder_stub` instead of shrinking the set. The root
+`CMakeLists.txt` turns the lists into `NT_BASISU_HAS_ETC1S/UASTC/ETC2/BC7/ASTC`
+(0/1) on `nt_shared`, which the builder, the transcoder and `nt_gfx` link, so
+one configure always agrees with itself: the builder asserts a texture's codec
+before its cache lookup, `nt_basisu_info`/`nt_basisu_transcode_chain` return
+`false` for a codec or compressed target outside the set, and the activator's
+selector skips targets outside the set
+([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
+
+Native builds keep the full upstream LDR superset in the shared transcoder
+TU because the encoder needs it; the wrapper enforces the set. WASM builds
+compile only the decoders in `NT_BASISU_CODECS` and the ETC1S→X tables for
+`NT_BASISU_TARGETS` (UASTC→X needs no table), through the local patch
+described in [deps/basisu/README.md](../deps/basisu/README.md).
+`BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms keeps
+ETC1S→ASTC bytes identical between native and web.
+
+Packs cross configures: the native builder writes them, the wasm configure
+copies them. Put both values in the preset every configure inherits (the
+engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
+preset or include before `add_subdirectory`). `cmake/nt_example_packs.cmake`
+records `NT_BASISU_CODECS` next to each native pack directory and the wasm
+configure refuses packs built with a different codec list. A pack from a
+foreign tree still fails at runtime: `nt_basisu_info` rejects the blob and the
+asset becomes FAILED.
+
+The test-only `nt_basisu_transcoder_trimmed_test` library (top-level project,
+native) compiles the transcoder TU with the wasm defines of the current set so
+ctest decodes the golden fixtures exactly as the web build will.
 
 ### CRT, probes and profiling
 

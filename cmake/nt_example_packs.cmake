@@ -44,6 +44,9 @@ function(nt_example_packs)
         # list is informational (missing packs already fail the build itself).
         string(REPLACE ";" "\n" _manifest_body "${PACKS_PACKS}")
         file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "${_manifest_body}\n")
+        # The wasm configure that copies these packs must decode every codec the
+        # builder was allowed to emit (checked below against this record).
+        file(WRITE "${PACKS_PACK_DIR}/.basisu_codecs" "${NT_BASISU_CODECS}\n")
     elseif(_skipped)
         foreach(PACK ${PACKS_PACKS})
             if(EXISTS "${PACKS_PACK_DIR}/${PACK}")
@@ -63,6 +66,14 @@ function(nt_example_packs)
         # ninja error ("no known rule to make <pack>") until a native build
         # creates it — then the same edge copies it, no reconfigure needed.
         set(_copy_list ${PACKS_PACKS})
+        if(EXISTS "${PACKS_PACK_DIR}/.basisu_codecs")
+            file(STRINGS "${PACKS_PACK_DIR}/.basisu_codecs" _pack_codecs LIMIT_COUNT 1)
+            if(NOT "${_pack_codecs}" STREQUAL "${NT_BASISU_CODECS}")
+                message(FATAL_ERROR "${PACKS_NAME}: packs in ${PACKS_PACK_DIR} were built with"
+                    " NT_BASISU_CODECS='${_pack_codecs}' but this configure decodes '${NT_BASISU_CODECS}';"
+                    " configure both presets with the same NT_BASISU_CODECS (docs/build.md#basis-universal-admission).")
+            endif()
+        endif()
     endif()
 
     foreach(PACK ${_copy_list})

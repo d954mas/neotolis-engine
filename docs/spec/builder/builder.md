@@ -83,7 +83,11 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 `nt_basisu_codec_t` and `nt_basisu_encode_opts_t` are shared by the public
 builder and encoder in `shared/include/nt_basisu_codec.h`. The descriptor tags
 an active branch when compressed: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
-`NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes.
+`NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes. The codec
+must also be in the build's `NT_BASISU_CODECS`
+([build options](../../build.md#basis-universal-admission)); a texture asking
+for a codec outside it is an `NT_BUILD_ASSERT` in the option validation, before
+any cache lookup, because the runtime of the same configure cannot decode it.
 
 | Active field | Valid range | Meaning |
 |---|---|---|
