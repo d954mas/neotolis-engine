@@ -11,10 +11,9 @@ target_link_libraries(nt_basisu_transcoder_interface INTERFACE nt_shared)
 # Shared transcoder build config. The builder's encoder compiles the same basisu
 # headers and links this TU, so its defines must match exactly (ODR).
 add_library(nt_basisu_transcoder_config INTERFACE)
-# Disable unused transcode targets: minimizes WASM size and caps the formats
-# available to BOTH consumers (the builder's validate/stats paths included).
-# ASTC_HIGHER_OPAQUE_QUALITY (ETC1S->ASTC opaque blocks) is upstream's native
-# default; setting it everywhere keeps web and native bytes identical.
+# Unused transcode targets off for BOTH consumers (the builder's validate/stats
+# paths included). ASTC_HIGHER_OPAQUE_QUALITY (ETC1S->ASTC opaque blocks) is
+# upstream's native default; set everywhere so web and native bytes match.
 set(NT_BASISU_COMMON_DEFINITIONS
     BASISD_SUPPORT_DXT1=0
     BASISD_SUPPORT_DXT5A=0
@@ -28,7 +27,7 @@ set(NT_BASISU_COMMON_DEFINITIONS
 target_compile_definitions(nt_basisu_transcoder_config INTERFACE ${NT_BASISU_COMMON_DEFINITIONS})
 
 # Trimmed profile: only the decoders in NT_BASISU_CODECS and the ETC1S->X tables
-# for NT_BASISU_TARGETS (UASTC->X needs no table). XUASTC/HDR/RG11/16bpp are
+# for NT_BASISU_TARGETS (UASTC->X does not use them). XUASTC/HDR/RG11/16bpp are
 # never reached by the engine. Needs the local patch in deps/basisu/README.md.
 function(nt_basisu_trimmed_definitions out_var)
     set(_defs
@@ -59,8 +58,9 @@ if(EMSCRIPTEN)
     nt_basisu_trimmed_definitions(_nt_basisu_wasm_defs)
     target_compile_definitions(nt_basisu_transcoder_config INTERFACE ${_nt_basisu_wasm_defs})
 else()
-    # Native superset: the encoder's headers require KTX2, XUASTC and every LDR
-    # decoder in the shared TU. The wrapper enforces NT_BASISU_* on top.
+    # Native superset: the encoder shares this TU (its headers need KTX2 and
+    # XUASTC, its validation paths call the transcoder), so native keeps the
+    # upstream LDR set unchanged and the wrapper enforces NT_BASISU_* on top.
     target_compile_definitions(nt_basisu_transcoder_config INTERFACE
         BASISD_SUPPORT_KTX2=1
         BASISD_SUPPORT_ETC1S=1
@@ -84,7 +84,7 @@ function(nt_basisu_transcoder_settings target)
     target_include_directories(${target} PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
     target_link_libraries(${target} PRIVATE nt_core)
     target_link_libraries(${target} PUBLIC nt_basisu_transcoder_interface)
-    # -fno-strict-aliasing required by Basis transcoder (TEX-10)
+    # The vendored transcoder type-puns block data and needs -fno-strict-aliasing.
     target_compile_options(${target} PRIVATE -fno-strict-aliasing)
     # Suppress warnings in vendored C++ code
     target_compile_options(${target} PRIVATE -w)

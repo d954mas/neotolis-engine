@@ -79,7 +79,7 @@ static uint8_t s_ui_arena[1U << 20];
 static nt_hash32_t s_pack_id;
 static nt_hash32_t s_basis_pack_id;
 static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
-/* basis_fixture.ntpack textures of the first codec in NT_BASISU_CODECS; both activate through the
+/* basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
@@ -976,7 +976,7 @@ int main(int argc, char *argv[]) {
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
-    /* Resource ids are the hashed asset names; the first codec of NT_BASISU_CODECS is the fixture. */
+    /* Resource ids are the hashed asset names. */
 #if NT_BASISU_HAS_ETC1S
     s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgba"), NT_ASSET_TEXTURE);
     s_basis_rgb_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgb"), NT_ASSET_TEXTURE);

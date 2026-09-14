@@ -776,9 +776,8 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
       # browser_smoke reuses the ui_showcase example pack (RAW atlas) and its own Basis fixture
-      # pack, produced by the native build for the configured NT_BASISU_* set. Produce both via
-      # their build-graph pack targets before ANY wasm configure below — the copy rules are
-      # configure-time — then the wasm builds copy them into assets/.
+      # pack for the configured NT_BASISU_* set. Build both natively before ANY wasm configure
+      # below: the showcase copy rule only exists when the pack does at configure time.
       - name: Configure native debug
         run: cmake --preset native-debug
 
@@ -813,11 +812,11 @@ jobs:
       - name: Run browser smoke test
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
 
-      # Each admission row activates its own fixture pack through the regular resource path in
-      # Debug (FULL asserts) and Release and samples the transcoded texels through WebGL. The
-      # runner's SwiftShader reports every compressed cap, so a row's build set decides the
-      # target; real GPUs stay unverified here. Example packs are skipped: they were built with
-      # the default set and the copy check would refuse them.
+      # Each admission row activates its own fixture pack in Debug (FULL asserts) and Release
+      # and samples the transcoded texels through WebGL; SwiftShader reports every compressed
+      # cap, so the build set decides the target and real GPUs stay unverified here. Example
+      # packs are skipped: their producers are UASTC-only and the codec rows would fail the
+      # pack copy check.
       - name: Basis admission rows (browser activation)
         run: |
           skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"

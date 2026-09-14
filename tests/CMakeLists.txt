@@ -1063,9 +1063,8 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_basisu_roundtrip)
 
     # --- Basis goldens: native encoder + full transcoder produce, the trimmed
-    # mirror (WASM defines compiled natively) consumes byte-for-byte. The
-    # golden dir is keyed by the admission set, not the preset, so the WASM
-    # consumer under Node reads the files of its own set. ---
+    # mirror consumes byte-for-byte. The golden dir is keyed by the admission
+    # set, not the preset, so the WASM consumer under Node reads its own set. ---
     set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden/${NT_BASISU_SET_TAG}")
     file(MAKE_DIRECTORY "${NT_BASISU_GOLDEN_DIR}")
     add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)

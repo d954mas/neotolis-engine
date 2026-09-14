@@ -4252,11 +4252,9 @@ void test_basis_effective_cache_and_dedup_identity(void) {
     }
 }
 
-/* The cache entry a full builder writes for a UASTC 1x1 texture, addressed by
- * the same key the builder derives (decoded-pixel hash + opts hash). With
- * UASTC in NT_BASISU_CODECS the pack build must find it; without, the add must
- * assert before the cache is ever consulted, so a warm cache from a fuller
- * configure cannot smuggle a codec this runtime does not decode. */
+/* Admission must precede the cache lookup: a warm cache from a fuller configure
+ * (entry addressed by the builder's own key, decoded-pixel hash + opts hash)
+ * must not smuggle in a codec this runtime refuses. */
 void test_cache_hit_never_bypasses_codec_admission(void) {
     const char *cache = TMP_DIR "/basis_admission_cache";
     MKDIR(cache);

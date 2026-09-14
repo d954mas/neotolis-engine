@@ -1,11 +1,6 @@
-/*
- * Build the browser smoke app's Basis fixture pack:
- *   basis_fixture.ntpack -- per codec of the build's NT_BASISU_CODECS, a 128x128
- *   RGBA texture (alpha on its right half) and a 96x64 opaque RGB texture, both
- *   two-colour halves so any transcode target lands on the same texels.
- *
- * Usage: build_browser_fixture_pack <pack_dir>
- */
+/* Browser smoke app's Basis fixture pack: per admitted codec a 128x128 RGBA and
+ * a 96x64 opaque RGB texture of two solid halves, so every transcode target lands
+ * on the same texels. */
 
 #include "nt_builder.h"
 

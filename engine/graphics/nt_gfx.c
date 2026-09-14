@@ -2238,7 +2238,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, bo
     (void)width;
     (void)height;
 #if NT_BASISU_HAS_BC7
-    /* WebGL BPTC requires block-aligned base dimensions; a halved chain then aligns every level it can. */
+    /* WebGL BPTC requires block-aligned level-0 dimensions; the smaller levels of a halved chain are accepted as they come. */
     if (caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
         return NT_TEXTURE_FORMAT_BC7_RGBA;
     }

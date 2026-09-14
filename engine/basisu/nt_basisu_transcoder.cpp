@@ -6,10 +6,9 @@
 
 /* ---- Build-set cross-check ---- */
 
-/* nt_basisu_transcoder_config sets every BASISD_SUPPORT_* checked here. The
-   trimmed profile (WASM, test mirror) must compile exactly the decoders of
-   NT_BASISU_CODECS plus the ETC1S->X tables of NT_BASISU_TARGETS; the native
-   superset keeps every LDR path because the encoder shares this TU. */
+/* engine/basisu/CMakeLists.txt sets every BASISD_SUPPORT_* checked here. Trimmed
+   (WASM, test mirror): exactly the decoders of NT_BASISU_CODECS plus the ETC1S->X
+   tables of NT_BASISU_TARGETS. Native: everything stays on for the shared encoder TU. */
 #if NT_BASISU_PROFILE_TRIMMED
 static_assert(BASISD_SUPPORT_ETC1S == NT_BASISU_HAS_ETC1S, "trimmed transcoder: BASISD_SUPPORT_ETC1S must follow NT_BASISU_CODECS");
 static_assert(BASISD_SUPPORT_UASTC == NT_BASISU_HAS_UASTC, "trimmed transcoder: BASISD_SUPPORT_UASTC must follow NT_BASISU_CODECS");
@@ -18,7 +17,7 @@ static_assert(BASISD_SUPPORT_ASTC == (NT_BASISU_HAS_ASTC && NT_BASISU_HAS_ETC1S)
 static_assert(BASISD_SUPPORT_ETC2_EAC_A8 == (NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_ETC1S), "trimmed transcoder: BASISD_SUPPORT_ETC2_EAC_A8 must follow NT_BASISU_TARGETS && ETC1S");
 #else
 static_assert(BASISD_SUPPORT_ETC1S == 1 && BASISD_SUPPORT_UASTC == 1 && BASISD_SUPPORT_BC7 == 1 && BASISD_SUPPORT_ASTC == 1 && BASISD_SUPPORT_ETC2_EAC_A8 == 1,
-              "native transcoder: the encoder needs the full LDR superset in the shared TU");
+              "native transcoder: both decoders and every engine target stay compiled for the shared encoder TU");
 #endif
 
 /* ---- Static transcoder instance ---- */

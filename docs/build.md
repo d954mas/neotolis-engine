@@ -91,10 +91,12 @@ before its cache lookup, `nt_basisu_info`/`nt_basisu_transcode_chain` return
 selector skips targets outside the set
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
 
-Native builds keep the full upstream LDR superset in the shared transcoder
-TU because the encoder needs it; the wrapper enforces the set. WASM builds
+Native builds keep both decoders and every engine target compiled in the
+shared transcoder TU because the encoder shares it; the wrapper enforces the
+set there. WASM builds
 compile only the decoders in `NT_BASISU_CODECS` and the ETC1S→X tables for
-`NT_BASISU_TARGETS` (UASTC→X needs no table), through the local patch
+`NT_BASISU_TARGETS` (UASTC→X does not use the tables those flags gate),
+through the local patch
 described in [deps/basisu/README.md](../deps/basisu/README.md).
 `BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms keeps
 ETC1S→ASTC bytes identical between native and web.
@@ -103,16 +105,19 @@ Packs cross configures: the native builder writes them, the wasm configure
 copies them. Put both values in the preset every configure inherits (the
 engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
 preset or include before `add_subdirectory`). `cmake/nt_example_packs.cmake`
-records `NT_BASISU_CODECS` next to each native pack directory and the wasm
-configure refuses packs built with a different codec list. A pack from a
-foreign tree still fails at runtime: `nt_basisu_info` rejects the blob and the
-asset becomes FAILED.
+records the native configure's `NT_BASISU_CODECS` next to each pack directory
+it produces, and a wasm configure refuses packs whose record names a different
+codec list (an example listed in `NT_SKIP_EXAMPLE_PACKS`, or a directory
+without a record, is copied unchecked). A blob of a codec outside the set still
+fails at runtime: `nt_basisu_info` rejects it and the asset becomes FAILED.
 
 Coverage per set. `test_basisu_golden_produce` (native encoder + full
 transcoder) writes fixtures, goldens and `manifest.txt` into
 `build/tests/basisu_golden/<set tag>/` (`NT_BASISU_SET_TAG`, e.g.
 `etc1s-uastc_ldr--etc2-bc7-astc_ldr`) and, in the default set, pins them to
-`tests/fixtures/basisu_golden.sha256`, taken from the pre-patch tree.
+`tests/fixtures/basisu_golden.sha256`. Regenerate that file only from a
+default-set golden directory: `sha256sum *.basis *.bin | LC_ALL=C sort -k2`
+inside it; a restricted set produces fewer files.
 `test_basisu_trimmed` decodes them byte-for-byte with the test-only
 `nt_basisu_transcoder_trimmed_test` library (the transcoder TU with the wasm
 defines of the current set, top-level project, native) and, under Emscripten,

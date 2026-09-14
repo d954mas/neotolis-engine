@@ -34,7 +34,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
     if (compressed) {
         NT_BUILD_ASSERT((format == NT_TEXTURE_FORMAT_RGBA8 || format == NT_TEXTURE_FORMAT_RGB8) && "texture opts: Basis compression requires RGBA8 or RGB8");
         NT_BUILD_ASSERT((compress_opts->codec == NT_BASISU_CODEC_ETC1S || compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR) && "texture opts: compression mode out of range");
-        /* The runtime built from the same configure has no decoder for a codec outside NT_BASISU_CODECS. */
+        /* The runtime of the same configure refuses a codec outside NT_BASISU_CODECS. */
         NT_BUILD_ASSERT(((compress_opts->codec == NT_BASISU_CODEC_ETC1S && NT_BASISU_HAS_ETC1S) || (compress_opts->codec == NT_BASISU_CODEC_UASTC_LDR && NT_BASISU_HAS_UASTC)) &&
                         "texture opts: codec is not in NT_BASISU_CODECS of this build");
         if (compress_opts->codec == NT_BASISU_CODEC_ETC1S) {

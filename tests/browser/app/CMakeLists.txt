@@ -1,7 +1,6 @@
-# browser_smoke -- minimal standalone web target the Playwright browser specs drive.
-# Renders a Cyrillic input field + a rich-text block with one clickable <link> and exposes the
-# window.__nt smoke-test hooks. Reuses the ui_showcase pack (same generated asset ids) and builds
-# its own Basis fixture pack for the admission set of this configure.
+# browser_smoke -- minimal standalone web target the Playwright browser specs drive through
+# window.__nt hooks. Reuses the ui_showcase pack (same generated asset ids) and builds its own
+# Basis fixture pack for the admission set of this configure.
 
 set(BROWSER_APP_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/tests/browser/app/${NT_PRESET_NAME}")
 set(BROWSER_APP_ASSETS_DIR "${BROWSER_APP_OUTPUT_DIR}/assets")

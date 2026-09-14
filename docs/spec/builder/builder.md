@@ -142,7 +142,8 @@ runtime would accept it and sample level 0.
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
 runtime treats that as legal: an `RGBA8` header over an alpha-less blob selects
-`ETC2_RGB8` on an ETC2 host, where the opaque block is half the size; BC7, ASTC
+`ETC2_RGB8` when ETC2 is the chosen target, where the opaque block is half the
+size; BC7, ASTC
 and the RGBA8 fallback have no opaque variant and are unaffected. The header's
 `format` is not cross-checked against the blob: its alpha flag alone decides.
 

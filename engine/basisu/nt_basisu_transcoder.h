@@ -29,11 +29,10 @@ void nt_basisu_transcoder_global_init(void);
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
- * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info`, which
- * must come from nt_basisu_info of this build. Returns false for a codec
- * outside NT_BASISU_CODECS or a compressed format outside NT_BASISU_TARGETS
- * (RGBA8 is always available); a format that is no Basis target asserts. A
- * capacity short of the whole chain is rejected before anything is written. */
+ * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` (from
+ * nt_basisu_info of this build). False for a codec outside NT_BASISU_CODECS, a
+ * compressed format outside NT_BASISU_TARGETS (RGBA8 is always available) or a
+ * capacity short of the whole chain, before anything is written. */
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
 
 #ifdef __cplusplus

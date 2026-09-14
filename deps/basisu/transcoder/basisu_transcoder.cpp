@@ -14359,7 +14359,7 @@ namespace basist
 	// UASTC LDR 4x4
 	// ------------------------------------------------------------------------------------------------------ 
 
-	const uint32_t g_bc7_weights2[4] = { 0, 21, 43, 64 }; // moved out of BASISD_SUPPORT_UASTC: BC7 mode 5 (ETC1S->BC7) needs it too
+	const uint32_t g_bc7_weights2[4] = { 0, 21, 43, 64 }; // outside BASISD_SUPPORT_UASTC: the ETC1S->BC7 (mode 5) path reads it too
 #if BASISD_SUPPORT_UASTC
 	const astc_bc7_common_partition2_desc g_astc_bc7_common_partitions2[TOTAL_ASTC_BC7_COMMON_PARTITIONS2] =
 	{

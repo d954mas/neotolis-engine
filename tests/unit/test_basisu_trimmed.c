@@ -1,8 +1,6 @@
-/* Trimmed-transcoder consumer: decodes the goldens of test_basisu_golden_produce
- * with a transcoder built from the WASM defines (the native mirror library, or
- * the production library under Node). Every (codec, target) pair inside the
- * admission set must be byte-identical to the full native decode; every pair
- * outside it must be refused, never decoded. */
+/* Trimmed-transcoder consumer (native mirror library, or the production library
+ * under Node): every (codec, target) pair inside the admission set must match the
+ * native goldens byte-for-byte, every pair outside it must be refused. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

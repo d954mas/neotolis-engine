@@ -64,10 +64,9 @@ set_property(CACHE NT_LOG_MIN_LEVEL PROPERTY STRINGS 0 1 2 3)
 if(NOT NT_LOG_MIN_LEVEL MATCHES "^[0-3]$")
     message(FATAL_ERROR "NT_LOG_MIN_LEVEL must be 0 (INFO), 1 (WARN), 2 (ERROR), or 3 (NONE).")
 endif()
-# Basis Universal admission. One set feeds the builder's encoder, the runtime
-# transcoder and the texture activator through nt_shared, so a pack can only
-# carry codecs this build decodes and the WASM transcoder compiles only the
-# decoders and ETC1S->X tables it needs (docs/build.md#basis-universal-admission).
+# Basis Universal admission: one set for the builder, the transcoder and the
+# activator (via nt_shared), so packs carry only codecs this build decodes and
+# the WASM transcoder compiles only what it needs (docs/build.md#basis-universal-admission).
 set(NT_BASISU_CODECS "ETC1S;UASTC_LDR" CACHE STRING "Basis codecs the builder emits and the runtime decodes (ETC1S, UASTC_LDR). Empty is an error: a texture-less build links nt_basisu_transcoder_stub.")
 set(NT_BASISU_TARGETS "ETC2;BC7;ASTC_LDR" CACHE STRING "Compressed GPU formats Basis textures may transcode to (ETC2, BC7, ASTC_LDR). RGBA8 is always available; empty leaves only RGBA8.")
 function(nt_basisu_check_set var allowed)

@@ -1,8 +1,7 @@
 /* Golden producer: encodes fixed synthetic fixtures with the builder's encoder
- * and decodes each one to every engine target with the native transcoder. The
- * files land in NT_BASISU_GOLDEN_DIR for test_basisu_trimmed (native mirror and
- * WASM) and are pinned by SHA-256 against tests/fixtures/basisu_golden.sha256,
- * the baseline taken before the vendored transcoder patch. */
+ * and decodes them with the native transcoder to every admitted target, as the
+ * reference bytes for the trimmed consumers. The default set is also pinned
+ * against the committed SHA-256 list. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,8 +165,7 @@ static void produce_fixture(const fixture_t *fx, FILE *manifest) {
 #if NT_BASISU_HAS_ETC1S && NT_BASISU_HAS_UASTC && NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
 static int compare_names(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
 
-/* sha256sum's own line format, sorted by file name, so the committed baseline
- * can be regenerated from any tree with `sha256sum *.basis *.bin | sort -k2`. */
+/* sha256sum's own line format, sorted by file name (regeneration: docs/build.md). */
 static void check_baseline(void) {
     qsort(s_file_names, s_file_count, sizeof(s_file_names[0]), compare_names);
     FILE *baseline = fopen(GOLDEN_SHA_FILE, "r");
@@ -211,7 +209,7 @@ void test_goldens_are_produced_and_pinned(void) {
     }
     (void)fclose(manifest);
     /* The pinned baseline is the default set; a restricted configure produces
-     * fewer files and is checked by test_basisu_trimmed against its own run. */
+     * fewer files and only serves its own consumers. */
 #if NT_BASISU_HAS_ETC1S && NT_BASISU_HAS_UASTC && NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
     check_baseline();
 #else

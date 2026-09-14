@@ -23,10 +23,13 @@ described below:
 ## Local transcoder patch
 
 `transcoder/basisu_transcoder.cpp` and `transcoder/basisu_transcoder.h` carry a
-guards-only patch (`#if`/`#else`/`#endif` and one moved definition, no logic
-changes) so the WASM runtime can drop decoder paths the engine never reaches.
+patch of compile-time guards, the matching rejections for disabled paths
+(`return false` branches and `basis_is_format_supported` entries) and one
+relocated definition, so the WASM runtime can drop decoder paths the engine
+never reaches. Retained decoder code is unchanged.
 Upstream cannot build with those flags off (BinomialLLC/basis_universal#196).
-Reapply the patch on every vendor update; an upstream pull request is pending.
+Reapply the patch on every vendor update until upstream accepts it (an
+upstream pull request is planned).
 
 - `BASISD_SUPPORT_XUASTC=0` / `BASISD_SUPPORT_UASTC_HDR=0` / `BASISD_SUPPORT_UASTC=0`
   compile: the XBC7 decoder include, `arith_fastbits_f32` globals,
