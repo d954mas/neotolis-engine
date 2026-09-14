@@ -384,15 +384,13 @@ static bool render_target_depth_sampler_valid(const nt_render_target_desc_t *des
            desc->depth_texture_wrap_u <= NT_WRAP_MIRRORED_REPEAT && desc->depth_texture_wrap_v >= NT_WRAP_CLAMP_TO_EDGE && desc->depth_texture_wrap_v <= NT_WRAP_MIRRORED_REPEAT;
 }
 
-static bool texture_format_is_depth(nt_texture_format_t format) { return format >= NT_TEXTURE_FORMAT_DEPTH16 && format <= NT_TEXTURE_FORMAT_DEPTH32F; }
-
 static bool texture_filter_uses_linear(nt_texture_filter_t filter) { return filter != NT_FILTER_NEAREST && filter != NT_FILTER_NEAREST_MIPMAP_NEAREST; }
 
 static bool render_target_depth_format_valid(const nt_render_target_desc_t *desc) {
     if (desc->depth_storage == NT_RT_DEPTH_NONE) {
         return desc->depth_format == NT_TEXTURE_FORMAT_INVALID;
     }
-    return texture_format_is_depth(desc->depth_format);
+    return nt_texture_format_is_depth(desc->depth_format);
 }
 
 static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owned) {
@@ -1037,7 +1035,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     }
     nt_texture_desc_t local_desc = *desc;
 
-    bool format_valid = local_desc.format > NT_TEXTURE_FORMAT_INVALID && local_desc.format <= NT_TEXTURE_FORMAT_DEPTH32F;
+    bool format_valid = nt_texture_format_valid(local_desc.format);
     NT_ASSERT(format_valid && "make_texture: format is required");
     if (!format_valid) {
         return result;
@@ -1052,7 +1050,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
         NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
     }
-    if (texture_format_is_depth(local_desc.format)) {
+    if (nt_texture_format_is_depth(local_desc.format)) {
         NT_ASSERT(local_desc.data == NULL && "depth texture upload is not supported");
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST min_filter without compare mode");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "depth texture requires NEAREST mag_filter without compare mode");
@@ -1509,7 +1507,7 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
     uint8_t format = meta->format;
     bool compares = desc->compare_func != NT_COMPARE_NONE;
-    bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    bool depth = nt_texture_format_is_depth((nt_texture_format_t)format);
     /* Comparison against a non-depth texture makes every lookup undefined in
      * GL, whichever sampler type the shader declares. */
     if (compares && !depth) {
@@ -1531,7 +1529,7 @@ static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_d
 
 static bool texture_matches_sampler_class(uint32_t texture_slot, const nt_sampler_desc_t *sampler, uint8_t sampler_class) {
     const uint8_t format = s_gfx.texture_metas[texture_slot].format;
-    const bool depth = format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    const bool depth = nt_texture_format_is_depth((nt_texture_format_t)format);
     const bool integer = format == (uint8_t)NT_TEXTURE_FORMAT_RG16UI;
     const bool compares = sampler->compare_func != NT_COMPARE_NONE;
     switch ((nt_gfx_sampler_class_t)sampler_class) {
@@ -2165,7 +2163,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
     uint8_t stored_format = s_gfx.texture_metas[slot].format;
-    bool format_valid = stored_format > (uint8_t)NT_TEXTURE_FORMAT_INVALID && stored_format <= (uint8_t)NT_TEXTURE_FORMAT_DEPTH32F;
+    bool format_valid = nt_texture_format_valid((nt_texture_format_t)stored_format);
     NT_ASSERT(format_valid && "update_texture: invalid stored format");
     if (!format_valid) {
         return;
@@ -2179,7 +2177,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     NT_ASSERT(!s_gfx.texture_metas[slot].compressed && "update_texture: compressed textures cannot be sub-updated");
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
-    bool is_depth = stored_format >= (uint8_t)NT_TEXTURE_FORMAT_DEPTH16;
+    bool is_depth = nt_texture_format_is_depth((nt_texture_format_t)stored_format);
     NT_ASSERT(!is_depth && "update_texture: depth texture updates are not supported");
     if (is_depth) {
         return;

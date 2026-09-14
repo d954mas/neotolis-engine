@@ -21,7 +21,22 @@ typedef enum {
     NT_TEXTURE_FORMAT_DEPTH16 = 8,
     NT_TEXTURE_FORMAT_DEPTH24 = 9,
     NT_TEXTURE_FORMAT_DEPTH32F = 10,
+    NT_TEXTURE_FORMAT_ETC2_RGB8 = 11,     /* GL_COMPRESSED_RGB8_ETC2, 8 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_ETC2_RGBA8 = 12,    /* GL_COMPRESSED_RGBA8_ETC2_EAC, 16 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_BC7_RGBA = 13,      /* GL_COMPRESSED_RGBA_BPTC_UNORM, 16 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_ASTC_4x4_RGBA = 14, /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR, 16 bytes per 4x4 block */
 } nt_texture_format_t;
+
+static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+
+static inline bool nt_texture_format_is_depth(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_DEPTH16 && fmt <= NT_TEXTURE_FORMAT_DEPTH32F; }
+
+static inline bool nt_texture_format_is_compressed(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_ETC2_RGB8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+
+static inline bool nt_texture_format_is_integer(nt_texture_format_t fmt) { return fmt == NT_TEXTURE_FORMAT_RG16UI; }
+
+/* What a sampler2D reads: colour storage, normalized or float. */
+static inline bool nt_texture_format_is_sampled_color(nt_texture_format_t fmt) { return nt_texture_format_valid(fmt) && !nt_texture_format_is_depth(fmt) && !nt_texture_format_is_integer(fmt); }
 
 /* Builder source formats are the packed-asset subset RGBA8..R8. */
 typedef nt_texture_format_t nt_texture_pixel_format_t;
@@ -42,6 +57,54 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     default:
         return 0;
     }
+}
+
+/* Bytes of one mip level of the given size. Returns 0 for INVALID and depth
+ * formats -- this shared header cannot include core/nt_assert.h, so callers
+ * assert on the 0 sentinel. uint64 because 32768x32768 RGBA8 is exactly 2^32. */
+static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t w, uint32_t h) {
+    uint64_t bytes_per_block = 0;
+    uint64_t bytes_per_pixel = 0;
+    switch (fmt) {
+    case NT_TEXTURE_FORMAT_RGBA8:
+        bytes_per_pixel = 4;
+        break;
+    case NT_TEXTURE_FORMAT_RGB8:
+        bytes_per_pixel = 3;
+        break;
+    case NT_TEXTURE_FORMAT_RG8:
+        bytes_per_pixel = 2;
+        break;
+    case NT_TEXTURE_FORMAT_R8:
+        bytes_per_pixel = 1;
+        break;
+    case NT_TEXTURE_FORMAT_RGBA16F:
+        bytes_per_pixel = 8;
+        break;
+    case NT_TEXTURE_FORMAT_RG16UI:
+        bytes_per_pixel = 4;
+        break;
+    case NT_TEXTURE_FORMAT_RGBA32F:
+        bytes_per_pixel = 16;
+        break;
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        bytes_per_block = 8;
+        break;
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        bytes_per_block = 16;
+        break;
+    case NT_TEXTURE_FORMAT_INVALID:
+    case NT_TEXTURE_FORMAT_DEPTH16:
+    case NT_TEXTURE_FORMAT_DEPTH24:
+    case NT_TEXTURE_FORMAT_DEPTH32F:
+        return 0;
+    }
+    if (bytes_per_block != 0) {
+        return (((uint64_t)w + 3) / 4) * (((uint64_t)h + 3) / 4) * bytes_per_block;
+    }
+    return (uint64_t)w * (uint64_t)h * bytes_per_pixel;
 }
 
 /* Compression type */

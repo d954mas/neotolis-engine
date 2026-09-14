@@ -381,6 +381,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_pack_format COMMAND test_pack_format)
 
+    # --- Texture format tests ---
+    add_executable(test_texture_format unit/test_texture_format.c)
+    target_link_libraries(test_texture_format PRIVATE nt_shared unity)
+    nt_set_warning_flags(test_texture_format)
+    nt_set_sanitizer_flags(test_texture_format)
+    set_target_properties(test_texture_format PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_texture_format COMMAND test_texture_format)
+
     # --- Entity module tests ---
     add_executable(test_entity unit/test_entity.c)
     target_link_libraries(test_entity PRIVATE nt_entity nt_log_stub unity)
