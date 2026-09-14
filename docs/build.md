@@ -108,9 +108,38 @@ configure refuses packs built with a different codec list. A pack from a
 foreign tree still fails at runtime: `nt_basisu_info` rejects the blob and the
 asset becomes FAILED.
 
-The test-only `nt_basisu_transcoder_trimmed_test` library (top-level project,
-native) compiles the transcoder TU with the wasm defines of the current set so
-ctest decodes the golden fixtures exactly as the web build will.
+Coverage per set. `test_basisu_golden_produce` (native encoder + full
+transcoder) writes fixtures, goldens and `manifest.txt` into
+`build/tests/basisu_golden/<set tag>/` (`NT_BASISU_SET_TAG`, e.g.
+`etc1s-uastc_ldr--etc2-bc7-astc_ldr`) and, in the default set, pins them to
+`tests/fixtures/basisu_golden.sha256`, taken from the pre-patch tree.
+`test_basisu_trimmed` decodes them byte-for-byte with the test-only
+`nt_basisu_transcoder_trimmed_test` library (the transcoder TU with the wasm
+defines of the current set, top-level project, native) and, under Emscripten,
+with the production transcoder through Node (`-sNODERAWFS`; ctest registers
+it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate`,
+`test_nt_gfx_basis_native` and `test_builder` follow the set, and the browser
+smoke app activates its own fixture pack (below). To check a restricted set
+locally, configure a separate directory and skip the example packs (their
+producers use UASTC and their `.basisu_codecs` records belong to the default
+set):
+
+```bash
+skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+cmake --preset native-debug-test -B build/_cmake/basisu-codecs-etc1s -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-codecs-etc1s --target test_basisu_golden_produce test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-codecs-etc1s --output-on-failure -R '^test_(basisu_golden_produce|basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+emcmake cmake --preset wasm-debug -B build/_cmake/basisu-codecs-etc1s-wasm -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-codecs-etc1s-wasm --target test_basisu_trimmed
+ctest --test-dir build/_cmake/basisu-codecs-etc1s-wasm --no-tests=error -R '^test_basisu_trimmed$'
+```
+
+CI runs this for `NT_BASISU_CODECS=ETC1S`, `UASTC_LDR`, each single
+`NT_BASISU_TARGETS` token and the empty target list (RGBA8 only), rejects the
+empty codec list, a duplicate and an unknown token at configure, and drives the
+browser smoke app's fixture through the same rows in wasm Debug and Release.
+The runner's SwiftShader reports every compressed cap; rows on real GPUs stay
+unverified.
 
 ### CRT, probes and profiling
 
