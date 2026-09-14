@@ -207,7 +207,12 @@ typedef struct {
 } NtTextureAssetHeader;
 #pragma pack(pop)
 
+/* The transcoder wrapper compiles this header as C++, where GCC has no _Static_assert. */
+#ifdef __cplusplus
+static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28 bytes");
+#else
 _Static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28 bytes");
+#endif
 
 /* Backward compat alias — code that used V2 suffix continues to compile.
  * The struct is the V3 layout; the alias is purely a name. */
