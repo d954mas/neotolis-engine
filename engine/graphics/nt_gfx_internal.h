@@ -41,7 +41,6 @@ void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
 
 void nt_gfx_backend_begin_frame(void);
-void nt_gfx_backend_end_frame(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 
@@ -76,6 +75,8 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
+/* Creates the name and uploads every declared level from desc->data: levels
+ * 0..N-1 back to back, N = desc->level_count > 1 ? desc->level_count : 1. */
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
@@ -130,11 +131,6 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 
 bool nt_gfx_backend_recreate_all_resources(void);
 
-/* Compressed texture creation (per-mip transcode + glCompressedTexImage2D upload) */
-uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
-                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v,
-                                                  uint32_t transcode_target /* nt_basisu_format_t cast to uint32_t */);
-
 /* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 
@@ -184,6 +180,10 @@ uint8_t nt_gfx_test_texture_set_state(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);
 int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name);
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog);
+/* Activation staging buffer: current capacity and base pointer (0 / NULL once
+ * the idle timer has freed it). Mesh decode and Basis transcode share it. */
+uint32_t nt_gfx_test_stage_size(void);
+const void *nt_gfx_test_stage_ptr(void);
 #endif
 
 #endif /* NT_GFX_INTERNAL_H */

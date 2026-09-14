@@ -444,6 +444,9 @@ typedef struct {
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     bool gen_mipmaps;               /* DEPTH* requires false; RGBA32F requires float filtering + rendering caps */
+    /* 0 or 1 = base level only; N = data holds levels 0..N-1 back to back with
+     * no padding (KTX/DDS layout). Any count from 1 to the full chain is legal. */
+    uint8_t level_count;
     const char *label;
 } nt_texture_desc_t;
 
@@ -731,7 +734,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
-/* ---- Texture update (non-mipmapped, non-depth textures only, level 0) ---- */
+/* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 

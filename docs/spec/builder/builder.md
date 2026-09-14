@@ -130,6 +130,17 @@ before encoding.
 Basis always emits a full mip chain, independent of `gen_mipmaps` (that flag
 controls RAW runtime mip generation). The builder asserts exactly
 `1 + floor(log2(max(width, height)))` levels; 1x1 is complete with one level.
+Activation cross-checks that count against the blob and the header and rejects
+any asset that disagrees. A RAW texture whose default min filter asks for
+mipmaps without `gen_mipmaps` is a build-time assert (`NT_BUILD_ASSERT`); the
+runtime would accept it and sample level 0.
+
+An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
+the encoder checks the actual pixels, not the declared channel count. The
+runtime treats that as legal: an `RGBA8` header over an alpha-less blob selects
+`ETC2_RGB8` on an ETC2 host, where the opaque block is half the size; BC7, ASTC
+and the RGBA8 fallback have no opaque variant and are unaffected. The header's
+`format` is not cross-checked against the blob: its alpha flag alone decides.
 
 ## Builder stages
 

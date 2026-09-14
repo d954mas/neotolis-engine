@@ -3,6 +3,10 @@
 
 #include "core/nt_platform.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Asserts are contracts, not error handling.
    A failed assert means the program is broken — continuing would mask bugs.
    Release default is TRAP (immediate crash, no strings, minimal overhead).
@@ -61,6 +65,10 @@ extern nt_assert_handler_t nt_assert_handler;
 
 #define NT_ASSERT(cond) ((void)0)
 
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* NT_ASSERT_H */

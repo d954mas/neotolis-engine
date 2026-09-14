@@ -5,6 +5,8 @@ enable_language(CXX)
 # Header-only interface carries the C API header; the exe selects the impl
 # (real transcoder or stub) like every other swappable module.
 nt_declare_interface(nt_basisu_transcoder)
+# The C API speaks nt_texture_format_t / nt_basisu_codec_t.
+target_link_libraries(nt_basisu_transcoder_interface INTERFACE nt_shared)
 
 # Shared transcoder build config. The builder's encoder compiles the same basisu
 # headers and links this TU, so its defines must match exactly (ODR).
@@ -38,7 +40,7 @@ add_library(nt_basisu_transcoder STATIC
 
 target_include_directories(nt_basisu_transcoder PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_include_directories(nt_basisu_transcoder PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
-target_link_libraries(nt_basisu_transcoder PRIVATE nt_basisu_transcoder_config)
+target_link_libraries(nt_basisu_transcoder PRIVATE nt_basisu_transcoder_config nt_core)
 target_link_libraries(nt_basisu_transcoder PUBLIC nt_basisu_transcoder_interface)
 
 # -fno-strict-aliasing required by Basis transcoder (TEX-10)

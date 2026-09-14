@@ -311,10 +311,8 @@ if(NOT EMSCRIPTEN)
 
     # Real OpenGL framebuffer smoke: fills every texture slot, resizes, and reads back pixels.
     # Real OpenGL: a rejected bind must clear the backend slot mirrors (stub cannot show it).
-    # No nt_basisu_transcoder_stub: the test TU supplies a transcoder fake whose
-    # failure lands mid-upload, which the loud-fail stub cannot reach.
     add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
-    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
 
@@ -325,6 +323,12 @@ if(NOT EMSCRIPTEN)
     set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
 
     # Real OpenGL shape-renderer ring: multi-flush uploads at ring offsets render pixel-correct.
+    # Real GL + real transcoder + builder encoder. No nt_gfx_fake here: it bundles nt_gfx.c.
+    add_executable(test_nt_gfx_basis_native unit/test_nt_gfx_basis_native.c)
+    target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_builder nt_basisu_transcoder nt_window nt_input_stub nt_log unity glad nt_meshwire)
+    nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
+    set_tests_properties(test_nt_gfx_basis_native PROPERTIES LABELS "native")
+
     add_executable(test_shape_renderer_ring_native unit/test_shape_renderer_ring_native.c)
     target_link_libraries(test_shape_renderer_ring_native PRIVATE nt_shape_renderer nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_shape_renderer_ring_native)
@@ -380,6 +384,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_pack_format COMMAND test_pack_format)
+
+    # --- Texture format tests ---
+    add_executable(test_texture_format unit/test_texture_format.c)
+    target_link_libraries(test_texture_format PRIVATE nt_shared unity)
+    nt_set_warning_flags(test_texture_format)
+    nt_set_sanitizer_flags(test_texture_format)
+    set_target_properties(test_texture_format PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_texture_format COMMAND test_texture_format)
 
     # --- Entity module tests ---
     add_executable(test_entity unit/test_entity.c)
@@ -1048,6 +1062,13 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
 
+    # --- Basis activation on the fake backend: real transcoder + builder encoder ---
+    # Consumers before the archives that define their symbols: GNU ld and
+    # Emscripten resolve a static link left to right.
+    add_executable(test_gfx_basis_activate unit/test_gfx_basis_activate.c)
+    target_link_libraries(test_gfx_basis_activate PRIVATE nt_gfx_fake nt_builder nt_basisu_transcoder nt_log_stub unity nt_meshwire)
+    nt_setup_test_target(test_gfx_basis_activate TIMEOUT 300)
+
     # --- basisu stub loud-fail contract: every entry point asserts ---
     add_executable(test_basisu_stub unit/test_basisu_stub.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_basisu_stub PRIVATE nt_basisu_transcoder_stub nt_core unity)
@@ -1057,7 +1078,7 @@ if(NOT EMSCRIPTEN)
     # Stub recompiled with NT_ASSERT_MODE=0: proves the failure-return safety
     # net behind the asserts (nt_gfx's activate error path stays reachable).
     add_executable(test_basisu_stub_off unit/test_basisu_stub_off.c unit/test_helpers/nt_basisu_stub_assert_off_tu.c)
-    target_link_libraries(test_basisu_stub_off PRIVATE nt_core unity)
+    target_link_libraries(test_basisu_stub_off PRIVATE nt_core nt_basisu_transcoder_interface unity)
     nt_setup_test_target(test_basisu_stub_off)
 
     # --- meshwire real impl: SOA re-interleave + index-decode rejection ---

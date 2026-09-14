@@ -108,6 +108,8 @@ static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
 static bool s_fake_backend_missing;
 static uint8_t s_fake_fail_texture_creates;
+static uint32_t s_fake_texture_destroy_count;
+static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
@@ -176,6 +178,8 @@ void nt_gfx_fake_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_texture_creates = mask;
 }
+uint32_t nt_gfx_fake_texture_destroy_count(void) { return s_fake_texture_destroy_count; }
+uint32_t nt_gfx_fake_last_destroyed_texture(void) { return s_fake_last_destroyed_texture; }
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_buffer_creates = mask;
@@ -237,6 +241,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_context_lost = false;
     s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
+    s_fake_texture_destroy_count = 0;
+    s_fake_last_destroyed_texture = 0;
     s_fake_fail_buffer_creates = 0;
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
@@ -308,8 +314,6 @@ void nt_gfx_backend_shutdown(void) {
 bool nt_gfx_backend_is_context_lost(void) { return s_fake_context_lost || s_fake_backend_missing; }
 
 void nt_gfx_backend_begin_frame(void) {}
-
-void nt_gfx_backend_end_frame(void) {}
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
     (void)desc;
@@ -450,6 +454,9 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_hand
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     s_fake_last_texture_desc = *desc;
     s_fake_texture_create_count++;
+    if (s_fake_context_lost) {
+        return 0; /* glGenTextures returns no name on a lost context */
+    }
     /* One bit per create, consumed in order: mask 1 fails the first, 2 the
      * second, 3 both. */
     bool fail = (s_fake_fail_texture_creates & 1U) != 0;
@@ -460,22 +467,13 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     return ++s_fake_next_texture_backend;
 }
 
-uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
-                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
-    (void)basis_data;
-    (void)basis_size;
-    (void)base_width;
-    (void)base_height;
-    (void)level_count;
-    (void)min_filter;
-    (void)mag_filter;
-    (void)wrap_u;
-    (void)wrap_v;
-    (void)transcode_target;
-    return ++s_fake_next_texture_backend;
+void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
+    if (backend_handle == 0) {
+        return;
+    }
+    s_fake_last_destroyed_texture = backend_handle;
+    s_fake_texture_destroy_count++;
 }
-
-void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; }
 
 uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
     NT_ASSERT(desc != NULL);

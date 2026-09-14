@@ -70,6 +70,9 @@ uint32_t nt_gfx_fake_last_index_buffer_hash(void);
 uint32_t nt_gfx_fake_backend_restore_count(void);
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void);
 void nt_gfx_fake_fail_texture_creates(uint8_t mask);
+uint32_t nt_gfx_fake_texture_destroy_count(void);
+/* Backend handle of the last destroyed texture; handle 0 is a no-op, as on GL. */
+uint32_t nt_gfx_fake_last_destroyed_texture(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
 void nt_gfx_fake_fail_next_backend_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);

@@ -88,6 +88,16 @@ preference symbols from the executable, without per-frame engine work.
 the release builder. Native unit tests are excluded under Emscripten; on WASM,
 `NT_BUILD_TESTS` gates the registered test targets. `native-release-test` compiles
 test translation units under NDEBUG; the production `native-release` does not.
+`NT_TEST_ACCESS` also exposes `nt_gfx_test_stage_size` / `nt_gfx_test_stage_ptr`,
+the capacity and base pointer of the shared activation staging buffer.
+
+Basis coverage splits by backend. `test_gfx_basis_activate` drives the texture
+activator on the fake backend with the real transcoder and the builder's encoder.
+`test_nt_gfx_basis_native` (label `native`, `RESOURCE_LOCK gl_display`) uploads and
+samples real compressed storage through GL; the `native-debug-test` and
+`native-release-test` ctest runs both cover it. A format the host GPU lacks is
+reported as IGNORE in the Unity test log; ctest still counts the executable as
+passed, so read the log rather than the ctest summary for per-format coverage.
 
 Measure performance in Release with the required timing flag explicitly ON.
 Timing producers do not require metrics. `NT_LOG_MIN_LEVEL=3` uses the existing
@@ -150,6 +160,12 @@ Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_DIAGNOSTICS_PRESET/LOG/UI/GPU/METRICS`. Debug and Release use timer values
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 `tests/browser/app` (`window.__nt` hooks), not the showcase.
+
+That app reuses two prebuilt packs: `ui_showcase.ntpack` (target
+`ui_showcase_packs`) and `bunnymark_sd.ntpack` (target `bunnymark_demo_packs`,
+the UASTC Basis fixture). Build both with a native preset before configuring
+wasm — the copy rules are configure-time, so a pack produced later is missing
+from the app's `assets/` until the next configure.
 
 Verify font geometry changes with `NT_FONT_EMBOLDEN_ENABLED` OFF and ON. The ON
 mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label` and all

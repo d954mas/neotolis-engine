@@ -8,7 +8,6 @@
  * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
-#include "basisu/nt_basisu_transcoder.h"
 #include "core/nt_assert.h"
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
@@ -183,14 +182,6 @@ static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-
 // #endregion
 
 #endif
-
-/* ---- Transcode buffer (reused across textures, freed after idle) ---- */
-
-#define NT_TRANSCODE_BUF_IDLE_FRAMES 60 /* ~1s at 60fps */
-
-static uint8_t *s_transcode_buf = NULL;
-static uint32_t s_transcode_buf_size = 0;
-static uint32_t s_transcode_buf_idle = 0;
 
 /* ---- GL state cache (skip redundant JS interop calls) ----
  * Every direct GL call that changes a field here mirrors it or invalidates the
@@ -592,7 +583,6 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_targets);
     free(s_texture_gl);
     free(s_render_targets);
-    free(s_transcode_buf);
 
     s_programs = NULL;
     s_pipelines = NULL;
@@ -601,8 +591,6 @@ void nt_gfx_backend_shutdown(void) {
     s_buffer_targets = NULL;
     s_texture_gl = NULL;
     s_render_targets = NULL;
-    s_transcode_buf = NULL;
-    s_transcode_buf_size = 0;
 
     s_bound_framebuffer = 0;
     /* A dead context already reclaimed the name; a GL call here would run
@@ -732,17 +720,6 @@ void nt_gfx_backend_begin_frame(void) {
         }
     }
 #endif
-}
-
-void nt_gfx_backend_end_frame(void) {
-    if (s_transcode_buf != NULL) {
-        s_transcode_buf_idle++;
-        if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
-            free(s_transcode_buf);
-            s_transcode_buf = NULL;
-            s_transcode_buf_size = 0;
-        }
-    }
 }
 
 // #region GPU timer segments — poll/lifecycle
@@ -1637,30 +1614,53 @@ typedef struct {
     GLenum format;   /* upload layout: GL_RGBA, GL_RG_INTEGER, ... */
     GLenum type;     /* component type: GL_UNSIGNED_BYTE, GL_HALF_FLOAT, ... */
     bool align4;     /* true if rows are naturally 4-byte aligned */
+    bool compressed; /* upload through glCompressedTexImage2D, sized in bytes */
 } nt_gfx_gl_fmt_t;
+
+/* Not every GL header defines all four tokens; the values are spec-fixed. */
+#ifndef GL_COMPRESSED_RGB8_ETC2
+#define GL_COMPRESSED_RGB8_ETC2 0x9274
+#endif
+#ifndef GL_COMPRESSED_RGBA8_ETC2_EAC
+#define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
+#endif
+#ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
+#define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
+#endif
+#ifndef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+#define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
+#endif
 
 static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
     switch (fmt) {
     case NT_TEXTURE_FORMAT_RGB8:
-        return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_RG8:
-        return (nt_gfx_gl_fmt_t){GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_R8:
-        return (nt_gfx_gl_fmt_t){GL_R8, GL_RED, GL_UNSIGNED_BYTE, false};
+        return (nt_gfx_gl_fmt_t){GL_R8, GL_RED, GL_UNSIGNED_BYTE, false, false};
     case NT_TEXTURE_FORMAT_RGBA16F:
-        return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_RG16UI:
-        return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true};
+        return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true, false};
     case NT_TEXTURE_FORMAT_RGBA32F:
-        return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH16:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH24:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, true, false};
     case NT_TEXTURE_FORMAT_DEPTH32F:
-        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true};
+        return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_RGBA8:
-        return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true};
+        return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGB8_ETC2, GL_RGB, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA8_ETC2_EAC, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_BPTC_UNORM, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGBA_ASTC_4x4_KHR, GL_RGBA, GL_UNSIGNED_BYTE, true, true};
     case NT_TEXTURE_FORMAT_INVALID:
     default:
         NT_ASSERT(0 && "unsupported texture format");
@@ -1690,7 +1690,9 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
  * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = glGetError();
-    NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
+    /* WebGL reports a loss once through glGetError; that is a recoverable
+       outcome the caller rolls back, not a programmer error. */
+    NT_ASSERT((pending_error == GL_NO_ERROR || nt_gfx_gl_ctx_is_lost()) && "pending GL error before texture upload");
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
         return false;
@@ -1709,37 +1711,55 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         return 0;
     }
 
-    /* Set filter and wrap parameters BEFORE uploading data */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(desc->mag_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
-
+    /* Filter and wrap live on the sampler object every bind carries; the
+       texture object keeps GL defaults, which no sampling path reads. */
     nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(desc->format);
     if (gl.internal == 0) {
         glDeleteTextures(1, &tex);
         return 0;
     }
 
+    /* Declared levels lie back to back in desc->data (NULL = storage only). */
+    const uint8_t levels = desc->level_count > 1 ? desc->level_count : 1;
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     }
-
-    /* Upload pixel data (may be NULL for storage-only allocation) */
-    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, gl.format, gl.type, desc->data);
+    const uint8_t *level_data = (const uint8_t *)desc->data;
+    for (uint8_t level = 0; level < levels; level++) {
+        const uint32_t level_w = nt_texture_level_extent(desc->width, level);
+        const uint32_t level_h = nt_texture_level_extent(desc->height, level);
+        const uint64_t level_bytes = nt_texture_level_bytes(desc->format, level_w, level_h);
+        if (gl.compressed) {
+            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
+        }
+        if (level_data != NULL) {
+            level_data += level_bytes;
+        }
+    }
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    }
-    GLenum upload_error = glGetError();
-    if (upload_error != GL_NO_ERROR) {
-        NT_LOG_ERROR("glTexImage2D failed: GL error 0x%04X", (unsigned)upload_error);
-        glDeleteTextures(1, &tex);
-        return 0;
     }
 
     /* Generate mipmaps after base level upload if requested and data present */
     if (desc->gen_mipmaps && desc->data) {
         glGenerateMipmap(GL_TEXTURE_2D);
+    }
+
+    const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
+
+    GLenum first_error = GL_NO_ERROR;
+    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+        if (first_error == GL_NO_ERROR) {
+            first_error = e;
+        }
+    }
+    if (first_error != GL_NO_ERROR) {
+        NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
+        glDeleteTextures(1, &tex);
+        return 0;
     }
 
     return tex;
@@ -1787,124 +1807,6 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     }
-}
-
-/* Per-mip transcode + compressed upload (Basis Universal) */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
-                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
-    nt_basisu_format_t target = (nt_basisu_format_t)transcode_target;
-    bool is_compressed = (target != NT_BASISU_FORMAT_RGBA32);
-    uint32_t gl_internal = nt_basisu_gl_internal_format(target);
-    uint32_t bpb = nt_basisu_bytes_per_block(target);
-
-    /* Query level 0 size to preallocate transcode buffer (reused for all mips) */
-    uint32_t lw0 = 0;
-    uint32_t lh0 = 0;
-    uint32_t blocks0 = 0;
-    if (!nt_basisu_get_level_desc(basis_data, basis_size, 0, &lw0, &lh0, &blocks0)) {
-        return 0;
-    }
-    if (lw0 != base_width || lh0 != base_height) {
-        NT_LOG_ERROR("compressed texture: header/basis dimension mismatch (%ux%u vs %ux%u)", base_width, base_height, lw0, lh0);
-        return 0;
-    }
-    uint32_t buf_size = is_compressed ? blocks0 * bpb : lw0 * lh0 * 4;
-    /* Grow shared transcode buffer if needed (reused across textures) */
-    if (buf_size > s_transcode_buf_size) {
-        free(s_transcode_buf);
-        s_transcode_buf = (uint8_t *)malloc(buf_size);
-        if (!s_transcode_buf) {
-            s_transcode_buf_size = 0;
-            return 0;
-        }
-        s_transcode_buf_size = buf_size;
-    }
-    s_transcode_buf_idle = 0;
-    uint8_t *transcode_buf = s_transcode_buf;
-
-    GLuint tex;
-    glGenTextures(1, &tex);
-    if (tex == 0) {
-        return 0; /* lost context: storing name 0 would alias the free-slot sentinel */
-    }
-    if (!nt_gfx_gl_begin_texture_upload(tex)) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(min_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(mag_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(wrap_u));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(wrap_v));
-
-    /* Start transcoding session once for all mip levels */
-    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-
-    bool ok = true;
-    for (uint32_t level = 0; level < level_count; level++) {
-        uint32_t lw = 0;
-        uint32_t lh = 0;
-        uint32_t total_blocks = 0;
-        if (!nt_basisu_get_level_desc(basis_data, basis_size, level, &lw, &lh, &total_blocks)) {
-            ok = false;
-            break;
-        }
-
-        uint32_t output_size;
-        if (is_compressed) {
-            output_size = total_blocks * bpb;
-        } else {
-            /* RGBA32 fallback: 4 bytes per pixel */
-            output_size = lw * lh * 4;
-            total_blocks = lw * lh; /* for transcode_level: output_blocks = pixel count */
-        }
-
-        if (!nt_basisu_transcode_level(basis_data, basis_size, level, transcode_buf, total_blocks, target)) {
-            ok = false;
-            break;
-        }
-
-        if (is_compressed) {
-            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLenum)gl_internal, (GLsizei)lw, (GLsizei)lh, 0, (GLsizei)output_size, transcode_buf);
-        } else {
-            /* RGBA32 fallback: regular upload */
-            glTexImage2D(GL_TEXTURE_2D, (GLint)level, GL_RGBA8, (GLsizei)lw, (GLsizei)lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, transcode_buf);
-        }
-
-        GLenum gl_err = glGetError();
-        if (gl_err != GL_NO_ERROR) {
-            NT_LOG_ERROR("compressed texture upload failed: GL error 0x%04X (level %u, format 0x%04X)", gl_err, level, gl_internal);
-            ok = false;
-            break;
-        }
-    }
-
-    nt_basisu_stop_transcoding();
-
-    if (!ok) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-
-    /* Find free texture slot (same pattern as existing create_texture) */
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
-        if (s_texture_gl[i] == 0) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == 0) {
-        glDeleteTextures(1, &tex);
-        return 0;
-    }
-    s_texture_gl[slot] = tex;
-
-    return slot;
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
@@ -2216,6 +2118,7 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_sampler: slot out of range");
+    NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
     if (s_gl_cache.bound_samplers[slot] == sampler) {
         return;

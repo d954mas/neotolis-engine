@@ -21,7 +21,22 @@ typedef enum {
     NT_TEXTURE_FORMAT_DEPTH16 = 8,
     NT_TEXTURE_FORMAT_DEPTH24 = 9,
     NT_TEXTURE_FORMAT_DEPTH32F = 10,
+    NT_TEXTURE_FORMAT_ETC2_RGB8 = 11,     /* GL_COMPRESSED_RGB8_ETC2, 8 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_ETC2_RGBA8 = 12,    /* GL_COMPRESSED_RGBA8_ETC2_EAC, 16 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_BC7_RGBA = 13,      /* GL_COMPRESSED_RGBA_BPTC_UNORM, 16 bytes per 4x4 block */
+    NT_TEXTURE_FORMAT_ASTC_4x4_RGBA = 14, /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR, 16 bytes per 4x4 block */
 } nt_texture_format_t;
+
+static inline bool nt_texture_format_valid(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_RGBA8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+
+static inline bool nt_texture_format_is_depth(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_DEPTH16 && fmt <= NT_TEXTURE_FORMAT_DEPTH32F; }
+
+static inline bool nt_texture_format_is_compressed(nt_texture_format_t fmt) { return fmt >= NT_TEXTURE_FORMAT_ETC2_RGB8 && fmt <= NT_TEXTURE_FORMAT_ASTC_4x4_RGBA; }
+
+static inline bool nt_texture_format_is_integer(nt_texture_format_t fmt) { return fmt == NT_TEXTURE_FORMAT_RG16UI; }
+
+/* What a sampler2D reads: colour storage, normalized or float. */
+static inline bool nt_texture_format_is_sampled_color(nt_texture_format_t fmt) { return nt_texture_format_valid(fmt) && !nt_texture_format_is_depth(fmt) && !nt_texture_format_is_integer(fmt); }
 
 /* Builder source formats are the packed-asset subset RGBA8..R8. */
 typedef nt_texture_format_t nt_texture_pixel_format_t;
@@ -42,6 +57,71 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     default:
         return 0;
     }
+}
+
+/* Levels of the full mip chain down to 1x1: floor(log2(max(w, h))) + 1. */
+static inline uint8_t nt_texture_full_chain_levels(uint32_t w, uint32_t h) {
+    uint32_t max_dim = w > h ? w : h;
+    uint8_t levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1U;
+        levels++;
+    }
+    return levels;
+}
+
+/* One dimension at `level`, never below 1 (the GL mip rule). */
+static inline uint32_t nt_texture_level_extent(uint32_t d, uint32_t level) {
+    uint32_t extent = d >> level;
+    return extent > 0 ? extent : 1;
+}
+
+/* Bytes of one mip level of the given size. Returns 0 for INVALID and depth
+ * formats; callers exclude those before calling. uint64 because 32768x32768
+ * RGBA8 is exactly 2^32. */
+static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t w, uint32_t h) {
+    uint64_t bytes_per_block = 0;
+    uint64_t bytes_per_pixel = 0;
+    switch (fmt) {
+    case NT_TEXTURE_FORMAT_RGBA8:
+        bytes_per_pixel = 4;
+        break;
+    case NT_TEXTURE_FORMAT_RGB8:
+        bytes_per_pixel = 3;
+        break;
+    case NT_TEXTURE_FORMAT_RG8:
+        bytes_per_pixel = 2;
+        break;
+    case NT_TEXTURE_FORMAT_R8:
+        bytes_per_pixel = 1;
+        break;
+    case NT_TEXTURE_FORMAT_RGBA16F:
+        bytes_per_pixel = 8;
+        break;
+    case NT_TEXTURE_FORMAT_RG16UI:
+        bytes_per_pixel = 4;
+        break;
+    case NT_TEXTURE_FORMAT_RGBA32F:
+        bytes_per_pixel = 16;
+        break;
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+        bytes_per_block = 8;
+        break;
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        bytes_per_block = 16;
+        break;
+    case NT_TEXTURE_FORMAT_INVALID:
+    case NT_TEXTURE_FORMAT_DEPTH16:
+    case NT_TEXTURE_FORMAT_DEPTH24:
+    case NT_TEXTURE_FORMAT_DEPTH32F:
+        return 0;
+    }
+    if (bytes_per_block != 0) {
+        return (((uint64_t)w + 3) / 4) * (((uint64_t)h + 3) / 4) * bytes_per_block;
+    }
+    return (uint64_t)w * (uint64_t)h * bytes_per_pixel;
 }
 
 /* Compression type */
@@ -88,7 +168,8 @@ typedef enum {
  *
  * format field serves double duty:
  *   RAW: pixel layout (RGBA8, RGB8, RG8, R8)
- *   BASIS: source channel config (RGBA8 = has alpha, RGB8 = no alpha)
+ *   BASIS: range-checked like every header field, but it does not pick the
+ *          target -- alpha and codec come from the Basis blob itself
  *
  * flags field:
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
@@ -104,9 +185,6 @@ typedef enum {
  *   samples with the asset's intended filter unless a material overrides.
  *   Pixel-art atlases typically pick LINEAR/NEAREST + REPEAT; downscaled
  *   3D textures want LINEAR_MIPMAP_LINEAR.
- *
- * Bump from V2 to V3: added 4 sampler-default bytes. Older V2 packs need
- * to be rebuilt — no compat shim, this is a feature-branch change.
  *
  * No mip_sizes[] array: RAW mips are calculable from dimensions,
  * BASIS mip boundaries are parsed internally by the transcoder.
@@ -129,7 +207,12 @@ typedef struct {
 } NtTextureAssetHeader;
 #pragma pack(pop)
 
+/* The transcoder wrapper compiles this header as C++, where GCC has no _Static_assert. */
+#ifdef __cplusplus
+static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28 bytes");
+#else
 _Static_assert(sizeof(NtTextureAssetHeader) == 28, "TextureAssetHeader must be 28 bytes");
+#endif
 
 /* Backward compat alias — code that used V2 suffix continues to compile.
  * The struct is the V3 layout; the alias is purely a name. */

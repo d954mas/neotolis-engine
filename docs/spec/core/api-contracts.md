@@ -237,14 +237,53 @@ false without mutating the material.
 ### Texture descriptors
 
 `nt_texture_desc_t.format` is required and names the real storage format.
-`RG16UI` requires `NEAREST` minification and magnification. `DEPTH16`, `DEPTH24`,
+`RG16UI` requires `NEAREST` minification and magnification, and `level_count <= 1`
+because integer storage is never sampled through a mip filter. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
+`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA` and `ASTC_4x4_RGBA` are block-compressed
+color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
+three. They require `data` and reject `gen_mipmaps`, because block data can only
+be uploaded, never generated. Each needs its capability bit (`has_etc2`,
+`has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` precedent —
+assert in Debug, error log, invalid handle, no storage created. Compressed
+storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
+`nt_gfx_update_texture` asserts on it, since a sub-rectangle of blocks is not a
+sub-rectangle of texels.
+
+`BC7_RGBA` additionally requires both base dimensions to be multiples of 4,
+including textures smaller than one block. This is the portable WebGL BPTC
+upload contract and asserts before storage creation on every backend. Other
+compressed formats allow partial edge blocks.
+
+`level_count` declares how many mip levels `data` carries. `0` and `1` both mean
+base level only, `0` being the zero-init spelling. `N > 1` means levels `0..N-1`
+lie back to back in `data` with no padding (the KTX/DDS layout); level `L`
+measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
+`nt_texture_level_bytes` of that size. Any count from 1 to the full chain
+(`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
+excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
+shot: the handle is published only after the last declared level uploaded and
+the default sampler was acquired. A failed upload or sampler creation leaves no
+texture and no pool slot. Filter and wrap state lives only on sampler objects:
+every sampling bind carries one (the texture's default or a material override),
+the texture object itself keeps GL defaults, and the backend asserts on a bind
+without a sampler.
+
+`GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
+every published texture is complete for every minification filter. Descriptors the
+engine builds for render-target attachments ship `level_count == 0`. A
+`glGenerateMipmap` that fails fails the creation: no texture is published. A
+mipmap filter over a single-level texture is therefore legal in both the descriptor and
+a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
+or multi-level texture asserts, then returns without touching storage; whole
+levels are replaced by recreating the texture.
+
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
-both in the texture descriptor and in sampler overrides. Without it, texture
-descriptors require `NEAREST` minification and magnification and no generated
-mipmaps. Sampler overrides may additionally use `NEAREST_MIPMAP_NEAREST` with a
-complete mip chain (including a 1x1 base level). Creating mipmaps requires
+both in the texture descriptor and in sampler overrides. Without it, both allow
+`NEAREST` or `NEAREST_MIPMAP_NEAREST` minification, require `NEAREST`
+magnification, and forbid generated mipmaps.
+Creating mipmaps requires
 both `has_float_texture_linear` and `has_float_render_target`, because WebGL
 generation requires filterable, color-renderable storage. Unsupported combinations
 assert before creating storage or applying bindings; filters are never substituted.
@@ -285,6 +324,39 @@ The sampler class is part of the linked interface:
 `isampler2D` and sampler dimensions other than 2D are rejected at link because
 the public texture formats cannot satisfy them.
 
+### Texture activation
+
+Pack bytes are untrusted, so `nt_gfx_activate_texture` rejects a bad header
+instead of asserting on it: it logs and returns an invalid handle for an
+out-of-range pixel format, sampler defaults outside the filter/wrap enums,
+dimensions above `gpu_caps.max_texture_size` or above `UINT16_MAX`, a
+`data_size` longer than the blob, an unknown `compression`, and a RAW
+`data_size` shorter than `width * height * bpp`. Magic, version and the minimum
+blob size are checked before the header is read. RAW assets then go through
+the public constructor unchanged.
+
+A BASIS asset is cross-checked against the blob before anything is created. The
+blob's own dimensions must equal the header's, and its level count must equal
+both `mip_count` and the full chain down to 1x1. Every mismatch is a recoverable
+rejection with a log. The header's `format` field is range-checked at the
+boundary like every other header field, but it does not determine the target
+format: alpha and codec come from the blob, because the encoder drops alpha
+slices for a fully opaque source.
+
+The target format is the first entry the GPU supports of `BC7_RGBA`,
+`ASTC_4x4_RGBA`, `ETC2_RGBA8` or `ETC2_RGB8` (by the blob's alpha), then `RGBA8`
+as the always-available fallback. `BC7_RGBA` is eligible only when both base
+dimensions are multiples of 4; otherwise selection continues with ASTC, ETC2,
+then RGBA8. `nt_gfx_texture_format` reports that choice.
+The activator transcodes the whole chain into the shared staging buffer with one
+codec call and then creates the texture through `nt_gfx_make_texture`, which is
+the single path to storage — there is no internal create/upload pair. The codec
+call opens and closes its own transcoder session. Any failure — transcode,
+staging, storage creation, sampler creation — publishes nothing: no handle, no
+pool slot, no open transcoder session. Texture pool exhaustion during activation
+is an asserted precondition, exactly as in `nt_gfx_make_texture`, not a
+rejection.
+
 ### Render-target handles
 
 `nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
@@ -305,7 +377,8 @@ Both readiness queries return `false` for invalid handles, so callers can also
 use them after a failed resource-creation call.
 `nt_gfx_texture_size` writes a texture's logical dimensions to its two required
 outputs. Invalid handles write zero to both outputs and return `false`.
-`nt_gfx_texture_format` returns the retained logical format, or
+`nt_gfx_texture_format` returns the actual storage format — including the
+compressed format an activator picked for a Basis asset — or
 `NT_TEXTURE_FORMAT_INVALID` for an invalid handle.
 
 `nt_gfx_resize_render_target` preserves the logical render-target handle and

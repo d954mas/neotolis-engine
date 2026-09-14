@@ -544,13 +544,19 @@ static nt_sampler_t make_mipmap_sampler(void) {
     });
 }
 
-static void test_render_target_color_rejects_mipmap_sampler_override(void) {
+/* Attachments are single-level, and GL_TEXTURE_MAX_LEVEL makes that complete:
+ * a mip filter samples level 0. */
+static void test_render_target_color_accepts_mipmap_sampler_override(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_sampler_t mipmap_sampler = make_mipmap_sampler();
 
+    /* The attachment desc keeps the zero-init spelling; the backend reads it as one level. */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_gfx_fake_last_texture_desc().level_count);
+
     begin_single_sampler_pass(NT_GFX_SAMPLER_CLASS_FLOAT);
-    NT_TEST_EXPECT_ASSERT(apply_one_texture(nt_gfx_render_target_color(rt), mipmap_sampler));
+    apply_one_texture(nt_gfx_render_target_color(rt), mipmap_sampler);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 }
 
 static void test_one_pixel_texture_accepts_mipmap_sampler_override(void) {
@@ -669,6 +675,8 @@ static void test_context_restore_recreates_backend_from_retained_descriptor(void
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_DEPTH16, restored_depth.format);
     TEST_ASSERT_EQUAL_INT(NT_WRAP_REPEAT, restored_depth.wrap_u);
     TEST_ASSERT_EQUAL_INT(NT_WRAP_MIRRORED_REPEAT, restored_depth.wrap_v);
+    /* The recreate desc keeps the zero-init spelling; the GL name creator reads it as one level. */
+    TEST_ASSERT_EQUAL_UINT8(0, restored_depth.level_count);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_gpu_caps_probe_count());
 
     nt_gfx_end_frame();
@@ -855,7 +863,7 @@ int main(void) {
     RUN_TEST(test_integer_texture_rejects_comparison_sampler);
     RUN_TEST(test_comparison_state_participates_in_sampler_dedupe);
     RUN_TEST(test_out_of_range_sampler_state_keys_what_the_backend_builds);
-    RUN_TEST(test_render_target_color_rejects_mipmap_sampler_override);
+    RUN_TEST(test_render_target_color_accepts_mipmap_sampler_override);
     RUN_TEST(test_one_pixel_texture_accepts_mipmap_sampler_override);
     RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_incomplete_target);
