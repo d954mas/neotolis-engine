@@ -335,9 +335,10 @@ constructor unchanged.
 A BASIS asset is cross-checked against the blob before anything is created. The
 blob's own dimensions must equal the header's, and its level count must equal
 both `mip_count` and the full chain down to 1x1. Every mismatch is a recoverable
-rejection with a log. The header's `format` field is not consulted on this path:
-alpha and codec come from the blob, because the encoder drops alpha slices for a
-fully opaque source.
+rejection with a log. The header's `format` field is range-checked at the
+boundary like every other header field, but it does not determine the target
+format: alpha and codec come from the blob, because the encoder drops alpha
+slices for a fully opaque source.
 
 The target format is the first entry the GPU supports of `BC7_RGBA`,
 `ASTC_4x4_RGBA`, `ETC2_RGBA8` or `ETC2_RGB8` (by the blob's alpha), then `RGBA8`
