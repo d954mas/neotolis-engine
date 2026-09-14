@@ -13,7 +13,7 @@
 #include "nt_texture_format.h"
 
 /* Shared activation staging: grow-on-demand, reused sequentially by mesh
- * decode (VBO then IBO) and by Basis transcode output (one mip at a time),
+ * decode (VBO then IBO) and by Basis transcode output (the whole mip chain),
  * freed after NT_STAGE_IDLE_FRAMES without use -- no per-activation heap
  * traffic while a pack streams in. */
 #define NT_STAGE_IDLE_FRAMES 60 /* ~1s at 60fps */
@@ -1011,17 +1011,6 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     return result;
 }
 
-/* floor(log2(max(w, h))) + 1 -- levels down to 1x1. */
-static uint8_t texture_full_chain_levels(uint16_t width, uint16_t height) {
-    uint16_t max_dim = width > height ? width : height;
-    uint8_t levels = 1;
-    while (max_dim > 1) {
-        max_dim >>= 1;
-        levels++;
-    }
-    return levels;
-}
-
 static bool texture_compressed_format_supported(nt_texture_format_t format) {
     switch (format) {
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
@@ -1036,55 +1025,37 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
     }
 }
 
-/* Publishes a fully uploaded texture: desc->level_count is the resolved count. */
-static uint32_t texture_commit(uint32_t id, const nt_texture_desc_t *desc, uint32_t backend) {
-    nt_sampler_desc_t sd = {
-        .min_filter = desc->min_filter,
-        .mag_filter = desc->mag_filter,
-        .wrap_u = desc->wrap_u,
-        .wrap_v = desc->wrap_v,
-        .label = NULL,
-    };
-    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
-    if (default_sampler.id == 0) {
-        nt_gfx_backend_destroy_texture(backend);
-        nt_pool_free(&s_gfx.texture_pool, id);
-        return 0;
-    }
-
-    uint32_t slot = nt_pool_slot_index(id);
-    s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_metas[slot].width = desc->width;
-    s_gfx.texture_metas[slot].height = desc->height;
-    s_gfx.texture_metas[slot].format = (uint8_t)desc->format;
-    s_gfx.texture_metas[slot].mip_count = desc->level_count;
-    s_gfx.texture_metas[slot].default_sampler = default_sampler;
-    return id;
-}
-
-/* Checks a caller's descriptor and resolves level_count in place. Shared by
- * make_texture and the Basis activator so both publish identical texture state.
- * Returns false on the outcomes the API rejects recoverably. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool texture_desc_validate(nt_texture_desc_t *local) {
-    nt_texture_desc_t local_desc = *local;
+nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
+    nt_texture_t result = {0};
+    if (!desc) {
+        return result;
+    }
+    /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
+     * Emscripten's module-global GL.lastError, which survives context
+     * recreation and would trip the next upload's pending-error assert. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        return result;
+    }
+    nt_texture_desc_t local_desc = *desc;
 
+    // #region descriptor contract
     if (local_desc.width == 0 || local_desc.height == 0) {
         NT_LOG_ERROR("make_texture: zero dimension");
-        return false;
+        return result;
     }
     if (local_desc.width > g_nt_gfx.gpu_caps.max_texture_size || local_desc.height > g_nt_gfx.gpu_caps.max_texture_size) {
 #ifdef NT_DEBUG
         NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
 #endif
         NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", local_desc.width, local_desc.height, g_nt_gfx.gpu_caps.max_texture_size);
-        return false;
+        return result;
     }
 
     bool format_valid = nt_texture_format_valid(local_desc.format);
     NT_ASSERT(format_valid && "make_texture: format is required");
     if (!format_valid) {
-        return false;
+        return result;
     }
 
     /* Mipmaps require initial data — GL cannot generate from empty storage */
@@ -1100,7 +1071,7 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
             NT_ASSERT(0 && "make_texture: compressed format is not supported by the GPU");
 #endif
             NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
-            return false;
+            return result;
         }
     }
     /* Ahead of the generic level rule so the depth-specific message wins. */
@@ -1114,7 +1085,7 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
     if (local_desc.level_count > 1) {
         NT_ASSERT(local_desc.data != NULL && "make_texture: level_count > 1 requires data");
         NT_ASSERT(!local_desc.gen_mipmaps && "make_texture: level_count > 1 cannot be combined with gen_mipmaps");
-        NT_ASSERT(local_desc.level_count <= texture_full_chain_levels(local_desc.width, local_desc.height) && "make_texture: level_count exceeds the full mip chain");
+        NT_ASSERT(local_desc.level_count <= nt_texture_full_chain_levels(local_desc.width, local_desc.height) && "make_texture: level_count exceeds the full mip chain");
     }
 
     /* Integer textures: NEAREST only, no mipmaps */
@@ -1135,28 +1106,7 @@ static bool texture_desc_validate(nt_texture_desc_t *local) {
 
     /* mag_filter: only NEAREST or LINEAR allowed */
     NT_ASSERT(local_desc.mag_filter <= NT_FILTER_LINEAR && "make_texture: mag_filter must be NEAREST or LINEAR");
-
-    /* The backend mirrors a resolved count, never a policy: 0 is only the zero-init spelling. */
-    if (local_desc.level_count <= 1) {
-        local_desc.level_count = (local_desc.gen_mipmaps && local_desc.data) ? texture_full_chain_levels(local_desc.width, local_desc.height) : 1;
-    }
-
-    *local = local_desc;
-    return true;
-}
-
-nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
-    nt_texture_t result = {0};
-    if (!desc) {
-        return result;
-    }
-    /* Levels the caller supplies in `data`; gen_mipmaps leaves 1 and GL fills the rest. */
-    uint8_t supplied_levels = desc->level_count > 1 ? desc->level_count : 1;
-
-    nt_texture_desc_t local_desc = *desc;
-    if (!texture_desc_validate(&local_desc)) {
-        return result;
-    }
+    // #endregion
 
     /* Pool exhaustion is a configuration error, not a backend allocation failure. */
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
@@ -1169,23 +1119,34 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         return result;
     }
 
-    /* Levels 1..N-1 follow level 0 in `data` with no padding. */
-    uint64_t offset = nt_texture_level_bytes(local_desc.format, local_desc.width, local_desc.height);
-    for (uint8_t level = 1; level < supplied_levels; level++) {
-        uint16_t level_w = (uint16_t)(local_desc.width >> level);
-        uint16_t level_h = (uint16_t)(local_desc.height >> level);
-        level_w = level_w > 0 ? level_w : 1;
-        level_h = level_h > 0 ? level_h : 1;
-        if (!nt_gfx_backend_upload_texture_level(backend, level, level_w, level_h, local_desc.format, (const uint8_t *)local_desc.data + offset)) {
-            NT_LOG_ERROR("backend texture level %u upload failed", (unsigned)level);
-            nt_gfx_backend_destroy_texture(backend);
-            nt_pool_free(&s_gfx.texture_pool, id);
-            return result;
-        }
-        offset += nt_texture_level_bytes(local_desc.format, level_w, level_h);
+    nt_sampler_desc_t sampler_desc = {
+        .min_filter = local_desc.min_filter,
+        .mag_filter = local_desc.mag_filter,
+        .wrap_u = local_desc.wrap_u,
+        .wrap_v = local_desc.wrap_v,
+        .label = NULL,
+    };
+    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sampler_desc);
+    if (default_sampler.id == 0) {
+        nt_gfx_backend_destroy_texture(backend);
+        nt_pool_free(&s_gfx.texture_pool, id);
+        return result;
     }
 
-    result.id = texture_commit(id, &local_desc, backend);
+    uint32_t slot = nt_pool_slot_index(id);
+    s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].width = local_desc.width;
+    s_gfx.texture_metas[slot].height = local_desc.height;
+    s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
+    /* Levels the storage really has: gen_mipmaps fills the chain GL-side. */
+    uint8_t mip_count = local_desc.level_count > 1 ? local_desc.level_count : 1;
+    if (local_desc.gen_mipmaps && local_desc.data) {
+        mip_count = nt_texture_full_chain_levels(local_desc.width, local_desc.height);
+    }
+    s_gfx.texture_metas[slot].mip_count = mip_count;
+    s_gfx.texture_metas[slot].default_sampler = default_sampler;
+
+    result.id = id;
     return result;
 }
 
@@ -2273,6 +2234,12 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
+    /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
+     * Emscripten's module-global GL.lastError, which survives context
+     * recreation and would trip the next upload's pending-error assert. */
+    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        return 0;
+    }
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
 
     // #region header boundary (pack bytes are untrusted -- reject, never assert)
@@ -2296,12 +2263,6 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     /* Subtraction safe -- caller verified size >= sizeof header */
     if (hdr2->data_size > size - sizeof(NtTextureAssetHeaderV2)) {
         NT_LOG_ERROR("activate_texture: v2 blob truncated");
-        return 0;
-    }
-    /* The builder only encodes RGBA8/RGB8 sources into Basis, so any other
-     * header format over a Basis blob is a corrupt pack. */
-    if (hdr2->compression == NT_TEXTURE_COMPRESSION_BASIS && hdr2->format != NT_TEXTURE_FORMAT_RGBA8 && hdr2->format != NT_TEXTURE_FORMAT_RGB8) {
-        NT_LOG_ERROR("activate_texture: Basis blob with header format %u (RGBA8 or RGB8 required)", hdr2->format);
         return 0;
     }
     const uint16_t width = (uint16_t)hdr2->width;
@@ -2355,13 +2316,8 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: header %ux%u but Basis blob is %ux%u", hdr2->width, hdr2->height, info.width, info.height);
         return 0;
     }
-    if (info.level_count != hdr2->mip_count || info.level_count != texture_full_chain_levels(width, height)) {
-        NT_LOG_ERROR("activate_texture: Basis chain %u levels, header says %u, full chain is %u", info.level_count, hdr2->mip_count, texture_full_chain_levels(width, height));
-        return 0;
-    }
-    /* An RGBA8 header over an alpha-less blob is fine; the reverse loses data. */
-    if (hdr2->format == NT_TEXTURE_FORMAT_RGB8 && info.has_alpha) {
-        NT_LOG_ERROR("activate_texture: RGB8 header over a Basis blob with alpha");
+    if (info.level_count != hdr2->mip_count || info.level_count != nt_texture_full_chain_levels(width, height)) {
+        NT_LOG_ERROR("activate_texture: Basis chain %u levels, header says %u, full chain is %u", info.level_count, hdr2->mip_count, nt_texture_full_chain_levels(width, height));
         return 0;
     }
     // #endregion
@@ -2379,17 +2335,44 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         target = NT_TEXTURE_FORMAT_RGBA8;
     }
 
-    uint64_t bytes0 = nt_texture_level_bytes(target, width, height);
+    uint64_t chain_bytes = 0;
+    for (uint32_t level = 0; level < info.level_count; level++) {
+        chain_bytes += nt_texture_level_bytes(target, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
+    }
     /* Only the RGBA8 fallback can reach 2^32, at 32768x32768. */
-    if (bytes0 > UINT32_MAX) {
-        NT_LOG_ERROR("activate_texture: level 0 needs %llu bytes, more than a uint32 holds", (unsigned long long)bytes0);
+    if (chain_bytes > UINT32_MAX) {
+        NT_LOG_ERROR("activate_texture: the chain needs %llu bytes, more than a uint32 holds", (unsigned long long)chain_bytes);
         return 0;
     }
-    uint8_t *stage = stage_acquire((uint32_t)bytes0);
+    uint8_t *stage = stage_acquire((uint32_t)chain_bytes);
     if (stage == NULL) {
-        NT_LOG_ERROR("activate_texture: staging allocation of %u bytes failed", (uint32_t)bytes0);
+        NT_LOG_ERROR("activate_texture: staging allocation of %u bytes failed", (uint32_t)chain_bytes);
         return 0;
     }
+    // #endregion
+
+    // #region transcode the whole chain into staging
+    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
+        NT_LOG_ERROR("activate_texture: Basis start_transcoding failed");
+        return 0;
+    }
+    uint32_t offset = 0;
+    bool ok = true;
+    for (uint32_t level = 0; level < info.level_count; level++) {
+        uint32_t level_bytes = (uint32_t)nt_texture_level_bytes(target, nt_texture_level_extent(width, level), nt_texture_level_extent(height, level));
+        if (!nt_basisu_transcode_level(basis_data, basis_size, level, stage + offset, level_bytes, target)) {
+            NT_LOG_ERROR("activate_texture: transcode of level %u failed", (unsigned)level);
+            ok = false;
+            break;
+        }
+        offset += level_bytes;
+    }
+    nt_basisu_stop_transcoding();
+    if (!ok) {
+        return 0;
+    }
+    // #endregion
+
     nt_texture_desc_t desc = {
         .width = width,
         .height = height,
@@ -2403,61 +2386,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         .gen_mipmaps = false,
         .label = NULL,
     };
-    /* Cannot fail here: the target came from caps and the dims passed the boundary block. */
-    if (!texture_desc_validate(&desc)) {
-        return 0;
-    }
-    // #endregion
-
-    // #region transcode and upload, one level at a time
-    /* Pool slot before the session: an assert on a full pool must not leave one open. */
-    uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
-    NT_ASSERT(id != 0 && "texture pool full -- raise nt_gfx_desc_t.max_textures");
-    if (id == 0) {
-        return 0;
-    }
-
-    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
-        NT_LOG_ERROR("activate_texture: Basis start_transcoding failed");
-        nt_pool_free(&s_gfx.texture_pool, id);
-        return 0;
-    }
-
-    uint32_t backend = 0;
-    bool ok = true;
-    for (uint8_t level = 0; level < desc.level_count; level++) {
-        uint16_t level_w = (uint16_t)(width >> level);
-        uint16_t level_h = (uint16_t)(height >> level);
-        level_w = level_w > 0 ? level_w : 1;
-        level_h = level_h > 0 ? level_h : 1;
-        if (!nt_basisu_transcode_level(basis_data, basis_size, level, stage, (uint32_t)nt_texture_level_bytes(target, level_w, level_h), target)) {
-            NT_LOG_ERROR("activate_texture: transcode of level %u failed", (unsigned)level);
-            ok = false;
-            break;
-        }
-        if (level == 0) {
-            backend = nt_gfx_backend_create_texture(&desc);
-            if (backend == 0) {
-                NT_LOG_ERROR("backend texture creation failed");
-                ok = false;
-                break;
-            }
-        } else if (!nt_gfx_backend_upload_texture_level(backend, level, level_w, level_h, target, stage)) {
-            NT_LOG_ERROR("backend texture level %u upload failed", (unsigned)level);
-            ok = false;
-            break;
-        }
-    }
-    nt_basisu_stop_transcoding();
-
-    if (!ok) {
-        nt_gfx_backend_destroy_texture(backend);
-        nt_pool_free(&s_gfx.texture_pool, id);
-        return 0;
-    }
-    // #endregion
-
-    return texture_commit(id, &desc, backend);
+    return nt_gfx_make_texture(&desc).id;
 }
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {

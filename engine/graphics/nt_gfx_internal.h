@@ -75,10 +75,9 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
-/* Creates the name and uploads level 0 only (desc->data); remaining declared
- * levels arrive one at a time through nt_gfx_backend_upload_texture_level. */
+/* Creates the name and uploads every declared level from desc->data: levels
+ * 0..N-1 back to back, N = desc->level_count > 1 ? desc->level_count : 1. */
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
-bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);

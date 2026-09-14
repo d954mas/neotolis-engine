@@ -59,9 +59,26 @@ static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     }
 }
 
+/* Levels of the full mip chain down to 1x1: floor(log2(max(w, h))) + 1. */
+static inline uint8_t nt_texture_full_chain_levels(uint32_t w, uint32_t h) {
+    uint32_t max_dim = w > h ? w : h;
+    uint8_t levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1U;
+        levels++;
+    }
+    return levels;
+}
+
+/* One dimension at `level`, never below 1 (the GL mip rule). */
+static inline uint32_t nt_texture_level_extent(uint32_t d, uint32_t level) {
+    uint32_t extent = d >> level;
+    return extent > 0 ? extent : 1;
+}
+
 /* Bytes of one mip level of the given size. Returns 0 for INVALID and depth
- * formats -- this shared header cannot include core/nt_assert.h, so callers
- * assert on the 0 sentinel. uint64 because 32768x32768 RGBA8 is exactly 2^32. */
+ * formats; callers exclude those before calling. uint64 because 32768x32768
+ * RGBA8 is exactly 2^32. */
 static inline uint64_t nt_texture_level_bytes(nt_texture_format_t fmt, uint32_t w, uint32_t h) {
     uint64_t bytes_per_block = 0;
     uint64_t bytes_per_pixel = 0;
@@ -151,7 +168,8 @@ typedef enum {
  *
  * format field serves double duty:
  *   RAW: pixel layout (RGBA8, RGB8, RG8, R8)
- *   BASIS: source channel config (RGBA8 = has alpha, RGB8 = no alpha)
+ *   BASIS: the builder-side source channel layout, informational only -- the
+ *          runtime reads alpha and codec from the Basis blob itself
  *
  * flags field:
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied

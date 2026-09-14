@@ -23,8 +23,9 @@ typedef struct {
 /* One-time transcoder init (call at startup before any transcode) */
 void nt_basisu_transcoder_global_init(void);
 
-/* Describe image 0 without allocating. Returns false for a bad header or a
- * codec this engine does not decode. */
+/* Describe image 0 without allocating. Returns false for a bad header, a codec
+ * this engine does not decode, or a mip chain whose level L is not exactly
+ * max(1, width >> L) x max(1, height >> L). */
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
 /* Begin/end a transcoding session. Call start once, transcode levels, then stop. */

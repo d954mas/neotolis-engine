@@ -1690,12 +1690,9 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
  * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = glGetError();
-    /* WebGL reports a loss once through glGetError; between two mip uploads that
-       is a recoverable outcome the caller rolls back, not a programmer error. */
-    if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost()) {
-        return false;
-    }
-    NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
+    /* WebGL reports a loss once through glGetError; that is a recoverable
+       outcome the caller rolls back, not a programmer error. */
+    NT_ASSERT((pending_error == GL_NO_ERROR || nt_gfx_gl_ctx_is_lost()) && "pending GL error before texture upload");
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
         return false;
@@ -1726,17 +1723,27 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         return 0;
     }
 
-    if (gl.compressed) {
-        glCompressedTexImage2D(GL_TEXTURE_2D, 0, gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, (GLsizei)nt_texture_level_bytes(desc->format, desc->width, desc->height), desc->data);
-    } else {
-        if (!gl.align4) {
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    /* Declared levels lie back to back in desc->data (NULL = storage only). */
+    const uint8_t levels = desc->level_count > 1 ? desc->level_count : 1;
+    if (!gl.align4) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    }
+    const uint8_t *level_data = (const uint8_t *)desc->data;
+    for (uint8_t level = 0; level < levels; level++) {
+        const uint32_t level_w = nt_texture_level_extent(desc->width, level);
+        const uint32_t level_h = nt_texture_level_extent(desc->height, level);
+        const uint64_t level_bytes = nt_texture_level_bytes(desc->format, level_w, level_h);
+        if (gl.compressed) {
+            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
         }
-        /* Upload pixel data (may be NULL for storage-only allocation) */
-        glTexImage2D(GL_TEXTURE_2D, 0, (GLint)gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, gl.format, gl.type, desc->data);
-        if (!gl.align4) {
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        if (level_data != NULL) {
+            level_data += level_bytes;
         }
+    }
+    if (!gl.align4) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     }
 
     /* Generate mipmaps after base level upload if requested and data present */
@@ -1744,8 +1751,8 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
 
-    /* RT resize staging builds its own desc and reaches here with level_count 0. */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)((desc->level_count ? desc->level_count : 1) - 1));
+    const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
     GLenum first_error = GL_NO_ERROR;
     for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
@@ -1760,40 +1767,6 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     }
 
     return tex;
-}
-
-bool nt_gfx_backend_upload_texture_level(uint32_t backend_handle, uint8_t level, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && "backend_upload_texture_level: invalid handle");
-    GLuint tex = s_texture_gl[backend_handle];
-    NT_ASSERT(tex != 0 && "backend_upload_texture_level: no GL texture at handle");
-    if (!nt_gfx_gl_begin_texture_upload(tex)) {
-        return false;
-    }
-
-    nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(format);
-    if (gl.compressed) {
-        glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)w, (GLsizei)h, 0, (GLsizei)nt_texture_level_bytes(format, w, h), data);
-    } else {
-        if (!gl.align4) {
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        }
-        glTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)w, (GLsizei)h, 0, gl.format, gl.type, data);
-        if (!gl.align4) {
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        }
-    }
-
-    GLenum first_error = GL_NO_ERROR;
-    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
-        if (first_error == GL_NO_ERROR) {
-            first_error = e;
-        }
-    }
-    if (first_error != GL_NO_ERROR) {
-        NT_LOG_ERROR("texture level %u upload failed: GL error 0x%04X", (unsigned)level, (unsigned)first_error);
-        return false;
-    }
-    return true;
 }
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {

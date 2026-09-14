@@ -7,7 +7,6 @@
 /* ---- Static transcoder instance ---- */
 
 static basist::basisu_transcoder s_transcoder;
-static bool s_transcoding_active = false;
 
 /* ---- Public API ---- */
 
@@ -49,9 +48,7 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
         if (!s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level, level_w, level_h, level_blocks)) {
             return false;
         }
-        const uint32_t expect_w = image_info.m_orig_width >> level;
-        const uint32_t expect_h = image_info.m_orig_height >> level;
-        if (level_w != (expect_w > 0 ? expect_w : 1) || level_h != (expect_h > 0 ? expect_h : 1)) {
+        if (level_w != nt_texture_level_extent(image_info.m_orig_width, level) || level_h != nt_texture_level_extent(image_info.m_orig_height, level)) {
             return false;
         }
     }
@@ -60,24 +57,11 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     return true;
 }
 
-bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
-    NT_ASSERT(!s_transcoding_active && "start_transcoding: a session is already active");
-    bool ok = s_transcoder.start_transcoding(basis_data, basis_size);
-    if (ok) {
-        s_transcoding_active = true;
-    }
-    return ok;
-}
+bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) { return s_transcoder.start_transcoding(basis_data, basis_size); }
 
-void nt_basisu_stop_transcoding(void) {
-    NT_ASSERT(s_transcoding_active && "stop_transcoding: no active session");
-    s_transcoder.stop_transcoding();
-    s_transcoding_active = false;
-}
+void nt_basisu_stop_transcoding(void) { s_transcoder.stop_transcoding(); }
 
 bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t capacity_bytes, nt_texture_format_t format) {
-    NT_ASSERT(s_transcoding_active && "transcode_level: no active session");
-
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
     switch (format) {
