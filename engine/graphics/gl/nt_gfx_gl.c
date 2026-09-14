@@ -1711,12 +1711,8 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         return 0;
     }
 
-    /* Set filter and wrap parameters BEFORE uploading data */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(desc->mag_filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
-
+    /* Filter and wrap live on the sampler object every bind carries; the
+       texture object keeps GL defaults, which no sampling path reads. */
     nt_gfx_gl_fmt_t gl = nt_gfx_gl_texture_format(desc->format);
     if (gl.internal == 0) {
         glDeleteTextures(1, &tex);
@@ -2122,6 +2118,7 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_sampler: slot out of range");
+    NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
     if (s_gl_cache.bound_samplers[slot] == sampler) {
         return;

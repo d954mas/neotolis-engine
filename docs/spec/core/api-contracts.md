@@ -265,7 +265,10 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
 shot: the handle is published only after the last declared level uploaded and
 the default sampler was acquired. A failed upload or sampler creation leaves no
-texture and no pool slot.
+texture and no pool slot. Filter and wrap state lives only on sampler objects:
+every sampling bind carries one (the texture's default or a material override),
+the texture object itself keeps GL defaults, and the backend asserts on a bind
+without a sampler.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
 every published texture is complete for every minification filter. Descriptors the
