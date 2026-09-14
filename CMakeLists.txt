@@ -98,6 +98,17 @@ foreach(_pair "ETC1S:NT_BASISU_CODECS:ETC1S" "UASTC:NT_BASISU_CODECS:UASTC_LDR" 
         set(NT_BASISU_HAS_${_name} 0)
     endif()
 endforeach()
+# Directory tag for fixtures that depend on the set (golden transcodes, browser
+# fixture packs): native producer and wasm consumer of one set share a directory,
+# different sets never overwrite each other.
+string(TOLOWER "${NT_BASISU_CODECS}" _nt_basisu_codec_tag)
+string(REPLACE ";" "-" _nt_basisu_codec_tag "${_nt_basisu_codec_tag}")
+string(TOLOWER "${NT_BASISU_TARGETS}" _nt_basisu_target_tag)
+string(REPLACE ";" "-" _nt_basisu_target_tag "${_nt_basisu_target_tag}")
+if("${_nt_basisu_target_tag}" STREQUAL "")
+    set(_nt_basisu_target_tag "rgba8")
+endif()
+set(NT_BASISU_SET_TAG "${_nt_basisu_codec_tag}--${_nt_basisu_target_tag}")
 
 option(NT_UI_TIMING_ENABLED "Measure UI layout, tree building and walking." OFF)
 option(NT_RESOURCE_TIMING_ENABLED "Measure pack parsing and resource steps." OFF)

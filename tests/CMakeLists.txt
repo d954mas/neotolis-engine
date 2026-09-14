@@ -1064,9 +1064,9 @@ if(NOT EMSCRIPTEN)
 
     # --- Basis goldens: native encoder + full transcoder produce, the trimmed
     # mirror (WASM defines compiled natively) consumes byte-for-byte. The
-    # golden dir is preset-independent so the WASM consumer under Node reads
-    # the same files. ---
-    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    # golden dir is keyed by the admission set, not the preset, so the WASM
+    # consumer under Node reads the files of its own set. ---
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden/${NT_BASISU_SET_TAG}")
     file(MAKE_DIRECTORY "${NT_BASISU_GOLDEN_DIR}")
     add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)
     target_link_libraries(test_basisu_golden_produce PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
@@ -1423,7 +1423,7 @@ if(EMSCRIPTEN)
 
     # --- The real WASM transcoder against the native goldens (NODERAWFS reads
     # the host directory written by a native test_basisu_golden_produce run) ---
-    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden/${NT_BASISU_SET_TAG}")
     add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
     target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder nt_core nt_log_stub unity)
     target_compile_definitions(test_basisu_trimmed PRIVATE NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
