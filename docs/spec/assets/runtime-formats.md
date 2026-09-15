@@ -53,9 +53,8 @@ candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
 ETC2 chooses `ETC2_RGBA8` or `ETC2_RGB8` by the blob's alpha flag. BC7
 additionally requires block-aligned level-0 dimensions (WebGL BPTC accepts the
 smaller levels of a halved chain as they come). RGBA8 is always the last
-candidate, so selection never fails. The order is engine policy, not a game
-setting: the admission set is the game's lever. The caps are what the context
-reports, not whether the decode is native: desktop GL 4.3+ reports ETC2 even
+candidate, so selection never fails. The caps are what the context reports,
+not whether the decode is native: desktop GL 4.3+ reports ETC2 even
 where the driver decompresses it on upload, so such a context stores an ETC1S
 texture at RGBA8 cost. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`)
 is a pack from another configure, a developer error: `nt_basisu_info` asserts
