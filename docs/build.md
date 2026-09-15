@@ -105,8 +105,9 @@ Packs cross configures: the native builder writes them, the wasm configure
 copies them. Put both values in the preset every configure inherits (the
 engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
 preset or include before `add_subdirectory`). `cmake/nt_example_packs.cmake`
-records the native configure's `NT_BASISU_CODECS` next to each pack directory
-it produces, and a wasm configure refuses packs whose record names a different
+publishes the native configure's `NT_BASISU_CODECS` beside the packs only after
+their builder succeeds; configuring another native build leaves that record
+unchanged. A wasm configure refuses packs whose record names a different
 codec list (an example listed in `NT_SKIP_EXAMPLE_PACKS`, or a directory
 without a record, is copied unchecked). A blob of a codec outside the set still
 fails at runtime: `nt_basisu_info` rejects it and the asset becomes FAILED.

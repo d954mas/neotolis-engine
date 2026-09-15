@@ -23,6 +23,11 @@ function(nt_example_packs)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
+        # Keep configure-local input separate from the successful producer's
+        # record: another native configure must not relabel existing packs.
+        set(_codec_input "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}.basisu_codecs")
+        set(_codec_record "${PACKS_PACK_DIR}/.basisu_codecs")
+        file(GENERATE OUTPUT "${_codec_input}" CONTENT "${NT_BASISU_CODECS}\n")
         # The stamp is the only OUTPUT: it appears strictly after the builder
         # succeeded, so a builder that published packs and then died (e.g. at
         # header generation) cannot look up-to-date to ninja's mtime check.
@@ -31,11 +36,12 @@ function(nt_example_packs)
         set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
         add_custom_command(
             OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files}
+            BYPRODUCTS ${_pack_files} "${_codec_record}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_codec_input}" "${_codec_record}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER}
+            DEPENDS ${PACKS_BUILDER} "${_codec_input}"
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )
@@ -44,9 +50,6 @@ function(nt_example_packs)
         # list is informational (missing packs already fail the build itself).
         string(REPLACE ";" "\n" _manifest_body "${PACKS_PACKS}")
         file(WRITE "${PACKS_PACK_DIR}/.expected_packs" "${_manifest_body}\n")
-        # The wasm configure that copies these packs must decode every codec the
-        # builder was allowed to emit (checked below against this record).
-        file(WRITE "${PACKS_PACK_DIR}/.basisu_codecs" "${NT_BASISU_CODECS}\n")
     elseif(_skipped)
         foreach(PACK ${PACKS_PACKS})
             if(EXISTS "${PACKS_PACK_DIR}/${PACK}")

@@ -423,6 +423,7 @@ jobs:
           path: |
             build/examples/*/*.ntpack
             build/examples/*/.basisu_codecs
+          include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
 
