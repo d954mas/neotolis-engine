@@ -82,18 +82,6 @@ static nt_anim_trs_t make_trs(float tx, float ty, float tz, float ax, float ay, 
     return o;
 }
 
-/* ---- Pose ABI ---- */
-
-void test_abi_sizes_and_offsets(void) {
-    TEST_ASSERT_EQUAL_size_t(40, sizeof(nt_anim_trs_t));
-    TEST_ASSERT_EQUAL_size_t(0, offsetof(nt_anim_trs_t, t));
-    TEST_ASSERT_EQUAL_size_t(12, offsetof(nt_anim_trs_t, q));
-    TEST_ASSERT_EQUAL_size_t(28, offsetof(nt_anim_trs_t, s));
-    TEST_ASSERT_EQUAL_size_t(4, _Alignof(nt_anim_trs_t));
-    TEST_ASSERT_EQUAL_size_t(48, sizeof(nt_anim_mat34_t));
-    TEST_ASSERT_EQUAL_size_t(4, _Alignof(nt_anim_mat34_t));
-}
-
 /* ---- Kernels against cglm ---- */
 
 void test_mat34_from_trs_matches_cglm(void) {
@@ -592,7 +580,6 @@ void test_socket_traps_on_non_unit_quaternion(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_abi_sizes_and_offsets);
     RUN_TEST(test_mat34_from_trs_matches_cglm);
     RUN_TEST(test_mat34_mul_matches_cglm);
     RUN_TEST(test_mat34_from_mat4_takes_top_three_rows);

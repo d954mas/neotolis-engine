@@ -7,8 +7,6 @@
 
 #include "anim/nt_anim.h"
 #include "anim/nt_skin.h"
-#include "anim_bank/nt_anim_bank.h"
-#include "anim_gpu/nt_anim_gpu.h"
 #include "math/nt_math.h"
 #include "test_helpers/anim_rig.h"
 
@@ -241,11 +239,6 @@ void test_palette_build_traps_on_out_of_range_remap(void) {
 }
 #endif
 
-void test_contract_header_sizes(void) {
-    TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_deformation_binding_t));
-    TEST_ASSERT_EQUAL_size_t(12, sizeof(nt_anim_bank_lookup_t));
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_palette_at_bind_pose_is_identity);
@@ -259,6 +252,5 @@ int main(void) {
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
     RUN_TEST(test_palette_build_traps_on_out_of_range_remap);
 #endif
-    RUN_TEST(test_contract_header_sizes);
     return UNITY_END();
 }

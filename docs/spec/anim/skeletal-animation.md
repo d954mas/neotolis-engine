@@ -180,7 +180,7 @@ nt_anim_bank_bake(&bank);          /* sample → FK → palette per frame into t
 s = nt_anim_bank_lookup(&bank, clip_index, normalized_time);   /* frame0, frame1 origins, alpha — pure */
 ```
 
-The lookup result `nt_anim_bank_lookup_t { uint16_t x0, y0, x1, y1; float alpha; }` (12 B) lives in `engine/anim_bank/nt_anim_bank.h`, which is a contract header only until #478 implements init/bake/lookup.
+The lookup result is `nt_anim_bank_lookup_t { uint16_t x0, y0, x1, y1; float alpha; }` (12 B).
 
 **Deliberate divergence** from [Principles](../core/principles.md) §3 (the builder does heavy work, the runtime loads): the bake is a one-time explicit load-time operation on prebuilt data, chosen because the developer's rigs are small and the load-time cost is measured (#487); serialized banks in packs are the fallback if that measurement fails.
 
@@ -210,8 +210,6 @@ typedef struct {
     uint32_t frame_epoch;        /* 0 reserved */
 } nt_deformation_binding_t;      /* _Static_assert(sizeof == 20) */
 ```
-
-The type lives in `engine/anim_gpu/nt_anim_gpu.h`, a contract header only until #476 implements staging and upload.
 
 `frame_epoch` mirrors `anim_gpu`'s counter for one reachable bug — a character whose binding was not prepared this frame; an item whose epoch ≠ the current epoch is `NT_ASSERT` (per-item, every build). A binding is valid until the context's next `begin_frame` or graphics invalidation. Textures and assets stay alive through all consuming passes. Capacities are init parameters; overflow asserts. Identical pose+binding may share one prepared binding explicitly; no global dedup cache. Coordinates are separate x/y integers (a linear offset may exceed 2²⁴ in float).
 
@@ -253,7 +251,7 @@ Order: import → normalize spaces/units → canonical hierarchy/remap → valid
 
 - `anim` (`engine/anim`, one module `nt_anim`): `nt_anim.h` — pose ABI, skeleton view, 3×4 kernels, FK, sockets, rig identity, plus sample and mix/override/additive, with `tracks_advance` in a separate object file; `nt_skin.h` — binding view, palette build. The radius bounds helper (§14) lands with its first consumer (#479).
 - `anim_bank`: bank init/bake/lookup over `anim` + gfx interface.
-- `anim_gpu`: staging/upload, DeformationBinding; depends on the gfx interface. `anim_bank` and `anim_gpu` exist today as contract headers only (§10, §12).
+- `anim_gpu`: staging/upload, DeformationBinding; depends on the gfx interface.
 - `skinned_mesh_renderer` + `skin_comp`.
 - Optional asset adapters (NSKL/NSKN/NANM); `anim_ik`, `anim_retarget` as extensions. Track assign/release/crossfade helpers live in the showcase.
 - Kernels retain no inputs and keep no mutable global evaluation state; concurrent calls (if a game ever schedules them) need immutable shared inputs, disjoint outputs/workspaces and caller synchronization — no engine job system, staging reservation or atomics exist or are planned.

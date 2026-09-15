@@ -50,6 +50,7 @@ typedef struct {
 
 #ifndef __cplusplus
 _Static_assert(sizeof(nt_anim_mat34_t) == 48, "pose ABI: nt_anim_mat34_t is 48 bytes");
+_Static_assert(_Alignof(nt_anim_mat34_t) == 4, "pose ABI: mat34 alignment 4");
 #endif
 
 #define NT_ANIM_NO_PARENT UINT16_MAX

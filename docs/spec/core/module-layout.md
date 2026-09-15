@@ -20,13 +20,6 @@ per-platform impl subdirs (`native/`, `web/`, `stub/`); the executable picks one
 A module may omit a platform whose capability does not exist there (`nt_fs` has
 no `web/`), in which case nothing on that platform can select it.
 
-A **contract-header directory** is an `engine/<name>/` holding only public
-headers: no TU, no CMake target. A header pins its value types with
-`_Static_assert` and a unit test compiles it, so consumers can contract on the
-ABI before the implementation lands; the implementing issue adds the TU and the
-target and the directory becomes a fixed module. Current instances:
-`engine/anim_gpu`, `engine/anim_bank`.
-
 ```text
 engine/
     core/
