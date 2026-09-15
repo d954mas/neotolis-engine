@@ -26,6 +26,12 @@
 #endif
 #endif
 
+/* Checks are plain NT_ASSERTs: without asserts they would only warn as unused. */
+#if NT_ASSERT_MODE == NT_ASSERT_OFF
+#undef NT_ANIM_CHECKS
+#define NT_ANIM_CHECKS 0
+#endif
+
 /* Local joint transform, AoS in joint order. Quaternion is unit xyzw: a
  * quaternion decoded from a lossy codec is renormalized by its decoder, because
  * the unit check tolerance assumes float32 inputs. */

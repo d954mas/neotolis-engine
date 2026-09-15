@@ -13,7 +13,7 @@
 static bool nt_anim_is_finite(float x) { return (x - x) == 0.0F; }
 #endif
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_anim_check_trs(const nt_anim_trs_t *l) {
     for (int c = 0; c < 3; ++c) {
@@ -62,7 +62,7 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_a
      * built from their own output. */
     NT_ASSERT((const char *)(local + skel->joint_count) <= (const char *)model || (const char *)(model + skel->joint_count) <= (const char *)local);
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS
     nt_anim_check_locals(skel, local, first, count);
 #endif
 
@@ -88,7 +88,7 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
     NT_ASSERT(out != NULL);
     NT_ASSERT(out != g_joint);
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS
     nt_anim_check_trs(socket_local);
 #endif
 
@@ -116,7 +116,7 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34
     NT_ASSERT(binding->palette_count <= capacity);
     NT_ASSERT(out + binding->palette_count <= model || model + model_count <= out);
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS
     for (uint16_t p = 0; p < binding->palette_count; ++p) {
         NT_ASSERT(binding->remap[p] < model_count);
     }

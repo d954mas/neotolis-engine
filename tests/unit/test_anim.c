@@ -495,7 +495,7 @@ void test_rig_compat_id_traps_on_small_scratch(void) {
 
 /* ---- Per-element checks ---- */
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
 void test_fk_traps_on_non_finite_translation(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));
@@ -586,7 +586,7 @@ int main(void) {
     RUN_TEST(test_fk_traps_on_overlap);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
 #endif
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
     RUN_TEST(test_fk_traps_on_non_finite_translation);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);
     RUN_TEST(test_fk_traps_on_forward_parent);

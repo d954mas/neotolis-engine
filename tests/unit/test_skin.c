@@ -222,7 +222,7 @@ void test_palette_build_traps_on_overlapping_output(void) {
 }
 #endif
 
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
 void test_palette_build_traps_on_out_of_range_remap(void) {
     nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
     nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
@@ -248,7 +248,7 @@ int main(void) {
     RUN_TEST(test_palette_build_traps_on_small_capacity);
     RUN_TEST(test_palette_build_traps_on_overlapping_output);
 #endif
-#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
     RUN_TEST(test_palette_build_traps_on_out_of_range_remap);
 #endif
     return UNITY_END();
