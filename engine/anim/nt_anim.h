@@ -16,7 +16,7 @@
  */
 
 /* Per-element input validation (finite t/s, unit quaternion). On in Debug,
- * overridable from CMake. */
+ * overridable from CMake (`NT_ANIM_CHECKS`). */
 #ifndef NT_ANIM_CHECKS
 #ifdef NT_DEBUG
 #define NT_ANIM_CHECKS 1
