@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 9d15204
+# Commit: a072ed5
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  76 B
-Code              193650 B
+Code              193732 B
 Data              212328 B
 Custom             10780 B
 ---------------- ----------
-TOTAL             417963 B
+TOTAL             418045 B
 
 ## Top 30 Functions by Size
 
@@ -26,7 +26,7 @@ TOTAL             417963 B
 32771 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-17539 B   nt_gfx_activate_texture
+17621 B   nt_gfx_activate_texture
  5762 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  5225 B   main
  5011 B   nt_gfx_activate_mesh
@@ -55,7 +55,7 @@ TOTAL             417963 B
   738 B   emmalloc_aligned_realloc
 
 Total functions: 169
-Total code size: 193379 B
+Total code size: 193461 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              197998 B
-libnt_gfx.a                80118 B
+libnt_gfx.a                80240 B
 libnt_gfx_stub.a            5238 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -117,7 +117,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4201040 B
+TOTAL (archives)         4201162 B
 
 ## Data Segments Summary
 

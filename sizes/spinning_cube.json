@@ -4938,5 +4938,43 @@
       "raw": 103451,
       "gzip": 43348
     }
+  },
+  {
+    "commit": "a072ed5",
+    "date": "2026-09-15T10:48:53Z",
+    "files": {
+      "index.html": {
+        "raw": 2561,
+        "gzip": 1285
+      },
+      "index_simd.wasm": {
+        "raw": 83841,
+        "gzip": 35207
+      },
+      "index.wasm": {
+        "raw": 79967,
+        "gzip": 35269
+      },
+      "index_simd.js": {
+        "raw": 17049,
+        "gzip": 6856
+      },
+      "index.js": {
+        "raw": 17049,
+        "gzip": 6851
+      }
+    },
+    "engine": {
+      "raw": 103451,
+      "gzip": 43348
+    },
+    "resources": {
+      "raw": 0,
+      "gzip": 0
+    },
+    "total": {
+      "raw": 103451,
+      "gzip": 43348
+    }
   }
 ]
