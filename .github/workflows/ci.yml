@@ -420,10 +420,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: example-packs
-          path: |
-            build/examples/*/*.ntpack
-            build/examples/*/.basisu_codecs
-          include-hidden-files: true
+          path: build/examples/*/*.ntpack
           retention-days: 1
           if-no-files-found: error
 
@@ -476,9 +473,8 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
-      # Each positive admission row runs the golden producer, the trimmed native mirror and the
-      # Basis suites under FULL asserts; example packs are skipped so the rows neither build
-      # UASTC-only producers nor rewrite the default rows' .basisu_codecs records.
+      # Each admission row consumes the full native baseline through the trimmed mirror.
+      # Example packs are skipped because their producers explicitly select UASTC.
       - name: Basis admission matrix (FULL asserts)
         run: |
           skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
@@ -488,8 +484,8 @@ jobs:
             name="basisu-${row%%:*}"
             flag="${row#*:}"
             cmake --preset native-debug-test -B "build/_cmake/$name" "$flag" -DNT_SKIP_EXAMPLE_PACKS="$skip"
-            cmake --build "build/_cmake/$name" --target test_basisu_golden_produce test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-            xvfb-run ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_(basisu_golden_produce|basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+            cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+            xvfb-run ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
           done
 
       - name: Basis admission rejects bad sets at configure
@@ -504,12 +500,14 @@ jobs:
             grep -q "NT_BASISU_" "/tmp/basisu-negative-$i.log" || { cat "/tmp/basisu-negative-$i.log"; exit 1; }
           done
 
-      # Every set's goldens (default rows above plus the matrix) feed the wasm job's real decode.
+      # The full baseline feeds every WASM admission row.
       - name: Upload Basis goldens
         uses: actions/upload-artifact@v4
         with:
           name: basisu-goldens
-          path: build/tests/basisu_golden
+          path: |
+            build/tests/basisu_golden/*.basis
+            build/tests/basisu_golden/*.bin
           retention-days: 1
           if-no-files-found: error
 
@@ -815,9 +813,8 @@ jobs:
 
       # Each admission row activates its own fixture pack in Debug (FULL asserts) and Release
       # and samples the transcoded texels through WebGL; SwiftShader reports every compressed
-      # cap, so the build set decides the target and real GPUs stay unverified here. Example
-      # packs are skipped: their producers are UASTC-only and the codec rows would fail the
-      # pack copy check.
+      # cap, so the build set decides the target and real GPUs stay unverified here.
+      # Example packs are skipped because their producers explicitly select UASTC.
       - name: Basis admission rows (browser activation)
         run: |
           skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
@@ -832,7 +829,7 @@ jobs:
               cmake --build "build/_cmake/$dir" --target browser_smoke
               test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
               test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
-              (cd tests/browser && CI=1 NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$dir" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 npx playwright test context_loss.spec.ts --project=chromium --workers=1)
+              (cd tests/browser && CI=1 NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$dir" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 npx playwright test context_loss.spec.ts --grep 'basis fixture:' --project=chromium --workers=1)
             done
           done
 

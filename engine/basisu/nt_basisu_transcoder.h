@@ -30,7 +30,7 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
 
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
  * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` (from
- * nt_basisu_info of this build). False for a codec outside NT_BASISU_CODECS, a
+ * a successful nt_basisu_info call on the same blob in this build). False for a
  * compressed format outside NT_BASISU_TARGETS (RGBA8 is always available) or a
  * capacity short of the whole chain, before anything is written. */
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);

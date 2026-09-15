@@ -964,11 +964,7 @@ int main(int argc, char *argv[]) {
     /* Basis fixture pack, produced per admission set by build_fixture_pack.c. */
     s_basis_pack_id = nt_hash32_str("basis_fixture");
     nt_resource_mount(s_basis_pack_id, 50);
-#ifdef NT_CDN_URL
-    nt_resource_load_auto(s_basis_pack_id, NT_CDN_URL "/tests/browser/basis_fixture.ntpack");
-#else
     nt_resource_load_auto(s_basis_pack_id, "assets/basis_fixture.ntpack");
-#endif
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);

@@ -81,14 +81,15 @@ Contracts and less common options:
 
 `NT_BASISU_CODECS` and `NT_BASISU_TARGETS` are CMake lists (`;`-separated) of
 the tokens above; unknown or duplicate tokens and an empty codec list are
-configure errors. A build without Basis textures links
+configure errors. List order does not matter. A build without Basis textures links
 `nt_basisu_transcoder_stub` instead of shrinking the set. The root
 `CMakeLists.txt` turns the lists into `NT_BASISU_HAS_ETC1S/UASTC/ETC2/BC7/ASTC`
 (0/1) on `nt_shared`, which the builder, the transcoder and `nt_gfx` link, so
 one configure always agrees with itself: the builder asserts a texture's codec
-before its cache lookup, `nt_basisu_info`/`nt_basisu_transcode_chain` return
-`false` for a codec or compressed target outside the set, and the activator's
-selector skips targets outside the set
+before its cache lookup, `nt_basisu_info` rejects blobs whose codec is outside
+the set, and `nt_basisu_transcode_chain` rejects compressed targets outside it.
+Transcoding requires the info returned by a successful `nt_basisu_info` call
+on the same blob in this build. The activator's selector skips excluded targets
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
 
 Native builds keep both decoders and every engine target compiled in the
@@ -104,37 +105,39 @@ ETC1S→ASTC bytes identical between native and web.
 Packs cross configures: the native builder writes them, the wasm configure
 copies them. Put both values in the preset every configure inherits (the
 engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
-preset or include before `add_subdirectory`). `cmake/nt_example_packs.cmake`
-publishes the native configure's `NT_BASISU_CODECS` beside the packs only after
-their builder succeeds; configuring another native build leaves that record
-unchanged. A wasm configure refuses packs whose record names a different
-codec list (an example listed in `NT_SKIP_EXAMPLE_PACKS`, or a directory
-without a record, is copied unchecked). A blob of a codec outside the set still
-fails at runtime: `nt_basisu_info` rejects it and the asset becomes FAILED.
+preset or include before `add_subdirectory`). Use one set for the shared example
+pack directory. To change it, reconfigure native and WASM, rebuild the native
+packs, then rebuild WASM. Asset compression options must explicitly select an
+admitted codec; changing the set does not rewrite those options. A stale pack
+whose blob codec is excluded fails at runtime: `nt_basisu_info` rejects it and
+the asset becomes FAILED.
 
-Coverage per set. `test_basisu_golden_produce` (native encoder + full
-transcoder) writes fixtures, goldens and `manifest.txt` into
-`build/tests/basisu_golden/<set tag>/` (`NT_BASISU_SET_TAG`, e.g.
-`etc1s-uastc_ldr--etc2-bc7-astc_ldr`) and, in the default set, pins them to
-`tests/fixtures/basisu_golden.sha256`. Regenerate that file only from a
-default-set golden directory: `sha256sum *.basis *.bin | LC_ALL=C sort -k2`
-inside it; a restricted set produces fewer files.
+One full baseline serves all configurations. `test_basisu_golden_produce`
+(native encoder + full transcoder) is built only when both codecs and all
+compressed targets are enabled. It writes the 12 fixtures and 60 transcodes
+listed in `tests/unit/basisu_fixtures.h` into `build/tests/basisu_golden/` and
+checks all 72 files against `tests/fixtures/basisu_golden.sha256`. Regenerate
+that checksum file only for an intentional baseline change:
+`sha256sum *.basis *.bin | LC_ALL=C sort -k2` inside the golden directory.
 `test_basisu_trimmed` decodes them byte-for-byte with the test-only
 `nt_basisu_transcoder_trimmed_test` library (the transcoder TU with the wasm
 defines of the current set, top-level project, native) and, under Emscripten,
 with the production transcoder through Node (`-sNODERAWFS`; ctest registers
 it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate`,
 `test_nt_gfx_basis_native` and `test_builder` follow the set, and the browser
-smoke app activates its own fixture pack (below). To check a restricted set
-locally, configure a separate directory and skip the example packs (their
-producers use UASTC and their `.basisu_codecs` records belong to the default
-set):
+smoke app activates its own fixture pack (below). Produce the full baseline
+first, then check restricted sets in separate directories. They consume the
+same files and never regenerate them. Skip the example packs because their
+producers explicitly select UASTC:
 
 ```bash
+cmake --preset native-debug-test
+cmake --build --preset native-debug-test --target test_basisu_golden_produce
+ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
 skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
 cmake --preset native-debug-test -B build/_cmake/basisu-codecs-etc1s -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
-cmake --build build/_cmake/basisu-codecs-etc1s --target test_basisu_golden_produce test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-ctest --test-dir build/_cmake/basisu-codecs-etc1s --output-on-failure -R '^test_(basisu_golden_produce|basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+cmake --build build/_cmake/basisu-codecs-etc1s --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-codecs-etc1s --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
 emcmake cmake --preset wasm-debug -B build/_cmake/basisu-codecs-etc1s-wasm -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-codecs-etc1s-wasm --target test_basisu_trimmed
 ctest --test-dir build/_cmake/basisu-codecs-etc1s-wasm --no-tests=error -R '^test_basisu_trimmed$'
@@ -143,7 +146,8 @@ ctest --test-dir build/_cmake/basisu-codecs-etc1s-wasm --no-tests=error -R '^tes
 CI runs this for `NT_BASISU_CODECS=ETC1S`, `UASTC_LDR`, each single
 `NT_BASISU_TARGETS` token and the empty target list (RGBA8 only), rejects the
 empty codec list, a duplicate and an unknown token at configure, and drives the
-browser smoke app's fixture through the same rows in wasm Debug and Release.
+two `basis fixture:` browser tests through the same rows in wasm Debug and
+Release. The default browser run still covers all smoke tests.
 The runner's SwiftShader reports every compressed cap; rows on real GPUs stay
 unverified.
 

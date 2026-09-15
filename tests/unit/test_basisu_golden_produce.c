@@ -1,11 +1,11 @@
 /* Golden producer: encodes fixed synthetic fixtures with the builder's encoder
- * and decodes them with the native transcoder to every admitted target, as the
- * reference bytes for the trimmed consumers. The default set is also pinned
- * against the committed SHA-256 list. */
+ * and decodes them with the full native transcoder to all five targets.
+ * These reference bytes are pinned against the committed SHA-256 list. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "basisu_fixtures.h"
 #include "nt_basisu_encoder.h"
 #include "nt_basisu_transcoder.h"
 #include "nt_texture_format.h"
@@ -16,31 +16,6 @@ void setUp(void) {}
 void tearDown(void) {}
 
 #define GOLDEN_SHA_FILE "tests/fixtures/basisu_golden.sha256"
-
-typedef struct {
-    const char *name;
-    uint32_t w;
-    uint32_t h;
-    bool alpha;
-    nt_basisu_codec_t codec;
-} fixture_t;
-
-/* Both codecs always: the native encoder is a superset, and the baseline must
- * cover every codec a restricted consumer has to reject. */
-static const fixture_t s_fixtures[] = {
-    {"etc1s_96x64_rgba", 96, 64, true, NT_BASISU_CODEC_ETC1S},     {"etc1s_96x64_rgb", 96, 64, false, NT_BASISU_CODEC_ETC1S},         {"etc1s_13x7_rgba", 13, 7, true, NT_BASISU_CODEC_ETC1S},
-    {"etc1s_1x1_rgb", 1, 1, false, NT_BASISU_CODEC_ETC1S},         {"etc1s_128x128_rgba", 128, 128, true, NT_BASISU_CODEC_ETC1S},     {"etc1s_4x4_rgba", 4, 4, true, NT_BASISU_CODEC_ETC1S},
-    {"uastc_96x64_rgba", 96, 64, true, NT_BASISU_CODEC_UASTC_LDR}, {"uastc_96x64_rgb", 96, 64, false, NT_BASISU_CODEC_UASTC_LDR},     {"uastc_13x7_rgba", 13, 7, true, NT_BASISU_CODEC_UASTC_LDR},
-    {"uastc_1x1_rgb", 1, 1, false, NT_BASISU_CODEC_UASTC_LDR},     {"uastc_128x128_rgba", 128, 128, true, NT_BASISU_CODEC_UASTC_LDR}, {"uastc_4x4_rgba", 4, 4, true, NT_BASISU_CODEC_UASTC_LDR},
-};
-#define FIXTURE_COUNT (sizeof(s_fixtures) / sizeof(s_fixtures[0]))
-
-static const nt_texture_format_t s_targets[] = {NT_TEXTURE_FORMAT_ETC2_RGB8, NT_TEXTURE_FORMAT_ETC2_RGBA8, NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, NT_TEXTURE_FORMAT_RGBA8};
-static const char *const s_target_names[] = {"etc2_rgb8", "etc2_rgba8", "bc7", "astc", "rgba8"};
-static const bool s_target_enabled[] = {NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_BC7 != 0, NT_BASISU_HAS_ASTC != 0, true};
-#define TARGET_COUNT (sizeof(s_targets) / sizeof(s_targets[0]))
-/* Indexed by nt_basisu_codec_t: NONE, ETC1S, UASTC_LDR. */
-static const bool s_codec_enabled[] = {false, NT_BASISU_HAS_ETC1S != 0, NT_BASISU_HAS_UASTC != 0};
 
 /* One hashed file per fixture and per produced target. */
 #define MAX_GOLDEN_FILES (FIXTURE_COUNT * (1U + TARGET_COUNT))
@@ -98,7 +73,7 @@ static uint64_t chain_bytes(nt_texture_format_t format, const nt_basisu_info_t *
     return total;
 }
 
-static void produce_fixture(const fixture_t *fx, FILE *manifest) {
+static void produce_fixture(const fixture_t *fx) {
     uint8_t *pixels = (uint8_t *)malloc((size_t)fx->w * fx->h * 4);
     TEST_ASSERT_NOT_NULL(pixels);
     generate_pixels(pixels, fx->w, fx->h, fx->alpha, (fx->w * 31U) + fx->h);
@@ -122,22 +97,13 @@ static void produce_fixture(const fixture_t *fx, FILE *manifest) {
     write_golden(file_name, enc.data, enc.size);
 
     nt_basisu_info_t info = {0};
-    const bool codec_enabled = s_codec_enabled[fx->codec];
-    TEST_ASSERT_EQUAL_MESSAGE(codec_enabled, nt_basisu_info(enc.data, enc.size, &info), fx->name);
-    if (!codec_enabled) {
-        /* Outside NT_BASISU_CODECS the wrapper refuses the blob; the consumer's
-         * negative checks need only the file and its shape. */
-        (void)fprintf(manifest, "%s %d %u %u %d %u %u\n", fx->name, (int)fx->codec, fx->w, fx->h, fx->alpha ? 1 : 0, enc.mip_count, enc.size);
-        nt_basisu_encode_free(&enc);
-        return;
-    }
+    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_info(enc.data, enc.size, &info), fx->name);
     TEST_ASSERT_EQUAL_INT(fx->codec, info.codec);
     TEST_ASSERT_EQUAL_UINT32(fx->w, info.width);
     TEST_ASSERT_EQUAL_UINT32(fx->h, info.height);
     TEST_ASSERT_EQUAL(fx->alpha, info.has_alpha);
     TEST_ASSERT_EQUAL_UINT32(enc.mip_count, info.level_count);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, info.level_count);
-    (void)fprintf(manifest, "%s %d %u %u %d %u %u", fx->name, (int)info.codec, info.width, info.height, info.has_alpha ? 1 : 0, info.level_count, enc.size);
+    TEST_ASSERT_EQUAL_UINT32(fx->levels, info.level_count);
 
     for (size_t t = 0; t < TARGET_COUNT; t++) {
         const uint64_t bytes = chain_bytes(s_targets[t], &info);
@@ -149,20 +115,14 @@ static void produce_fixture(const fixture_t *fx, FILE *manifest) {
         TEST_ASSERT_NOT_NULL(out);
         memset(out, 0xCD, (size_t)bytes);
         const bool ok = nt_basisu_transcode_chain(enc.data, enc.size, &info, s_targets[t], out, (uint32_t)bytes);
-        /* A target outside NT_BASISU_TARGETS has no golden in this configure. */
-        TEST_ASSERT_EQUAL_MESSAGE(s_target_enabled[t], ok, fx->name);
-        if (ok) {
-            (void)snprintf(file_name, sizeof(file_name), "%s.%s.bin", fx->name, s_target_names[t]);
-            write_golden(file_name, out, (size_t)bytes);
-            (void)fprintf(manifest, " %s", s_target_names[t]);
-        }
+        TEST_ASSERT_TRUE_MESSAGE(ok, fx->name);
+        (void)snprintf(file_name, sizeof(file_name), "%s.%s.bin", fx->name, s_target_names[t]);
+        write_golden(file_name, out, (size_t)bytes);
         free(out);
     }
-    (void)fputc('\n', manifest);
     nt_basisu_encode_free(&enc);
 }
 
-#if NT_BASISU_HAS_ETC1S && NT_BASISU_HAS_UASTC && NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
 static int compare_names(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
 
 /* sha256sum's own line format, sorted by file name (regeneration: docs/build.md). */
@@ -197,24 +157,12 @@ static void check_baseline(void) {
     TEST_ASSERT_FALSE_MESSAGE(trailing, "baseline lists more files than the producer wrote");
     TEST_ASSERT_EQUAL_UINT32(MAX_GOLDEN_FILES, matched);
 }
-#endif
 
 void test_goldens_are_produced_and_pinned(void) {
-    char path[MAX_PATH_BYTES];
-    (void)snprintf(path, sizeof(path), "%s/manifest.txt", NT_BASISU_GOLDEN_DIR);
-    FILE *manifest = fopen(path, "w");
-    TEST_ASSERT_NOT_NULL_MESSAGE(manifest, path);
     for (size_t i = 0; i < FIXTURE_COUNT; i++) {
-        produce_fixture(&s_fixtures[i], manifest);
+        produce_fixture(&s_fixtures[i]);
     }
-    (void)fclose(manifest);
-    /* The pinned baseline is the default set; a restricted configure produces
-     * fewer files and only serves its own consumers. */
-#if NT_BASISU_HAS_ETC1S && NT_BASISU_HAS_UASTC && NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
     check_baseline();
-#else
-    TEST_ASSERT_LESS_THAN_UINT32(MAX_GOLDEN_FILES, s_file_count);
-#endif
 }
 
 int main(void) {

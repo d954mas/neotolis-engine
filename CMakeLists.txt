@@ -83,6 +83,8 @@ function(nt_basisu_check_set var allowed)
 endfunction()
 nt_basisu_check_set(NT_BASISU_CODECS "ETC1S;UASTC_LDR")
 nt_basisu_check_set(NT_BASISU_TARGETS "ETC2;BC7;ASTC_LDR")
+list(SORT NT_BASISU_CODECS)
+list(SORT NT_BASISU_TARGETS)
 if("${NT_BASISU_CODECS}" STREQUAL "")
     message(FATAL_ERROR "NT_BASISU_CODECS is empty. A build without Basis textures links nt_basisu_transcoder_stub; a build with the transcoder needs at least one codec.")
 endif()
@@ -97,9 +99,7 @@ foreach(_pair "ETC1S:NT_BASISU_CODECS:ETC1S" "UASTC:NT_BASISU_CODECS:UASTC_LDR" 
         set(NT_BASISU_HAS_${_name} 0)
     endif()
 endforeach()
-# Directory tag for fixtures that depend on the set (golden transcodes, browser
-# fixture packs): native producer and wasm consumer of one set share a directory,
-# different sets never overwrite each other.
+# Browser fixture packs contain only the codecs admitted by their configuration.
 string(TOLOWER "${NT_BASISU_CODECS}" _nt_basisu_codec_tag)
 string(REPLACE ";" "-" _nt_basisu_codec_tag "${_nt_basisu_codec_tag}")
 string(TOLOWER "${NT_BASISU_TARGETS}" _nt_basisu_target_tag)

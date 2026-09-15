@@ -46,8 +46,9 @@ upstream pull request is planned).
   RGBA4444 output cases. UASTC→BC1/BC3/BC4/BC5 cases now honor the existing
   `BASISD_SUPPORT_DXT1`/`BASISD_SUPPORT_DXT5A`. `basis_is_format_supported`
   answers false for every removed path.
-- The BC1 single-colour init tables stay under `DXT1 || UASTC`: the native
-  UASTC encoder reads them through `encode_bc1` for its hints.
+- BC1 single-colour table initialization is skipped when DXT1 is disabled and
+  `NT_BASISU_PROFILE_TRIMMED=1`. The native UASTC encoder still initializes
+  these tables because it reads them through `encode_bc1` for its hints.
 
 With the native defines in `engine/basisu/CMakeLists.txt` the encoder
 translation units preprocess identically to the pristine v2_50 sources; the

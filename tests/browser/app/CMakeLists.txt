@@ -35,7 +35,7 @@ nt_set_warning_flags(browser_smoke)
 nt_set_sanitizer_flags(browser_smoke)
 set_target_properties(browser_smoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BROWSER_APP_OUTPUT_DIR}")
 
-# Basis fixture producer (native only); nt_example_packs wires build + copy + the codec-set check.
+# Basis fixture producer (native only); nt_example_packs wires build and copy.
 if(NOT EMSCRIPTEN)
     add_executable(build_browser_fixture_pack build_fixture_pack.c)
     target_link_libraries(build_browser_fixture_pack PRIVATE nt_builder nt_log nt_meshwire)

@@ -2182,7 +2182,7 @@ namespace basist
 		exit(0);
 #endif
 
-#if BASISD_SUPPORT_DXT1 || BASISD_SUPPORT_UASTC
+#if BASISD_SUPPORT_DXT1 || (BASISD_SUPPORT_UASTC && !NT_BASISU_PROFILE_TRIMMED)
 		uint8_t bc1_expand5[32];
 		for (int i = 0; i < 32; i++)
 			bc1_expand5[i] = static_cast<uint8_t>((i << 3) | (i >> 2));

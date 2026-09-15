@@ -23,11 +23,6 @@ function(nt_example_packs)
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
-        # Keep configure-local input separate from the successful producer's
-        # record: another native configure must not relabel existing packs.
-        set(_codec_input "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}.basisu_codecs")
-        set(_codec_record "${PACKS_PACK_DIR}/.basisu_codecs")
-        file(GENERATE OUTPUT "${_codec_input}" CONTENT "${NT_BASISU_CODECS}\n")
         # The stamp is the only OUTPUT: it appears strictly after the builder
         # succeeded, so a builder that published packs and then died (e.g. at
         # header generation) cannot look up-to-date to ninja's mtime check.
@@ -36,12 +31,11 @@ function(nt_example_packs)
         set(_stamp "${PACKS_PACK_DIR}/.${PACKS_NAME}.stamp")
         add_custom_command(
             OUTPUT "${_stamp}"
-            BYPRODUCTS ${_pack_files} "${_codec_record}"
+            BYPRODUCTS ${_pack_files}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_codec_input}" "${_codec_record}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER} "${_codec_input}"
+            DEPENDS ${PACKS_BUILDER}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )
@@ -69,16 +63,6 @@ function(nt_example_packs)
         # ninja error ("no known rule to make <pack>") until a native build
         # creates it — then the same edge copies it, no reconfigure needed.
         set(_copy_list ${PACKS_PACKS})
-        if(EXISTS "${PACKS_PACK_DIR}/.basisu_codecs")
-            # file(READ), not file(STRINGS): the latter escapes the list's semicolons.
-            file(READ "${PACKS_PACK_DIR}/.basisu_codecs" _pack_codecs)
-            string(STRIP "${_pack_codecs}" _pack_codecs)
-            if(NOT "${_pack_codecs}" STREQUAL "${NT_BASISU_CODECS}")
-                message(FATAL_ERROR "${PACKS_NAME}: packs in ${PACKS_PACK_DIR} were built with"
-                    " NT_BASISU_CODECS='${_pack_codecs}' but this configure decodes '${NT_BASISU_CODECS}';"
-                    " configure both presets with the same NT_BASISU_CODECS (docs/build.md#basis-universal-admission).")
-            endif()
-        endif()
     endif()
 
     foreach(PACK ${_copy_list})

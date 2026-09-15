@@ -91,11 +91,6 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
 
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
     NT_ASSERT(info != nullptr);
-    /* A caller-built info for a codec outside NT_BASISU_CODECS would otherwise
-       reach the native superset decoder; the web build has no such path. */
-    if (!codec_enabled(info->codec)) {
-        return false;
-    }
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
     bool target_enabled; /* NT_BASISU_TARGETS; RGBA8 is always available */

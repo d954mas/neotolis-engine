@@ -1062,26 +1062,29 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
 
-    # --- Basis goldens: native encoder + full transcoder produce, the trimmed
-    # mirror consumes byte-for-byte. The golden dir is keyed by the admission
-    # set, not the preset, so the WASM consumer under Node reads its own set. ---
-    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden/${NT_BASISU_SET_TAG}")
+    # One complete native baseline feeds every native mirror and WASM configuration.
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
     file(MAKE_DIRECTORY "${NT_BASISU_GOLDEN_DIR}")
-    add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)
-    target_link_libraries(test_basisu_golden_produce PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
-    if(NOT WIN32)
-        target_link_libraries(test_basisu_golden_produce PRIVATE m)
+    if(NT_BASISU_HAS_ETC1S AND NT_BASISU_HAS_UASTC AND NT_BASISU_HAS_ETC2 AND NT_BASISU_HAS_BC7 AND NT_BASISU_HAS_ASTC)
+        add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)
+        target_link_libraries(test_basisu_golden_produce PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
+        if(NOT WIN32)
+            target_link_libraries(test_basisu_golden_produce PRIVATE m)
+        endif()
+        target_include_directories(test_basisu_golden_produce PRIVATE ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench)
+        target_compile_definitions(test_basisu_golden_produce PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+        nt_setup_test_target(test_basisu_golden_produce WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 300)
+        set_tests_properties(test_basisu_golden_produce PROPERTIES FIXTURES_SETUP basisu_golden)
     endif()
-    target_include_directories(test_basisu_golden_produce PRIVATE ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench)
-    target_compile_definitions(test_basisu_golden_produce PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
-    nt_setup_test_target(test_basisu_golden_produce WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 300)
-    set_tests_properties(test_basisu_golden_produce PROPERTIES FIXTURES_SETUP basisu_golden)
 
     add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
     target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder_trimmed_test nt_core nt_log_stub unity)
     target_compile_definitions(test_basisu_trimmed PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
     nt_setup_test_target(test_basisu_trimmed)
-    set_tests_properties(test_basisu_trimmed PROPERTIES FIXTURES_REQUIRED basisu_golden)
+    if(TARGET test_basisu_golden_produce)
+        add_dependencies(test_basisu_trimmed test_basisu_golden_produce)
+        set_tests_properties(test_basisu_trimmed PROPERTIES FIXTURES_REQUIRED basisu_golden)
+    endif()
 
     # --- Basis activation on the fake backend: real transcoder + builder encoder ---
     # Consumers before the archives that define their symbols: GNU ld and
@@ -1422,7 +1425,7 @@ if(EMSCRIPTEN)
 
     # --- The real WASM transcoder against the native goldens (NODERAWFS reads
     # the host directory written by a native test_basisu_golden_produce run) ---
-    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden/${NT_BASISU_SET_TAG}")
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
     add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
     target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder nt_core nt_log_stub unity)
     target_compile_definitions(test_basisu_trimmed PRIVATE NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")

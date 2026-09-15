@@ -133,8 +133,7 @@ void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 #endif
 
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-/* The native encoder still emits the codec outside NT_BASISU_CODECS; the
- * wrapper must refuse it at info and again for a caller-built info. */
+/* The native encoder still emits codecs outside NT_BASISU_CODECS. */
 void test_codec_outside_the_set_is_refused(void) {
     uint8_t src[16 * 8 * 4];
     fill_pixels(src, 16, 8, true);
@@ -144,16 +143,6 @@ void test_codec_outside_the_set_is_refused(void) {
     TEST_ASSERT_NOT_NULL(enc.data);
     nt_basisu_info_t info = {0};
     TEST_ASSERT_FALSE(nt_basisu_info(enc.data, enc.size, &info));
-    info.codec = codec;
-    info.width = 16;
-    info.height = 8;
-    info.level_count = 5;
-    info.has_alpha = true;
-    memset(s_out, 0xCD, sizeof(s_out));
-    TEST_ASSERT_FALSE(nt_basisu_transcode_chain(enc.data, enc.size, &info, NT_TEXTURE_FORMAT_RGBA8, s_out, chain_bytes(NT_TEXTURE_FORMAT_RGBA8, 16, 8, 5)));
-    for (uint32_t i = 0; i < sizeof(s_out); i++) {
-        TEST_ASSERT_EQUAL_HEX8(0xCD, s_out[i]);
-    }
     nt_basisu_encode_free(&enc);
 }
 #endif
