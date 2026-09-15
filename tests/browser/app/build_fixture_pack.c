@@ -1,6 +1,6 @@
-/* Browser smoke app's Basis fixture pack: per admitted codec a 128x128 RGBA and
- * a 96x64 opaque RGB texture of two solid halves, so every transcode target lands
- * on the same texels. */
+/* Browser smoke app's Basis fixture pack: a 128x128 RGBA and a 96x64 opaque RGB
+ * texture of two solid halves (ETC1S when its option is ON, else UASTC), so every
+ * transcode target lands on the same texels. main.c requests the same pair. */
 
 #include "nt_builder.h"
 
@@ -79,8 +79,7 @@ int main(int argc, char *argv[]) {
 
 #if NT_BASISU_HAS_ETC1S
     add_pair(ctx, "etc1s", nt_tex_compress_etc1s_default());
-#endif
-#if NT_BASISU_HAS_UASTC
+#else
     add_pair(ctx, "uastc", nt_tex_compress_uastc_default());
 #endif
 

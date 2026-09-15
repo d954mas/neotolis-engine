@@ -110,7 +110,7 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 
 #define TMP_DIR "build/tests/tmp"
 
-/* A Basis preset inside NT_BASISU_CODECS for tests that are not about the codec. */
+/* A Basis preset whose codec is ON for tests that are not about the codec. */
 #define ANY_COMPRESS() (NT_BASISU_HAS_UASTC ? nt_tex_compress_uastc_default() : nt_tex_compress_etc1s_default())
 
 /* --- Test fixture helpers --- */
@@ -451,13 +451,15 @@ void test_texture_compress_rdo_boundaries(void) {
     opts.compress.etc1s.endpoint_rdo_threshold = 1.0e10F;
     opts.compress.etc1s.selector_rdo_threshold = 0.0F;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
-#endif
 
+    /* Negatives only where the codec is admitted: otherwise the admission
+     * assert fires first and the range check is never reached. */
     opts.compress.etc1s.endpoint_rdo_threshold = 2.0e10F;
     expect_texture_compress_opts_assert(opts.compress);
     opts.compress = nt_tex_compress_etc1s_default();
     opts.compress.etc1s.selector_rdo_threshold = 2.0e10F;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
 
     opts.compress = nt_tex_compress_uastc_default();
 #if NT_BASISU_HAS_UASTC
@@ -467,27 +469,33 @@ void test_texture_compress_rdo_boundaries(void) {
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
     opts.compress.uastc.rdo_lambda = 50.0F;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
-#endif
 
     opts.compress.uastc.rdo_lambda = 0.0001F;
     expect_texture_compress_opts_assert(opts.compress);
     opts.compress.uastc.rdo_lambda = 50.001F;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
     const float invalid[] = {-1.0F, NAN, INFINITY};
     for (uint32_t i = 0; i < 3; i++) {
+#if NT_BASISU_HAS_ETC1S
         opts.compress = nt_tex_compress_etc1s_default();
         opts.compress.etc1s.endpoint_rdo_threshold = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
         opts.compress = nt_tex_compress_etc1s_default();
         opts.compress.etc1s.selector_rdo_threshold = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
+#endif
+#if NT_BASISU_HAS_UASTC
         opts.compress = nt_tex_compress_uastc_default();
         opts.compress.uastc.rdo_lambda = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
+#endif
     }
+#if NT_BASISU_HAS_ETC1S
     opts.compress = nt_tex_compress_etc1s_default();
     opts.compress.etc1s.quality = 256;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
 }
 
 void test_texture_option_aliases_are_canonicalized(void) {
@@ -4186,7 +4194,7 @@ void test_basis_effective_cache_and_dedup_identity(void) {
     const char *cache = TMP_DIR "/basis_identity_cache";
     MKDIR(cache);
     clean_cache_dir(cache);
-    /* Every field of every codec in NT_BASISU_CODECS, plus the presets whose
+    /* Every field of every admitted codec, plus the presets whose
      * zero thresholds exercise the signed-zero identity below. */
     nt_basisu_encode_opts_t variants[9];
     uint32_t variant_count = 0;
@@ -4252,59 +4260,16 @@ void test_basis_effective_cache_and_dedup_identity(void) {
     }
 }
 
-/* Admission must precede the cache lookup: a warm cache from a fuller configure
- * (entry addressed by the builder's own key, decoded-pixel hash + opts hash)
- * must not smuggle in a codec this runtime refuses. */
-void test_cache_hit_never_bypasses_codec_admission(void) {
-    const char *cache = TMP_DIR "/basis_admission_cache";
-    MKDIR(cache);
-    clean_cache_dir(cache);
+#if !NT_BASISU_HAS_UASTC
+/* A codec whose option is OFF is refused at add time, before any cache lookup. */
+void test_codec_outside_the_build_is_refused_at_add(void) {
     const uint8_t pixel[4] = {70, 120, 190, 180};
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = nt_tex_compress_uastc_default();
-
-    NtBuildTextureData td;
-    memset(&td, 0, sizeof(td));
-    td.width = 1;
-    td.height = 1;
-    td.opts = opts;
-    td.opts.format = NT_TEXTURE_FORMAT_RGBA8;
-    NtBuildEntry entry;
-    memset(&entry, 0, sizeof(entry));
-    entry.kind = NT_BUILD_ASSET_TEXTURE;
-    entry.data = &td;
-    const uint64_t decoded_hash = nt_hash64(pixel, sizeof(pixel)).value;
-    const uint64_t opts_hash = nt_builder_compute_opts_hash(&entry);
-    char entry_path[512];
-    nt_builder_build_cache_path(cache, decoded_hash, opts_hash, entry_path, sizeof(entry_path));
-
-#if NT_BASISU_HAS_UASTC
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_admission.ntpack");
-    nt_builder_set_cache_dir(ctx, cache);
-    nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    TEST_ASSERT_EQUAL_UINT32(1, ctx->cache_miss_count);
-    nt_builder_free_pack(ctx);
-    /* The hand-derived key is the builder's key: the entry it stored is there. */
-    FILE *stored = fopen(entry_path, "rb");
-    TEST_ASSERT_NOT_NULL_MESSAGE(stored, entry_path);
-    (void)fclose(stored);
-
-    NtBuilderContext *warm = nt_builder_start_pack(TMP_DIR "/basis_admission_warm.ntpack");
-    nt_builder_set_cache_dir(warm, cache);
-    nt_builder_add_texture_raw(warm, pixel, 1, 1, "pixel", &opts);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(warm));
-    TEST_ASSERT_EQUAL_UINT32(1, warm->cache_hit_count);
-    nt_builder_free_pack(warm);
-#else
-    static const uint8_t foreign_entry[4] = {1, 2, 3, 4};
-    TEST_ASSERT_TRUE(nt_builder_cache_store(cache, decoded_hash, opts_hash, foreign_entry, sizeof(foreign_entry)));
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_admission.ntpack");
-    nt_builder_set_cache_dir(ctx, cache);
-    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts), "NT_BASISU_CODECS");
-    TEST_ASSERT_EQUAL_UINT32(1, count_bin_files(cache));
-#endif
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts), "NT_BASISU_HAS_");
 }
+#endif
 
 /* CACHE-02b: Sampler defaults (filter/wrap) participate in the texture
  * opts hash. Regression for the bug where SD/HD packs with different
@@ -9574,7 +9539,9 @@ int main(void) {
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
     RUN_TEST(test_basis_effective_cache_and_dedup_identity);
-    RUN_TEST(test_cache_hit_never_bypasses_codec_admission);
+#if !NT_BASISU_HAS_UASTC
+    RUN_TEST(test_codec_outside_the_build_is_refused_at_add);
+#endif
     RUN_TEST(test_cache_filter_wrap_in_opts_hash);
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);

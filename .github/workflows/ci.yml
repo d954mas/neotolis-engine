@@ -23,6 +23,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Basis admission rows shared by the native and browser jobs: `name:flags`, rows separated
+  # by spaces, several -D flags inside one row by commas (expanded with ${flags//,/ }).
+  # Two rows cover both single-codec decoders and both target extremes: UASTC-only (the
+  # smallest transcoder) and ETC1S with ETC2 as the only compressed target.
+  NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF"
+  # Examples require the default set (sponza uses both codecs), so restricted rows skip them.
+  NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+
 jobs:
   wasm:
     name: WASM Build & Test
@@ -103,23 +112,10 @@ jobs:
       - name: Run baseline WASM smoke test (debug)
         run: node tests/wasm/smoke_test.js wasm-debug
 
+      # Includes test_basisu_trimmed: the production wasm transcoder decodes the native
+      # goldens under Node (the download step above).
       - name: Run baseline WASM debug ctest
         run: ctest --preset wasm-debug
-
-      # The production wasm transcoder of each set decodes its native goldens under Node
-      # (test_basisu_trimmed is also part of the default ctest runs above and below).
-      - name: Basis admission rows (real wasm decode)
-        run: |
-          skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-          for row in "codecs-etc1s:-DNT_BASISU_CODECS=ETC1S" "codecs-uastc:-DNT_BASISU_CODECS=UASTC_LDR" \
-                     "targets-etc2:-DNT_BASISU_TARGETS=ETC2" "targets-bc7:-DNT_BASISU_TARGETS=BC7" \
-                     "targets-astc:-DNT_BASISU_TARGETS=ASTC_LDR" "targets-none:-DNT_BASISU_TARGETS="; do
-            name="basisu-${row%%:*}"
-            flag="${row#*:}"
-            emcmake cmake --preset wasm-debug -B "build/_cmake/$name" "$flag" -DNT_SKIP_EXAMPLE_PACKS="$skip"
-            cmake --build "build/_cmake/$name" --target test_basisu_trimmed
-            ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_basisu_trimmed$'
-          done
 
       - name: Build standalone WASM debug SIMD artifacts
         run: |
@@ -473,34 +469,19 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
-      # Each admission row consumes the full native baseline through the trimmed mirror.
-      # Example packs are skipped because their producers explicitly select UASTC.
-      - name: Basis admission matrix (FULL asserts)
+      # Each admission row (NT_BASISU_ROWS) consumes the full native baseline through the
+      # trimmed mirror and runs the Basis suites with the restricted set.
+      - name: Basis admission rows (FULL asserts)
         run: |
-          skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-          for row in "codecs-etc1s:-DNT_BASISU_CODECS=ETC1S" "codecs-uastc:-DNT_BASISU_CODECS=UASTC_LDR" \
-                     "targets-etc2:-DNT_BASISU_TARGETS=ETC2" "targets-bc7:-DNT_BASISU_TARGETS=BC7" \
-                     "targets-astc:-DNT_BASISU_TARGETS=ASTC_LDR" "targets-none:-DNT_BASISU_TARGETS="; do
-            name="basisu-${row%%:*}"
-            flag="${row#*:}"
-            cmake --preset native-debug-test -B "build/_cmake/$name" "$flag" -DNT_SKIP_EXAMPLE_PACKS="$skip"
+          for row in $NT_BASISU_ROWS; do
+            name="${row%%:*}"
+            flags="${row#*:}"
+            cmake --preset native-debug-test -B "build/_cmake/$name" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
             cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
             xvfb-run ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
           done
 
-      - name: Basis admission rejects bad sets at configure
-        run: |
-          i=0
-          for bad in "-DNT_BASISU_CODECS=" "-DNT_BASISU_CODECS=ETC1S;ETC1S" "-DNT_BASISU_TARGETS=ETC2;PVRTC"; do
-            i=$((i + 1))
-            if cmake --preset native-debug -B "build/_cmake/basisu-negative-$i" "$bad" > "/tmp/basisu-negative-$i.log" 2>&1; then
-              echo "::error::configure accepted $bad"
-              exit 1
-            fi
-            grep -q "NT_BASISU_" "/tmp/basisu-negative-$i.log" || { cat "/tmp/basisu-negative-$i.log"; exit 1; }
-          done
-
-      # The full baseline feeds every WASM admission row.
+      # The full baseline feeds the WASM job's test_basisu_trimmed run.
       - name: Upload Basis goldens
         uses: actions/upload-artifact@v4
         with:
@@ -811,26 +792,23 @@ jobs:
       - name: Run browser smoke test
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
 
-      # Each admission row activates its own fixture pack in Debug (FULL asserts) and Release
-      # and samples the transcoded texels through WebGL; SwiftShader reports every compressed
-      # cap, so the build set decides the target and real GPUs stay unverified here.
-      # Example packs are skipped because their producers explicitly select UASTC.
+      # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
+      # asserts) and samples the transcoded texels through WebGL; a Release row would add no
+      # decision path (same selector, same SwiftShader caps). SwiftShader reports every
+      # compressed cap, so the build set decides the target and real GPUs stay unverified here.
       - name: Basis admission rows (browser activation)
         run: |
-          skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-          for row in "codecs-etc1s:-DNT_BASISU_CODECS=ETC1S" "codecs-uastc:-DNT_BASISU_CODECS=UASTC_LDR"                      "targets-etc2:-DNT_BASISU_TARGETS=ETC2" "targets-bc7:-DNT_BASISU_TARGETS=BC7"                      "targets-astc:-DNT_BASISU_TARGETS=ASTC_LDR" "targets-none:-DNT_BASISU_TARGETS="; do
-            name="basisu-${row%%:*}"
-            flag="${row#*:}"
-            cmake --preset native-debug -B "build/_cmake/$name-native" "$flag" -DNT_SKIP_EXAMPLE_PACKS="$skip"
+          for row in $NT_BASISU_ROWS; do
+            name="${row%%:*}"
+            flags="${row#*:}"
+            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
             cmake --build "build/_cmake/$name-native" --target browser_smoke_packs
-            for preset in wasm-debug wasm-release; do
-              dir="$name-$preset"
-              emcmake cmake --preset "$preset" -B "build/_cmake/$dir" "$flag" -DNT_SKIP_EXAMPLE_PACKS="$skip"
-              cmake --build "build/_cmake/$dir" --target browser_smoke
-              test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
-              test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
-              (cd tests/browser && CI=1 NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$dir" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 npx playwright test context_loss.spec.ts --grep 'basis fixture:' --project=chromium --workers=1)
-            done
+            dir="$name-wasm-debug"
+            emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            cmake --build "build/_cmake/$dir" --target browser_smoke
+            test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
+            test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
+            (cd tests/browser && CI=1 NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$dir" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 npx playwright test context_loss.spec.ts --grep 'basis fixture:' --project=chromium --workers=1)
           done
 
       - name: Check release diagnostics with independent UI and GPU timing

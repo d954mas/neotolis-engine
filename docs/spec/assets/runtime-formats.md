@@ -38,11 +38,11 @@ through — one grow-on-demand allocation, freed once it goes idle.
 
 The target selector walks BC7 → ASTC 4x4 → ETC2 (RGBA8 or RGB8 by the blob's
 alpha flag) → RGBA8 and takes the first candidate that the GPU
-(`nt_gfx_gpu_caps()`) reports and the build admits (`NT_BASISU_TARGETS`,
+(`nt_gfx_gpu_caps()`) reports and the build admits (`NT_BASISU_HAS_ETC2/BC7/ASTC`,
 [build options](../../build.md#basis-universal-admission)). BC7 additionally
 requires block-aligned level-0 dimensions (WebGL BPTC accepts the smaller
 levels of a halved chain as they come). RGBA8 is always the last candidate, so
-selection never fails. A blob whose codec is outside `NT_BASISU_CODECS` is
+selection never fails. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`) is
 rejected by `nt_basisu_info` at the cross-check and the asset becomes FAILED.
 
 The runtime accepts a single-level texture under any min filter, because

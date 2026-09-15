@@ -12,8 +12,9 @@ target_link_libraries(nt_basisu_transcoder_interface INTERFACE nt_shared)
 # headers and links this TU, so its defines must match exactly (ODR).
 add_library(nt_basisu_transcoder_config INTERFACE)
 # Unused transcode targets off for BOTH consumers (the builder's validate/stats
-# paths included). ASTC_HIGHER_OPAQUE_QUALITY (ETC1S->ASTC opaque blocks) is
-# upstream's native default; set everywhere so web and native bytes match.
+# paths included). ASTC_HIGHER_OPAQUE_QUALITY: 8-bit endpoints for ETC1S->ASTC
+# opaque/grayscale blocks; worth its ~28 KB brotli table on web (upstream's
+# Emscripten default is 0), and native/web bytes stay identical.
 set(NT_BASISU_COMMON_DEFINITIONS
     BASISD_SUPPORT_DXT1=0
     BASISD_SUPPORT_DXT5A=0
@@ -26,8 +27,8 @@ set(NT_BASISU_COMMON_DEFINITIONS
 )
 target_compile_definitions(nt_basisu_transcoder_config INTERFACE ${NT_BASISU_COMMON_DEFINITIONS})
 
-# Trimmed profile: only the decoders in NT_BASISU_CODECS and the ETC1S->X tables
-# for NT_BASISU_TARGETS (UASTC->X does not use them). XUASTC/HDR/RG11/16bpp are
+# Trimmed profile: only the decoders in NT_BASISU_HAS_ETC1S/UASTC and the ETC1S->X
+# tables of NT_BASISU_HAS_ETC2/BC7/ASTC (UASTC->X does not use them). XUASTC/HDR/RG11/16bpp are
 # never reached by the engine. Needs the local patch in deps/basisu/README.md.
 function(nt_basisu_trimmed_definitions out_var)
     set(_defs
@@ -38,7 +39,6 @@ function(nt_basisu_trimmed_definitions out_var)
         BASISD_SUPPORT_16BPP_FORMATS=0
         BASISD_SUPPORT_ETC1S=${NT_BASISU_HAS_ETC1S}
         BASISD_SUPPORT_UASTC=${NT_BASISU_HAS_UASTC}
-        NT_BASISU_PROFILE_TRIMMED=1
     )
     foreach(_pair "BC7:BC7" "ASTC:ASTC" "ETC2_EAC_A8:ETC2")
         string(REPLACE ":" ";" _pair "${_pair}")
@@ -68,7 +68,6 @@ else()
         BASISD_SUPPORT_BC7=1
         BASISD_SUPPORT_ASTC=1
         BASISD_SUPPORT_ETC2_EAC_A8=1
-        NT_BASISU_PROFILE_TRIMMED=0
     )
 endif()
 

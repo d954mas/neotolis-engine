@@ -28,8 +28,8 @@ patch of compile-time guards, the matching rejections for disabled paths
 relocated definition, so the WASM runtime can drop decoder paths the engine
 never reaches. Retained decoder code is unchanged.
 Upstream cannot build with those flags off (BinomialLLC/basis_universal#196).
-Reapply the patch on every vendor update until upstream accepts it (an
-upstream pull request is planned).
+The patch is local to this engine and is not submitted upstream; reapply it
+on every vendor update.
 
 - `BASISD_SUPPORT_XUASTC=0` / `BASISD_SUPPORT_UASTC_HDR=0` / `BASISD_SUPPORT_UASTC=0`
   compile: the XBC7 decoder include, `arith_fastbits_f32` globals,
@@ -46,9 +46,6 @@ upstream pull request is planned).
   RGBA4444 output cases. UASTC→BC1/BC3/BC4/BC5 cases now honor the existing
   `BASISD_SUPPORT_DXT1`/`BASISD_SUPPORT_DXT5A`. `basis_is_format_supported`
   answers false for every removed path.
-- BC1 single-colour table initialization is skipped when DXT1 is disabled and
-  `NT_BASISU_PROFILE_TRIMMED=1`. The native UASTC encoder still initializes
-  these tables because it reads them through `encode_bc1` for its hints.
 
 With the native defines in `engine/basisu/CMakeLists.txt` the encoder
 translation units preprocess identically to the pristine v2_50 sources; the

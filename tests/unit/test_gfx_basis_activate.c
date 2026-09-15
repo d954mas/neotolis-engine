@@ -136,31 +136,21 @@ static NtTextureAssetHeader *fixture_header(basis_fixture_t *fixture) { return (
 // #region probes
 
 /* The selector's contract: the first of BC7 -> ASTC -> ETC2 that the GPU
- * reports and NT_BASISU_TARGETS admits, RGBA8 otherwise. */
+ * reports and NT_BASISU_HAS_* admits, RGBA8 otherwise. */
 static nt_texture_format_t first_admitted(bool bc7, bool astc, bool etc2, bool alpha) {
-    (void)bc7;
-    (void)astc;
-    (void)etc2;
-    (void)alpha;
-#if NT_BASISU_HAS_BC7
-    if (bc7) {
+    if (NT_BASISU_HAS_BC7 && bc7) {
         return NT_TEXTURE_FORMAT_BC7_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ASTC
-    if (astc) {
+    if (NT_BASISU_HAS_ASTC && astc) {
         return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ETC2
-    if (etc2) {
+    if (NT_BASISU_HAS_ETC2 && etc2) {
         return alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
     }
-#endif
     return NT_TEXTURE_FORMAT_RGBA8;
 }
 
-/* A codec inside NT_BASISU_CODECS for the tests that are not about the codec. */
+/* An admitted codec for the tests that are not about the codec. */
 #define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
 
 static void set_caps(bool bc7, bool astc, bool etc2) {
@@ -316,7 +306,7 @@ void test_uastc_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_
 #endif
 
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-/* The native encoder still emits the codec outside NT_BASISU_CODECS; the
+/* The native encoder still emits the codec whose option is OFF; the
  * activator must fail the asset at the blob check, before any staging. */
 void test_blob_of_a_codec_outside_the_set_fails_before_staging(void) {
     const nt_basisu_codec_t outside = NT_BASISU_HAS_ETC1S ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S;
@@ -509,9 +499,6 @@ void test_reactivation_after_context_restore_yields_the_same_storage(void) {
 
 // #region staging lifecycle
 
-/* The mesh size is tuned against the BC7 chain, so the staging tests need
- * BC7 in NT_BASISU_TARGETS. */
-#if NT_BASISU_HAS_BC7
 static void idle_frames(uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         nt_gfx_begin_frame();
@@ -520,21 +507,21 @@ static void idle_frames(uint32_t count) {
 }
 
 /* One float3 stream: the SOA plane layout is the interleaved layout, so the
- * re-interleave through staging is a pure copy of MESH_VERTEX_BYTES. The count
- * is chosen to outgrow the 96x64 BC7 chain (8224 bytes). */
-#define MESH_VERTEX_COUNT 700U
-#define MESH_VERTEX_BYTES ((size_t)MESH_VERTEX_COUNT * 12U)
+ * re-interleave through staging is a pure copy of the vertex bytes. The count is
+ * chosen per run to just outgrow the 96x64 chain of the admitted target (RGBA8
+ * is the widest: 32764 bytes) while every 128x128 chain still outgrows it. */
+#define MESH_MAX_VERTEX_COUNT 2800U
 
-static void fill_valid_mesh_blob(uint8_t *blob) {
+static void fill_valid_mesh_blob(uint8_t *blob, uint32_t vertex_count) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->magic = NT_MESH_MAGIC;
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 1;
     hdr->index_type = 1;
     hdr->vertex_wire = NT_MESH_WIRE_VTX_SOA;
-    hdr->vertex_count = MESH_VERTEX_COUNT;
+    hdr->vertex_count = vertex_count;
     hdr->index_count = 3;
-    hdr->vertex_data_size = MESH_VERTEX_BYTES;
+    hdr->vertex_data_size = vertex_count * 12U;
     hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
     sd->name_hash = 0x12345678;
@@ -542,42 +529,45 @@ static void fill_valid_mesh_blob(uint8_t *blob) {
     sd->count = 3;
 }
 
-#define MESH_BLOB_BYTES (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + MESH_VERTEX_BYTES + 6)
+#define MESH_BLOB_BYTES(vertex_count) (sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + ((size_t)(vertex_count) * 12U) + 6)
 
 void test_staging_is_shared_grown_and_evicted(void) {
     set_caps(true, false, false);
+    const nt_texture_format_t fmt = first_admitted(true, false, false, true);
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_stage_size());
 
     basis_fixture_t small = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
-    uint32_t handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
+    uint32_t handle = activate_expecting(&small, fmt);
     const void *first_ptr = nt_gfx_test_stage_ptr();
     uint32_t first_size = nt_gfx_test_stage_size();
     TEST_ASSERT_NOT_NULL(first_ptr);
-    TEST_ASSERT_EQUAL_UINT32(chain_bytes(NT_TEXTURE_FORMAT_BC7_RGBA, 96, 64), first_size);
+    TEST_ASSERT_EQUAL_UINT32(chain_bytes(fmt, 96, 64), first_size);
 
     /* Mesh SOA decode takes the same buffer and outgrows that whole chain. */
-    uint8_t mesh_blob[MESH_BLOB_BYTES];
+    const uint32_t mesh_vertices = (first_size / 12U) + 1U;
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(MESH_MAX_VERTEX_COUNT, mesh_vertices);
+    static uint8_t mesh_blob[MESH_BLOB_BYTES(MESH_MAX_VERTEX_COUNT)];
     memset(mesh_blob, 0, sizeof(mesh_blob));
-    fill_valid_mesh_blob(mesh_blob);
-    uint32_t mesh = nt_gfx_activate_mesh(mesh_blob, (uint32_t)sizeof(mesh_blob));
+    fill_valid_mesh_blob(mesh_blob, mesh_vertices);
+    uint32_t mesh = nt_gfx_activate_mesh(mesh_blob, (uint32_t)MESH_BLOB_BYTES(mesh_vertices));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, mesh);
     const void *mesh_ptr = nt_gfx_test_stage_ptr();
     uint32_t mesh_size = nt_gfx_test_stage_size();
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)MESH_VERTEX_BYTES, mesh_size);
+    TEST_ASSERT_EQUAL_UINT32(mesh_vertices * 12U, mesh_size);
     TEST_ASSERT_GREATER_THAN_UINT32(first_size, mesh_size);
     nt_gfx_deactivate_mesh(mesh);
 
     /* The texture then transcodes into the buffer the mesh grew. */
     nt_gfx_deactivate_texture(handle);
-    handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
+    handle = activate_expecting(&small, fmt);
     TEST_ASSERT_EQUAL_PTR(mesh_ptr, nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(mesh_size, nt_gfx_test_stage_size());
     nt_gfx_deactivate_texture(handle);
 
     basis_fixture_t large = fixture_encode(128, 128, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
-    handle = activate_expecting(&large, NT_TEXTURE_FORMAT_BC7_RGBA);
-    TEST_ASSERT_EQUAL_UINT32(chain_bytes(NT_TEXTURE_FORMAT_BC7_RGBA, 128, 128), nt_gfx_test_stage_size());
+    handle = activate_expecting(&large, fmt);
+    TEST_ASSERT_EQUAL_UINT32(chain_bytes(fmt, 128, 128), nt_gfx_test_stage_size());
     TEST_ASSERT_GREATER_THAN_UINT32(first_size, nt_gfx_test_stage_size());
     uint32_t grown_size = nt_gfx_test_stage_size();
     nt_gfx_deactivate_texture(handle);
@@ -605,7 +595,7 @@ void test_staging_is_shared_grown_and_evicted(void) {
 void test_shutdown_releases_a_live_staging_buffer(void) {
     set_caps(true, false, false);
     basis_fixture_t small = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
-    uint32_t handle = activate_expecting(&small, NT_TEXTURE_FORMAT_BC7_RGBA);
+    uint32_t handle = activate_expecting(&small, first_admitted(true, false, false, true));
     TEST_ASSERT_NOT_NULL(nt_gfx_test_stage_ptr());
     nt_gfx_deactivate_texture(handle);
 
@@ -615,7 +605,6 @@ void test_shutdown_releases_a_live_staging_buffer(void) {
     fixture_free(&small);
     setUp(); /* tearDown's shutdown must be the only one left to run */
 }
-#endif
 
 // #endregion
 
@@ -642,9 +631,7 @@ int main(void) {
     RUN_TEST(test_backend_failure_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_sampler_failure_leaves_no_texture_and_allows_a_retry);
     RUN_TEST(test_reactivation_after_context_restore_yields_the_same_storage);
-#if NT_BASISU_HAS_BC7
     RUN_TEST(test_staging_is_shared_grown_and_evicted);
     RUN_TEST(test_shutdown_releases_a_live_staging_buffer);
-#endif
     return UNITY_END();
 }

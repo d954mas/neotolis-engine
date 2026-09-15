@@ -34,10 +34,10 @@ static void check_pixels(const uint8_t *src, const uint8_t *out, uint32_t bytes)
 }
 
 static const nt_texture_format_t s_targets[] = {NT_TEXTURE_FORMAT_ETC2_RGB8, NT_TEXTURE_FORMAT_ETC2_RGBA8, NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, NT_TEXTURE_FORMAT_RGBA8};
-/* NT_BASISU_TARGETS of this configure; RGBA8 is always admitted. */
+/* NT_BASISU_HAS_ETC2/BC7/ASTC of this configure; RGBA8 is always admitted. */
 static const bool s_target_enabled[] = {NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_BC7 != 0, NT_BASISU_HAS_ASTC != 0, true};
 
-/* Presets of the codecs in NT_BASISU_CODECS; the encoder itself is a superset. */
+/* Presets of the admitted codecs; the encoder itself is a superset. */
 static uint32_t enabled_codec_presets(nt_basisu_encode_opts_t out[2]) {
     uint32_t count = 0;
 #if NT_BASISU_HAS_ETC1S
@@ -68,12 +68,7 @@ static void check_outputs(const nt_basisu_encode_result_t *enc, const nt_basisu_
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_out) - 16U, bytes);
         memset(s_out, 0xCD, sizeof(s_out));
         if (!s_target_enabled[f]) {
-            /* Outside NT_BASISU_TARGETS: refused, nothing written. */
-            TEST_ASSERT_FALSE(nt_basisu_transcode_chain(enc->data, enc->size, info, s_targets[f], s_out, bytes));
-            for (uint32_t i = 0; i < sizeof(s_out); i++) {
-                TEST_ASSERT_EQUAL_HEX8(0xCD, s_out[i]);
-            }
-            continue;
+            continue; /* target option OFF: not a legal argument in this build */
         }
         TEST_ASSERT_TRUE(nt_basisu_transcode_chain(enc->data, enc->size, info, s_targets[f], s_out, bytes));
         /* The chain ends exactly where the per-level sizes say it does. */
@@ -133,7 +128,7 @@ void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 #endif
 
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-/* The native encoder still emits codecs outside NT_BASISU_CODECS. */
+/* The native encoder still emits a codec whose option is OFF. */
 void test_codec_outside_the_set_is_refused(void) {
     uint8_t src[16 * 8 * 4];
     fill_pixels(src, 16, 8, true);

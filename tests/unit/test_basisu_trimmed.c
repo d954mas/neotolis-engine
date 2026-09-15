@@ -1,6 +1,6 @@
 /* Trimmed-transcoder consumer (native mirror library, or the production library
  * under Node): every (codec, target) pair inside the admission set must match the
- * native goldens byte-for-byte, every pair outside it must be refused. */
+ * native goldens byte-for-byte; a codec outside it must be refused by nt_basisu_info. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,6 @@ void tearDown(void) {}
 static const bool s_target_enabled[] = {NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_BC7 != 0, NT_BASISU_HAS_ASTC != 0, true};
 
 static uint32_t s_identical;
-static uint32_t s_target_refused;
 static uint32_t s_codec_refused;
 
 static uint8_t *read_file(const char *name, uint32_t *out_size) {
@@ -57,16 +56,13 @@ static void check_pair(const char *name, const uint8_t *basis, uint32_t basis_si
         TEST_FAIL_MESSAGE(label);
         return;
     }
+    if (!s_target_enabled[t]) {
+        return; /* target option OFF: not a legal argument in this build */
+    }
     uint8_t *out = (uint8_t *)malloc((size_t)bytes);
     TEST_ASSERT_NOT_NULL(out);
     memset(out, 0xCD, (size_t)bytes);
     const bool ok = nt_basisu_transcode_chain(basis, basis_size, info, s_targets[t], out, (uint32_t)bytes);
-    if (!s_target_enabled[t]) {
-        TEST_ASSERT_FALSE_MESSAGE(ok, label);
-        s_target_refused++;
-        free(out);
-        return;
-    }
     TEST_ASSERT_TRUE_MESSAGE(ok, label);
     char file_name[96];
     (void)snprintf(file_name, sizeof(file_name), "%s.%s.bin", name, s_target_names[t]);
@@ -121,8 +117,8 @@ void test_every_admitted_pair_matches_the_golden_and_every_other_is_refused(void
     for (size_t i = 0; i < FIXTURE_COUNT; i++) {
         check_fixture(&s_fixtures[i]);
     }
-    (void)printf("basisu trimmed: %u byte-identical, %u targets refused, %u codecs refused (ETC1S=%d UASTC=%d ETC2=%d BC7=%d ASTC=%d)\n", s_identical, s_target_refused, s_codec_refused,
-                 NT_BASISU_HAS_ETC1S, NT_BASISU_HAS_UASTC, NT_BASISU_HAS_ETC2, NT_BASISU_HAS_BC7, NT_BASISU_HAS_ASTC);
+    (void)printf("basisu trimmed: %u byte-identical, %u codecs refused (ETC1S=%d UASTC=%d ETC2=%d BC7=%d ASTC=%d)\n", s_identical, s_codec_refused, NT_BASISU_HAS_ETC1S, NT_BASISU_HAS_UASTC,
+                 NT_BASISU_HAS_ETC2, NT_BASISU_HAS_BC7, NT_BASISU_HAS_ASTC);
 }
 
 int main(void) {

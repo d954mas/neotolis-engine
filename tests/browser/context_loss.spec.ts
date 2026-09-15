@@ -193,7 +193,7 @@ const FORMAT_BC7_RGBA = 13;
 const FORMAT_ASTC_4x4_RGBA = 14;
 
 // The activator's fixed candidate order over the formats both the GPU reports and the build
-// admits (NT_BASISU_TARGETS); an opaque texture takes ETC2 RGB8. RGBA8 is always the last candidate.
+// admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque texture takes ETC2 RGB8. RGBA8 is always the last candidate.
 function expectedBasisFormat(caps: number, buildTargets: number, hasAlpha: boolean): number {
   const admitted = caps & buildTargets;
   if (admitted & 1) return FORMAT_BC7_RGBA;

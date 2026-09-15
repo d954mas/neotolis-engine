@@ -344,7 +344,7 @@ format: alpha and codec come from the blob, because the encoder drops alpha
 slices for a fully opaque source.
 
 The target format is the first entry that the GPU supports and the build
-admits (`NT_BASISU_TARGETS`) of `BC7_RGBA`, `ASTC_4x4_RGBA`, `ETC2_RGBA8` or
+admits (`NT_BASISU_HAS_BC7/ASTC/ETC2`) of `BC7_RGBA`, `ASTC_4x4_RGBA`, `ETC2_RGBA8` or
 `ETC2_RGB8` (by the blob's alpha), then `RGBA8` as the always-available
 fallback. `BC7_RGBA` is eligible only when both base dimensions are multiples
 of 4; otherwise selection continues with ASTC, ETC2, then RGBA8.

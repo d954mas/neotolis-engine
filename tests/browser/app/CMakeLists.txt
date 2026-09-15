@@ -6,7 +6,7 @@ set(BROWSER_APP_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/tests/browser/app/${NT_PRE
 set(BROWSER_APP_ASSETS_DIR "${BROWSER_APP_OUTPUT_DIR}/assets")
 # Shared pack location -- the native ui_showcase build writes the pack here; we copy from it.
 set(UI_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/ui_showcase")
-# The Basis fixture is bound to NT_BASISU_CODECS/NT_BASISU_TARGETS: a native configure of one set
+# The Basis fixture is bound to the NT_BASISU_HAS_* set: a native configure of one set
 # produces it, the wasm configure of the same set copies it, other sets never see it.
 set(BROWSER_FIXTURE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/tests/browser/fixtures/${NT_BASISU_SET_TAG}")
 

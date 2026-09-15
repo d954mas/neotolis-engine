@@ -354,7 +354,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) { return (basis_handle_ready(
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_format(void) { return (int)nt_gfx_texture_format(basis_fixture_texture()); }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_rgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_rgb_handle)}); }
 /* Bitmasks the spec turns into the expected format with the fixed order BC7 -> ASTC -> ETC2 -> RGBA8:
- * what the GPU reports and what NT_BASISU_TARGETS admits. */
+ * what the GPU reports and what the NT_BASISU_HAS_* targets admit. */
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     return (caps->has_bc7 ? 1 : 0) | (caps->has_astc ? 2 : 0) | (caps->has_etc2 ? 4 : 0);

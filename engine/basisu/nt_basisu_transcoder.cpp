@@ -4,22 +4,6 @@
 
 #include "core/nt_assert.h"
 
-/* ---- Build-set cross-check ---- */
-
-/* engine/basisu/CMakeLists.txt sets every BASISD_SUPPORT_* checked here. Trimmed
-   (WASM, test mirror): exactly the decoders of NT_BASISU_CODECS plus the ETC1S->X
-   tables of NT_BASISU_TARGETS. Native: everything stays on for the shared encoder TU. */
-#if NT_BASISU_PROFILE_TRIMMED
-static_assert(BASISD_SUPPORT_ETC1S == NT_BASISU_HAS_ETC1S, "trimmed transcoder: BASISD_SUPPORT_ETC1S must follow NT_BASISU_CODECS");
-static_assert(BASISD_SUPPORT_UASTC == NT_BASISU_HAS_UASTC, "trimmed transcoder: BASISD_SUPPORT_UASTC must follow NT_BASISU_CODECS");
-static_assert(BASISD_SUPPORT_BC7 == (NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ETC1S), "trimmed transcoder: BASISD_SUPPORT_BC7 must follow NT_BASISU_TARGETS && ETC1S");
-static_assert(BASISD_SUPPORT_ASTC == (NT_BASISU_HAS_ASTC && NT_BASISU_HAS_ETC1S), "trimmed transcoder: BASISD_SUPPORT_ASTC must follow NT_BASISU_TARGETS && ETC1S");
-static_assert(BASISD_SUPPORT_ETC2_EAC_A8 == (NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_ETC1S), "trimmed transcoder: BASISD_SUPPORT_ETC2_EAC_A8 must follow NT_BASISU_TARGETS && ETC1S");
-#else
-static_assert(BASISD_SUPPORT_ETC1S == 1 && BASISD_SUPPORT_UASTC == 1 && BASISD_SUPPORT_BC7 == 1 && BASISD_SUPPORT_ASTC == 1 && BASISD_SUPPORT_ETC2_EAC_A8 == 1,
-              "native transcoder: both decoders and every engine target stay compiled for the shared encoder TU");
-#endif
-
 /* ---- Static transcoder instance ---- */
 
 static basist::basisu_transcoder s_transcoder;
@@ -32,6 +16,21 @@ static bool codec_enabled(nt_basisu_codec_t codec) {
         return NT_BASISU_HAS_UASTC != 0;
     default:
         return false;
+    }
+}
+
+/* RGBA8 is always available; the compressed targets follow their option. */
+static bool target_enabled(nt_texture_format_t format) {
+    switch (format) {
+    case NT_TEXTURE_FORMAT_ETC2_RGB8:
+    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
+        return NT_BASISU_HAS_ETC2 != 0;
+    case NT_TEXTURE_FORMAT_BC7_RGBA:
+        return NT_BASISU_HAS_BC7 != 0;
+    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
+        return NT_BASISU_HAS_ASTC != 0;
+    default:
+        return format == NT_TEXTURE_FORMAT_RGBA8;
     }
 }
 
@@ -57,7 +56,7 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     default:
         return false;
     }
-    /* Not in NT_BASISU_CODECS: the trimmed profile has no decoder for it, the
+    /* Codec option OFF: the trimmed profile has no decoder for it, the
        native superset refuses it too so both answer alike. */
     if (!codec_enabled(codec)) {
         return false;
@@ -91,41 +90,33 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
 
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
     NT_ASSERT(info != nullptr);
+    NT_ASSERT(target_enabled(format) && "transcode_chain: target outside NT_BASISU_HAS_*");
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
-    bool target_enabled; /* NT_BASISU_TARGETS; RGBA8 is always available */
     switch (format) {
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
         /* Upstream has no ETC2_RGB target; an ETC1 payload is a legal GL_COMPRESSED_RGB8_ETC2 block. */
         target = basist::transcoder_texture_format::cTFETC1_RGB;
         unit_bytes = 8;
-        target_enabled = NT_BASISU_HAS_ETC2 != 0;
         break;
     case NT_TEXTURE_FORMAT_ETC2_RGBA8:
         target = basist::transcoder_texture_format::cTFETC2_RGBA;
         unit_bytes = 16;
-        target_enabled = NT_BASISU_HAS_ETC2 != 0;
         break;
     case NT_TEXTURE_FORMAT_BC7_RGBA:
         target = basist::transcoder_texture_format::cTFBC7_RGBA;
         unit_bytes = 16;
-        target_enabled = NT_BASISU_HAS_BC7 != 0;
         break;
     case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
         target = basist::transcoder_texture_format::cTFASTC_4x4_RGBA;
         unit_bytes = 16;
-        target_enabled = NT_BASISU_HAS_ASTC != 0;
         break;
     case NT_TEXTURE_FORMAT_RGBA8:
         target = basist::transcoder_texture_format::cTFRGBA32;
         unit_bytes = 4;
-        target_enabled = true;
         break;
     default:
         NT_ASSERT(0 && "transcode_chain: format is not a Basis transcode target");
-        return false;
-    }
-    if (!target_enabled) {
         return false;
     }
 

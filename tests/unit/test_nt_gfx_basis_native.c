@@ -216,29 +216,22 @@ static void check_against_reference(uint32_t level, uint8_t tolerance, bool opaq
 }
 
 /* The selector's contract: the first of BC7 -> ASTC -> ETC2 the GPU reports
- * and NT_BASISU_TARGETS admits, RGBA8 otherwise. */
+ * and NT_BASISU_HAS_* admits, RGBA8 otherwise. */
 static nt_texture_format_t expected_target(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
-    (void)caps;
-#if NT_BASISU_HAS_BC7
-    if (caps->has_bc7) {
+    if (NT_BASISU_HAS_BC7 && caps->has_bc7) {
         return NT_TEXTURE_FORMAT_BC7_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ASTC
-    if (caps->has_astc) {
+    if (NT_BASISU_HAS_ASTC && caps->has_astc) {
         return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ETC2
-    if (caps->has_etc2) {
+    if (NT_BASISU_HAS_ETC2 && caps->has_etc2) {
         return NT_TEXTURE_FORMAT_ETC2_RGBA8;
     }
-#endif
     return NT_TEXTURE_FORMAT_RGBA8;
 }
 
-/* A codec inside NT_BASISU_CODECS for the tests that are not about the codec. */
+/* An admitted codec for the tests that are not about the codec. */
 #define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
 
 static GLint texture_max_level(nt_texture_t tex) {
@@ -444,7 +437,7 @@ int main(void) {
     RUN_TEST(test_activate_uastc_blob_uploads_and_samples);
 #endif
     RUN_TEST(test_prepared_upload_rgba8);
-    /* A target outside NT_BASISU_TARGETS has no transcoded chain to upload. */
+    /* A target whose option is OFF has no transcoded chain to upload. */
 #if NT_BASISU_HAS_BC7
     RUN_TEST(test_prepared_upload_bc7);
 #endif

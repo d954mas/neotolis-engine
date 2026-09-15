@@ -2231,28 +2231,18 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* ---- Asset activators ---- */
 
 /* Basis transcode target: BC7 -> ASTC -> ETC2 -> RGBA8, skipping formats the
- * GPU lacks and formats outside NT_BASISU_TARGETS. RGBA8 is always available. */
+ * GPU lacks and formats outside NT_BASISU_HAS_*. RGBA8 is always available. */
 static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, bool has_alpha, uint32_t width, uint32_t height) {
-    (void)caps;
-    (void)has_alpha;
-    (void)width;
-    (void)height;
-#if NT_BASISU_HAS_BC7
     /* WebGL BPTC requires block-aligned level-0 dimensions; the smaller levels of a halved chain are accepted as they come. */
-    if (caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
+    if (NT_BASISU_HAS_BC7 && caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
         return NT_TEXTURE_FORMAT_BC7_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ASTC
-    if (caps->has_astc) {
+    if (NT_BASISU_HAS_ASTC && caps->has_astc) {
         return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
     }
-#endif
-#if NT_BASISU_HAS_ETC2
-    if (caps->has_etc2) {
+    if (NT_BASISU_HAS_ETC2 && caps->has_etc2) {
         return has_alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
     }
-#endif
     return NT_TEXTURE_FORMAT_RGBA8;
 }
 

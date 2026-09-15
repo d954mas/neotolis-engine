@@ -67,8 +67,11 @@ covers the common options; module specs own detailed ON/OFF behavior.
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
 | `NT_DEVAPI_ENABLED` | OFF | Group switches are dormant while the master gate is OFF. |
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
-| `NT_BASISU_CODECS` | `ETC1S;UASTC_LDR` | Basis codecs the builder emits and the runtime decodes. Empty is a configure error. See [Basis Universal admission](#basis-universal-admission). |
-| `NT_BASISU_TARGETS` | `ETC2;BC7;ASTC_LDR` | Compressed GPU formats Basis textures may transcode to; RGBA8 is always available, empty leaves only RGBA8. |
+| `NT_BASISU_HAS_ETC1S` | ON | Basis ETC1S: the builder emits it, the runtime decodes it. See [Basis Universal admission](#basis-universal-admission). |
+| `NT_BASISU_HAS_UASTC` | ON | Basis UASTC LDR, same contract. Both codecs OFF is a configure error. |
+| `NT_BASISU_HAS_ETC2` | ON | Basis textures may transcode to ETC2 RGB8/RGBA8. |
+| `NT_BASISU_HAS_BC7` | ON | Basis textures may transcode to BC7. |
+| `NT_BASISU_HAS_ASTC` | ON | Basis textures may transcode to ASTC 4x4. RGBA8 is always available. |
 
 Contracts and less common options:
 
@@ -79,13 +82,12 @@ Contracts and less common options:
 
 ### Basis Universal admission
 
-`NT_BASISU_CODECS` and `NT_BASISU_TARGETS` are CMake lists (`;`-separated) of
-the tokens above; unknown or duplicate tokens and an empty codec list are
-configure errors. List order does not matter. A build without Basis textures links
+The five `NT_BASISU_HAS_*` options are one set; both codecs OFF is a
+configure error, because a build without Basis textures links
 `nt_basisu_transcoder_stub` instead of shrinking the set. The root
-`CMakeLists.txt` turns the lists into `NT_BASISU_HAS_ETC1S/UASTC/ETC2/BC7/ASTC`
-(0/1) on `nt_shared`, which the builder, the transcoder and `nt_gfx` link, so
-one configure always agrees with itself: the builder asserts a texture's codec
+`CMakeLists.txt` delivers them as 0/1 definitions on `nt_shared`, which the
+builder, the transcoder and `nt_gfx` link, so one configure always agrees
+with itself: the builder asserts a texture's codec
 before its cache lookup, `nt_basisu_info` rejects blobs whose codec is outside
 the set, and `nt_basisu_transcode_chain` rejects compressed targets outside it.
 Transcoding requires the info returned by a successful `nt_basisu_info` call
@@ -95,15 +97,16 @@ on the same blob in this build. The activator's selector skips excluded targets
 Native builds keep both decoders and every engine target compiled in the
 shared transcoder TU because the encoder shares it; the wrapper enforces the
 set there. WASM builds
-compile only the decoders in `NT_BASISU_CODECS` and the ETC1S→X tables for
-`NT_BASISU_TARGETS` (UASTC→X does not use the tables those flags gate),
-through the local patch
-described in [deps/basisu/README.md](../deps/basisu/README.md).
-`BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms keeps
-ETC1S→ASTC bytes identical between native and web.
+compile only the admitted decoders and the ETC1S→X tables of the admitted
+targets (UASTC→X does not use the tables those flags gate), through the local
+patch described in [deps/basisu/README.md](../deps/basisu/README.md).
+`BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms: 8-bit
+endpoints for ETC1S→ASTC opaque and grayscale blocks are worth the ~28 KB
+brotli table on web (upstream's Emscripten default is 0), and native/web
+bytes stay identical as a consequence.
 
 Packs cross configures: the native builder writes them, the wasm configure
-copies them. Put both values in the preset every configure inherits (the
+copies them. Put the options in the preset every configure inherits (the
 engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
 preset or include before `add_subdirectory`). Use one set for the shared example
 pack directory. To change it, reconfigure native and WASM, rebuild the native
@@ -127,29 +130,33 @@ it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate
 `test_nt_gfx_basis_native` and `test_builder` follow the set, and the browser
 smoke app activates its own fixture pack (below). Produce the full baseline
 first, then check restricted sets in separate directories. They consume the
-same files and never regenerate them. Skip the example packs because their
-producers explicitly select UASTC:
+same files and never regenerate them. The examples require the default set
+(sponza uses both codecs), so restricted configures skip them via
+`NT_SKIP_EXAMPLE_PACKS`:
 
 ```bash
 cmake --preset native-debug-test
 cmake --build --preset native-debug-test --target test_basisu_golden_produce
 ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
 skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
-cmake --preset native-debug-test -B build/_cmake/basisu-codecs-etc1s -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
-cmake --build build/_cmake/basisu-codecs-etc1s --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-ctest --test-dir build/_cmake/basisu-codecs-etc1s --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
-emcmake cmake --preset wasm-debug -B build/_cmake/basisu-codecs-etc1s-wasm -DNT_BASISU_CODECS=ETC1S -DNT_SKIP_EXAMPLE_PACKS="$skip"
-cmake --build build/_cmake/basisu-codecs-etc1s-wasm --target test_basisu_trimmed
-ctest --test-dir build/_cmake/basisu-codecs-etc1s-wasm --no-tests=error -R '^test_basisu_trimmed$'
+tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+# UASTC only (the smallest transcoder)
+cmake --preset native-debug-test -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-uastc-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-uastc-only --output-on-failure --no-tests=error -R "$tests"
+# ETC1S with ETC2 as the only compressed target
+cmake --preset native-debug-test -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-etc1s-etc2 --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-etc1s-etc2 --output-on-failure --no-tests=error -R "$tests"
 ```
 
-CI runs this for `NT_BASISU_CODECS=ETC1S`, `UASTC_LDR`, each single
-`NT_BASISU_TARGETS` token and the empty target list (RGBA8 only), rejects the
-empty codec list, a duplicate and an unknown token at configure, and drives the
-two `basis fixture:` browser tests through the same rows in wasm Debug and
-Release. The default browser run still covers all smoke tests.
-The runner's SwiftShader reports every compressed cap; rows on real GPUs stay
-unverified.
+CI runs exactly these two rows (`NT_BASISU_ROWS` in `ci.yml`): together they
+cover both single-codec decoders and both target extremes. The native job runs
+the five suites per row, the browser job drives the two `basis fixture:` tests
+per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
+with the production transcoder under Node. The default browser run still
+covers all smoke tests. The runner's SwiftShader reports every compressed cap;
+rows on real GPUs stay unverified.
 
 ### CRT, probes and profiling
 
@@ -240,16 +247,16 @@ above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 That app reuses the prebuilt `ui_showcase.ntpack` (target `ui_showcase_packs`)
 and builds its own Basis fixture, `basis_fixture.ntpack` (target
 `browser_smoke_packs`, producer `tests/browser/app/build_fixture_pack.c`): one
-RGBA and one opaque RGB texture per codec in `NT_BASISU_CODECS`, written to
+RGBA and one opaque RGB texture, ETC1S when `NT_BASISU_HAS_ETC1S` is ON and
+UASTC otherwise (the pair `main.c` requests), written to
 `build/tests/browser/fixtures/<set tag>/` so a wasm configure only ever copies
 the pack of its own admission set. Build both with a native preset of the same
 `NT_BASISU_*` values before configuring wasm — the showcase copy rule is
 configure-time, so a pack produced later is missing from the app's `assets/`
 until the next configure. The Playwright spec `context_loss.spec.ts` derives the
 expected transcode target from the GPU caps and the build's targets and checks
-texels of levels 0, 3 and 7; a `NT_BASISU_TARGETS=` (RGBA8-only) pair is the
-portable row, compressed rows on the SwiftShader runner prove upload and
-sampling but not hardware decoding.
+texels of levels 0, 3 and 7; compressed targets on the SwiftShader runner prove
+upload and sampling but not hardware decoding.
 
 Verify font geometry changes with `NT_FONT_EMBOLDEN_ENABLED` OFF and ON. The ON
 mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label` and all
