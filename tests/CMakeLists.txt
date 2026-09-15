@@ -49,14 +49,13 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_nt_color COMMAND test_nt_color)
 
-    # --- Float16 tests (header-only nt_half.h; no lib, just the shared include root) ---
+    # --- Float16 tests (nt_half out-of-line TU from shared/) ---
     add_executable(test_half unit/test_half.c)
-    target_link_libraries(test_half PRIVATE unity)
+    target_link_libraries(test_half PRIVATE nt_half unity)
     # The test uses ldexpf/fabsf; standalone (no engine lib), so GNU ld needs libm explicitly (Windows has it in the CRT).
     if(NOT WIN32)
         target_link_libraries(test_half PRIVATE m)
     endif()
-    target_include_directories(test_half PRIVATE "${CMAKE_SOURCE_DIR}/shared/include")
     nt_setup_test_target(test_half)
 
     # --- Skeletal animation kernels (pose ABI, 3x4 math, FK, sockets) ---
