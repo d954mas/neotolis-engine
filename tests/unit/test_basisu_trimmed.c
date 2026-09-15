@@ -1,6 +1,6 @@
-/* Trimmed-transcoder consumer (native mirror library, or the production library
- * under Node): every (codec, target) pair inside the admission set must match the
- * native goldens byte-for-byte. */
+/* Runtime-transcoder consumer (natively or under Node): every (codec, target)
+ * pair inside the admission set must match the full transcoder's goldens
+ * byte-for-byte. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

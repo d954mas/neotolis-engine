@@ -47,14 +47,15 @@ on every vendor update.
   `BASISD_SUPPORT_DXT1`/`BASISD_SUPPORT_DXT5A`. `basis_is_format_supported`
   answers false for every removed path.
 
-With the native defines in `engine/basisu/CMakeLists.txt` the encoder
-translation units preprocess identically to the pristine v2_50 sources; the
-transcoder loses only the UASTC→BC1/BC3/BC4/BC5 cases (`DXT1=0`, `DXT5A=0`).
+With the `nt_basisu_transcoder_full` defines in `engine/basisu/CMakeLists.txt`
+the encoder translation units preprocess identically to the pristine v2_50
+sources; that full transcoder loses only the UASTC→BC1/BC3/BC4/BC5 cases
+(`DXT1=0`, `DXT5A=0`). The runtime library `nt_basisu_transcoder` is the same
+translation unit with the `NT_BASISU_HAS_*` set applied.
 
 The builder's encoder source list is explicit in
-[tools/builder/CMakeLists.txt](../../tools/builder/CMakeLists.txt).
-Native encoder and runtime share the single upstream transcoder translation unit
-and `nt_basisu_transcoder_config` from
+[tools/builder/CMakeLists.txt](../../tools/builder/CMakeLists.txt); it links
+`nt_basisu_transcoder_full` and `nt_basisu_transcoder_full_config` from
 [engine/basisu/CMakeLists.txt](../../engine/basisu/CMakeLists.txt).
 
 Engine input is ETC1S/UASTC LDR `.basis`; outputs are ETC1 RGB, ETC2 RGBA,

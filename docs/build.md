@@ -94,12 +94,13 @@ Transcoding requires the info returned by a successful `nt_basisu_info` call
 on the same blob in this build. The activator's selector skips excluded targets
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
 
-Native builds keep both decoders and every engine target compiled in the
-shared transcoder TU because the encoder shares it; the wrapper enforces the
-set there. WASM builds
-compile only the admitted decoders and the ETC1S→X tables of the admitted
-targets (UASTC→X does not use the tables those flags gate), through the local
-patch described in [deps/basisu/README.md](../deps/basisu/README.md).
+The runtime library `nt_basisu_transcoder` compiles only the admitted decoders
+and the ETC1S→X tables of the admitted targets (UASTC→X does not use the
+tables those flags gate) on every platform, through the local patch described
+in [deps/basisu/README.md](../deps/basisu/README.md). The builder's encoder
+needs the upstream LDR superset, so it links `nt_basisu_transcoder_full`
+(native only): a builder-side executable links the full variant, a game links
+the runtime one, and no executable links both (same symbols).
 `BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms: 8-bit
 endpoints for ETC1S→ASTC opaque and grayscale blocks are worth the ~28 KB
 brotli table on web (upstream's Emscripten default is 0), and native/web
@@ -122,11 +123,9 @@ listed in `tests/unit/basisu_fixtures.h` into `build/tests/basisu_golden/` and
 checks all 72 files against `tests/fixtures/basisu_golden.sha256`. Regenerate
 that checksum file only for an intentional baseline change:
 `sha256sum *.basis *.bin | LC_ALL=C sort -k2` inside the golden directory.
-`test_basisu_trimmed` decodes them byte-for-byte with the test-only
-`nt_basisu_transcoder_trimmed_test` library (the transcoder TU with the wasm
-defines of the current set, top-level project, native) and, under Emscripten,
-with the production transcoder through Node (`-sNODERAWFS`; ctest registers
-it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate`,
+`test_basisu_trimmed` decodes them byte-for-byte with the runtime library of
+the current set, natively and, under Emscripten, through Node (`-sNODERAWFS`;
+ctest registers it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate`,
 `test_nt_gfx_basis_native` and `test_builder` follow the set, and the browser
 smoke app activates its own fixture pack (below). Produce the full baseline
 first, then check restricted sets in separate directories. They consume the

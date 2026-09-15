@@ -8,10 +8,13 @@ nt_declare_interface(nt_basisu_transcoder)
 # The C API speaks nt_texture_format_t / nt_basisu_codec_t.
 target_link_libraries(nt_basisu_transcoder_interface INTERFACE nt_shared)
 
-# Shared transcoder build config. The builder's encoder compiles the same basisu
-# headers and links this TU, so its defines must match exactly (ODR).
-add_library(nt_basisu_transcoder_config INTERFACE)
-# Unused transcode targets off for BOTH consumers (the builder's validate/stats
+# Two builds of the same wrapper + vendored TU. The runtime library carries only
+# the decoders and ETC1S->X tables of NT_BASISU_HAS_* on every platform; the
+# builder's encoder needs the upstream LDR superset (both codecs, KTX2, XUASTC
+# headers), so builder-side executables link nt_basisu_transcoder_full instead.
+# An executable links exactly one of them: they define the same symbols.
+
+# Unused transcode targets off for BOTH variants (the builder's validate/stats
 # paths included). ASTC_HIGHER_OPAQUE_QUALITY: 8-bit endpoints for ETC1S->ASTC
 # opaque/grayscale blocks; worth its ~28 KB brotli table on web (upstream's
 # Emscripten default is 0), and native/web bytes stay identical.
@@ -25,11 +28,11 @@ set(NT_BASISU_COMMON_DEFINITIONS
     BASISD_SUPPORT_KTX2_ZSTD=0
     BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1
 )
-target_compile_definitions(nt_basisu_transcoder_config INTERFACE ${NT_BASISU_COMMON_DEFINITIONS})
 
-# Trimmed profile: only the decoders in NT_BASISU_HAS_ETC1S/UASTC and the ETC1S->X
-# tables of NT_BASISU_HAS_ETC2/BC7/ASTC (UASTC->X does not use them). XUASTC/HDR/RG11/16bpp are
-# never reached by the engine. Needs the local patch in deps/basisu/README.md.
+# Runtime set: only the decoders in NT_BASISU_HAS_ETC1S/UASTC and the ETC1S->X
+# tables of NT_BASISU_HAS_ETC2/BC7/ASTC (UASTC->X does not use them). KTX2, XUASTC,
+# HDR, RG11 and 16bpp are never reached by the engine. Needs the local patch in
+# deps/basisu/README.md.
 function(nt_basisu_trimmed_definitions out_var)
     set(_defs
         BASISD_SUPPORT_KTX2=0
@@ -53,31 +56,12 @@ function(nt_basisu_trimmed_definitions out_var)
     set(${out_var} ${_defs} PARENT_SCOPE)
 endfunction()
 
-if(EMSCRIPTEN)
-    # Runtime .basis loading never reads KTX2; the encoder does not build on WASM
-    nt_basisu_trimmed_definitions(_nt_basisu_wasm_defs)
-    target_compile_definitions(nt_basisu_transcoder_config INTERFACE ${_nt_basisu_wasm_defs})
-else()
-    # Native superset: the encoder shares this TU (its headers need KTX2 and
-    # XUASTC, its validation paths call the transcoder), so native keeps the
-    # upstream LDR set unchanged and the wrapper enforces NT_BASISU_* on top.
-    target_compile_definitions(nt_basisu_transcoder_config INTERFACE
-        BASISD_SUPPORT_KTX2=1
-        BASISD_SUPPORT_ETC1S=1
-        BASISD_SUPPORT_UASTC=1
-        BASISD_SUPPORT_BC7=1
-        BASISD_SUPPORT_ASTC=1
-        BASISD_SUPPORT_ETC2_EAC_A8=1
-    )
-endif()
-
 set(NT_BASISU_TRANSCODER_SOURCES
     nt_basisu_transcoder.cpp
     ${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp
 )
 
-# Compiler/CRT settings the vendored TU needs, shared by the production library
-# and the test-only trimmed mirror below.
+# Compiler/CRT settings the vendored TU needs, shared by both variants.
 function(nt_basisu_transcoder_settings target)
     target_include_directories(${target} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
     target_include_directories(${target} PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
@@ -99,18 +83,29 @@ function(nt_basisu_transcoder_settings target)
     )
 endfunction()
 
+# Runtime variant: games, wasm, and the trimmed-consumer test on every platform.
 add_library(nt_basisu_transcoder STATIC ${NT_BASISU_TRANSCODER_SOURCES})
-target_link_libraries(nt_basisu_transcoder PRIVATE nt_basisu_transcoder_config)
+nt_basisu_trimmed_definitions(_nt_basisu_runtime_defs)
+target_compile_definitions(nt_basisu_transcoder PRIVATE ${NT_BASISU_COMMON_DEFINITIONS} ${_nt_basisu_runtime_defs})
 nt_basisu_transcoder_settings(nt_basisu_transcoder)
 
-# Test-only native mirror of the WASM transcoder: the same TU with the trimmed
-# defines, so ctest can decode against goldens exactly as the web build will.
-# Top-level project only; it cannot share an executable with the encoder.
-if(NT_BUILDING_TESTS AND NT_BUILD_TESTS AND NOT EMSCRIPTEN)
-    nt_basisu_trimmed_definitions(_nt_basisu_trimmed_defs)
-    add_library(nt_basisu_transcoder_trimmed_test STATIC EXCLUDE_FROM_ALL ${NT_BASISU_TRANSCODER_SOURCES})
-    target_compile_definitions(nt_basisu_transcoder_trimmed_test PRIVATE ${NT_BASISU_COMMON_DEFINITIONS} ${_nt_basisu_trimmed_defs})
-    nt_basisu_transcoder_settings(nt_basisu_transcoder_trimmed_test)
+# Full variant for the builder (native only: the encoder does not build on WASM).
+# The encoder's own TUs include the same headers and link the config so their
+# defines match this TU exactly (ODR).
+if(NOT EMSCRIPTEN)
+    add_library(nt_basisu_transcoder_full_config INTERFACE)
+    target_compile_definitions(nt_basisu_transcoder_full_config INTERFACE
+        ${NT_BASISU_COMMON_DEFINITIONS}
+        BASISD_SUPPORT_KTX2=1
+        BASISD_SUPPORT_ETC1S=1
+        BASISD_SUPPORT_UASTC=1
+        BASISD_SUPPORT_BC7=1
+        BASISD_SUPPORT_ASTC=1
+        BASISD_SUPPORT_ETC2_EAC_A8=1
+    )
+    add_library(nt_basisu_transcoder_full STATIC ${NT_BASISU_TRANSCODER_SOURCES})
+    target_link_libraries(nt_basisu_transcoder_full PRIVATE nt_basisu_transcoder_full_config)
+    nt_basisu_transcoder_settings(nt_basisu_transcoder_full)
 endif()
 
 # Loud-fail stub: texture-less builds skip the C++ transcoder (and its stdlib

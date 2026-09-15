@@ -114,9 +114,12 @@ in `nt_gfx` owns the policy (target format, staging) and hands the GL backend
 finished bytes, so the backend neither links nor calls Basis. Which codecs and
 compressed targets the real impl accepts is a configure-time set (the
 `NT_BASISU_HAS_*` options, delivered as 0/1 definitions on `nt_shared`); the
-stub is the only "no Basis at all" composition. The builder (`tools/builder`) and
-`test_basisu_roundtrip` link the real impl directly — they are executables
-picking an impl, not engine modules, so the no-real-impl gate does not apply.
+stub is the only "no Basis at all" composition. The builder's encoder needs the
+upstream LDR superset of the same translation unit, so builder-side executables
+(`tools/builder`, `test_basisu_roundtrip`) link the native-only
+`nt_basisu_transcoder_full` variant instead of the runtime impl — they are
+executables picking an impl, not engine modules, so the no-real-impl gate does
+not apply; an executable never links both variants.
 
 `nt_meshwire` follows the same size-motivated shape: the real impl is a C port
 of the meshopt index codec (stream format v1) plus the SoA re-interleave loop;
