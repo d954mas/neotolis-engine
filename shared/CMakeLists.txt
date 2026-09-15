@@ -13,13 +13,19 @@ target_compile_definitions(nt_shared INTERFACE
 add_library(nt_crc32 STATIC ${CMAKE_CURRENT_SOURCE_DIR}/include/nt_crc32.c)
 target_include_directories(nt_crc32 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Out of line so the float16 rounding paths are not inlined at every cold call site.
+add_library(nt_half STATIC ${CMAKE_CURRENT_SOURCE_DIR}/include/nt_half.c)
+target_include_directories(nt_half PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # Apply project warning/sanitizer policy when building as part of main project
 if(COMMAND nt_set_warning_flags)
-    nt_set_warning_flags(nt_crc32)
-    nt_set_sanitizer_flags(nt_crc32)
-    set_target_properties(nt_crc32 PROPERTIES
-        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/shared/${NT_PRESET_NAME}"
-    )
+    foreach(_shared_lib nt_crc32 nt_half)
+        nt_set_warning_flags(${_shared_lib})
+        nt_set_sanitizer_flags(${_shared_lib})
+        set_target_properties(${_shared_lib} PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/shared/${NT_PRESET_NAME}"
+        )
+    endforeach()
 endif()
 
-target_link_libraries(nt_shared INTERFACE nt_crc32)
+target_link_libraries(nt_shared INTERFACE nt_crc32 nt_half)

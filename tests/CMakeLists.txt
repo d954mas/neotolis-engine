@@ -49,6 +49,28 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_nt_color COMMAND test_nt_color)
 
+    # --- Float16 tests (nt_half out-of-line TU from shared/) ---
+    add_executable(test_half unit/test_half.c)
+    target_link_libraries(test_half PRIVATE nt_half unity)
+    # The test uses ldexpf/fabsf; standalone (no engine lib), so GNU ld needs libm explicitly (Windows has it in the CRT).
+    if(NOT WIN32)
+        target_link_libraries(test_half PRIVATE m)
+    endif()
+    nt_setup_test_target(test_half)
+
+    # --- Skeletal animation kernels (pose ABI, 3x4 math, FK, sockets) ---
+    # nt_math is the independent cglm reference path of the test, not a nt_anim
+    # dependency; anim_rig.c is the shared asymmetric fixture rig.
+    add_executable(test_anim unit/test_anim.c unit/test_helpers/anim_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_anim PRIVATE nt_anim nt_hash nt_core nt_log_stub nt_math unity)
+    target_include_directories(test_anim PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_anim)
+
+    add_executable(test_skin unit/test_skin.c unit/test_helpers/anim_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skin PRIVATE nt_anim nt_hash nt_core nt_log_stub nt_math unity)
+    target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skin)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 

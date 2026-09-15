@@ -156,27 +156,3 @@ char *nt_builder_read_file(const char *path, uint32_t *out_size) {
     bool too_large = false;
     return nt_builder_read_file_bounded(path, UINT32_MAX, out_size, &too_large);
 }
-
-/* --- Float16 conversion --- */
-
-uint16_t nt_builder_float32_to_float16(float value) {
-    union {
-        float f;
-        uint32_t u;
-    } conv;
-    conv.f = value;
-
-    uint32_t sign = (conv.u >> 16) & 0x8000U;
-    int32_t exponent = (int32_t)((conv.u >> 23) & 0xFFU) - 127 + 15;
-    uint32_t mantissa = conv.u & 0x007FFFFFU;
-
-    if (exponent <= 0) {
-        /* Underflow: clamp to zero */
-        return (uint16_t)sign;
-    }
-    if (exponent >= 31) {
-        /* Overflow: clamp to max finite value */
-        return (uint16_t)(sign | 0x7BFFU);
-    }
-    return (uint16_t)(sign | ((uint32_t)exponent << 10) | (mantissa >> 13));
-}
