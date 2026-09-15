@@ -43,7 +43,8 @@ alpha flag) → RGBA8 and takes the first candidate that the GPU
 requires block-aligned level-0 dimensions (WebGL BPTC accepts the smaller
 levels of a halved chain as they come). RGBA8 is always the last candidate, so
 selection never fails. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`) is
-rejected by `nt_basisu_info` at the cross-check and the asset becomes FAILED.
+a pack from another configure, a developer error: `nt_basisu_info` asserts at
+the cross-check; there is no FAILED fallback for it.
 
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder

@@ -127,21 +127,6 @@ void test_uastc_rgb(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, false); }
 void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
 #endif
 
-#if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-/* The native encoder still emits a codec whose option is OFF. */
-void test_codec_outside_the_set_is_refused(void) {
-    uint8_t src[16 * 8 * 4];
-    fill_pixels(src, 16, 8, true);
-    const nt_basisu_codec_t codec = NT_BASISU_HAS_ETC1S ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S;
-    nt_basisu_encode_opts_t opts = codec == NT_BASISU_CODEC_ETC1S ? nt_tex_compress_etc1s_high() : nt_tex_compress_uastc_default();
-    nt_basisu_encode_result_t enc = nt_basisu_encode(1, src, 16, 8, true, &opts);
-    TEST_ASSERT_NOT_NULL(enc.data);
-    nt_basisu_info_t info = {0};
-    TEST_ASSERT_FALSE(nt_basisu_info(enc.data, enc.size, &info));
-    nt_basisu_encode_free(&enc);
-}
-#endif
-
 void test_reject_non_basis_header(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
@@ -420,9 +405,6 @@ int main(void) {
     RUN_TEST(test_uastc_alpha);
     RUN_TEST(test_reject_mip_level_with_a_shrunken_stored_width);
     RUN_TEST(test_uastc_premultiplied_mip);
-#endif
-#if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-    RUN_TEST(test_codec_outside_the_set_is_refused);
 #endif
     RUN_TEST(test_reject_non_basis_header);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);

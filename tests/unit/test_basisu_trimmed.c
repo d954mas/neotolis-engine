@@ -1,6 +1,6 @@
 /* Trimmed-transcoder consumer (native mirror library, or the production library
  * under Node): every (codec, target) pair inside the admission set must match the
- * native goldens byte-for-byte; a codec outside it must be refused by nt_basisu_info. */
+ * native goldens byte-for-byte. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,6 @@ void tearDown(void) {}
 static const bool s_target_enabled[] = {NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_BC7 != 0, NT_BASISU_HAS_ASTC != 0, true};
 
 static uint32_t s_identical;
-static uint32_t s_codec_refused;
 
 static uint8_t *read_file(const char *name, uint32_t *out_size) {
     char path[MAX_PATH_BYTES];
@@ -87,6 +86,11 @@ static void check_pair(const char *name, const uint8_t *basis, uint32_t basis_si
 
 static void check_fixture(const fixture_t *fx) {
     const char *name = fx->name;
+    /* A codec this build does not decode is an asserted developer error, not a
+       transcoder outcome: those fixtures are simply not part of this build's set. */
+    if (!s_codec_enabled[fx->codec]) {
+        return;
+    }
     char file_name[96];
     (void)snprintf(file_name, sizeof(file_name), "%s.basis", name);
     uint32_t basis_size = 0;
@@ -94,14 +98,7 @@ static void check_fixture(const fixture_t *fx) {
 
     nt_basisu_info_t info;
     memset(&info, 0, sizeof(info));
-    const bool info_ok = nt_basisu_info(basis, basis_size, &info);
-    const bool allowed = s_codec_enabled[fx->codec];
-    TEST_ASSERT_EQUAL_MESSAGE(allowed, info_ok, name);
-    if (!allowed) {
-        s_codec_refused++;
-        free(basis);
-        return;
-    }
+    TEST_ASSERT_TRUE_MESSAGE(nt_basisu_info(basis, basis_size, &info), name);
     TEST_ASSERT_EQUAL_INT_MESSAGE(fx->codec, info.codec, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->w, info.width, name);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(fx->h, info.height, name);
@@ -113,17 +110,17 @@ static void check_fixture(const fixture_t *fx) {
     free(basis);
 }
 
-void test_every_admitted_pair_matches_the_golden_and_every_other_is_refused(void) {
+void test_every_admitted_pair_matches_the_golden(void) {
     for (size_t i = 0; i < FIXTURE_COUNT; i++) {
         check_fixture(&s_fixtures[i]);
     }
-    (void)printf("basisu trimmed: %u byte-identical, %u codecs refused (ETC1S=%d UASTC=%d ETC2=%d BC7=%d ASTC=%d)\n", s_identical, s_codec_refused, NT_BASISU_HAS_ETC1S, NT_BASISU_HAS_UASTC,
-                 NT_BASISU_HAS_ETC2, NT_BASISU_HAS_BC7, NT_BASISU_HAS_ASTC);
+    (void)printf("basisu trimmed: %u byte-identical (ETC1S=%d UASTC=%d ETC2=%d BC7=%d ASTC=%d)\n", s_identical, NT_BASISU_HAS_ETC1S, NT_BASISU_HAS_UASTC, NT_BASISU_HAS_ETC2, NT_BASISU_HAS_BC7,
+                 NT_BASISU_HAS_ASTC);
 }
 
 int main(void) {
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
-    RUN_TEST(test_every_admitted_pair_matches_the_golden_and_every_other_is_refused);
+    RUN_TEST(test_every_admitted_pair_matches_the_golden);
     return UNITY_END();
 }

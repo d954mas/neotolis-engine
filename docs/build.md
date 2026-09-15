@@ -88,8 +88,8 @@ configure error, because a build without Basis textures links
 `CMakeLists.txt` delivers them as 0/1 definitions on `nt_shared`, which the
 builder, the transcoder and `nt_gfx` link, so one configure always agrees
 with itself: the builder asserts a texture's codec
-before its cache lookup, `nt_basisu_info` rejects blobs whose codec is outside
-the set, and `nt_basisu_transcode_chain` rejects compressed targets outside it.
+before its cache lookup, `nt_basisu_info` asserts that a blob's codec is
+compiled in, and the activator's selector never picks a target outside the set.
 Transcoding requires the info returned by a successful `nt_basisu_info` call
 on the same blob in this build. The activator's selector skips excluded targets
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
@@ -112,8 +112,8 @@ preset or include before `add_subdirectory`). Use one set for the shared example
 pack directory. To change it, reconfigure native and WASM, rebuild the native
 packs, then rebuild WASM. Asset compression options must explicitly select an
 admitted codec; changing the set does not rewrite those options. A stale pack
-whose blob codec is excluded fails at runtime: `nt_basisu_info` rejects it and
-the asset becomes FAILED.
+whose blob codec is excluded is a pack from another configure: `nt_basisu_info`
+asserts on it (no FAILED fallback).
 
 One full baseline serves all configurations. `test_basisu_golden_produce`
 (native encoder + full transcoder) is built only when both codecs and all

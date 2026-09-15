@@ -306,14 +306,15 @@ void test_uastc_unaligned_dimensions_skip_bc7(void) { unaligned_caps_matrix_for_
 #endif
 
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-/* The native encoder still emits the codec whose option is OFF; the
- * activator must fail the asset at the blob check, before any staging. */
-void test_blob_of_a_codec_outside_the_set_fails_before_staging(void) {
+/* The native encoder still emits the codec whose option is OFF; a pack from
+ * another configure is a developer error, asserted at the blob check before
+ * any staging. */
+void test_blob_of_a_codec_outside_the_set_asserts_before_staging(void) {
     const nt_basisu_codec_t outside = NT_BASISU_HAS_ETC1S ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S;
     basis_fixture_t alpha = fixture_encode(16, 8, outside, true, NT_TEXTURE_FORMAT_RGBA8);
     set_caps(true, true, true);
     nt_gfx_fake_reset();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(alpha.blob, alpha.size));
+    EXPECT_ASSERT((void)nt_gfx_activate_texture(alpha.blob, alpha.size));
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_create_count());
     expect_full_pool_available();
@@ -622,7 +623,7 @@ int main(void) {
     RUN_TEST(test_uastc_unaligned_dimensions_skip_bc7);
 #endif
 #if !NT_BASISU_HAS_ETC1S || !NT_BASISU_HAS_UASTC
-    RUN_TEST(test_blob_of_a_codec_outside_the_set_fails_before_staging);
+    RUN_TEST(test_blob_of_a_codec_outside_the_set_asserts_before_staging);
 #endif
     RUN_TEST(test_single_pixel_blob_activates_as_one_level);
     RUN_TEST(test_asymmetric_blob_activates_with_a_full_chain);

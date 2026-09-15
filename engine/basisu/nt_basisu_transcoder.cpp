@@ -8,29 +8,16 @@
 
 static basist::basisu_transcoder s_transcoder;
 
-static bool codec_enabled(nt_basisu_codec_t codec) {
-    switch (codec) {
-    case NT_BASISU_CODEC_ETC1S:
+/* A blob whose codec this build does not decode is a pack built for another
+   configure: a developer error, not runtime input. */
+static bool codec_built(basist::basis_tex_format fmt) {
+    switch (fmt) {
+    case basist::basis_tex_format::cETC1S:
         return NT_BASISU_HAS_ETC1S != 0;
-    case NT_BASISU_CODEC_UASTC_LDR:
+    case basist::basis_tex_format::cUASTC_LDR_4x4:
         return NT_BASISU_HAS_UASTC != 0;
     default:
         return false;
-    }
-}
-
-/* RGBA8 is always available; the compressed targets follow their option. */
-static bool target_enabled(nt_texture_format_t format) {
-    switch (format) {
-    case NT_TEXTURE_FORMAT_ETC2_RGB8:
-    case NT_TEXTURE_FORMAT_ETC2_RGBA8:
-        return NT_BASISU_HAS_ETC2 != 0;
-    case NT_TEXTURE_FORMAT_BC7_RGBA:
-        return NT_BASISU_HAS_BC7 != 0;
-    case NT_TEXTURE_FORMAT_ASTC_4x4_RGBA:
-        return NT_BASISU_HAS_ASTC != 0;
-    default:
-        return format == NT_TEXTURE_FORMAT_RGBA8;
     }
 }
 
@@ -45,22 +32,9 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     if (!s_transcoder.validate_header(basis_data, basis_size)) {
         return false;
     }
-    nt_basisu_codec_t codec;
-    switch (s_transcoder.get_basis_tex_format(basis_data, basis_size)) {
-    case basist::basis_tex_format::cETC1S:
-        codec = NT_BASISU_CODEC_ETC1S;
-        break;
-    case basist::basis_tex_format::cUASTC_LDR_4x4:
-        codec = NT_BASISU_CODEC_UASTC_LDR;
-        break;
-    default:
-        return false;
-    }
-    /* Codec option OFF: the trimmed profile has no decoder for it, the
-       native superset refuses it too so both answer alike. */
-    if (!codec_enabled(codec)) {
-        return false;
-    }
+    const basist::basis_tex_format fmt = s_transcoder.get_basis_tex_format(basis_data, basis_size);
+    NT_ASSERT(codec_built(fmt) && "basisu: blob codec is not compiled into this build (NT_BASISU_HAS_*)");
+    const nt_basisu_codec_t codec = fmt == basist::basis_tex_format::cETC1S ? NT_BASISU_CODEC_ETC1S : NT_BASISU_CODEC_UASTC_LDR;
 
     basist::basisu_image_info image_info;
     if (!s_transcoder.get_image_info(basis_data, basis_size, image_info, 0)) {
@@ -90,7 +64,6 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
 
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
     NT_ASSERT(info != nullptr);
-    NT_ASSERT(target_enabled(format) && "transcode_chain: target outside NT_BASISU_HAS_*");
     basist::transcoder_texture_format target;
     uint32_t unit_bytes; /* bytes per 4x4 block, or per pixel for RGBA8 */
     switch (format) {
