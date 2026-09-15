@@ -72,6 +72,13 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_anim PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_anim)
 
+    # nt_gfx_interface is headers only: it carries NT_GFX_GPU_TIMING_ENABLED for
+    # the anim_gpu contract header, which has no implementation yet.
+    add_executable(test_skin unit/test_skin.c unit/test_helpers/anim_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skin PRIVATE nt_anim nt_hash nt_core nt_log_stub nt_math nt_gfx_interface unity)
+    target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skin)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 

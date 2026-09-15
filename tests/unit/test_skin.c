@@ -1,0 +1,218 @@
+/* System and engine headers before Unity: <stdnoreturn.h> and the Windows SDK
+ * clash over __declspec(noreturn) in the other order. */
+#include <math.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
+
+#include "anim/nt_anim.h"
+#include "anim/nt_skin.h"
+#include "anim_bank/nt_anim_bank.h"
+#include "anim_gpu/nt_anim_gpu.h"
+#include "math/nt_math.h"
+#include "test_helpers/anim_rig.h"
+
+#include "unity.h"
+
+#include "test_helpers/nt_assert_trap.h"
+
+/* Unity is built with UNITY_EXCLUDE_FLOAT, so float comparisons go through
+ * fabsf like everywhere else in the suite. */
+#define ASSERT_FLOAT_NEAR(expected, actual, tol) TEST_ASSERT_TRUE_MESSAGE(fabsf((expected) - (actual)) <= (tol), "float not within tolerance")
+
+enum { JOINT_ARM = 3, JOINT_HAND = 4, JOINT_TAIL1 = 7 };
+/* hand is palette entry 3 of binding A ({0,1,3,4,5}) and of binding B ({6,7,8,4}). */
+enum { HAND_ENTRY_A = 3, HAND_ENTRY_B = 3 };
+
+static anim_rig_t g_rig;
+static nt_skin_binding_t g_a;
+static nt_skin_binding_t g_b;
+
+void setUp(void) {
+    anim_rig_asymmetric(&g_rig);
+    anim_rig_bindings(&g_rig, &g_a, &g_b);
+}
+
+void tearDown(void) {}
+
+/* ---- cglm reference path ---- */
+
+/* Reads t/q/s straight out of the AoS pose as vec3/versor: the ABI-alignment
+ * exercise that Debug UBSan checks. */
+static void ref_mat4_from_trs(nt_anim_trs_t *trs, mat4 out) {
+    mat4 t;
+    glm_translate_make(t, trs->t);
+    mat4 r;
+    glm_quat_mat4(trs->q, r);
+    mat4 s;
+    glm_scale_make(s, trs->s);
+    mat4 tr;
+    glm_mat4_mul(t, r, tr);
+    glm_mat4_mul(tr, s, out);
+}
+
+static void ref_fk(nt_anim_trs_t *local, mat4 *out) {
+    for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
+        mat4 l;
+        ref_mat4_from_trs(&local[j], l);
+        const uint16_t p = g_rig.skel.parent[j];
+        if (p == NT_ANIM_NO_PARENT) {
+            glm_mat4_copy(l, out[j]);
+        } else {
+            glm_mat4_mul(out[p], l, out[j]);
+        }
+    }
+}
+
+static void assert_mat34_equals_mat4(const nt_anim_mat34_t *m34, mat4 ref, float tol) {
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            ASSERT_FLOAT_NEAR(ref[c][r], m34->r[r][c], tol);
+        }
+    }
+}
+
+static void set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees) {
+    const float half = (degrees * 0.5F) * 0.017453292519943295F;
+    const float sn = sinf(half);
+    o->q[0] = ax * sn;
+    o->q[1] = ay * sn;
+    o->q[2] = az * sn;
+    o->q[3] = cosf(half);
+}
+
+/* Bind pose with arm and tail1 rotated: a pose no inverse bind cancels. */
+static void make_edited_pose(nt_anim_trs_t *local) {
+    memcpy(local, g_rig.bind, (size_t)ANIM_RIG_JOINT_COUNT * sizeof(nt_anim_trs_t));
+    set_axis_angle(&local[JOINT_ARM], 0.0F, 0.0F, 1.0F, 47.0F);
+    set_axis_angle(&local[JOINT_TAIL1], 0.0F, 1.0F, 0.0F, -80.0F);
+}
+
+static bool is_identity(const nt_anim_mat34_t *m, float tol) {
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            const float expected = (r == c) ? 1.0F : 0.0F;
+            if (fabsf(m->r[r][c] - expected) > tol) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* ---- Palette build ---- */
+
+void test_palette_at_bind_pose_is_identity(void) {
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    /* The fixture's binds must be non-identity, or identity palettes prove nothing. */
+    bool any_non_identity = false;
+    for (uint16_t p = 0; p < g_a.palette_count; ++p) {
+        any_non_identity = any_non_identity || !is_identity(&g_a.inverse_bind[p], 1e-5F);
+    }
+    TEST_ASSERT_TRUE(any_non_identity);
+
+    nt_anim_mat34_t palette_a[ANIM_RIG_PALETTE_A_COUNT];
+    nt_skin_palette_build(&g_a, model, ANIM_RIG_JOINT_COUNT, palette_a, ANIM_RIG_PALETTE_A_COUNT);
+    for (uint16_t p = 0; p < g_a.palette_count; ++p) {
+        TEST_ASSERT_TRUE(is_identity(&palette_a[p], 1e-5F));
+    }
+
+    nt_anim_mat34_t palette_b[ANIM_RIG_PALETTE_B_COUNT];
+    nt_skin_palette_build(&g_b, model, ANIM_RIG_JOINT_COUNT, palette_b, ANIM_RIG_PALETTE_B_COUNT);
+    for (uint16_t p = 0; p < g_b.palette_count; ++p) {
+        TEST_ASSERT_TRUE(is_identity(&palette_b[p], 1e-5F));
+    }
+}
+
+void test_shared_joint_matches_in_both_bindings(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    make_edited_pose(local);
+
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    nt_anim_mat34_t palette_a[ANIM_RIG_PALETTE_A_COUNT];
+    nt_skin_palette_build(&g_a, model, ANIM_RIG_JOINT_COUNT, palette_a, ANIM_RIG_PALETTE_A_COUNT);
+    nt_anim_mat34_t palette_b[ANIM_RIG_PALETTE_B_COUNT];
+    nt_skin_palette_build(&g_b, model, ANIM_RIG_JOINT_COUNT, palette_b, ANIM_RIG_PALETTE_B_COUNT);
+
+    TEST_ASSERT_EQUAL_UINT16(JOINT_HAND, g_a.remap[HAND_ENTRY_A]);
+    TEST_ASSERT_EQUAL_UINT16(JOINT_HAND, g_b.remap[HAND_ENTRY_B]);
+    /* Same inputs through the same kernel: bit-identical, not just close. */
+    TEST_ASSERT_EQUAL_MEMORY(&palette_a[HAND_ENTRY_A], &palette_b[HAND_ENTRY_B], sizeof(nt_anim_mat34_t));
+}
+
+void test_palette_matches_cglm_reference(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    make_edited_pose(local);
+
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    mat4 ref_pose[ANIM_RIG_JOINT_COUNT];
+    ref_fk(local, ref_pose);
+    mat4 ref_bind[ANIM_RIG_JOINT_COUNT];
+    ref_fk(g_rig.bind, ref_bind);
+
+    const nt_skin_binding_t *bindings[] = {&g_a, &g_b};
+    for (size_t k = 0; k < sizeof(bindings) / sizeof(bindings[0]); ++k) {
+        const nt_skin_binding_t *binding = bindings[k];
+        nt_anim_mat34_t palette[ANIM_RIG_PALETTE_A_COUNT];
+        nt_skin_palette_build(binding, model, ANIM_RIG_JOINT_COUNT, palette, ANIM_RIG_PALETTE_A_COUNT);
+
+        for (uint16_t p = 0; p < binding->palette_count; ++p) {
+            const uint16_t j = binding->remap[p];
+            mat4 inv;
+            glm_mat4_inv(ref_bind[j], inv);
+            mat4 expected;
+            glm_mat4_mul(ref_pose[j], inv, expected);
+            assert_mat34_equals_mat4(&palette[p], expected, 1e-5F);
+        }
+    }
+}
+
+/* ---- Contracts ---- */
+
+void test_palette_build_traps_on_small_capacity(void) {
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
+    nt_anim_mat34_t palette[ANIM_RIG_PALETTE_A_COUNT];
+
+    NT_TEST_EXPECT_ASSERT(nt_skin_palette_build(&g_a, model, ANIM_RIG_JOINT_COUNT, palette, ANIM_RIG_PALETTE_A_COUNT - 1));
+}
+
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+void test_palette_build_traps_on_out_of_range_remap(void) {
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
+    nt_anim_mat34_t palette[ANIM_RIG_PALETTE_A_COUNT];
+
+    uint16_t remap[ANIM_RIG_PALETTE_A_COUNT];
+    memcpy(remap, g_a.remap, sizeof(remap));
+    remap[2] = ANIM_RIG_JOINT_COUNT;
+
+    nt_skin_binding_t broken = g_a;
+    broken.remap = remap;
+    NT_TEST_EXPECT_ASSERT(nt_skin_palette_build(&broken, model, ANIM_RIG_JOINT_COUNT, palette, ANIM_RIG_PALETTE_A_COUNT));
+}
+#endif
+
+void test_contract_header_sizes(void) {
+    TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_deformation_binding_t));
+    TEST_ASSERT_EQUAL_size_t(12, sizeof(nt_anim_bank_lookup_t));
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_palette_at_bind_pose_is_identity);
+    RUN_TEST(test_shared_joint_matches_in_both_bindings);
+    RUN_TEST(test_palette_matches_cglm_reference);
+    RUN_TEST(test_palette_build_traps_on_small_capacity);
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+    RUN_TEST(test_palette_build_traps_on_out_of_range_remap);
+#endif
+    RUN_TEST(test_contract_header_sizes);
+    return UNITY_END();
+}

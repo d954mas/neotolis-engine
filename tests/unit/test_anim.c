@@ -306,6 +306,141 @@ void test_socket_matches_cglm_composition(void) {
     assert_mat34_equals_mat4(&out, expected, 1e-5F);
 }
 
+/* ---- Rig identity ---- */
+
+enum { RIG_VECTOR_JOINTS = 2, RIG_VECTOR_BYTES = 8 + (46 * RIG_VECTOR_JOINTS) };
+
+typedef struct {
+    uint16_t parent[RIG_VECTOR_JOINTS];
+    uint16_t subtree_end[RIG_VECTOR_JOINTS];
+    uint32_t joint_id[RIG_VECTOR_JOINTS];
+    nt_anim_trs_t rest[RIG_VECTOR_JOINTS];
+    nt_anim_skeleton_t skel;
+} vector_rig_t;
+
+/* The view points into the struct's own arrays, so a copy has to be re-pointed. */
+static void vector_rig_rebind(vector_rig_t *r) {
+    r->skel.parent = r->parent;
+    r->skel.subtree_end = r->subtree_end;
+    r->skel.joint_id = r->joint_id;
+    r->skel.rest = r->rest;
+}
+
+/* Published vector rig: joint 1 carries a -0 translation and a quaternion whose
+ * two largest components tie, so both canonicalization rules are exercised. */
+static void make_vector_rig(vector_rig_t *r) {
+    r->parent[0] = NT_ANIM_NO_PARENT;
+    r->parent[1] = 0;
+    r->subtree_end[0] = RIG_VECTOR_JOINTS;
+    r->subtree_end[1] = RIG_VECTOR_JOINTS;
+    r->joint_id[0] = 0x11111111U;
+    r->joint_id[1] = 0x22222222U;
+
+    const nt_anim_trs_t j0 = {{1.0F, 2.0F, 3.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}};
+    const nt_anim_trs_t j1 = {{0.0F, -0.0F, 0.5F}, {0.0F, 0.0F, -0.70710678F, -0.70710678F}, {1.0F, 1.0F, 1.0F}};
+    r->rest[0] = j0;
+    r->rest[1] = j1;
+
+    r->skel.rig_compat_id = (nt_hash64_t){0};
+    r->skel.joint_count = RIG_VECTOR_JOINTS;
+    vector_rig_rebind(r);
+}
+
+static uint64_t vector_rig_id(const vector_rig_t *r) {
+    uint8_t scratch[RIG_VECTOR_BYTES];
+    return nt_anim_rig_compat_id(&r->skel, scratch, (uint32_t)sizeof(scratch)).value;
+}
+
+void test_rig_compat_id_size(void) {
+    TEST_ASSERT_EQUAL_UINT32(RIG_VECTOR_BYTES, nt_anim_rig_compat_id_size(RIG_VECTOR_JOINTS));
+    TEST_ASSERT_EQUAL_UINT32(422U, nt_anim_rig_compat_id_size(9));
+    TEST_ASSERT_EQUAL_UINT32(8U, nt_anim_rig_compat_id_size(0));
+}
+
+void test_rig_compat_id_published_vector(void) {
+    /* Byte table (little-endian, packed):
+     *   header  'N' 'R' 'I' 'G' | schema 01 | convention 01 | joint_count 0002
+     *   joint 0 id 11111111 | parent FFFF | t 1,2,3 | q 0,0,0,1 | s 1,1,1
+     *   joint 1 id 22222222 | parent 0000 | t 0,-0->+0,0.5
+     *           | q (0,0,-0.70710678,-0.70710678) -> first largest |c| is z,
+     *             negative, so all four flip -> (0,0,+0.70710678,+0.70710678)
+     *           | s 1,1,1 */
+    static const uint8_t expected[RIG_VECTOR_BYTES] = {
+        0x4E, 0x52, 0x49, 0x47, 0x01, 0x01, 0x02, 0x00,                                                 /* header */
+        0x11, 0x11, 0x11, 0x11, 0xFF, 0xFF,                                                             /* joint 0: id, parent */
+        0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x40, 0x40,                         /* t 1, 2, 3 */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, /* q 0, 0, 0, 1 */
+        0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F,                         /* s 1, 1, 1 */
+        0x22, 0x22, 0x22, 0x22, 0x00, 0x00,                                                             /* joint 1: id, parent */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3F,                         /* t 0, +0, 0.5 */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3, 0x04, 0x35, 0x3F, 0xF3, 0x04, 0x35, 0x3F, /* q 0, 0, +0.7071, +0.7071 */
+        0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F,                         /* s 1, 1, 1 */
+    };
+
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+
+    uint8_t scratch[RIG_VECTOR_BYTES];
+    const nt_hash64_t id = nt_anim_rig_compat_id(&rig.skel, scratch, (uint32_t)sizeof(scratch));
+
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, scratch, RIG_VECTOR_BYTES);
+    TEST_ASSERT_EQUAL_HEX64(0x03E59E1475239034ULL, id.value);
+}
+
+void test_rig_compat_id_ignores_quaternion_sign(void) {
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    const uint64_t id = vector_rig_id(&rig);
+
+    for (int c = 0; c < 4; ++c) {
+        rig.rest[1].q[c] = -rig.rest[1].q[c];
+    }
+    TEST_ASSERT_EQUAL_HEX64(id, vector_rig_id(&rig));
+}
+
+void test_rig_compat_id_ignores_negative_zero(void) {
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    const uint64_t id = vector_rig_id(&rig);
+
+    rig.rest[1].t[1] = 0.0F;
+    TEST_ASSERT_EQUAL_HEX64(id, vector_rig_id(&rig));
+}
+
+void test_rig_compat_id_changes_with_the_rig(void) {
+    vector_rig_t base;
+    make_vector_rig(&base);
+    const uint64_t id = vector_rig_id(&base);
+
+    vector_rig_t rig = base;
+    vector_rig_rebind(&rig);
+    rig.joint_id[1] = 0x22222223U;
+    TEST_ASSERT_NOT_EQUAL_UINT64(id, vector_rig_id(&rig));
+
+    rig = base;
+    vector_rig_rebind(&rig);
+    rig.parent[1] = NT_ANIM_NO_PARENT;
+    TEST_ASSERT_NOT_EQUAL_UINT64(id, vector_rig_id(&rig));
+
+    rig = base;
+    vector_rig_rebind(&rig);
+    rig.rest[0].t[2] = 3.0001F;
+    TEST_ASSERT_NOT_EQUAL_UINT64(id, vector_rig_id(&rig));
+
+    rig = base;
+    vector_rig_rebind(&rig);
+    rig.skel.joint_count = 1;
+    TEST_ASSERT_NOT_EQUAL_UINT64(id, vector_rig_id(&rig));
+}
+
+void test_rig_compat_id_traps_on_small_scratch(void) {
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    uint8_t scratch[RIG_VECTOR_BYTES];
+
+    NT_TEST_EXPECT_ASSERT(nt_anim_rig_compat_id(&rig.skel, scratch, RIG_VECTOR_BYTES - 1));
+}
+
 /* ---- Per-element checks ---- */
 
 #if NT_ANIM_CHECKS
@@ -346,6 +481,12 @@ int main(void) {
     RUN_TEST(test_pose_rest_then_fk_matches_fk_over_rest);
     RUN_TEST(test_pose_rest_traps_on_self_copy);
     RUN_TEST(test_socket_matches_cglm_composition);
+    RUN_TEST(test_rig_compat_id_size);
+    RUN_TEST(test_rig_compat_id_published_vector);
+    RUN_TEST(test_rig_compat_id_ignores_quaternion_sign);
+    RUN_TEST(test_rig_compat_id_ignores_negative_zero);
+    RUN_TEST(test_rig_compat_id_changes_with_the_rig);
+    RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
 #if NT_ANIM_CHECKS
     RUN_TEST(test_fk_traps_on_non_finite_translation);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);

@@ -48,6 +48,11 @@ _Static_assert(sizeof(nt_anim_mat34_t) == 48, "pose ABI: nt_anim_mat34_t is 48 b
 
 #define NT_ANIM_NO_PARENT UINT16_MAX
 
+/* Version of the rig identity byte schema; a new value is a new rig identity. */
+#define NT_ANIM_RIG_SCHEMA_VERSION 1
+/* Unit/axis convention of the hashed rest pose: glTF metres, Y-up, right-handed. */
+#define NT_ANIM_RIG_CONVENTION_GLTF 1
+
 /* Immutable borrowed view of one rig. The owner is whoever built the arrays
  * (a skeleton activator or a test fixture); it keeps them alive and unchanged
  * until it republishes or destroys them. Kernels read the view for the
@@ -146,5 +151,18 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_a
 /* out = E * G[j] * socket_local, where E (world) is a cglm column-major mat4
  * mapping skeleton space to world. out must not alias g_joint. */
 void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const nt_anim_trs_t *socket_local, nt_anim_mat34_t *out);
+
+/* Bytes the rig identity hashes over: 8 header + 46 per joint. */
+uint32_t nt_anim_rig_compat_id_size(uint16_t joint_count);
+
+/* rig_compat_id of the skeleton: hash64 over the canonical little-endian byte
+ * schema (tag "NRIG", schema version, convention id, joint count, then per
+ * joint in index order the stable id, the parent index and the rest TRS as
+ * canonical binary32). scratch is caller storage of at least
+ * nt_anim_rig_compat_id_size(skel->joint_count) bytes (asserted); the function
+ * writes the schema into it and retains no pointer. Activation/build time only,
+ * never a frame operation. Ignores skel->rig_compat_id, which is the output
+ * slot this value fills. */
+nt_hash64_t nt_anim_rig_compat_id(const nt_anim_skeleton_t *skel, void *scratch, uint32_t scratch_size);
 
 #endif /* NT_ANIM_H */
