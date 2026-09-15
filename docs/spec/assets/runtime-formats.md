@@ -41,8 +41,9 @@ candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
 (`NT_BASISU_HAS_ETC2/BC7/ASTC`,
 [build options](../../build.md#basis-universal-admission)):
 
-- ETC1S: ETC2 → BC7 → ASTC 4x4 → RGBA8. ETC1S is a subset of ETC1, so the ETC2
-  target is an exact unpack, and an opaque blob takes `ETC2_RGB8` at half the
+- ETC1S: ETC2 → BC7 → ASTC 4x4 → RGBA8. ETC1S is a subset of ETC1, so the
+  colour blocks unpack into ETC2 exactly (an alpha slice still goes through a
+  lookup table into EAC), and an opaque blob takes `ETC2_RGB8` at half the
   bytes of BC7/ASTC; BC7 and ASTC are lookup-table approximations of the same
   four-colour blocks.
 - UASTC: ASTC 4x4 → BC7 → ETC2 → RGBA8. UASTC is a subset of ASTC, so that
@@ -55,9 +56,12 @@ smaller levels of a halved chain as they come). RGBA8 is always the last
 candidate, so selection never fails. The order is engine policy, not a game
 setting: the admission set is the game's lever (a UASTC game that would rather
 pay RGBA8 memory than ETC2 quality on ETC2-only devices turns
-`NT_BASISU_HAS_ETC2` off). Desktop GL 4.3+ reports ETC2 even where the driver
+`NT_BASISU_HAS_ETC2` off). The caps are what the context reports, not whether
+the decode is native: desktop GL 4.3+ reports ETC2 even where the driver
 decompresses it on upload, so a native build on such a GPU stores an ETC1S
-texture at RGBA8 cost; web contexts expose ETC2 only where it is native. A blob
+texture at RGBA8 cost, and a web context with emulated ETC2 (SwiftShader, some
+desktop-GL browser backends) pays the same; Chrome/ANGLE exposes
+`WEBGL_compressed_texture_etc` only where it is native. A blob
 whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`) is a pack from another
 configure, a developer error: `nt_basisu_info` asserts at the cross-check;
 there is no FAILED fallback for it.

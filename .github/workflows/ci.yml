@@ -26,10 +26,12 @@ concurrency:
 env:
   # Basis admission rows shared by the native and browser jobs: `name:flags`, rows separated
   # by spaces, several -D flags inside one row by commas (expanded with ${flags//,/ }).
-  # Three rows cover both single-codec decoders and every compressed target on the runner's
-  # GPU: UASTC-only (the smallest transcoder; UASTC picks ASTC), ETC1S with ETC2 as the only
-  # compressed target, and both codecs with BC7 as the only compressed target (the 1x1 blob
-  # observes BC7's level-zero rule there).
+  # Three rows cover both single-codec decoders and upload+sample every compressed target
+  # through the runner's software GL: UASTC-only (the smallest transcoder; UASTC picks ASTC),
+  # ETC1S with ETC2 as the only compressed target, and both codecs with BC7 as the only
+  # compressed target (the 1x1 blob observes BC7's level-zero rule there). The per-codec
+  # order itself is pinned only where several targets are admitted: the default set and the
+  # UASTC-only row.
   NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF basisu-bc7-only:-DNT_BASISU_HAS_ETC2=OFF,-DNT_BASISU_HAS_ASTC=OFF"
   # Examples require the default set (sponza uses both codecs), so restricted rows skip them.
   NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"

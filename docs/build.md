@@ -154,10 +154,12 @@ ctest --test-dir build/_cmake/basisu-bc7-only --output-on-failure --no-tests=err
 ```
 
 CI runs exactly these three rows (`NT_BASISU_ROWS` in `ci.yml`): together they
-cover both single-codec decoders and, on the runner's GPU, every compressed
-target (the selector's per-codec order otherwise settles on ETC2 for ETC1S and
-ASTC for UASTC, see
-[runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)). The native job runs
+cover both single-codec decoders and upload and sample every compressed target
+through the runner's software GL (hardware ASTC/ETC2 decode stays unverified).
+The selector's per-codec order (see
+[runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex))
+settles on ETC2 for ETC1S and ASTC for UASTC, so the single-target rows cannot
+observe it; the default set and the UASTC-only row pin it. The native job runs
 the five suites per row, the browser job drives the two `basis fixture:` tests
 per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
 with the production transcoder under Node. The default browser run still

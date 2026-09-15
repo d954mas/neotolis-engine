@@ -288,10 +288,11 @@ test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
   const buildCodecs = await page.evaluate(() => window.__nt!.basis_build_codecs());
   // The embedded blob is UASTC and the restriction under test is BC7's. The 1x1 observes it only
-  // where BC7 is UASTC's first admitted candidate, i.e. a build without ASTC (the bc7-only CI row).
+  // where BC7 is UASTC's first candidate, i.e. no ASTC admitted and reported (the bc7-only CI row).
   test.skip((buildTargets & 1) === 0 || (buildCodecs & 2) === 0, 'build admits no BC7 target or no UASTC codec');
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);
+  test.skip((caps & buildTargets & 2) !== 0, 'ASTC precedes BC7 for UASTC; the level-zero rule is unobservable here');
   const format = await page.evaluate(() => window.__nt!.basis_single_pixel_format());
   const expected = expectedBasisFormat(caps & ~1, buildTargets, true, CODEC_UASTC);
   expect(errors, 'single-pixel Basis activation must not emit WebGL errors').toEqual([]);

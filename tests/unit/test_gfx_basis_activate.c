@@ -273,6 +273,20 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     }
     set_caps(false, false, false);
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
+#if NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
+    /* Literal anchors of the spec order on the rows where the two codecs
+     * diverge, independent of the first_admitted mirror. */
+    const bool etc1s = codec == NT_BASISU_CODEC_ETC1S;
+    set_caps(true, true, true);
+    check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+    check_target(&rgb, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGB8 : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+    set_caps(true, true, false);
+    check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_BC7_RGBA : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+    set_caps(true, false, true);
+    check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_BC7_RGBA);
+    set_caps(false, true, true);
+    check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);
+#endif
 
     fixture_free(&alpha);
     fixture_free(&rgb);
