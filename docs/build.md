@@ -147,10 +147,17 @@ ctest --test-dir build/_cmake/basisu-uastc-only --output-on-failure --no-tests=e
 cmake --preset native-debug-test -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-etc1s-etc2 --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
 ctest --test-dir build/_cmake/basisu-etc1s-etc2 --output-on-failure --no-tests=error -R "$tests"
+# Both codecs with BC7 as the only compressed target
+cmake --preset native-debug-test -B build/_cmake/basisu-bc7-only -DNT_BASISU_HAS_ETC2=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-bc7-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-bc7-only --output-on-failure --no-tests=error -R "$tests"
 ```
 
-CI runs exactly these two rows (`NT_BASISU_ROWS` in `ci.yml`): together they
-cover both single-codec decoders and both target extremes. The native job runs
+CI runs exactly these three rows (`NT_BASISU_ROWS` in `ci.yml`): together they
+cover both single-codec decoders and, on the runner's GPU, every compressed
+target (the selector's per-codec order otherwise settles on ETC2 for ETC1S and
+ASTC for UASTC, see
+[runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)). The native job runs
 the five suites per row, the browser job drives the two `basis fixture:` tests
 per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
 with the production transcoder under Node. The default browser run still

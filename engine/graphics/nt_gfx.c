@@ -2230,18 +2230,37 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* ---- Asset activators ---- */
 
-/* Basis transcode target: BC7 -> ASTC -> ETC2 -> RGBA8, skipping formats the
- * GPU lacks and formats outside NT_BASISU_HAS_*. RGBA8 is always available. */
-static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, bool has_alpha, uint32_t width, uint32_t height) {
+/* Basis transcode target: the first candidate of the codec's order that the GPU
+ * reports and NT_BASISU_HAS_* admits, RGBA8 otherwise. ETC1S unpacks into ETC2
+ * exactly (opaque at half the bytes of BC7/ASTC); UASTC is a subset of ASTC,
+ * BC7 approximates it and an ETC2 target re-encodes it. */
+static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt_basisu_codec_t codec, bool has_alpha, uint32_t width, uint32_t height) {
     /* WebGL BPTC requires block-aligned level-0 dimensions; the smaller levels of a halved chain are accepted as they come. */
-    if (NT_BASISU_HAS_BC7 && caps->has_bc7 && width % 4 == 0 && height % 4 == 0) {
-        return NT_TEXTURE_FORMAT_BC7_RGBA;
+    const bool bc7 = NT_BASISU_HAS_BC7 && caps->has_bc7 && width % 4 == 0 && height % 4 == 0;
+    const bool astc = NT_BASISU_HAS_ASTC && caps->has_astc;
+    const bool etc2 = NT_BASISU_HAS_ETC2 && caps->has_etc2;
+    const nt_texture_format_t etc2_format = has_alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+    if (codec == NT_BASISU_CODEC_ETC1S) {
+        if (etc2) {
+            return etc2_format;
+        }
+        if (bc7) {
+            return NT_TEXTURE_FORMAT_BC7_RGBA;
+        }
+        if (astc) {
+            return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
+        }
+        return NT_TEXTURE_FORMAT_RGBA8;
     }
-    if (NT_BASISU_HAS_ASTC && caps->has_astc) {
+    NT_ASSERT(codec == NT_BASISU_CODEC_UASTC_LDR);
+    if (astc) {
         return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
     }
-    if (NT_BASISU_HAS_ETC2 && caps->has_etc2) {
-        return has_alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+    if (bc7) {
+        return NT_TEXTURE_FORMAT_BC7_RGBA;
+    }
+    if (etc2) {
+        return etc2_format;
     }
     return NT_TEXTURE_FORMAT_RGBA8;
 }
@@ -2337,7 +2356,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     // #endregion
 
     // #region target and staging
-    const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.has_alpha, width, height);
+    const nt_texture_format_t target = basis_target_format(nt_gfx_gpu_caps(), info.codec, info.has_alpha, width, height);
 
     uint64_t chain_bytes = 0;
     for (uint32_t level = 0; level < info.level_count; level++) {

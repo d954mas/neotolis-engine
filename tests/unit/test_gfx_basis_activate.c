@@ -135,20 +135,32 @@ static NtTextureAssetHeader *fixture_header(basis_fixture_t *fixture) { return (
 
 // #region probes
 
-/* The selector's contract: the first of BC7 -> ASTC -> ETC2 that the GPU
- * reports and NT_BASISU_HAS_* admits, RGBA8 otherwise. */
-static nt_texture_format_t first_admitted(bool bc7, bool astc, bool etc2, bool alpha) {
-    if (NT_BASISU_HAS_BC7 && bc7) {
-        return NT_TEXTURE_FORMAT_BC7_RGBA;
-    }
-    if (NT_BASISU_HAS_ASTC && astc) {
-        return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
-    }
-    if (NT_BASISU_HAS_ETC2 && etc2) {
-        return alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+/* The selector's contract: the first of the codec's order (ETC1S: ETC2 -> BC7 ->
+ * ASTC; UASTC: ASTC -> BC7 -> ETC2) that the GPU reports and NT_BASISU_HAS_*
+ * admits, RGBA8 otherwise. */
+static nt_texture_format_t first_admitted(nt_basisu_codec_t codec, bool bc7, bool astc, bool etc2, bool alpha) {
+    const nt_texture_format_t etc2_format = alpha ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ETC2_RGB8;
+    bc7 = NT_BASISU_HAS_BC7 && bc7;
+    astc = NT_BASISU_HAS_ASTC && astc;
+    etc2 = NT_BASISU_HAS_ETC2 && etc2;
+    const nt_texture_format_t etc1s_order[] = {etc2 ? etc2_format : NT_TEXTURE_FORMAT_INVALID, bc7 ? NT_TEXTURE_FORMAT_BC7_RGBA : NT_TEXTURE_FORMAT_INVALID,
+                                               astc ? NT_TEXTURE_FORMAT_ASTC_4x4_RGBA : NT_TEXTURE_FORMAT_INVALID};
+    const nt_texture_format_t uastc_order[] = {astc ? NT_TEXTURE_FORMAT_ASTC_4x4_RGBA : NT_TEXTURE_FORMAT_INVALID, bc7 ? NT_TEXTURE_FORMAT_BC7_RGBA : NT_TEXTURE_FORMAT_INVALID,
+                                               etc2 ? etc2_format : NT_TEXTURE_FORMAT_INVALID};
+    const nt_texture_format_t *order = codec == NT_BASISU_CODEC_ETC1S ? etc1s_order : uastc_order;
+    for (size_t i = 0; i < 3; i++) {
+        if (order[i] != NT_TEXTURE_FORMAT_INVALID) {
+            return order[i];
+        }
     }
     return NT_TEXTURE_FORMAT_RGBA8;
 }
+
+/* Every GPU cap combination, so the two codec orders diverge on the mixed rows. */
+static const bool s_caps_rows[][3] = {
+    {true, true, true}, {true, true, false}, {true, false, true}, {false, true, true}, {true, false, false}, {false, true, false}, {false, false, true}, {false, false, false},
+};
+#define CAPS_ROW_COUNT (sizeof(s_caps_rows) / sizeof(s_caps_rows[0]))
 
 /* An admitted codec for the tests that are not about the codec. */
 #define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
@@ -250,14 +262,15 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
      * so an ETC2-only device gets the 8-byte-per-block ETC2_RGB8 storage. */
     basis_fixture_t opaque_rgba = fixture_encode(16, 8, codec, false, NT_TEXTURE_FORMAT_RGBA8);
 
-    set_caps(true, true, true);
-    check_target(&alpha, first_admitted(true, true, true, true));
-    set_caps(false, true, true);
-    check_target(&alpha, first_admitted(false, true, true, true));
-    set_caps(false, false, true);
-    check_target(&alpha, first_admitted(false, false, true, true));
-    check_target(&rgb, first_admitted(false, false, true, false));
-    check_target(&opaque_rgba, first_admitted(false, false, true, false));
+    for (size_t i = 0; i < CAPS_ROW_COUNT; i++) {
+        const bool bc7 = s_caps_rows[i][0];
+        const bool astc = s_caps_rows[i][1];
+        const bool etc2 = s_caps_rows[i][2];
+        set_caps(bc7, astc, etc2);
+        check_target(&alpha, first_admitted(codec, bc7, astc, etc2, true));
+        check_target(&rgb, first_admitted(codec, bc7, astc, etc2, false));
+        check_target(&opaque_rgba, first_admitted(codec, bc7, astc, etc2, false));
+    }
     set_caps(false, false, false);
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
 
@@ -280,14 +293,16 @@ static void unaligned_caps_matrix_for_codec(nt_basisu_codec_t codec) {
         basis_fixture_t rgb = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGB8);
         basis_fixture_t opaque_rgba = fixture_encode(dimensions[i][0], dimensions[i][1], codec, false, NT_TEXTURE_FORMAT_RGBA8);
 
-        /* WebGL BPTC requires both base dimensions to be multiples of four. */
-        set_caps(true, true, true);
-        check_target(&alpha, first_admitted(false, true, true, true));
-        check_target(&rgb, first_admitted(false, true, true, false));
-        set_caps(true, false, true);
-        check_target(&alpha, first_admitted(false, false, true, true));
-        check_target(&rgb, first_admitted(false, false, true, false));
-        check_target(&opaque_rgba, first_admitted(false, false, true, false));
+        /* WebGL BPTC requires both base dimensions to be multiples of four:
+         * BC7 drops out of the order whatever the caps say. */
+        for (size_t row = 0; row < CAPS_ROW_COUNT; row++) {
+            const bool astc = s_caps_rows[row][1];
+            const bool etc2 = s_caps_rows[row][2];
+            set_caps(s_caps_rows[row][0], astc, etc2);
+            check_target(&alpha, first_admitted(codec, false, astc, etc2, true));
+            check_target(&rgb, first_admitted(codec, false, astc, etc2, false));
+            check_target(&opaque_rgba, first_admitted(codec, false, astc, etc2, false));
+        }
         set_caps(true, false, false);
         check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
         check_target(&rgb, NT_TEXTURE_FORMAT_RGBA8);
@@ -334,7 +349,7 @@ void test_asymmetric_blob_activates_with_a_full_chain(void) {
     basis_fixture_t big = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
     TEST_ASSERT_EQUAL_UINT8(7, big.mip_count);
     set_caps(true, false, false);
-    check_target(&big, first_admitted(true, false, false, true));
+    check_target(&big, first_admitted(ANY_CODEC, true, false, false, true));
     fixture_free(&big);
 }
 
@@ -418,7 +433,7 @@ void test_corrupted_payload_is_rejected_and_a_good_blob_still_activates(void) {
     fixture_free(&alpha);
 
     basis_fixture_t good = fixture_encode(16, 8, NT_BASISU_CODEC_ETC1S, true, NT_TEXTURE_FORMAT_RGBA8);
-    check_target(&good, first_admitted(true, false, false, true));
+    check_target(&good, first_admitted(NT_BASISU_CODEC_ETC1S, true, false, false, true));
     fixture_free(&good);
 }
 #endif
@@ -442,7 +457,7 @@ void test_backend_failure_leaves_no_texture_and_allows_a_retry(void) {
     expect_full_pool_available();
 
     nt_gfx_fake_fail_texture_creates(0);
-    check_target(&alpha, first_admitted(true, false, false, true));
+    check_target(&alpha, first_admitted(ANY_CODEC, true, false, false, true));
     fixture_free(&alpha);
 }
 
@@ -467,7 +482,7 @@ void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
     expect_transcoder_reusable(&alpha);
     expect_full_pool_available();
 
-    check_target(&alpha, first_admitted(true, false, false, true));
+    check_target(&alpha, first_admitted(ANY_CODEC, true, false, false, true));
     fixture_free(&alpha);
 }
 
@@ -478,7 +493,7 @@ void test_sampler_failure_leaves_no_texture_and_allows_a_retry(void) {
 void test_reactivation_after_context_restore_yields_the_same_storage(void) {
     set_caps(true, false, false);
     basis_fixture_t alpha = fixture_encode(16, 8, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
-    const nt_texture_format_t target = first_admitted(true, false, false, true);
+    const nt_texture_format_t target = first_admitted(ANY_CODEC, true, false, false, true);
     uint32_t first = activate_expecting(&alpha, target);
     nt_gfx_deactivate_texture(first);
 
@@ -534,7 +549,7 @@ static void fill_valid_mesh_blob(uint8_t *blob, uint32_t vertex_count) {
 
 void test_staging_is_shared_grown_and_evicted(void) {
     set_caps(true, false, false);
-    const nt_texture_format_t fmt = first_admitted(true, false, false, true);
+    const nt_texture_format_t fmt = first_admitted(ANY_CODEC, true, false, false, true);
     TEST_ASSERT_NULL(nt_gfx_test_stage_ptr());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_stage_size());
 
@@ -596,7 +611,7 @@ void test_staging_is_shared_grown_and_evicted(void) {
 void test_shutdown_releases_a_live_staging_buffer(void) {
     set_caps(true, false, false);
     basis_fixture_t small = fixture_encode(96, 64, ANY_CODEC, true, NT_TEXTURE_FORMAT_RGBA8);
-    uint32_t handle = activate_expecting(&small, first_admitted(true, false, false, true));
+    uint32_t handle = activate_expecting(&small, first_admitted(ANY_CODEC, true, false, false, true));
     TEST_ASSERT_NOT_NULL(nt_gfx_test_stage_ptr());
     nt_gfx_deactivate_texture(handle);
 

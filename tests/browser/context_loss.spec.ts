@@ -192,13 +192,16 @@ const FORMAT_ETC2_RGBA8 = 12;
 const FORMAT_BC7_RGBA = 13;
 const FORMAT_ASTC_4x4_RGBA = 14;
 
-// The activator's fixed candidate order over the formats both the GPU reports and the build
-// admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque texture takes ETC2 RGB8. RGBA8 is always the last candidate.
-function expectedBasisFormat(caps: number, buildTargets: number, hasAlpha: boolean): number {
+// The activator's candidate order per codec (ETC1S: ETC2 -> BC7 -> ASTC; UASTC: ASTC -> BC7 -> ETC2)
+// over the formats both the GPU reports and the build admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque
+// texture takes ETC2 RGB8. RGBA8 is always the last candidate. Bits: 1 = BC7, 2 = ASTC, 4 = ETC2.
+const CODEC_ETC1S = 1;
+const CODEC_UASTC = 2;
+function expectedBasisFormat(caps: number, buildTargets: number, hasAlpha: boolean, codec: number): number {
   const admitted = caps & buildTargets;
-  if (admitted & 1) return FORMAT_BC7_RGBA;
-  if (admitted & 2) return FORMAT_ASTC_4x4_RGBA;
-  if (admitted & 4) return hasAlpha ? FORMAT_ETC2_RGBA8 : FORMAT_ETC2_RGB8;
+  const etc2 = hasAlpha ? FORMAT_ETC2_RGBA8 : FORMAT_ETC2_RGB8;
+  const order = codec === CODEC_ETC1S ? [[4, etc2], [1, FORMAT_BC7_RGBA], [2, FORMAT_ASTC_4x4_RGBA]] : [[2, FORMAT_ASTC_4x4_RGBA], [1, FORMAT_BC7_RGBA], [4, etc2]];
+  for (const [bit, format] of order) if (admitted & bit) return format;
   return FORMAT_RGBA8;
 }
 
@@ -223,14 +226,16 @@ async function checkBasisFixture(page: Page, label: string): Promise<{ corner: n
   await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
+  // The fixture pack is ETC1S whenever the build admits it, UASTC otherwise.
+  const codec = ((await page.evaluate(() => window.__nt!.basis_build_codecs())) & CODEC_ETC1S) ? CODEC_ETC1S : CODEC_UASTC;
   const format = await page.evaluate(() => window.__nt!.basis_format());
   const rgbFormat = await page.evaluate(() => window.__nt!.basis_rgb_format());
   const corner = await page.evaluate(() => window.__nt!.basis_sample(0));
   const middle = await page.evaluate(() => window.__nt!.basis_sample(3));
   const last = await page.evaluate(() => window.__nt!.basis_sample(7));
-  console.log(`[basis ${label}] caps=${caps} build_targets=${buildTargets} format=${format} rgb_format=${rgbFormat} corner=0x${corner.toString(16)} middle=0x${middle.toString(16)} last=0x${last.toString(16)}`);
-  expect(format, `${label}: transcode target for caps ${caps} and build targets ${buildTargets}`).toBe(expectedBasisFormat(caps, buildTargets, true));
-  expect(rgbFormat, `${label}: opaque transcode target for caps ${caps} and build targets ${buildTargets}`).toBe(expectedBasisFormat(caps, buildTargets, false));
+  console.log(`[basis ${label}] caps=${caps} build_targets=${buildTargets} codec=${codec} format=${format} rgb_format=${rgbFormat} corner=0x${corner.toString(16)} middle=0x${middle.toString(16)} last=0x${last.toString(16)}`);
+  expect(format, `${label}: transcode target for caps ${caps}, build targets ${buildTargets} and codec ${codec}`).toBe(expectedBasisFormat(caps, buildTargets, true, codec));
+  expect(rgbFormat, `${label}: opaque transcode target for caps ${caps}, build targets ${buildTargets} and codec ${codec}`).toBe(expectedBasisFormat(caps, buildTargets, false, codec));
   expectTexel(corner, FIXTURE_LEFT, 12, `${label}: level-0 corner texel`);
   expectTexel(middle, FIXTURE_LEFT, 12, `${label}: level-3 corner texel`);
   expectTexel(last, FIXTURE_AVERAGE, 20, `${label}: 1x1 last level`);
@@ -282,12 +287,13 @@ test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({
   await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
   const buildCodecs = await page.evaluate(() => window.__nt!.basis_build_codecs());
-  // The embedded blob is UASTC and the restriction under test is BC7's.
+  // The embedded blob is UASTC and the restriction under test is BC7's. The 1x1 observes it only
+  // where BC7 is UASTC's first admitted candidate, i.e. a build without ASTC (the bc7-only CI row).
   test.skip((buildTargets & 1) === 0 || (buildCodecs & 2) === 0, 'build admits no BC7 target or no UASTC codec');
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);
   const format = await page.evaluate(() => window.__nt!.basis_single_pixel_format());
-  const expected = expectedBasisFormat(caps & ~1, buildTargets, true);
+  const expected = expectedBasisFormat(caps & ~1, buildTargets, true, CODEC_UASTC);
   expect(errors, 'single-pixel Basis activation must not emit WebGL errors').toEqual([]);
   expect(format, 'single-pixel Basis activation selects the next supported target').toBe(expected);
 });
