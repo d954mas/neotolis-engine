@@ -325,7 +325,7 @@ if(NOT EMSCRIPTEN)
     # Real OpenGL shape-renderer ring: multi-flush uploads at ring offsets render pixel-correct.
     # Real GL + real transcoder + builder encoder. No nt_gfx_fake here: it bundles nt_gfx.c.
     add_executable(test_nt_gfx_basis_native unit/test_nt_gfx_basis_native.c)
-    target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_builder nt_basisu_transcoder nt_window nt_input_stub nt_log unity glad nt_meshwire)
+    target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_builder nt_basisu_transcoder_full nt_window nt_input_stub nt_log unity glad nt_meshwire)
     nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
     set_tests_properties(test_nt_gfx_basis_native PROPERTIES LABELS "native")
 
@@ -1058,15 +1058,39 @@ if(NOT EMSCRIPTEN)
     # Transcoder listed first on purpose: the runtime-first consumer link line that
     # must resolve against a single shared basisu TU. Do not reorder.
     add_executable(test_basisu_roundtrip unit/test_basisu_roundtrip.c)
-    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder nt_builder nt_log unity nt_meshwire)
+    target_link_libraries(test_basisu_roundtrip PRIVATE nt_basisu_transcoder_full nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_basisu_roundtrip PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_basisu_roundtrip)
+
+    # One complete native baseline (full transcoder) feeds the runtime library on every platform.
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    file(MAKE_DIRECTORY "${NT_BASISU_GOLDEN_DIR}")
+    if(NT_BASISU_HAS_ETC1S AND NT_BASISU_HAS_UASTC AND NT_BASISU_HAS_ETC2 AND NT_BASISU_HAS_BC7 AND NT_BASISU_HAS_ASTC)
+        add_executable(test_basisu_golden_produce unit/test_basisu_golden_produce.c ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench/ntpack_parse.c)
+        target_link_libraries(test_basisu_golden_produce PRIVATE nt_basisu_transcoder_full nt_builder nt_log unity nt_meshwire)
+        if(NOT WIN32)
+            target_link_libraries(test_basisu_golden_produce PRIVATE m)
+        endif()
+        target_include_directories(test_basisu_golden_produce PRIVATE ${CMAKE_SOURCE_DIR}/tools/research/atlas_bench)
+        target_compile_definitions(test_basisu_golden_produce PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+        nt_setup_test_target(test_basisu_golden_produce WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 300)
+        set_tests_properties(test_basisu_golden_produce PROPERTIES FIXTURES_SETUP basisu_golden)
+    endif()
+
+    add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
+    target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder nt_core nt_log_stub unity)
+    target_compile_definitions(test_basisu_trimmed PRIVATE _CRT_SECURE_NO_WARNINGS NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+    nt_setup_test_target(test_basisu_trimmed)
+    if(TARGET test_basisu_golden_produce)
+        add_dependencies(test_basisu_trimmed test_basisu_golden_produce)
+        set_tests_properties(test_basisu_trimmed PROPERTIES FIXTURES_REQUIRED basisu_golden)
+    endif()
 
     # --- Basis activation on the fake backend: real transcoder + builder encoder ---
     # Consumers before the archives that define their symbols: GNU ld and
     # Emscripten resolve a static link left to right.
     add_executable(test_gfx_basis_activate unit/test_gfx_basis_activate.c)
-    target_link_libraries(test_gfx_basis_activate PRIVATE nt_gfx_fake nt_builder nt_basisu_transcoder nt_log_stub unity nt_meshwire)
+    target_link_libraries(test_gfx_basis_activate PRIVATE nt_gfx_fake nt_builder nt_basisu_transcoder_full nt_log_stub unity nt_meshwire)
     nt_setup_test_target(test_gfx_basis_activate TIMEOUT 300)
 
     # --- basisu stub loud-fail contract: every entry point asserts ---
@@ -1397,6 +1421,28 @@ if(EMSCRIPTEN)
         )
     else()
         message(STATUS "Node.js not found; skipping CTest registration for test_wasm_smoke")
+    endif()
+
+    # --- The real WASM transcoder against the native goldens (NODERAWFS reads
+    # the host directory written by a native test_basisu_golden_produce run) ---
+    set(NT_BASISU_GOLDEN_DIR "${CMAKE_SOURCE_DIR}/build/tests/basisu_golden")
+    add_executable(test_basisu_trimmed unit/test_basisu_trimmed.c)
+    target_link_libraries(test_basisu_trimmed PRIVATE nt_basisu_transcoder nt_core nt_log_stub unity)
+    target_compile_definitions(test_basisu_trimmed PRIVATE NT_BASISU_GOLDEN_DIR="${NT_BASISU_GOLDEN_DIR}")
+    nt_set_warning_flags(test_basisu_trimmed)
+    nt_set_sanitizer_flags(test_basisu_trimmed)
+    set_target_properties(test_basisu_trimmed PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    target_link_options(test_basisu_trimmed PRIVATE
+        "SHELL:-sENVIRONMENT=node"
+        "SHELL:-sNODERAWFS=1"
+        "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    )
+    if(NT_NODE_EXECUTABLE)
+        add_test(NAME test_basisu_trimmed COMMAND "${NT_NODE_EXECUTABLE}" "$<TARGET_FILE:test_basisu_trimmed>")
+    else()
+        message(STATUS "Node.js not found; skipping CTest registration for test_basisu_trimmed")
     endif()
 endif()
 

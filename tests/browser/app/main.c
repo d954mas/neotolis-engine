@@ -37,7 +37,6 @@
 
 #include "app/nt_app.h"
 
-#include "bunnymark_sd.h"       /* Basis fixture pack: the UASTC bunny atlas */
 #include "ui_showcase_assets.h" /* reuse the showcase pack's generated asset ids */
 
 #include <stdint.h>
@@ -80,7 +79,10 @@ static uint8_t s_ui_arena[1U << 20];
 static nt_hash32_t s_pack_id;
 static nt_hash32_t s_basis_pack_id;
 static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
-static nt_resource_t s_basis_tex_handle; /* bunny atlas: activates through the Basis transcode path */
+/* basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
+ * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
+static nt_resource_t s_basis_tex_handle;
+static nt_resource_t s_basis_rgb_handle;
 static nt_resource_t s_font_resource;
 static nt_resource_t s_rich_font_resource[4];
 
@@ -338,25 +340,32 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     }
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
-/* Basis fixture: bunnymark_sd.ntpack's UASTC atlas, 128x128 with a full 8-level chain. The pack's own
- * default filter is LINEAR (no mip access), so the last level is only reachable through a sampler
- * override. */
+/* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
+ * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
 #define BASIS_FIXTURE_SIZE 128.0F
-#define BASIS_FIXTURE_LAST_LEVEL 7.0F
 
 static nt_texture_t basis_fixture_texture(void) { return (nt_texture_t){nt_resource_get(s_basis_tex_handle)}; }
-
-EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) {
-    const nt_texture_t tex = basis_fixture_texture();
-    return (nt_resource_is_ready(s_basis_tex_handle) && tex.id != 0 && nt_gfx_texture_ready(tex)) ? 1 : 0;
+static bool basis_handle_ready(nt_resource_t handle) {
+    const nt_texture_t tex = {nt_resource_get(handle)};
+    return nt_resource_is_ready(handle) && tex.id != 0 && nt_gfx_texture_ready(tex);
 }
+
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) { return (basis_handle_ready(s_basis_tex_handle) && basis_handle_ready(s_basis_rgb_handle)) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_format(void) { return (int)nt_gfx_texture_format(basis_fixture_texture()); }
-/* Bitmask the spec turns into the expected format with the fixed order BC7 -> ASTC -> ETC2 -> RGBA8. */
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_rgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_rgb_handle)}); }
+/* Bitmasks the spec turns into the expected format with the fixed order BC7 -> ASTC -> ETC2 -> RGBA8:
+ * what the GPU reports and what the NT_BASISU_HAS_* targets admit. */
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     return (caps->has_bc7 ? 1 : 0) | (caps->has_astc ? 2 : 0) | (caps->has_etc2 ? 4 : 0);
 }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_targets(void) { return (NT_BASISU_HAS_BC7 ? 1 : 0) | (NT_BASISU_HAS_ASTC ? 2 : 0) | (NT_BASISU_HAS_ETC2 ? 4 : 0); }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_codecs(void) { return (NT_BASISU_HAS_ETC1S ? 1 : 0) | (NT_BASISU_HAS_UASTC ? 2 : 0); }
+/* -1 when the build has no UASTC decoder for the embedded blob. */
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
+#if !NT_BASISU_HAS_UASTC
+    return -1;
+#else
     /* Builder-produced TTEX: UASTC, 1x1 RGBA {70, 120, 190, 180}, one mip. */
     static const uint8_t blob[] = {
         0x54, 0x54, 0x45, 0x58, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x05, 0x01, 0x01, 0x01, 0x93, 0x00, 0x00, 0x00, 0x73, 0x42,
@@ -372,12 +381,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
         nt_gfx_destroy_texture(texture);
     }
     return format;
+#endif
 }
-/* Packed RGBA (r | g<<8 | b<<16 | a<<24) of one fixture texel, drawn through a 1x1 render target:
- * level 0 = the atlas corner through a NEAREST override, level 1 = the 1x1 last level through a
- * NEAREST_MIPMAP_NEAREST override. 0xFFFFFFFF = fixture not ready or readback failed. */
+/* Packed RGBA (r | g<<8 | b<<16 | a<<24) of texel (0,0) of one fixture level (0, 3 or 7), drawn
+ * through a 1x1 render target with an explicit-LOD sampler override. 0xFFFFFFFF = fixture not ready
+ * or readback failed. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
-    NT_ASSERT(level == 0 || level == 1);
+    NT_ASSERT(level == 0 || level == 3 || level == 7);
     const nt_texture_t tex = basis_fixture_texture();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
         return 0xFFFFFFFFU;
@@ -399,8 +409,9 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    /* Texel (0,0) at level 0; the single texel of the last level otherwise. */
-    const float uv[4] = {(level == 0) ? 0.5F / BASIS_FIXTURE_SIZE : 0.5F, (level == 0) ? 0.5F / BASIS_FIXTURE_SIZE : 0.5F, (level == 0) ? 0.0F : BASIS_FIXTURE_LAST_LEVEL, 0.0F};
+    /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
+    const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
+    const float uv[4] = {texel, texel, (float)level, 0.0F};
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
@@ -546,7 +557,10 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
         'basis_format': function() { return _nt_test_basis_format(); },
+        'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },
         'basis_caps': function() { return _nt_test_basis_caps(); },
+        'basis_build_targets': function() { return _nt_test_basis_build_targets(); },
+        'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
         'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
@@ -947,15 +961,10 @@ int main(int argc, char *argv[]) {
     nt_resource_load_auto(s_pack_id, "assets/ui_showcase.ntpack");
 #endif
 
-    /* Basis fixture pack. Its generated header shares the four shader ids with the showcase pack, so
-     * it mounts below the showcase priority and only its bunny texture is requested here. */
-    s_basis_pack_id = nt_hash32_str("bunnymark_sd");
+    /* Basis fixture pack, produced per admission set by build_fixture_pack.c. */
+    s_basis_pack_id = nt_hash32_str("basis_fixture");
     nt_resource_mount(s_basis_pack_id, 50);
-#ifdef NT_CDN_URL
-    nt_resource_load_auto(s_basis_pack_id, NT_CDN_URL "/bunnymark/bunnymark_sd.ntpack");
-#else
-    nt_resource_load_auto(s_basis_pack_id, "assets/bunnymark_sd.ntpack");
-#endif
+    nt_resource_load_auto(s_basis_pack_id, "assets/basis_fixture.ntpack");
 
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
@@ -963,7 +972,14 @@ int main(int argc, char *argv[]) {
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
-    s_basis_tex_handle = nt_resource_request(ASSET_TEXTURE_BUNNIES_TEX0, NT_ASSET_TEXTURE);
+    /* Resource ids are the hashed asset names. */
+#if NT_BASISU_HAS_ETC1S
+    s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgba"), NT_ASSET_TEXTURE);
+    s_basis_rgb_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgb"), NT_ASSET_TEXTURE);
+#else
+    s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_uastc_rgba"), NT_ASSET_TEXTURE);
+    s_basis_rgb_handle = nt_resource_request(nt_hash64_str("basis_uastc_rgb"), NT_ASSET_TEXTURE);
+#endif
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
     s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);

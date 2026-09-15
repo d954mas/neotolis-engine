@@ -23,14 +23,18 @@ typedef struct {
 /* One-time transcoder init (call at startup before any transcode) */
 void nt_basisu_transcoder_global_init(void);
 
-/* Describe image 0 without allocating. Returns false for a bad header, a codec
- * this engine does not decode, or a mip chain whose level L is not exactly
- * max(1, width >> L) x max(1, height >> L). */
+/* Describe image 0 without allocating. Returns false for a bad header or a mip
+ * chain whose level L is not exactly max(1, width >> L) x max(1, height >> L).
+ * A codec this build does not decode (NT_BASISU_HAS_ETC1S/UASTC OFF, or a
+ * non-LDR Basis format) is a pack from another configure: asserted. */
 bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_t *out_info);
 
 /* Transcode levels 0..N-1 of image 0 into `output` back to back, no padding
- * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info`. A
- * capacity short of the whole chain is rejected before anything is written. */
+ * (level L is max(1, w >> L) x max(1, h >> L)), N and dims from `info` (from
+ * a successful nt_basisu_info call on the same blob in this build). `format` is
+ * RGBA8 or a compressed target whose NT_BASISU_HAS_* option is ON (the
+ * activator's selector never picks another). False only for a capacity short
+ * of the whole chain, before anything is written. */
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes);
 
 #ifdef __cplusplus

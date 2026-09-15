@@ -23,6 +23,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Basis admission rows shared by the native and browser jobs: `name:flags`, rows separated
+  # by spaces, several -D flags inside one row by commas (expanded with ${flags//,/ }).
+  # Two rows cover both single-codec decoders and both target extremes: UASTC-only (the
+  # smallest transcoder) and ETC1S with ETC2 as the only compressed target.
+  NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF"
+  # Examples require the default set (sponza uses both codecs), so restricted rows skip them.
+  NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+
 jobs:
   wasm:
     name: WASM Build & Test
@@ -76,6 +85,12 @@ jobs:
           name: example-packs
           path: build/examples
 
+      - name: Download Basis goldens
+        uses: actions/download-artifact@v4
+        with:
+          name: basisu-goldens
+          path: build/tests/basisu_golden
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -97,6 +112,8 @@ jobs:
       - name: Run baseline WASM smoke test (debug)
         run: node tests/wasm/smoke_test.js wasm-debug
 
+      # Includes test_basisu_trimmed: the production wasm transcoder decodes the native
+      # goldens under Node (the download step above).
       - name: Run baseline WASM debug ctest
         run: ctest --preset wasm-debug
 
@@ -452,6 +469,29 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
+      # Each admission row (NT_BASISU_ROWS) consumes the full native baseline through the
+      # trimmed mirror and runs the Basis suites with the restricted set.
+      - name: Basis admission rows (FULL asserts)
+        run: |
+          for row in $NT_BASISU_ROWS; do
+            name="${row%%:*}"
+            flags="${row#*:}"
+            cmake --preset native-debug-test -B "build/_cmake/$name" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+            xvfb-run ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+          done
+
+      # The full baseline feeds the WASM job's test_basisu_trimmed run.
+      - name: Upload Basis goldens
+        uses: actions/upload-artifact@v4
+        with:
+          name: basisu-goldens
+          path: |
+            build/tests/basisu_golden/*.basis
+            build/tests/basisu_golden/*.bin
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Test optional font geometry (FULL asserts)
         run: |
           cmake --preset native-debug-test -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON
@@ -715,17 +755,16 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
 
-      # browser_smoke reuses two example packs (same assets): ui_showcase (RAW atlas) and
-      # bunnymark_sd (UASTC atlas, the Basis fixture). Produce both via their build-graph pack
-      # targets before ANY wasm configure below — the copy rules are configure-time — then the wasm
-      # builds copy them into assets/.
+      # browser_smoke reuses the ui_showcase example pack (RAW atlas) and its own Basis fixture
+      # pack for the configured NT_BASISU_* set. Build both natively before ANY wasm configure
+      # below: the showcase copy rule only exists when the pack does at configure time.
       - name: Configure native debug
         run: cmake --preset native-debug
 
-      - name: Build browser_smoke example packs
+      - name: Build browser_smoke packs
         run: |
           cmake --build --preset native-debug --target ui_showcase_packs
-          cmake --build --preset native-debug --target bunnymark_demo_packs
+          cmake --build --preset native-debug --target browser_smoke_packs
 
       - name: Build browser_smoke wasm (debug)
         run: |
@@ -733,7 +772,7 @@ jobs:
           cmake --build --preset wasm-debug --target browser_smoke
           # A missing pack must fail here, not as a 30 s Playwright timeout.
           test -f build/tests/browser/app/wasm-debug/assets/ui_showcase.ntpack
-          test -f build/tests/browser/app/wasm-debug/assets/bunnymark_sd.ntpack
+          test -f build/tests/browser/app/wasm-debug/assets/basis_fixture.ntpack
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -753,6 +792,25 @@ jobs:
       - name: Run browser smoke test
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
 
+      # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
+      # asserts) and samples the transcoded texels through WebGL; a Release row would add no
+      # decision path (same selector, same SwiftShader caps). SwiftShader reports every
+      # compressed cap, so the build set decides the target and real GPUs stay unverified here.
+      - name: Basis admission rows (browser activation)
+        run: |
+          for row in $NT_BASISU_ROWS; do
+            name="${row%%:*}"
+            flags="${row#*:}"
+            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            cmake --build "build/_cmake/$name-native" --target browser_smoke_packs
+            dir="$name-wasm-debug"
+            emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            cmake --build "build/_cmake/$dir" --target browser_smoke
+            test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
+            test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
+            (cd tests/browser && CI=1 NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$dir" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 npx playwright test context_loss.spec.ts --grep 'basis fixture:' --project=chromium --workers=1)
+          done
+
       - name: Check release diagnostics with independent UI and GPU timing
         run: |
           for timing in "0 0" "0 1" "1 0"; do
@@ -761,7 +819,7 @@ jobs:
             emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
             cmake --build "build/_cmake/$name" --target browser_smoke
             test -f "build/tests/browser/app/$name/assets/ui_showcase.ntpack"
-            test -f "build/tests/browser/app/$name/assets/bunnymark_sd.ntpack"
+            test -f "build/tests/browser/app/$name/assets/basis_fixture.ntpack"
             (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
           done
 

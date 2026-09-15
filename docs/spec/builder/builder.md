@@ -83,7 +83,11 @@ Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a typ
 `nt_basisu_codec_t` and `nt_basisu_encode_opts_t` are shared by the public
 builder and encoder in `shared/include/nt_basisu_codec.h`. The descriptor tags
 an active branch when compressed: `NT_BASISU_CODEC_ETC1S` selects `etc1s`, and
-`NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes.
+`NT_BASISU_CODEC_UASTC_LDR` selects `uastc`. There are no HDR modes. The codec
+must also be ON in the build (`NT_BASISU_HAS_ETC1S`/`NT_BASISU_HAS_UASTC`,
+[build options](../../build.md#basis-universal-admission)); a texture asking
+for a codec outside it is an `NT_BUILD_ASSERT` in the option validation, before
+any cache lookup, because the runtime of the same configure cannot decode it.
 
 | Active field | Valid range | Meaning |
 |---|---|---|
@@ -138,7 +142,8 @@ runtime would accept it and sample level 0.
 An RGBA8 source whose pixels are all opaque is encoded without alpha slices —
 the encoder checks the actual pixels, not the declared channel count. The
 runtime treats that as legal: an `RGBA8` header over an alpha-less blob selects
-`ETC2_RGB8` on an ETC2 host, where the opaque block is half the size; BC7, ASTC
+`ETC2_RGB8` when ETC2 is the chosen target, where the opaque block is half the
+size; BC7, ASTC
 and the RGBA8 fallback have no opaque variant and are unaffected. The header's
 `format` is not cross-checked against the blob: its alpha flag alone decides.
 

@@ -7,8 +7,20 @@
     },
     "configurePresets": [
         {
+            "name": "base",
+            "hidden": true,
+            "cacheVariables": {
+                "NT_BASISU_HAS_ETC1S": "ON",
+                "NT_BASISU_HAS_UASTC": "ON",
+                "NT_BASISU_HAS_ETC2": "ON",
+                "NT_BASISU_HAS_BC7": "ON",
+                "NT_BASISU_HAS_ASTC": "ON"
+            }
+        },
+        {
             "name": "base-wasm",
             "hidden": true,
+            "inherits": "base",
             "generator": "Ninja",
             "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
             "cacheVariables": {
@@ -19,6 +31,7 @@
         {
             "name": "base-native",
             "hidden": true,
+            "inherits": "base",
             "generator": "Ninja",
             "cacheVariables": {
                 "CMAKE_C_STANDARD": "17",

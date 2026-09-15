@@ -215,19 +215,24 @@ static void check_against_reference(uint32_t level, uint8_t tolerance, bool opaq
     }
 }
 
+/* The selector's contract: the first of BC7 -> ASTC -> ETC2 the GPU reports
+ * and NT_BASISU_HAS_* admits, RGBA8 otherwise. */
 static nt_texture_format_t expected_target(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
-    if (caps->has_bc7) {
+    if (NT_BASISU_HAS_BC7 && caps->has_bc7) {
         return NT_TEXTURE_FORMAT_BC7_RGBA;
     }
-    if (caps->has_astc) {
+    if (NT_BASISU_HAS_ASTC && caps->has_astc) {
         return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
     }
-    if (caps->has_etc2) {
+    if (NT_BASISU_HAS_ETC2 && caps->has_etc2) {
         return NT_TEXTURE_FORMAT_ETC2_RGBA8;
     }
     return NT_TEXTURE_FORMAT_RGBA8;
 }
+
+/* An admitted codec for the tests that are not about the codec. */
+#define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
 
 static GLint texture_max_level(nt_texture_t tex) {
     nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(tex), 0);
@@ -264,15 +269,19 @@ static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance) {
     nt_gfx_deactivate_texture(handle);
 }
 
+#if NT_BASISU_HAS_ETC1S
 void test_activate_etc1s_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_ETC1S, TOL_ETC1S); }
+#endif
+#if NT_BASISU_HAS_UASTC
 void test_activate_uastc_blob_uploads_and_samples(void) { check_activation(NT_BASISU_CODEC_UASTC_LDR, TOL_UASTC); }
+#endif
 
 // #endregion
 
 // #region (b) prepared upload of a contiguous chain
 
 static void check_prepared_upload(nt_texture_format_t format, uint8_t tolerance) {
-    build_fixture(NT_BASISU_CODEC_UASTC_LDR);
+    build_fixture(ANY_CODEC);
     uint32_t total = transcode_chain(format);
     TEST_ASSERT_GREATER_THAN_UINT32(0, total);
 
@@ -421,13 +430,24 @@ int main(void) {
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
+#if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_activate_etc1s_blob_uploads_and_samples);
+#endif
+#if NT_BASISU_HAS_UASTC
     RUN_TEST(test_activate_uastc_blob_uploads_and_samples);
+#endif
     RUN_TEST(test_prepared_upload_rgba8);
+    /* A target whose option is OFF has no transcoded chain to upload. */
+#if NT_BASISU_HAS_BC7
     RUN_TEST(test_prepared_upload_bc7);
+#endif
+#if NT_BASISU_HAS_ASTC
     RUN_TEST(test_prepared_upload_astc);
+#endif
+#if NT_BASISU_HAS_ETC2
     RUN_TEST(test_prepared_upload_etc2_rgba8);
     RUN_TEST(test_prepared_upload_etc2_rgb8);
+#endif
     RUN_TEST(test_single_level_texture_caps_max_level_and_still_samples);
     RUN_TEST(test_partial_chain_caps_max_level_and_samples_its_last_level);
     RUN_TEST(test_resized_render_target_color_caps_max_level);

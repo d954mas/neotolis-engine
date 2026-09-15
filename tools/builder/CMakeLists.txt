@@ -42,9 +42,10 @@ target_include_directories(nt_basisu_encoder PRIVATE
     ${NT_ENGINE_ROOT}/deps/basisu/encoder
     ${NT_ENGINE_ROOT}/deps/basisu/transcoder
 )
-# Transcoder TU comes from the shared runtime target (one copy per exe); the config
-# target keeps the encoder's header defines identical to that TU (ODR).
-target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder nt_basisu_transcoder_config
+# The encoder needs the full transcoder TU (both codecs, KTX2, XUASTC headers), not
+# the trimmed runtime one; the config target keeps its header defines identical to
+# that TU (ODR). Builder-side executables therefore link nt_basisu_transcoder_full.
+target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder_full nt_basisu_transcoder_full_config
     PUBLIC nt_shared)
 target_compile_definitions(nt_basisu_encoder PRIVATE _CRT_SECURE_NO_WARNINGS)
 # Suppress warnings in vendored C++ code

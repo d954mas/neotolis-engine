@@ -8,6 +8,19 @@
 
 static basist::basisu_transcoder s_transcoder;
 
+/* A blob whose codec this build does not decode is a pack built for another
+   configure: a developer error, not runtime input. */
+static bool codec_built(basist::basis_tex_format fmt) {
+    switch (fmt) {
+    case basist::basis_tex_format::cETC1S:
+        return NT_BASISU_HAS_ETC1S != 0;
+    case basist::basis_tex_format::cUASTC_LDR_4x4:
+        return NT_BASISU_HAS_UASTC != 0;
+    default:
+        return false;
+    }
+}
+
 /* ---- Public API ---- */
 
 void nt_basisu_transcoder_global_init(void) { basist::basisu_transcoder_init(); }
@@ -19,17 +32,9 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     if (!s_transcoder.validate_header(basis_data, basis_size)) {
         return false;
     }
-    nt_basisu_codec_t codec;
-    switch (s_transcoder.get_basis_tex_format(basis_data, basis_size)) {
-    case basist::basis_tex_format::cETC1S:
-        codec = NT_BASISU_CODEC_ETC1S;
-        break;
-    case basist::basis_tex_format::cUASTC_LDR_4x4:
-        codec = NT_BASISU_CODEC_UASTC_LDR;
-        break;
-    default:
-        return false;
-    }
+    const basist::basis_tex_format fmt = s_transcoder.get_basis_tex_format(basis_data, basis_size);
+    NT_ASSERT(codec_built(fmt) && "basisu: blob codec is not compiled into this build (NT_BASISU_HAS_*)");
+    const nt_basisu_codec_t codec = fmt == basist::basis_tex_format::cETC1S ? NT_BASISU_CODEC_ETC1S : NT_BASISU_CODEC_UASTC_LDR;
 
     basist::basisu_image_info image_info;
     if (!s_transcoder.get_image_info(basis_data, basis_size, image_info, 0)) {

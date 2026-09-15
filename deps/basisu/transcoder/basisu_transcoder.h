@@ -20,6 +20,10 @@
 // By default KTX2 support is enabled to simplify compilation. This implies the need for the Zstandard library (which we distribute as a single source file in the "zstd" directory) by default.
 // Set BASISD_SUPPORT_KTX2 to 0 to completely disable KTX2 support as well as Zstd/miniz usage which is only required for UASTC supercompression in KTX2 files.
 // Also see BASISD_SUPPORT_KTX2_ZSTD in basisu_transcoder.cpp, which individually disables Zstd usage.
+#ifndef BASISD_SUPPORT_ETC1S
+	#define BASISD_SUPPORT_ETC1S 1
+#endif
+
 #ifndef BASISD_SUPPORT_KTX2
 	#define BASISD_SUPPORT_KTX2 1
 #endif
@@ -947,17 +951,21 @@ namespace basist
 			void* pOutput_blocks, block_format fmt,
 			uint32_t block_stride_in_bytes, uint32_t output_row_pitch_in_blocks_or_pixels);
 
+#if BASISD_SUPPORT_ETC1S
 		void set_global_codebooks(const basisu_lowlevel_etc1s_transcoder* pGlobal_codebook) { m_lowlevel_etc1s_decoder.set_global_codebooks(pGlobal_codebook); }
 		const basisu_lowlevel_etc1s_transcoder* get_global_codebooks() const { return m_lowlevel_etc1s_decoder.get_global_codebooks(); }
 
 		const basisu_lowlevel_etc1s_transcoder& get_lowlevel_etc1s_decoder() const { return m_lowlevel_etc1s_decoder; }
 		basisu_lowlevel_etc1s_transcoder& get_lowlevel_etc1s_decoder() { return m_lowlevel_etc1s_decoder; }
+#endif // BASISD_SUPPORT_ETC1S
 
 		const basisu_lowlevel_uastc_ldr_4x4_transcoder& get_lowlevel_uastc_decoder() const { return m_lowlevel_uastc_ldr_4x4_decoder; }
 		basisu_lowlevel_uastc_ldr_4x4_transcoder& get_lowlevel_uastc_decoder() { return m_lowlevel_uastc_ldr_4x4_decoder; }
 
 	private:
+#if BASISD_SUPPORT_ETC1S
 		mutable basisu_lowlevel_etc1s_transcoder m_lowlevel_etc1s_decoder;
+#endif // BASISD_SUPPORT_ETC1S
 		mutable basisu_lowlevel_uastc_ldr_4x4_transcoder m_lowlevel_uastc_ldr_4x4_decoder;
 		mutable basisu_lowlevel_xuastc_ldr_transcoder m_lowlevel_xuastc_ldr_decoder;
 		mutable basisu_lowlevel_xubc7_transcoder m_lowlevel_xubc7_decoder;

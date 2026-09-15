@@ -34,6 +34,20 @@ static void check_pixels(const uint8_t *src, const uint8_t *out, uint32_t bytes)
 }
 
 static const nt_texture_format_t s_targets[] = {NT_TEXTURE_FORMAT_ETC2_RGB8, NT_TEXTURE_FORMAT_ETC2_RGBA8, NT_TEXTURE_FORMAT_BC7_RGBA, NT_TEXTURE_FORMAT_ASTC_4x4_RGBA, NT_TEXTURE_FORMAT_RGBA8};
+/* NT_BASISU_HAS_ETC2/BC7/ASTC of this configure; RGBA8 is always admitted. */
+static const bool s_target_enabled[] = {NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_ETC2 != 0, NT_BASISU_HAS_BC7 != 0, NT_BASISU_HAS_ASTC != 0, true};
+
+/* Presets of the admitted codecs; the encoder itself is a superset. */
+static uint32_t enabled_codec_presets(nt_basisu_encode_opts_t out[2]) {
+    uint32_t count = 0;
+#if NT_BASISU_HAS_ETC1S
+    out[count++] = nt_tex_compress_etc1s_default();
+#endif
+#if NT_BASISU_HAS_UASTC
+    out[count++] = nt_tex_compress_uastc_default();
+#endif
+    return count;
+}
 
 /* Bytes of the whole chain, levels back to back with no padding. */
 static uint32_t chain_bytes(nt_texture_format_t format, uint32_t width, uint32_t height, uint32_t levels) {
@@ -53,6 +67,9 @@ static void check_outputs(const nt_basisu_encode_result_t *enc, const nt_basisu_
         const uint32_t bytes = chain_bytes(s_targets[f], info->width, info->height, info->level_count);
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(sizeof(s_out) - 16U, bytes);
         memset(s_out, 0xCD, sizeof(s_out));
+        if (!s_target_enabled[f]) {
+            continue; /* target option OFF: not a legal argument in this build */
+        }
         TEST_ASSERT_TRUE(nt_basisu_transcode_chain(enc->data, enc->size, info, s_targets[f], s_out, bytes));
         /* The chain ends exactly where the per-level sizes say it does. */
         for (uint32_t i = bytes; i < bytes + 16; i++) {
@@ -101,10 +118,14 @@ static void codec_cases(nt_basisu_codec_t codec, bool alpha) {
     roundtrip(1, 1, codec, alpha);
     roundtrip(96, 64, codec, alpha);
 }
+#if NT_BASISU_HAS_ETC1S
 void test_etc1s_rgb(void) { codec_cases(NT_BASISU_CODEC_ETC1S, false); }
 void test_etc1s_alpha(void) { codec_cases(NT_BASISU_CODEC_ETC1S, true); }
+#endif
+#if NT_BASISU_HAS_UASTC
 void test_uastc_rgb(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, false); }
 void test_uastc_alpha(void) { codec_cases(NT_BASISU_CODEC_UASTC_LDR, true); }
+#endif
 
 void test_reject_non_basis_header(void) {
     uint8_t pixels[16 * 8 * 4];
@@ -118,8 +139,9 @@ void test_reject_non_basis_header(void) {
 void test_opaque_rgba_source_reports_no_alpha(void) {
     uint8_t pixels[16 * 8 * 4];
     fill_pixels(pixels, 16, 8, false);
-    nt_basisu_encode_opts_t codecs[] = {nt_tex_compress_etc1s_high(), nt_tex_compress_uastc_default()};
-    for (uint32_t i = 0; i < 2; i++) {
+    nt_basisu_encode_opts_t codecs[2];
+    const uint32_t codec_count = enabled_codec_presets(codecs);
+    for (uint32_t i = 0; i < codec_count; i++) {
         nt_basisu_encode_result_t enc = nt_basisu_encode(1, pixels, 16, 8, true, &codecs[i]);
         TEST_ASSERT_NOT_NULL(enc.data);
         nt_basisu_info_t info = {0};
@@ -129,6 +151,7 @@ void test_opaque_rgba_source_reports_no_alpha(void) {
     }
 }
 
+#if NT_BASISU_HAS_UASTC
 /* Byte offsets into basist::basis_file_header / basis_slice_desc
  * (deps/basisu/transcoder/basisu_file_headers.h; pack(1), little-endian). */
 #define BASIS_HEADER_TOTAL_SLICES_OFS 14U
@@ -181,6 +204,7 @@ void test_reject_mip_level_with_a_shrunken_stored_width(void) {
     TEST_ASSERT_FALSE(nt_basisu_info(enc.data, enc.size, &info));
     nt_basisu_encode_free(&enc);
 }
+#endif
 
 static void check_premultiplied_mip(nt_basisu_codec_t codec) {
     uint8_t pixels[8 * 8 * 4];
@@ -208,8 +232,12 @@ static void check_premultiplied_mip(nt_basisu_codec_t codec) {
     }
 }
 
+#if NT_BASISU_HAS_ETC1S
 void test_etc1s_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_ETC1S); }
+#endif
+#if NT_BASISU_HAS_UASTC
 void test_uastc_premultiplied_mip(void) { check_premultiplied_mip(NT_BASISU_CODEC_UASTC_LDR); }
+#endif
 
 /* Unity terminates failed reads with longjmp before the stream is reused. */
 // NOLINTBEGIN(clang-analyzer-unix.Stream)
@@ -301,10 +329,11 @@ void test_public_basis_file_memory_atlas(void) {
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL(sizeof(tga), fwrite(tga, 1, sizeof(tga), file));
     (void)fclose(file);
-    nt_basisu_encode_opts_t codecs[] = {nt_tex_compress_etc1s_default(), nt_tex_compress_uastc_default()};
-    for (uint32_t i = 0; i < 2; i++) {
+    nt_basisu_encode_opts_t codecs[2];
+    const uint32_t codec_count = enabled_codec_presets(codecs);
+    for (uint32_t i = 0; i < codec_count; i++) {
         nt_basisu_codec_t codec = codecs[i].codec;
-        const char *path = i == 0 ? "basis_public_etc1s.ntpack" : "basis_public_uastc.ntpack";
+        const char *path = codec == NT_BASISU_CODEC_ETC1S ? "basis_public_etc1s.ntpack" : "basis_public_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
         nt_builder_set_threads(ctx, 2);
         nt_tex_opts_t opts = nt_tex_opts_defaults();
@@ -347,11 +376,12 @@ void test_public_basis_file_memory_atlas(void) {
 
 void test_public_basis_single_pixel_full_mip_chain(void) {
     const uint8_t pixel[4] = {70, 120, 190, 180};
-    nt_basisu_encode_opts_t codecs[] = {nt_tex_compress_etc1s_default(), nt_tex_compress_uastc_default()};
-    for (uint32_t i = 0; i < 2; i++) {
+    nt_basisu_encode_opts_t codecs[2];
+    const uint32_t codec_count = enabled_codec_presets(codecs);
+    for (uint32_t i = 0; i < codec_count; i++) {
         nt_tex_opts_t opts = nt_tex_opts_defaults();
         opts.compress = codecs[i];
-        const char *path = i == 0 ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
+        const char *path = codecs[i].codec == NT_BASISU_CODEC_ETC1S ? "basis_single_etc1s.ntpack" : "basis_single_uastc.ntpack";
         NtBuilderContext *ctx = nt_builder_start_pack(path);
         nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts);
         nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -365,15 +395,19 @@ int main(void) {
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
+#if NT_BASISU_HAS_ETC1S
     RUN_TEST(test_etc1s_rgb);
     RUN_TEST(test_etc1s_alpha);
+    RUN_TEST(test_etc1s_premultiplied_mip);
+#endif
+#if NT_BASISU_HAS_UASTC
     RUN_TEST(test_uastc_rgb);
     RUN_TEST(test_uastc_alpha);
+    RUN_TEST(test_reject_mip_level_with_a_shrunken_stored_width);
+    RUN_TEST(test_uastc_premultiplied_mip);
+#endif
     RUN_TEST(test_reject_non_basis_header);
     RUN_TEST(test_opaque_rgba_source_reports_no_alpha);
-    RUN_TEST(test_reject_mip_level_with_a_shrunken_stored_width);
-    RUN_TEST(test_etc1s_premultiplied_mip);
-    RUN_TEST(test_uastc_premultiplied_mip);
     RUN_TEST(test_public_basis_single_pixel_full_mip_chain);
     RUN_TEST(test_public_basis_file_memory_atlas);
     return UNITY_END();

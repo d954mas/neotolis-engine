@@ -67,6 +67,11 @@ covers the common options; module specs own detailed ON/OFF behavior.
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
 | `NT_DEVAPI_ENABLED` | OFF | Group switches are dormant while the master gate is OFF. |
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
+| `NT_BASISU_HAS_ETC1S` | ON | Basis ETC1S: the builder emits it, the runtime decodes it. See [Basis Universal admission](#basis-universal-admission). |
+| `NT_BASISU_HAS_UASTC` | ON | Basis UASTC LDR, same contract. Both codecs OFF is a configure error. |
+| `NT_BASISU_HAS_ETC2` | ON | Basis textures may transcode to ETC2 RGB8/RGBA8. |
+| `NT_BASISU_HAS_BC7` | ON | Basis textures may transcode to BC7. |
+| `NT_BASISU_HAS_ASTC` | ON | Basis textures may transcode to ASTC 4x4. RGBA8 is always available. |
 
 Contracts and less common options:
 
@@ -74,6 +79,83 @@ Contracts and less common options:
 - [Resource measurements and resident bytes](spec/assets/resource.md#optional-measurements-and-resident-bytes).
 - [Font synthesis and rich markup](spec/ui/rich-text.md), [Clay debug view](spec/ui/nt-ui.md).
 - [WASM build variants](../README.md#wasm-requires-emsdk-activated).
+
+### Basis Universal admission
+
+The five `NT_BASISU_HAS_*` options are one set; both codecs OFF is a
+configure error, because a build without Basis textures links
+`nt_basisu_transcoder_stub` instead of shrinking the set. The root
+`CMakeLists.txt` delivers them as 0/1 definitions on `nt_shared`, which the
+builder, the transcoder and `nt_gfx` link, so one configure always agrees
+with itself: the builder asserts a texture's codec
+before its cache lookup, `nt_basisu_info` asserts that a blob's codec is
+compiled in, and the activator's selector never picks a target outside the set.
+Transcoding requires the info returned by a successful `nt_basisu_info` call
+on the same blob in this build. The activator's selector skips excluded targets
+([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)).
+
+The runtime library `nt_basisu_transcoder` compiles only the admitted decoders
+and the ETC1S→X tables of the admitted targets (UASTC→X does not use the
+tables those flags gate) on every platform, through the local patch described
+in [deps/basisu/README.md](../deps/basisu/README.md). The builder's encoder
+needs the upstream LDR superset, so it links `nt_basisu_transcoder_full`
+(native only): a builder-side executable links the full variant, a game links
+the runtime one, and no executable links both (same symbols).
+`BASISD_SUPPORT_ASTC_HIGHER_OPAQUE_QUALITY=1` on both platforms: 8-bit
+endpoints for ETC1S→ASTC opaque and grayscale blocks are worth the ~28 KB
+brotli table on web (upstream's Emscripten default is 0), and native/web
+bytes stay identical as a consequence.
+
+Packs cross configures: the native builder writes them, the wasm configure
+copies them. Put the options in the preset every configure inherits (the
+engine's hidden `base` preset in `CMakePresets.json`; a game's own shared
+preset or include before `add_subdirectory`). Use one set for the shared example
+pack directory. To change it, reconfigure native and WASM, rebuild the native
+packs, then rebuild WASM. Asset compression options must explicitly select an
+admitted codec; changing the set does not rewrite those options. A stale pack
+whose blob codec is excluded is a pack from another configure: `nt_basisu_info`
+asserts on it (no FAILED fallback).
+
+One full baseline serves all configurations. `test_basisu_golden_produce`
+(native encoder + full transcoder) is built only when both codecs and all
+compressed targets are enabled. It writes the 12 fixtures and 60 transcodes
+listed in `tests/unit/basisu_fixtures.h` into `build/tests/basisu_golden/` and
+checks all 72 files against `tests/fixtures/basisu_golden.sha256`. Regenerate
+that checksum file only for an intentional baseline change:
+`sha256sum *.basis *.bin | LC_ALL=C sort -k2` inside the golden directory.
+`test_basisu_trimmed` decodes them byte-for-byte with the runtime library of
+the current set, natively and, under Emscripten, through Node (`-sNODERAWFS`;
+ctest registers it only when `node` is found). `test_basisu_roundtrip`, `test_gfx_basis_activate`,
+`test_nt_gfx_basis_native` and `test_builder` follow the set, and the browser
+smoke app activates its own fixture pack (below). Produce the full baseline
+first, then check restricted sets in separate directories. They consume the
+same files and never regenerate them. The examples require the default set
+(sponza uses both codecs), so restricted configures skip them via
+`NT_SKIP_EXAMPLE_PACKS`:
+
+```bash
+cmake --preset native-debug-test
+cmake --build --preset native-debug-test --target test_basisu_golden_produce
+ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
+skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+# UASTC only (the smallest transcoder)
+cmake --preset native-debug-test -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-uastc-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-uastc-only --output-on-failure --no-tests=error -R "$tests"
+# ETC1S with ETC2 as the only compressed target
+cmake --preset native-debug-test -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-etc1s-etc2 --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-etc1s-etc2 --output-on-failure --no-tests=error -R "$tests"
+```
+
+CI runs exactly these two rows (`NT_BASISU_ROWS` in `ci.yml`): together they
+cover both single-codec decoders and both target extremes. The native job runs
+the five suites per row, the browser job drives the two `basis fixture:` tests
+per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
+with the production transcoder under Node. The default browser run still
+covers all smoke tests. The runner's SwiftShader reports every compressed cap;
+rows on real GPUs stay unverified.
 
 ### CRT, probes and profiling
 
@@ -161,11 +243,19 @@ Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 `tests/browser/app` (`window.__nt` hooks), not the showcase.
 
-That app reuses two prebuilt packs: `ui_showcase.ntpack` (target
-`ui_showcase_packs`) and `bunnymark_sd.ntpack` (target `bunnymark_demo_packs`,
-the UASTC Basis fixture). Build both with a native preset before configuring
-wasm — the copy rules are configure-time, so a pack produced later is missing
-from the app's `assets/` until the next configure.
+That app reuses the prebuilt `ui_showcase.ntpack` (target `ui_showcase_packs`)
+and builds its own Basis fixture, `basis_fixture.ntpack` (target
+`browser_smoke_packs`, producer `tests/browser/app/build_fixture_pack.c`): one
+RGBA and one opaque RGB texture, ETC1S when `NT_BASISU_HAS_ETC1S` is ON and
+UASTC otherwise (the pair `main.c` requests), written to
+`build/tests/browser/fixtures/<set tag>/` so a wasm configure only ever copies
+the pack of its own admission set. Build both with a native preset of the same
+`NT_BASISU_*` values before configuring wasm — the showcase copy rule is
+configure-time, so a pack produced later is missing from the app's `assets/`
+until the next configure. The Playwright spec `context_loss.spec.ts` derives the
+expected transcode target from the GPU caps and the build's targets and checks
+texels of levels 0, 3 and 7; compressed targets on the SwiftShader runner prove
+upload and sampling but not hardware decoding.
 
 Verify font geometry changes with `NT_FONT_EMBOLDEN_ENABLED` OFF and ON. The ON
 mirror includes `test_font`, `test_text_renderer`, `test_nt_ui_label` and all

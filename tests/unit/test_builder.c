@@ -110,6 +110,9 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 
 #define TMP_DIR "build/tests/tmp"
 
+/* A Basis preset whose codec is ON for tests that are not about the codec. */
+#define ANY_COMPRESS() (NT_BASISU_HAS_UASTC ? nt_tex_compress_uastc_default() : nt_tex_compress_etc1s_default())
+
 /* --- Test fixture helpers --- */
 
 static void write_test_shader(const char *path, const char *source) {
@@ -441,6 +444,7 @@ void test_texture_compress_rdo_boundaries(void) {
     nt_tex_opts_t opts = nt_tex_opts_defaults();
     opts.compress = nt_tex_compress_etc1s_default();
 
+#if NT_BASISU_HAS_ETC1S
     opts.compress.etc1s.endpoint_rdo_threshold = 0.0F;
     opts.compress.etc1s.selector_rdo_threshold = 1.0e10F;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
@@ -448,13 +452,17 @@ void test_texture_compress_rdo_boundaries(void) {
     opts.compress.etc1s.selector_rdo_threshold = 0.0F;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
 
+    /* Negatives only where the codec is admitted: otherwise the admission
+     * assert fires first and the range check is never reached. */
     opts.compress.etc1s.endpoint_rdo_threshold = 2.0e10F;
     expect_texture_compress_opts_assert(opts.compress);
     opts.compress = nt_tex_compress_etc1s_default();
     opts.compress.etc1s.selector_rdo_threshold = 2.0e10F;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
 
     opts.compress = nt_tex_compress_uastc_default();
+#if NT_BASISU_HAS_UASTC
     opts.compress.uastc.rdo_lambda = 0.0F;
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA8, nt_builder_assert_texture_opts(&opts));
     opts.compress.uastc.rdo_lambda = 0.001F;
@@ -466,21 +474,28 @@ void test_texture_compress_rdo_boundaries(void) {
     expect_texture_compress_opts_assert(opts.compress);
     opts.compress.uastc.rdo_lambda = 50.001F;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
     const float invalid[] = {-1.0F, NAN, INFINITY};
     for (uint32_t i = 0; i < 3; i++) {
+#if NT_BASISU_HAS_ETC1S
         opts.compress = nt_tex_compress_etc1s_default();
         opts.compress.etc1s.endpoint_rdo_threshold = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
         opts.compress = nt_tex_compress_etc1s_default();
         opts.compress.etc1s.selector_rdo_threshold = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
+#endif
+#if NT_BASISU_HAS_UASTC
         opts.compress = nt_tex_compress_uastc_default();
         opts.compress.uastc.rdo_lambda = invalid[i];
         expect_texture_compress_opts_assert(opts.compress);
+#endif
     }
+#if NT_BASISU_HAS_ETC1S
     opts.compress = nt_tex_compress_etc1s_default();
     opts.compress.etc1s.quality = 256;
     expect_texture_compress_opts_assert(opts.compress);
+#endif
 }
 
 void test_texture_option_aliases_are_canonicalized(void) {
@@ -488,7 +503,7 @@ void test_texture_option_aliases_are_canonicalized(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/texture_format_canonical.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_tex_opts_t opts = nt_tex_opts_defaults();
-    nt_basisu_encode_opts_t compress = nt_tex_compress_uastc_default();
+    nt_basisu_encode_opts_t compress = ANY_COMPRESS();
     opts.format = 0;
     opts.gen_mipmaps = false;
     opts.compress = compress;
@@ -502,7 +517,7 @@ void test_texture_option_aliases_are_canonicalized(void) {
 
 void test_atlas_texture_option_aliases_are_canonicalized(void) {
     uint8_t pixel[4] = {255, 255, 255, 255};
-    nt_basisu_encode_opts_t compress = nt_tex_compress_uastc_default();
+    nt_basisu_encode_opts_t compress = ANY_COMPRESS();
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_format_canonical.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
@@ -4179,27 +4194,35 @@ void test_basis_effective_cache_and_dedup_identity(void) {
     const char *cache = TMP_DIR "/basis_identity_cache";
     MKDIR(cache);
     clean_cache_dir(cache);
+    /* Every field of every admitted codec, plus the presets whose
+     * zero thresholds exercise the signed-zero identity below. */
     nt_basisu_encode_opts_t variants[9];
-    for (uint32_t i = 0; i < 4; i++) {
-        variants[i] = nt_tex_compress_etc1s_default();
-    }
-    variants[1].etc1s.quality++;
-    variants[2].etc1s.endpoint_rdo_threshold = 2.0F;
-    variants[3].etc1s.selector_rdo_threshold = 2.0F;
-    for (uint32_t i = 4; i < 7; i++) {
-        variants[i] = nt_tex_compress_uastc_default();
-    }
-    variants[5].uastc.pack_level++;
-    variants[6].uastc.rdo_lambda = 2.0F;
-    variants[7] = nt_tex_compress_etc1s_highest();
-    variants[8] = nt_tex_compress_uastc_highest();
+    uint32_t variant_count = 0;
+#if NT_BASISU_HAS_ETC1S
+    variants[variant_count++] = nt_tex_compress_etc1s_default();
+    variants[variant_count] = nt_tex_compress_etc1s_default();
+    variants[variant_count++].etc1s.quality++;
+    variants[variant_count] = nt_tex_compress_etc1s_default();
+    variants[variant_count++].etc1s.endpoint_rdo_threshold = 2.0F;
+    variants[variant_count] = nt_tex_compress_etc1s_default();
+    variants[variant_count++].etc1s.selector_rdo_threshold = 2.0F;
+    variants[variant_count++] = nt_tex_compress_etc1s_highest();
+#endif
+#if NT_BASISU_HAS_UASTC
+    variants[variant_count++] = nt_tex_compress_uastc_default();
+    variants[variant_count] = nt_tex_compress_uastc_default();
+    variants[variant_count++].uastc.pack_level++;
+    variants[variant_count] = nt_tex_compress_uastc_default();
+    variants[variant_count++].uastc.rdo_lambda = 2.0F;
+    variants[variant_count++] = nt_tex_compress_uastc_highest();
+#endif
     const uint8_t pixel[4] = {70, 120, 190, 180};
     for (uint32_t warm = 0; warm < 2; warm++) {
         NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_identity.ntpack");
         nt_builder_set_cache_dir(ctx, cache);
         nt_builder_set_threads(ctx, 2);
         uint64_t hashes[9];
-        for (uint32_t i = 0; i < 9; i++) {
+        for (uint32_t i = 0; i < variant_count; i++) {
             nt_tex_opts_t opts = nt_tex_opts_defaults();
             opts.compress = variants[i];
             char name[32];
@@ -4210,15 +4233,11 @@ void test_basis_effective_cache_and_dedup_identity(void) {
             alias.codec = variants[i].codec;
             if (alias.codec == NT_BASISU_CODEC_ETC1S) {
                 alias.etc1s.quality = variants[i].etc1s.quality;
-                alias.etc1s.endpoint_rdo_threshold = variants[i].etc1s.endpoint_rdo_threshold;
-                alias.etc1s.selector_rdo_threshold = variants[i].etc1s.selector_rdo_threshold;
-                if (i == 7) {
-                    alias.etc1s.endpoint_rdo_threshold = -0.0F;
-                    alias.etc1s.selector_rdo_threshold = -0.0F;
-                }
+                alias.etc1s.endpoint_rdo_threshold = variants[i].etc1s.endpoint_rdo_threshold == 0.0F ? -0.0F : variants[i].etc1s.endpoint_rdo_threshold;
+                alias.etc1s.selector_rdo_threshold = variants[i].etc1s.selector_rdo_threshold == 0.0F ? -0.0F : variants[i].etc1s.selector_rdo_threshold;
             } else {
                 alias.uastc.pack_level = variants[i].uastc.pack_level;
-                alias.uastc.rdo_lambda = i == 8 ? -0.0F : variants[i].uastc.rdo_lambda;
+                alias.uastc.rdo_lambda = variants[i].uastc.rdo_lambda == 0.0F ? -0.0F : variants[i].uastc.rdo_lambda;
             }
             opts.compress = alias;
             nt_builder_add_texture_raw(ctx, pixel, 1, 1, name, &opts);
@@ -4233,13 +4252,24 @@ void test_basis_effective_cache_and_dedup_identity(void) {
             TEST_ASSERT_EQUAL_UINT64(hashes[i], nt_builder_compute_opts_hash(&ctx->pending[(2 * i) + 1]));
         }
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-        TEST_ASSERT_EQUAL_UINT32(9, ctx->early_dedup_count);
-        TEST_ASSERT_EQUAL_UINT32(warm ? 9 : 0, ctx->cache_hit_count);
-        TEST_ASSERT_EQUAL_UINT32(warm ? 0 : 9, ctx->cache_miss_count);
+        TEST_ASSERT_EQUAL_UINT32(variant_count, ctx->early_dedup_count);
+        TEST_ASSERT_EQUAL_UINT32(warm ? variant_count : 0, ctx->cache_hit_count);
+        TEST_ASSERT_EQUAL_UINT32(warm ? 0 : variant_count, ctx->cache_miss_count);
         nt_builder_free_pack(ctx);
-        TEST_ASSERT_EQUAL_UINT32(9, count_bin_files(cache));
+        TEST_ASSERT_EQUAL_UINT32(variant_count, count_bin_files(cache));
     }
 }
+
+#if !NT_BASISU_HAS_UASTC
+/* A codec whose option is OFF is refused at add time, before any cache lookup. */
+void test_codec_outside_the_build_is_refused_at_add(void) {
+    const uint8_t pixel[4] = {70, 120, 190, 180};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.compress = nt_tex_compress_uastc_default();
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/basis_admission.ntpack");
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_texture_raw(ctx, pixel, 1, 1, "pixel", &opts), "NT_BASISU_HAS_");
+}
+#endif
 
 /* CACHE-02b: Sampler defaults (filter/wrap) participate in the texture
  * opts hash. Regression for the bug where SD/HD packs with different
@@ -9509,6 +9539,9 @@ int main(void) {
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
     RUN_TEST(test_basis_effective_cache_and_dedup_identity);
+#if !NT_BASISU_HAS_UASTC
+    RUN_TEST(test_codec_outside_the_build_is_refused_at_add);
+#endif
     RUN_TEST(test_cache_filter_wrap_in_opts_hash);
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);
