@@ -355,6 +355,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(NOT EMSCRIPTEN)
         # Declared before tests/ so NT_TEST_ACCESS_LIBS can gate the builder's test surface.
         add_subdirectory(tools/builder)
+        add_subdirectory(tools/research/anim_layout)
         add_subdirectory(tools/research/hash_benchmark)
         add_subdirectory(tools/research/atlas_bench)
     endif()
