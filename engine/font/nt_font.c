@@ -12,6 +12,7 @@
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 #include "nt_font_format.h"
+#include "nt_half.h"
 #include "nt_pack_format.h"
 #include "pool/nt_pool.h"
 #include "resource/nt_resource.h"
@@ -485,12 +486,12 @@ static void generate_tofu(nt_font_slot_t *slot) {
 
         uint32_t t0 = (uint32_t)seg * 2 * 4;
         uint32_t t1 = t0 + 4;
-        s_curve_upload[t0 + 0] = nt_float32_to_float16(p0x);
-        s_curve_upload[t0 + 1] = nt_float32_to_float16(p0y);
-        s_curve_upload[t0 + 2] = nt_float32_to_float16(p1x);
-        s_curve_upload[t0 + 3] = nt_float32_to_float16(p1y);
-        s_curve_upload[t1 + 0] = nt_float32_to_float16(p2x);
-        s_curve_upload[t1 + 1] = nt_float32_to_float16(p2y);
+        s_curve_upload[t0 + 0] = nt_f32_to_f16(p0x);
+        s_curve_upload[t0 + 1] = nt_f32_to_f16(p0y);
+        s_curve_upload[t0 + 2] = nt_f32_to_f16(p1x);
+        s_curve_upload[t0 + 3] = nt_f32_to_f16(p1y);
+        s_curve_upload[t1 + 0] = nt_f32_to_f16(p2x);
+        s_curve_upload[t1 + 1] = nt_f32_to_f16(p2y);
         s_curve_upload[t1 + 2] = 0;
         s_curve_upload[t1 + 3] = 0;
     }
@@ -1451,12 +1452,12 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
             uint16_t ci = band_sorted[i];
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
-            s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
-            s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
-            s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
-            s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
-            s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
-            s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+            s_curve_upload[t0 + 0] = nt_f32_to_f16(curves[ci].p0x);
+            s_curve_upload[t0 + 1] = nt_f32_to_f16(curves[ci].p0y);
+            s_curve_upload[t0 + 2] = nt_f32_to_f16(curves[ci].p1x);
+            s_curve_upload[t0 + 3] = nt_f32_to_f16(curves[ci].p1y);
+            s_curve_upload[t1 + 0] = nt_f32_to_f16(curves[ci].p2x);
+            s_curve_upload[t1 + 1] = nt_f32_to_f16(curves[ci].p2y);
             s_curve_upload[t1 + 2] = 0;
             s_curve_upload[t1 + 3] = 0;
             local_pos += 2;
@@ -1495,12 +1496,12 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
                 uint16_t ci = band_sorted[i];
                 uint32_t t0 = local_pos * 4;
                 uint32_t t1 = t0 + 4;
-                s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
-                s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
-                s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
-                s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
-                s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
-                s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+                s_curve_upload[t0 + 0] = nt_f32_to_f16(curves[ci].p0x);
+                s_curve_upload[t0 + 1] = nt_f32_to_f16(curves[ci].p0y);
+                s_curve_upload[t0 + 2] = nt_f32_to_f16(curves[ci].p1x);
+                s_curve_upload[t0 + 3] = nt_f32_to_f16(curves[ci].p1y);
+                s_curve_upload[t1 + 0] = nt_f32_to_f16(curves[ci].p2x);
+                s_curve_upload[t1 + 1] = nt_f32_to_f16(curves[ci].p2y);
                 s_curve_upload[t1 + 2] = 0;
                 s_curve_upload[t1 + 3] = 0;
                 local_pos += 2;

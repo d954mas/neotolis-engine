@@ -3,6 +3,7 @@
 
 #include "log/nt_log.h"
 #include "nt_builder.h"
+#include "nt_half.h"
 #include "nt_pack_format.h"
 
 #include <stdatomic.h>
@@ -314,7 +315,6 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
 
 /* Hash and path utilities (declared early -- used by inline functions below) */
 char *nt_builder_normalize_path(const char *path);
-uint16_t nt_builder_float32_to_float16(float value);
 
 /* Shared type conversion: float -> target stream type (float16, int8, uint8, int16, uint16) */
 static inline float nt_builder_clampf(float v, float lo, float hi) {
@@ -336,7 +336,7 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
     case NT_STREAM_FLOAT16: {
         NT_BUILD_ASSERT((value <= 65504.0F && value >= -65504.0F) && "float16 overflow -- value exceeds +-65504, use FLOAT32 for this stream");
-        uint16_t h = nt_builder_float32_to_float16(value);
+        uint16_t h = nt_f32_to_f16(value);
         memcpy(out_ptr, &h, sizeof(uint16_t));
         break;
     }

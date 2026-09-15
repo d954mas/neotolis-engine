@@ -49,6 +49,21 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_nt_color COMMAND test_nt_color)
 
+    # --- Float16 tests (header-only nt_half.h; no lib, just the shared include root) ---
+    add_executable(test_half unit/test_half.c)
+    target_link_libraries(test_half PRIVATE unity)
+    # The test uses ldexpf/fabsf; standalone (no engine lib), so GNU ld needs libm explicitly (Windows has it in the CRT).
+    if(NOT WIN32)
+        target_link_libraries(test_half PRIVATE m)
+    endif()
+    target_include_directories(test_half PRIVATE "${CMAKE_SOURCE_DIR}/shared/include")
+    nt_set_warning_flags(test_half)
+    nt_set_sanitizer_flags(test_half)
+    set_target_properties(test_half PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_half COMMAND test_half)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
