@@ -122,7 +122,7 @@ static inline void nt_anim_mat34_from_trs(const nt_anim_trs_t *trs, nt_anim_mat3
 /* out = a*b, both read as affine 4x4 with the implicit row [0 0 0 1].
  * out must alias neither a nor b. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *a, const nt_anim_mat34_t *b, nt_anim_mat34_t *out) {
+static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *restrict a, const nt_anim_mat34_t *restrict b, nt_anim_mat34_t *restrict out) {
     NT_ASSERT(a != NULL);
     NT_ASSERT(b != NULL);
     NT_ASSERT(out != NULL);
@@ -156,7 +156,7 @@ void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out);
  * inside it, so every in-range parent is either in the range or is
  * parent[first]. Precondition, not guarded because it is unverifiable: when
  * parent[first] != NT_ANIM_NO_PARENT, model[parent[first]] is already current. */
-void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_anim_mat34_t *model, uint16_t first, uint16_t count);
+void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *restrict local, nt_anim_mat34_t *restrict model, uint16_t first, uint16_t count);
 
 /* out = E * G[j] * socket_local, where E (world) is a cglm column-major mat4
  * mapping skeleton space to world. out must not alias g_joint. */
@@ -195,7 +195,7 @@ typedef struct {
  *
  * No rig-id argument: the game asserts binding/skeleton compatibility once when
  * it pairs them, not on every frame. */
-void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *model, uint16_t model_count, nt_anim_mat34_t *out, uint16_t capacity);
+void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *restrict model, uint16_t model_count, nt_anim_mat34_t *restrict out, uint16_t capacity);
 // #endregion
 
 /* Bytes the rig identity hashes over: 8 header + 46 per joint. */

@@ -49,7 +49,7 @@ void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_anim_mat34_t *model, uint16_t first, uint16_t count) {
+void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *restrict local, nt_anim_mat34_t *restrict model, uint16_t first, uint16_t count) {
     NT_ASSERT(skel != NULL);
     NT_ASSERT(skel->parent != NULL);
     NT_ASSERT(skel->subtree_end != NULL);
@@ -107,7 +107,7 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
 // #region skin
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *model, uint16_t model_count, nt_anim_mat34_t *out, uint16_t capacity) {
+void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *restrict model, uint16_t model_count, nt_anim_mat34_t *restrict out, uint16_t capacity) {
     NT_ASSERT(binding != NULL);
     NT_ASSERT(binding->remap != NULL);
     NT_ASSERT(binding->inverse_bind != NULL);
