@@ -142,6 +142,37 @@ void test_shared_joint_matches_in_both_bindings(void) {
     TEST_ASSERT_EQUAL_UINT16(JOINT_HAND, g_b.remap[HAND_ENTRY_B]);
     /* Same inputs through the same kernel: bit-identical, not just close. */
     TEST_ASSERT_EQUAL_MEMORY(&palette_a[HAND_ENTRY_A], &palette_b[HAND_ENTRY_B], sizeof(nt_anim_mat34_t));
+
+    /* Equal to each other proves nothing unless both are also the right matrix. */
+    mat4 ref_pose[ANIM_RIG_JOINT_COUNT];
+    ref_fk(local, ref_pose);
+    mat4 ref_bind[ANIM_RIG_JOINT_COUNT];
+    ref_fk(g_rig.bind, ref_bind);
+
+    mat4 inv;
+    glm_mat4_inv(ref_bind[JOINT_HAND], inv);
+    mat4 expected;
+    glm_mat4_mul(ref_pose[JOINT_HAND], inv, expected);
+
+    assert_mat34_equals_mat4(&palette_a[HAND_ENTRY_A], expected, 1e-5F);
+    assert_mat34_equals_mat4(&palette_b[HAND_ENTRY_B], expected, 1e-5F);
+}
+
+/* An empty binding is a legal binding: it writes nothing and must not trap. */
+void test_empty_palette_writes_nothing(void) {
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    nt_anim_mat34_t out[1];
+    memset(out, 0x5A, sizeof(out));
+    nt_anim_mat34_t poison[1];
+    memset(poison, 0x5A, sizeof(poison));
+
+    nt_skin_binding_t empty = g_a;
+    empty.palette_count = 0;
+    nt_skin_palette_build(&empty, model, ANIM_RIG_JOINT_COUNT, out, 0);
+
+    TEST_ASSERT_EQUAL_MEMORY(poison, out, sizeof(out));
 }
 
 void test_palette_matches_cglm_reference(void) {
@@ -175,6 +206,7 @@ void test_palette_matches_cglm_reference(void) {
 
 /* ---- Contracts ---- */
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 void test_palette_build_traps_on_small_capacity(void) {
     nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
     nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
@@ -182,6 +214,16 @@ void test_palette_build_traps_on_small_capacity(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_skin_palette_build(&g_a, model, ANIM_RIG_JOINT_COUNT, palette, ANIM_RIG_PALETTE_A_COUNT - 1));
 }
+
+/* Writing the palette into the model pose would feed later entries their own
+ * output; the range guard is per call, not per entry. */
+void test_palette_build_traps_on_overlapping_output(void) {
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, g_rig.bind, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    NT_TEST_EXPECT_ASSERT(nt_skin_palette_build(&g_a, model, ANIM_RIG_JOINT_COUNT, &model[1], ANIM_RIG_PALETTE_A_COUNT));
+}
+#endif
 
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
 void test_palette_build_traps_on_out_of_range_remap(void) {
@@ -208,8 +250,12 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_palette_at_bind_pose_is_identity);
     RUN_TEST(test_shared_joint_matches_in_both_bindings);
+    RUN_TEST(test_empty_palette_writes_nothing);
     RUN_TEST(test_palette_matches_cglm_reference);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_palette_build_traps_on_small_capacity);
+    RUN_TEST(test_palette_build_traps_on_overlapping_output);
+#endif
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
     RUN_TEST(test_palette_build_traps_on_out_of_range_remap);
 #endif

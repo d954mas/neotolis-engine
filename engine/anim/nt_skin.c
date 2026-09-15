@@ -8,6 +8,7 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34
     NT_ASSERT(model != NULL);
     NT_ASSERT(out != NULL);
     NT_ASSERT(binding->palette_count <= capacity);
+    NT_ASSERT(out + binding->palette_count <= model || model + model_count <= out);
 
 /* NT_ASSERT_OFF does not evaluate its expression, so a check loop left behind
  * there would only warn as dead code. */

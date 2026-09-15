@@ -22,7 +22,7 @@
 /* Immutable borrowed view (same ownership contract as nt_anim_skeleton_t): the
  * owner built the arrays, keeps them alive and unchanged until it republishes
  * or destroys them, and kernels neither store nor free them. Both arrays are
- * non-NULL and hold palette_count entries when palette_count > 0. */
+ * non-NULL and hold palette_count entries. */
 typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *remap;               /* palette entry p -> skeleton joint */
@@ -34,9 +34,11 @@ typedef struct {
  *
  * model is the caller's model-pose buffer of model_count joints and out the
  * caller's palette buffer of capacity entries; out must not overlap model.
- * Unconditional per-call contract: palette_count <= capacity. Under
- * NT_ANIM_CHECKS the per-element contract remap[p] < model_count is asserted
- * too; the builder validates that data, so release builds trust it.
+ * Unconditional per-call contracts: palette_count <= capacity, and out does not
+ * overlap model. Under NT_ANIM_CHECKS the per-element contract
+ * remap[p] < model_count is asserted too. The skin binding activator rejects
+ * remap[p] >= joint_count before publishing a view, so release builds trust the
+ * data; until that activator exists, hand-built bindings are unvalidated.
  *
  * No rig-id argument: the game asserts binding/skeleton compatibility once when
  * it pairs them, not on every frame. */

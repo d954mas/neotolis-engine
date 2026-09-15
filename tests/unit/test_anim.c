@@ -146,6 +146,24 @@ void test_mat34_from_mat4_takes_top_three_rows(void) {
     assert_mat34_equals_mat4(&m, ref, 0.0F);
 }
 
+/* The fourth row of the mat4 is the implicit [0 0 0 1] and must never be read. */
+void test_mat34_from_mat4_ignores_the_fourth_row(void) {
+    nt_anim_trs_t a = make_trs(4.0F, -2.0F, 0.5F, 1.0F, 0.0F, 0.0F, 63.0F, 0.75F, 1.0F, 1.25F);
+    mat4 ref;
+    ref_mat4_from_trs(&a, ref);
+
+    float junk[16];
+    memcpy(junk, ref, sizeof(junk));
+    junk[3] = 7.5F;
+    junk[7] = -13.0F;
+    junk[11] = 0.25F;
+    junk[15] = -4.0F;
+
+    nt_anim_mat34_t m;
+    nt_anim_mat34_from_mat4(junk, &m);
+    assert_mat34_equals_mat4(&m, ref, 0.0F);
+}
+
 /* ---- FK ---- */
 
 void test_fk_full_rig_matches_cglm_chain(void) {
@@ -247,6 +265,7 @@ void test_fk_whole_subtree_range_is_valid(void) {
     TEST_ASSERT_EQUAL_MEMORY(model, again, sizeof(model));
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 void test_fk_traps_on_invalid_ranges(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));
@@ -257,6 +276,7 @@ void test_fk_traps_on_invalid_ranges(void) {
     /* [3, 6) leaves arm's subtree, which ends at 5. */
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, JOINT_ARM, 3));
 }
+#endif
 
 /* ---- Rest pose ---- */
 
@@ -273,7 +293,19 @@ void test_pose_rest_then_fk_matches_fk_over_rest(void) {
     TEST_ASSERT_EQUAL_MEMORY(direct, copied, sizeof(direct));
 }
 
-void test_pose_rest_traps_on_self_copy(void) { NT_TEST_EXPECT_ASSERT(nt_anim_pose_rest(&g_rig.skel, (nt_anim_trs_t *)g_rig.skel.rest)); }
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+void test_pose_rest_traps_on_overlap(void) {
+    NT_TEST_EXPECT_ASSERT(nt_anim_pose_rest(&g_rig.skel, (nt_anim_trs_t *)g_rig.skel.rest));
+
+    /* Shifted by one joint inside one buffer: still overlapping, so memcpy would
+     * read joints it had already written. */
+    nt_anim_trs_t shared[ANIM_RIG_JOINT_COUNT + 1];
+    memcpy(&shared[1], g_rig.skel.rest, (size_t)ANIM_RIG_JOINT_COUNT * sizeof(nt_anim_trs_t));
+    nt_anim_skeleton_t overlapping = g_rig.skel;
+    overlapping.rest = &shared[1];
+    NT_TEST_EXPECT_ASSERT(nt_anim_pose_rest(&overlapping, &shared[0]));
+}
+#endif
 
 /* ---- Sockets ---- */
 
@@ -398,6 +430,53 @@ void test_rig_compat_id_ignores_quaternion_sign(void) {
     TEST_ASSERT_EQUAL_HEX64(id, vector_rig_id(&rig));
 }
 
+/* The tie rule picks the FIRST maximum in x, y, z, w order, so a |z| == |w| tie
+ * is decided by z's sign and w takes the flip. */
+void test_rig_compat_id_tie_break_follows_the_earlier_component(void) {
+    /* header 8 + joint 0's 46 + joint 1's id 4 + parent 2 + t 12. */
+    enum { JOINT1_Q_OFFSET = 8 + 46 + 4 + 2 + 12 };
+    static const uint8_t expected_q[16] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* x, y = 0 */
+        0xF3, 0x04, 0x35, 0x3F,                         /* z = +0.70710678 */
+        0xF3, 0x04, 0x35, 0xBF,                         /* w = -0.70710678 */
+    };
+
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    rig.rest[1].q[2] = -0.70710678F;
+    rig.rest[1].q[3] = 0.70710678F;
+
+    uint8_t scratch[RIG_VECTOR_BYTES];
+    (void)nt_anim_rig_compat_id(&rig.skel, scratch, (uint32_t)sizeof(scratch));
+
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_q, &scratch[JOINT1_Q_OFFSET], sizeof(expected_q));
+}
+
+/* An identity quaternion written as (0, 0, 0, -1) is the same rotation; the -0
+ * the flip produces in x, y, z must canonicalize away too. */
+void test_rig_compat_id_ignores_negated_identity_quaternion(void) {
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    const uint64_t id = vector_rig_id(&rig);
+
+    rig.rest[0].q[3] = -1.0F;
+    TEST_ASSERT_EQUAL_HEX64(id, vector_rig_id(&rig));
+}
+
+void test_rig_compat_id_of_an_empty_rig_is_the_header(void) {
+    static const uint8_t header[8] = {0x4E, 0x52, 0x49, 0x47, 0x01, 0x01, 0x00, 0x00};
+
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    rig.skel.joint_count = 0;
+
+    uint8_t scratch[8];
+    const nt_hash64_t id = nt_anim_rig_compat_id(&rig.skel, scratch, (uint32_t)sizeof(scratch));
+
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(header, scratch, sizeof(header));
+    TEST_ASSERT_EQUAL_HEX64(nt_hash64(header, sizeof(header)).value, id.value);
+}
+
 void test_rig_compat_id_ignores_negative_zero(void) {
     vector_rig_t rig;
     make_vector_rig(&rig);
@@ -433,6 +512,7 @@ void test_rig_compat_id_changes_with_the_rig(void) {
     TEST_ASSERT_NOT_EQUAL_UINT64(id, vector_rig_id(&rig));
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 void test_rig_compat_id_traps_on_small_scratch(void) {
     vector_rig_t rig;
     make_vector_rig(&rig);
@@ -440,10 +520,11 @@ void test_rig_compat_id_traps_on_small_scratch(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_anim_rig_compat_id(&rig.skel, scratch, RIG_VECTOR_BYTES - 1));
 }
+#endif
 
 /* ---- Per-element checks ---- */
 
-#if NT_ANIM_CHECKS
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
 void test_fk_traps_on_non_finite_translation(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));
@@ -464,6 +545,49 @@ void test_fk_traps_on_non_unit_quaternion(void) {
     local[JOINT_HELPER].q[3] = 2.0F;
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT));
 }
+
+/* Preorder is what lets FK write model[j] while it reads model[parent[j]]. */
+void test_fk_traps_on_forward_parent(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+
+    uint16_t parent[ANIM_RIG_JOINT_COUNT];
+    memcpy(parent, g_rig.skel.parent, sizeof(parent));
+    parent[JOINT_ARM] = JOINT_HAND;
+
+    nt_anim_skeleton_t broken = g_rig.skel;
+    broken.parent = parent;
+    NT_TEST_EXPECT_ASSERT(nt_anim_fk(&broken, local, model, 0, ANIM_RIG_JOINT_COUNT));
+}
+
+void test_mat34_mul_traps_on_alias(void) {
+    nt_anim_trs_t a = make_trs(0.3F, -1.2F, 2.0F, 0.0F, 1.0F, 0.0F, 37.0F, 1.0F, 2.5F, 0.4F);
+    nt_anim_mat34_t ma;
+    nt_anim_mat34_from_trs(&a, &ma);
+    nt_anim_mat34_t mb;
+    nt_anim_mat34_from_trs(&a, &mb);
+
+    NT_TEST_EXPECT_ASSERT(nt_anim_mat34_mul(&ma, &mb, &ma));
+    NT_TEST_EXPECT_ASSERT(nt_anim_mat34_mul(&ma, &mb, &mb));
+}
+
+void test_socket_traps_on_non_unit_quaternion(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    nt_anim_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.0F, 1.0F, 1.0F);
+    mat4 world;
+    ref_mat4_from_trs(&world_trs, world);
+
+    nt_anim_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
+    socket_local.q[3] = 2.0F;
+
+    nt_anim_mat34_t out;
+    NT_TEST_EXPECT_ASSERT(nt_anim_socket((const float *)world, &model[JOINT_HAND], &socket_local, &out));
+}
 #endif
 
 int main(void) {
@@ -472,24 +596,33 @@ int main(void) {
     RUN_TEST(test_mat34_from_trs_matches_cglm);
     RUN_TEST(test_mat34_mul_matches_cglm);
     RUN_TEST(test_mat34_from_mat4_takes_top_three_rows);
+    RUN_TEST(test_mat34_from_mat4_ignores_the_fourth_row);
     RUN_TEST(test_fk_full_rig_matches_cglm_chain);
     RUN_TEST(test_fk_transforms_points_as_column_vectors);
     RUN_TEST(test_fk_subtree_matches_full_pass);
     RUN_TEST(test_fk_root_spanning_range_equals_per_root_ranges);
     RUN_TEST(test_fk_whole_subtree_range_is_valid);
-    RUN_TEST(test_fk_traps_on_invalid_ranges);
     RUN_TEST(test_pose_rest_then_fk_matches_fk_over_rest);
-    RUN_TEST(test_pose_rest_traps_on_self_copy);
     RUN_TEST(test_socket_matches_cglm_composition);
     RUN_TEST(test_rig_compat_id_size);
     RUN_TEST(test_rig_compat_id_published_vector);
     RUN_TEST(test_rig_compat_id_ignores_quaternion_sign);
+    RUN_TEST(test_rig_compat_id_tie_break_follows_the_earlier_component);
+    RUN_TEST(test_rig_compat_id_ignores_negated_identity_quaternion);
+    RUN_TEST(test_rig_compat_id_of_an_empty_rig_is_the_header);
     RUN_TEST(test_rig_compat_id_ignores_negative_zero);
     RUN_TEST(test_rig_compat_id_changes_with_the_rig);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_fk_traps_on_invalid_ranges);
+    RUN_TEST(test_pose_rest_traps_on_overlap);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
-#if NT_ANIM_CHECKS
+#endif
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
     RUN_TEST(test_fk_traps_on_non_finite_translation);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);
+    RUN_TEST(test_fk_traps_on_forward_parent);
+    RUN_TEST(test_mat34_mul_traps_on_alias);
+    RUN_TEST(test_socket_traps_on_non_unit_quaternion);
 #endif
     return UNITY_END();
 }

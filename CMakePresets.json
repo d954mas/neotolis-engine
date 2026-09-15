@@ -165,6 +165,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
                 "NT_ASSERT_MODE": "2",
+                "NT_ANIM_CHECKS": "1",
                 "NT_BUILD_TESTS": "ON",
                 "NT_UI_DEBUG_TOOLS": "ON",
                 "NT_LOG_RING_ENABLED": "ON",

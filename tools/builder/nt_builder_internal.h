@@ -335,6 +335,7 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
         break;
     }
     case NT_STREAM_FLOAT16: {
+        /* Assert, not clamp: nt_f32_to_f16 saturates to Inf above 65504. */
         NT_BUILD_ASSERT((value <= 65504.0F && value >= -65504.0F) && "float16 overflow -- value exceeds +-65504, use FLOAT32 for this stream");
         uint16_t h = nt_f32_to_f16(value);
         memcpy(out_ptr, &h, sizeof(uint16_t));

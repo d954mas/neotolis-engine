@@ -25,6 +25,10 @@ typedef struct {
     uint32_t frame_epoch;    /* 0 reserved */
 } nt_deformation_binding_t;
 
+/* C++ spells this differently and GCC rejects the C keyword there; the ABI is
+ * pinned by the C build every consumer shares. */
+#ifndef __cplusplus
 _Static_assert(sizeof(nt_deformation_binding_t) == 20, "deformation binding ABI: 20 bytes");
+#endif
 
 #endif /* NT_ANIM_GPU_H */

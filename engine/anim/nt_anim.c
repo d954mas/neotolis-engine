@@ -7,23 +7,31 @@
 #if NT_ASSERT_MODE != NT_ASSERT_OFF
 #include <stdbool.h>
 
-/* x - x is 0 only for a finite x; keeps the module free of <math.h> and libm. */
+/* x - x is 0 only for a finite x; keeps the module free of <math.h> and libm.
+ * It relies on strict IEEE semantics: -ffast-math/-ffinite-math-only would fold
+ * it to true. Neither is set anywhere in this tree. */
 static bool nt_anim_is_finite(float x) { return (x - x) == 0.0F; }
 #endif
 
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void nt_anim_check_locals(const nt_anim_trs_t *local, uint16_t first, uint16_t count) {
+static void nt_anim_check_trs(const nt_anim_trs_t *l) {
+    for (int c = 0; c < 3; ++c) {
+        NT_ASSERT(nt_anim_is_finite(l->t[c]));
+        NT_ASSERT(nt_anim_is_finite(l->s[c]));
+    }
+    const float dot = (l->q[0] * l->q[0]) + (l->q[1] * l->q[1]) + (l->q[2] * l->q[2]) + (l->q[3] * l->q[3]);
+    /* Two-sided instead of fabsf: a NaN dot fails both comparisons. */
+    NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
+}
+
+/* The parent indices are checked here rather than at FK's per-call contracts:
+ * preorder is what makes model[j] safe to write while model[parent[j]] is read. */
+static void nt_anim_check_locals(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, uint16_t first, uint16_t count) {
     const uint16_t end = (uint16_t)(first + count);
     for (uint16_t j = first; j < end; ++j) {
-        const nt_anim_trs_t *l = &local[j];
-        for (int c = 0; c < 3; ++c) {
-            NT_ASSERT(nt_anim_is_finite(l->t[c]));
-            NT_ASSERT(nt_anim_is_finite(l->s[c]));
-        }
-        const float dot = (l->q[0] * l->q[0]) + (l->q[1] * l->q[1]) + (l->q[2] * l->q[2]) + (l->q[3] * l->q[3]);
-        /* Two-sided instead of fabsf: a NaN dot fails both comparisons. */
-        NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
+        NT_ASSERT(skel->parent[j] == NT_ANIM_NO_PARENT || skel->parent[j] < j);
+        nt_anim_check_trs(&local[j]);
     }
 }
 #endif
@@ -44,7 +52,7 @@ void nt_anim_pose_rest(const nt_anim_skeleton_t *skel, nt_anim_trs_t *local) {
     NT_ASSERT(skel != NULL);
     NT_ASSERT(skel->rest != NULL);
     NT_ASSERT(local != NULL);
-    NT_ASSERT(local != skel->rest);
+    NT_ASSERT(local + skel->joint_count <= skel->rest || skel->rest + skel->joint_count <= local);
 
     memcpy(local, skel->rest, (size_t)skel->joint_count * sizeof(nt_anim_trs_t));
 }
@@ -61,7 +69,7 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_a
     NT_ASSERT(skel->parent[first] == NT_ANIM_NO_PARENT || (uint32_t)first + (uint32_t)count <= (uint32_t)skel->subtree_end[first]);
 
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
-    nt_anim_check_locals(local, first, count);
+    nt_anim_check_locals(skel, local, first, count);
 #endif
 
     const uint16_t end = (uint16_t)(first + count);
@@ -85,6 +93,10 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
     NT_ASSERT(socket_local != NULL);
     NT_ASSERT(out != NULL);
     NT_ASSERT(out != g_joint);
+
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+    nt_anim_check_trs(socket_local);
+#endif
 
     nt_anim_mat34_t e;
     nt_anim_mat34_from_mat4(world, &e);

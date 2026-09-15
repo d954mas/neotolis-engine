@@ -17,6 +17,10 @@ typedef struct {
     float alpha;
 } nt_anim_bank_lookup_t;
 
+/* C++ spells this differently and GCC rejects the C keyword there; the ABI is
+ * pinned by the C build every consumer shares. */
+#ifndef __cplusplus
 _Static_assert(sizeof(nt_anim_bank_lookup_t) == 12, "bank lookup ABI: 12 bytes");
+#endif
 
 #endif /* NT_ANIM_BANK_H */

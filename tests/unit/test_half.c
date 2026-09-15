@@ -42,7 +42,24 @@ void test_f32_to_f16_subnormal_and_underflow(void) {
     TEST_ASSERT_EQUAL_HEX16(0x8000, nt_f32_to_f16(ldexpf(-1.0F, -25)));
     TEST_ASSERT_EQUAL_HEX16(0x0001, nt_f32_to_f16(ldexpf(1.0F, -24)));
     TEST_ASSERT_EQUAL_HEX16(0x03FF, nt_f32_to_f16(ldexpf(1023.0F, -24)));
+}
+
+/* The subnormal step is 2^-24, so these land on and between subnormal ties. */
+void test_f32_to_f16_subnormal_rounding(void) {
+    /* 1.5 steps: halfway between 0x0001 and 0x0002, ties to the even one up. */
+    TEST_ASSERT_EQUAL_HEX16(0x0002, nt_f32_to_f16(ldexpf(1.5F, -24)));
+    TEST_ASSERT_EQUAL_HEX16(0x8002, nt_f32_to_f16(ldexpf(-1.5F, -24)));
+    /* 1.25 steps: nearer 0x0001, no tie. */
+    TEST_ASSERT_EQUAL_HEX16(0x0001, nt_f32_to_f16(ldexpf(1.25F, -24)));
+    /* 1023.5 steps: the tie at the top of the subnormals carries into 2^-14. */
+    TEST_ASSERT_EQUAL_HEX16(0x0400, nt_f32_to_f16(ldexpf(2047.0F, -25)));
+}
+
+/* 2^-14 is the smallest normal half, not a subnormal: the boundary both
+ * directions must agree on. */
+void test_f32_to_f16_smallest_normal(void) {
     TEST_ASSERT_EQUAL_HEX16(0x0400, nt_f32_to_f16(ldexpf(1.0F, -14)));
+    TEST_ASSERT_EQUAL_HEX32(float_bits(ldexpf(1.0F, -14)), float_bits(nt_f16_to_f32(0x0400)));
 }
 
 void test_f32_to_f16_ties_to_even(void) {
@@ -65,6 +82,24 @@ void test_f32_to_f16_infinity_and_nan(void) {
     TEST_ASSERT_EQUAL_HEX16(0x7C00, neg & 0x7C00);
     TEST_ASSERT_NOT_EQUAL(0, neg & 0x03FF);
     TEST_ASSERT_EQUAL_HEX16(0x8000, neg & 0x8000);
+}
+
+void test_f16_to_f32_infinity_is_exact(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x7F800000U, float_bits(nt_f16_to_f32(0x7C00)));
+    TEST_ASSERT_EQUAL_HEX32(0xFF800000U, float_bits(nt_f16_to_f32(0xFC00)));
+}
+
+/* A signaling half NaN must widen into a quiet float NaN: a signaling one
+ * raises an invalid-operation trap on the first arithmetic that touches it. */
+void test_f16_to_f32_quiets_signaling_nan(void) {
+    const float f = nt_f16_to_f32(0x7C01);
+    TEST_ASSERT_TRUE(isnan(f));
+    TEST_ASSERT_EQUAL_HEX32(0x00400000U, float_bits(f) & 0x00400000U);
+
+    const float n = nt_f16_to_f32(0xFC01);
+    TEST_ASSERT_TRUE(isnan(n));
+    TEST_ASSERT_EQUAL_HEX32(0x00400000U, float_bits(n) & 0x00400000U);
+    TEST_ASSERT_EQUAL_HEX32(0x80000000U, float_bits(n) & 0x80000000U);
 }
 
 /* ---- float16 -> float32 known vectors ---- */
@@ -115,12 +150,13 @@ static uint16_t half_from_order(int32_t order) {
     return (uint16_t)(uint32_t)order;
 }
 
-void test_rounding_is_nearest_even(void) {
+/* Sweeps [-span, +span] and checks every result is the nearest half, ties even. */
+static void assert_nearest_even_over(float span) {
     uint32_t lcg = 0x12345678U;
     for (uint32_t n = 0; n < 4096U; n++) {
         lcg = (lcg * 1664525U) + 1013904223U;
         float unit = (float)(lcg >> 8U) / 16777216.0F;
-        float x = (unit * 140000.0F) - 70000.0F;
+        float x = ((unit * 2.0F) - 1.0F) * span;
 
         uint16_t h = nt_f32_to_f16(x);
         float r = nt_f16_to_f32(h);
@@ -143,15 +179,26 @@ void test_rounding_is_nearest_even(void) {
     }
 }
 
+void test_rounding_is_nearest_even(void) { assert_nearest_even_over(70000.0F); }
+
+/* The wide sweep almost never produces a subnormal; this range is nothing but
+ * subnormals, both signs and zero. */
+void test_rounding_is_nearest_even_near_zero(void) { assert_nearest_even_over(1e-4F); }
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_f32_to_f16_zero_and_one);
     RUN_TEST(test_f32_to_f16_overflow_saturates_to_inf);
     RUN_TEST(test_f32_to_f16_subnormal_and_underflow);
+    RUN_TEST(test_f32_to_f16_subnormal_rounding);
+    RUN_TEST(test_f32_to_f16_smallest_normal);
     RUN_TEST(test_f32_to_f16_ties_to_even);
     RUN_TEST(test_f32_to_f16_infinity_and_nan);
     RUN_TEST(test_f16_to_f32_known_vectors);
+    RUN_TEST(test_f16_to_f32_infinity_is_exact);
+    RUN_TEST(test_f16_to_f32_quiets_signaling_nan);
     RUN_TEST(test_round_trip_all_encodings);
     RUN_TEST(test_rounding_is_nearest_even);
+    RUN_TEST(test_rounding_is_nearest_even_near_zero);
     return UNITY_END();
 }

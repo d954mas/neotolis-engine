@@ -57,12 +57,7 @@ if(NOT EMSCRIPTEN)
         target_link_libraries(test_half PRIVATE m)
     endif()
     target_include_directories(test_half PRIVATE "${CMAKE_SOURCE_DIR}/shared/include")
-    nt_set_warning_flags(test_half)
-    nt_set_sanitizer_flags(test_half)
-    set_target_properties(test_half PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_half COMMAND test_half)
+    nt_setup_test_target(test_half)
 
     # --- Skeletal animation kernels (pose ABI, 3x4 math, FK, sockets) ---
     # nt_math is the independent cglm reference path of the test, not a nt_anim

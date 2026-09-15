@@ -56,7 +56,8 @@ static inline uint16_t nt_f32_to_f16(float value) {
     return (uint16_t)(sign | result);
 }
 
-/* Exact for every encoding: every binary16 value is representable in binary32. */
+/* Exact for every finite and infinite encoding: every such binary16 value is
+ * representable in binary32. NaN payloads are widened and quieted. */
 static inline float nt_f16_to_f32(uint16_t h) {
     uint32_t sign = ((uint32_t)h & 0x8000U) << 16;
     uint32_t exponent = ((uint32_t)h >> 10) & 0x1FU;
@@ -81,7 +82,9 @@ static inline float nt_f16_to_f32(uint16_t h) {
             conv.u = sign | ((113U - shift) << 23) | ((mantissa & 0x03FFU) << 13);
         }
     } else if (exponent == 0x1FU) {
-        conv.u = sign | 0x7F800000U | (mantissa << 13);
+        /* A signaling half NaN must not widen into a signaling float NaN: set the
+         * quiet bit on any payload. Inf (mantissa 0) stays exact. */
+        conv.u = sign | 0x7F800000U | (mantissa << 13) | ((mantissa != 0U) ? 0x00400000U : 0U);
     } else {
         conv.u = sign | ((exponent + 112U) << 23) | (mantissa << 13);
     }

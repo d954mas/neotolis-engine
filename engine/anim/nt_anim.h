@@ -32,11 +32,15 @@ typedef struct {
     float s[3];
 } nt_anim_trs_t;
 
+/* C++ spells these differently and GCC rejects the C keywords there; the ABI is
+ * pinned by the C build every consumer shares. */
+#ifndef __cplusplus
 _Static_assert(sizeof(nt_anim_trs_t) == 40, "pose ABI: nt_anim_trs_t is 40 bytes");
 _Static_assert(offsetof(nt_anim_trs_t, t) == 0, "pose ABI: t at offset 0");
 _Static_assert(offsetof(nt_anim_trs_t, q) == 12, "pose ABI: q at offset 12");
 _Static_assert(offsetof(nt_anim_trs_t, s) == 28, "pose ABI: s at offset 28");
 _Static_assert(_Alignof(nt_anim_trs_t) == 4, "pose ABI: alignment 4");
+#endif
 
 /* Affine 3x4, column-vector convention, rows [m_r0 m_r1 m_r2 m_r3]:
  * r[i][3] is translation. Preserves the shear that hierarchical TRS produces. */
@@ -44,7 +48,9 @@ typedef struct {
     float r[3][4];
 } nt_anim_mat34_t;
 
+#ifndef __cplusplus
 _Static_assert(sizeof(nt_anim_mat34_t) == 48, "pose ABI: nt_anim_mat34_t is 48 bytes");
+#endif
 
 #define NT_ANIM_NO_PARENT UINT16_MAX
 
@@ -57,8 +63,7 @@ _Static_assert(sizeof(nt_anim_mat34_t) == 48, "pose ABI: nt_anim_mat34_t is 48 b
  * (a skeleton activator or a test fixture); it keeps them alive and unchanged
  * until it republishes or destroys them. Kernels read the view for the
  * duration of the call and never store the pointer, so the caller frees
- * nothing here. Every array is non-NULL and holds joint_count entries when
- * joint_count > 0. */
+ * nothing here. Every array is non-NULL and holds joint_count entries. */
 typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *parent;      /* NT_ANIM_NO_PARENT = root; parent[j] < j (preorder) */
@@ -116,7 +121,11 @@ static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *a, const nt_anim_mat
     NT_ASSERT(a != NULL);
     NT_ASSERT(b != NULL);
     NT_ASSERT(out != NULL);
+/* Unlike the NULL checks, this one does not fold away: it runs per joint and
+ * per palette entry, so it is a checked-build contract. */
+#if NT_ANIM_CHECKS
     NT_ASSERT(out != a && out != b);
+#endif
 
     for (int i = 0; i < 3; ++i) {
         const float a0 = a->r[i][0];
@@ -134,7 +143,7 @@ static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *a, const nt_anim_mat
 void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out);
 
 /* Copies the rest pose into the caller's local buffer of joint_count entries.
- * local is caller-owned and must not be skel->rest. */
+ * local is caller-owned and must not overlap skel->rest. */
 void nt_anim_pose_rest(const nt_anim_skeleton_t *skel, nt_anim_trs_t *local);
 
 /* Forward kinematics over [first, first + count): model[j] = model[parent[j]] *
@@ -154,6 +163,9 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
 
 /* Bytes the rig identity hashes over: 8 header + 46 per joint. */
 uint32_t nt_anim_rig_compat_id_size(uint16_t joint_count);
+
+/* 46 B per joint is 3 MB at UINT16_MAX joints: the scratch belongs on the heap
+ * or in a sized pool, never on the WASM stack or in the frame scratch arena. */
 
 /* rig_compat_id of the skeleton: hash64 over the canonical little-endian byte
  * schema (tag "NRIG", schema version, convention id, joint count, then per
