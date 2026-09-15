@@ -218,9 +218,12 @@ function expectTexel(sample: number, expected: number[], tolerance: number, labe
 
 // The RGBA fixture is 128x128: left half (200,40,40,255), right half (40,40,200,128). Levels 0 and 3
 // sample texel (0,0) inside the left half; the 1x1 level 7 is the linear average of both halves.
-// Compressed targets approximate solid blocks, hence the tolerances.
+// Compressed targets approximate solid blocks, hence the tolerances: the level-3 corner measures
+// 13 off in red for UASTC through ASTC (the codec's own content, not a transcode) under SwiftShader,
+// so 16 keeps every real target while a channel swap, a flip or a wrong level still miss by 100+.
 const FIXTURE_LEFT = [200, 40, 40, 255];
 const FIXTURE_AVERAGE = [120, 40, 120, 191];
+const FIXTURE_TOLERANCE = 16;
 
 async function checkBasisFixture(page: Page, label: string): Promise<{ corner: number; middle: number; last: number }> {
   await page.waitForFunction(() => window.__nt!.basis_ready(), null, { timeout: 30_000 });
@@ -236,8 +239,8 @@ async function checkBasisFixture(page: Page, label: string): Promise<{ corner: n
   console.log(`[basis ${label}] caps=${caps} build_targets=${buildTargets} codec=${codec} format=${format} rgb_format=${rgbFormat} corner=0x${corner.toString(16)} middle=0x${middle.toString(16)} last=0x${last.toString(16)}`);
   expect(format, `${label}: transcode target for caps ${caps}, build targets ${buildTargets} and codec ${codec}`).toBe(expectedBasisFormat(caps, buildTargets, true, codec));
   expect(rgbFormat, `${label}: opaque transcode target for caps ${caps}, build targets ${buildTargets} and codec ${codec}`).toBe(expectedBasisFormat(caps, buildTargets, false, codec));
-  expectTexel(corner, FIXTURE_LEFT, 12, `${label}: level-0 corner texel`);
-  expectTexel(middle, FIXTURE_LEFT, 12, `${label}: level-3 corner texel`);
+  expectTexel(corner, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-0 corner texel`);
+  expectTexel(middle, FIXTURE_LEFT, FIXTURE_TOLERANCE, `${label}: level-3 corner texel`);
   expectTexel(last, FIXTURE_AVERAGE, 20, `${label}: 1x1 last level`);
   return { corner, middle, last };
 }
