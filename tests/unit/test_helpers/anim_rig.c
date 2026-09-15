@@ -5,7 +5,8 @@
 
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
-#include "math/nt_math.h"
+
+#include "unity.h"
 
 static const char *const s_names[ANIM_RIG_JOINT_COUNT] = {"root_a", "spine", "helper", "arm", "hand", "leg", "root_b", "tail1", "tail2"};
 
@@ -31,7 +32,7 @@ static void set_trs(nt_anim_trs_t *o, float tx, float ty, float tz) {
     o->s[2] = 1.0F;
 }
 
-static void set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees) {
+void anim_rig_set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees) {
     const float half = (degrees * 0.5F) * k_deg_to_rad;
     const float sn = sinf(half);
     o->q[0] = ax * sn;
@@ -54,19 +55,19 @@ void anim_rig_asymmetric(anim_rig_t *out) {
     }
 
     set_trs(&out->rest[0], 0.0F, 1.0F, 0.0F);
-    set_axis_angle(&out->rest[0], 0.0F, 1.0F, 0.0F, 30.0F);
+    anim_rig_set_axis_angle(&out->rest[0], 0.0F, 1.0F, 0.0F, 30.0F);
     set_trs(&out->rest[1], 0.0F, 0.5F, 0.0F);
     set_scale(&out->rest[1], 1.0F, 1.2F, 1.0F);
     set_trs(&out->rest[2], 0.1F, 0.0F, 0.0F);
-    set_axis_angle(&out->rest[2], 0.0F, 0.0F, 1.0F, 90.0F);
+    anim_rig_set_axis_angle(&out->rest[2], 0.0F, 0.0F, 1.0F, 90.0F);
     /* Nonuniform scale under a 90 deg rotation: T*R*S and T*S*R differ here. */
     set_scale(&out->rest[2], 1.0F, 1.3F, 0.7F);
     set_trs(&out->rest[3], 0.0F, 0.4F, 0.0F);
     set_trs(&out->rest[4], 0.0F, 0.3F, 0.0F);
-    set_axis_angle(&out->rest[4], 1.0F, 0.0F, 0.0F, 45.0F);
+    anim_rig_set_axis_angle(&out->rest[4], 1.0F, 0.0F, 0.0F, 45.0F);
     set_trs(&out->rest[5], -0.2F, -0.5F, 0.0F);
     set_trs(&out->rest[6], 2.0F, 0.0F, 0.0F);
-    set_axis_angle(&out->rest[6], 0.0F, 0.0F, 1.0F, 180.0F);
+    anim_rig_set_axis_angle(&out->rest[6], 0.0F, 0.0F, 1.0F, 180.0F);
     set_trs(&out->rest[7], 0.0F, 0.0F, 0.3F);
     set_scale(&out->rest[7], 0.5F, 0.5F, 0.5F);
     set_trs(&out->rest[8], 0.0F, 0.0F, 0.3F);
@@ -74,9 +75,9 @@ void anim_rig_asymmetric(anim_rig_t *out) {
     /* Bind replaces the local rotation of arm, hand and tail1 so that the bind
      * pose is not the rest pose and its inverse binds are not identities. */
     memcpy(out->bind, out->rest, sizeof(out->bind));
-    set_axis_angle(&out->bind[3], 0.0F, 0.0F, 1.0F, -60.0F);
-    set_axis_angle(&out->bind[4], 0.0F, 1.0F, 0.0F, 20.0F);
-    set_axis_angle(&out->bind[7], 1.0F, 0.0F, 0.0F, 30.0F);
+    anim_rig_set_axis_angle(&out->bind[3], 0.0F, 0.0F, 1.0F, -60.0F);
+    anim_rig_set_axis_angle(&out->bind[4], 0.0F, 1.0F, 0.0F, 20.0F);
+    anim_rig_set_axis_angle(&out->bind[7], 1.0F, 0.0F, 0.0F, 30.0F);
 
     out->skel.parent = s_parent;
     out->skel.subtree_end = s_subtree_end;
@@ -86,33 +87,39 @@ void anim_rig_asymmetric(anim_rig_t *out) {
     out->skel.rig_compat_id = nt_anim_rig_compat_id(&out->skel, out->rig_scratch, (uint32_t)sizeof(out->rig_scratch));
 }
 
-/* cglm reference FK: the inverse binds must not come from the kernel they are
- * later used to verify. */
-static void ref_mat4_from_trs(const nt_anim_trs_t *trs, mat4 out) {
-    vec3 t = {trs->t[0], trs->t[1], trs->t[2]};
-    versor q = {trs->q[0], trs->q[1], trs->q[2], trs->q[3]};
-    vec3 s = {trs->s[0], trs->s[1], trs->s[2]};
-
+/* cglm reference path: the kernels under test must never be verified against
+ * themselves, and the inverse binds must not come from them either. */
+void anim_rig_ref_mat4_from_trs(nt_anim_trs_t *trs, mat4 out) {
     mat4 mt;
-    glm_translate_make(mt, t);
+    glm_translate_make(mt, trs->t);
     mat4 mr;
-    glm_quat_mat4(q, mr);
+    glm_quat_mat4(trs->q, mr);
     mat4 ms;
-    glm_scale_make(ms, s);
+    glm_scale_make(ms, trs->s);
     mat4 tr;
     glm_mat4_mul(mt, mr, tr);
     glm_mat4_mul(tr, ms, out);
 }
 
-static void ref_fk_chain(const nt_anim_trs_t *local, mat4 *out) {
+void anim_rig_ref_fk(nt_anim_trs_t *local, mat4 *out) {
     for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
         mat4 l;
-        ref_mat4_from_trs(&local[j], l);
+        anim_rig_ref_mat4_from_trs(&local[j], l);
         const uint16_t p = s_parent[j];
         if (p == NT_ANIM_NO_PARENT) {
             glm_mat4_copy(l, out[j]);
         } else {
             glm_mat4_mul(out[p], l, out[j]);
+        }
+    }
+}
+
+/* Unity is built with UNITY_EXCLUDE_FLOAT, so float comparisons go through
+ * fabsf like everywhere else in the suite. */
+void anim_rig_assert_mat34_equals_mat4(const nt_anim_mat34_t *m34, mat4 ref, float tol) {
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            TEST_ASSERT_TRUE_MESSAGE(fabsf(ref[c][r] - m34->r[r][c]) <= tol, "float not within tolerance");
         }
     }
 }
@@ -131,7 +138,7 @@ void anim_rig_bindings(anim_rig_t *rig, nt_skin_binding_t *a, nt_skin_binding_t 
     NT_ASSERT(b != NULL);
 
     mat4 g_bind[ANIM_RIG_JOINT_COUNT];
-    ref_fk_chain(rig->bind, g_bind);
+    anim_rig_ref_fk(rig->bind, g_bind);
 
     fill_inverse_binds(g_bind, s_remap_a, ANIM_RIG_PALETTE_A_COUNT, rig->inverse_bind_a);
     fill_inverse_binds(g_bind, s_remap_b, ANIM_RIG_PALETTE_B_COUNT, rig->inverse_bind_b);

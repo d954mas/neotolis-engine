@@ -24,52 +24,6 @@ void setUp(void) { anim_rig_asymmetric(&g_rig); }
 
 void tearDown(void) {}
 
-/* ---- cglm reference path ---- */
-
-/* Reads t/q/s straight out of the AoS pose as vec3/versor: the ABI-alignment
- * exercise that Debug UBSan checks. */
-static void ref_mat4_from_trs(nt_anim_trs_t *trs, mat4 out) {
-    mat4 t;
-    glm_translate_make(t, trs->t);
-    mat4 r;
-    glm_quat_mat4(trs->q, r);
-    mat4 s;
-    glm_scale_make(s, trs->s);
-    mat4 tr;
-    glm_mat4_mul(t, r, tr);
-    glm_mat4_mul(tr, s, out);
-}
-
-static void ref_fk(nt_anim_trs_t *local, mat4 *out) {
-    for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
-        mat4 l;
-        ref_mat4_from_trs(&local[j], l);
-        const uint16_t p = g_rig.skel.parent[j];
-        if (p == NT_ANIM_NO_PARENT) {
-            glm_mat4_copy(l, out[j]);
-        } else {
-            glm_mat4_mul(out[p], l, out[j]);
-        }
-    }
-}
-
-static void assert_mat34_equals_mat4(const nt_anim_mat34_t *m34, mat4 ref, float tol) {
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 4; ++c) {
-            ASSERT_FLOAT_NEAR(ref[c][r], m34->r[r][c], tol);
-        }
-    }
-}
-
-static void set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees) {
-    const float half = (degrees * 0.5F) * 0.017453292519943295F;
-    const float sn = sinf(half);
-    o->q[0] = ax * sn;
-    o->q[1] = ay * sn;
-    o->q[2] = az * sn;
-    o->q[3] = cosf(half);
-}
-
 static nt_anim_trs_t make_trs(float tx, float ty, float tz, float ax, float ay, float az, float degrees, float sx, float sy, float sz) {
     nt_anim_trs_t o;
     o.t[0] = tx;
@@ -78,7 +32,7 @@ static nt_anim_trs_t make_trs(float tx, float ty, float tz, float ax, float ay, 
     o.s[0] = sx;
     o.s[1] = sy;
     o.s[2] = sz;
-    set_axis_angle(&o, ax, ay, az, degrees);
+    anim_rig_set_axis_angle(&o, ax, ay, az, degrees);
     return o;
 }
 
@@ -90,16 +44,16 @@ void test_mat34_from_trs_matches_cglm(void) {
 
     for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
         mat4 ref;
-        ref_mat4_from_trs(&local[j], ref);
+        anim_rig_ref_mat4_from_trs(&local[j], ref);
         nt_anim_mat34_t m;
         nt_anim_mat34_from_trs(&local[j], &m);
-        assert_mat34_equals_mat4(&m, ref, 1e-5F);
+        anim_rig_assert_mat34_equals_mat4(&m, ref, 1e-5F);
 
         mat4 ref_bind;
-        ref_mat4_from_trs(&g_rig.bind[j], ref_bind);
+        anim_rig_ref_mat4_from_trs(&g_rig.bind[j], ref_bind);
         nt_anim_mat34_t m_bind;
         nt_anim_mat34_from_trs(&g_rig.bind[j], &m_bind);
-        assert_mat34_equals_mat4(&m_bind, ref_bind, 1e-5F);
+        anim_rig_assert_mat34_equals_mat4(&m_bind, ref_bind, 1e-5F);
     }
 }
 
@@ -108,9 +62,9 @@ void test_mat34_mul_matches_cglm(void) {
     nt_anim_trs_t b = make_trs(-0.7F, 0.9F, 0.15F, 0.0F, 0.0F, 1.0F, -112.0F, 1.7F, 1.0F, 0.6F);
 
     mat4 ra;
-    ref_mat4_from_trs(&a, ra);
+    anim_rig_ref_mat4_from_trs(&a, ra);
     mat4 rb;
-    ref_mat4_from_trs(&b, rb);
+    anim_rig_ref_mat4_from_trs(&b, rb);
     mat4 rab;
     glm_mat4_mul(ra, rb, rab);
 
@@ -121,24 +75,24 @@ void test_mat34_mul_matches_cglm(void) {
     nt_anim_mat34_t mab;
     nt_anim_mat34_mul(&ma, &mb, &mab);
 
-    assert_mat34_equals_mat4(&mab, rab, 1e-5F);
+    anim_rig_assert_mat34_equals_mat4(&mab, rab, 1e-5F);
 }
 
 void test_mat34_from_mat4_takes_top_three_rows(void) {
     nt_anim_trs_t a = make_trs(4.0F, -2.0F, 0.5F, 1.0F, 0.0F, 0.0F, 63.0F, 0.75F, 1.0F, 1.25F);
     mat4 ref;
-    ref_mat4_from_trs(&a, ref);
+    anim_rig_ref_mat4_from_trs(&a, ref);
 
     nt_anim_mat34_t m;
     nt_anim_mat34_from_mat4((const float *)ref, &m);
-    assert_mat34_equals_mat4(&m, ref, 0.0F);
+    anim_rig_assert_mat34_equals_mat4(&m, ref, 0.0F);
 }
 
 /* The fourth row of the mat4 is the implicit [0 0 0 1] and must never be read. */
 void test_mat34_from_mat4_ignores_the_fourth_row(void) {
     nt_anim_trs_t a = make_trs(4.0F, -2.0F, 0.5F, 1.0F, 0.0F, 0.0F, 63.0F, 0.75F, 1.0F, 1.25F);
     mat4 ref;
-    ref_mat4_from_trs(&a, ref);
+    anim_rig_ref_mat4_from_trs(&a, ref);
 
     float junk[16];
     memcpy(junk, ref, sizeof(junk));
@@ -149,7 +103,7 @@ void test_mat34_from_mat4_ignores_the_fourth_row(void) {
 
     nt_anim_mat34_t m;
     nt_anim_mat34_from_mat4(junk, &m);
-    assert_mat34_equals_mat4(&m, ref, 0.0F);
+    anim_rig_assert_mat34_equals_mat4(&m, ref, 0.0F);
 }
 
 /* ---- FK ---- */
@@ -162,10 +116,10 @@ void test_fk_full_rig_matches_cglm_chain(void) {
     nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
 
     mat4 ref[ANIM_RIG_JOINT_COUNT];
-    ref_fk(local, ref);
+    anim_rig_ref_fk(local, ref);
 
     for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
-        assert_mat34_equals_mat4(&model[j], ref[j], 1e-5F);
+        anim_rig_assert_mat34_equals_mat4(&model[j], ref[j], 1e-5F);
     }
 }
 
@@ -181,7 +135,7 @@ void test_fk_transforms_points_as_column_vectors(void) {
     uint16_t j = JOINT_HAND;
     while (j != NT_ANIM_NO_PARENT) {
         mat4 l;
-        ref_mat4_from_trs(&local[j], l);
+        anim_rig_ref_mat4_from_trs(&local[j], l);
         vec3 next;
         glm_mat4_mulv3(l, v, 1.0F, next);
         glm_vec3_copy(next, v);
@@ -205,7 +159,7 @@ void test_fk_subtree_matches_full_pass(void) {
     nt_anim_mat34_t before[ANIM_RIG_JOINT_COUNT];
     memcpy(before, model, sizeof(before));
 
-    set_axis_angle(&local[JOINT_ARM], 0.0F, 0.0F, 1.0F, 33.0F);
+    anim_rig_set_axis_angle(&local[JOINT_ARM], 0.0F, 0.0F, 1.0F, 33.0F);
     nt_anim_fk(&g_rig.skel, local, model, JOINT_ARM, 2);
 
     nt_anim_mat34_t full[ANIM_RIG_JOINT_COUNT];
@@ -237,6 +191,32 @@ void test_fk_root_spanning_range_equals_per_root_ranges(void) {
 
     TEST_ASSERT_EQUAL_MEMORY(whole, split, sizeof(whole));
 }
+
+/* A partial pass must leave exactly the full pass behind: the range is poisoned
+ * first, so an untouched joint fails instead of passing on a stale value. */
+static void fk_partial_matches_full(uint16_t first, uint16_t count) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+
+    nt_anim_mat34_t full[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, local, full, 0, ANIM_RIG_JOINT_COUNT);
+
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    memcpy(model, full, sizeof(model));
+    memset(&model[first], 0x5A, (size_t)count * sizeof(nt_anim_mat34_t));
+
+    nt_anim_fk(&g_rig.skel, local, model, first, count);
+    TEST_ASSERT_EQUAL_MEMORY(full, model, sizeof(full));
+}
+
+void test_fk_single_root_range_equals_full_pass(void) { fk_partial_matches_full(JOINT_ROOT_B, 1); }
+
+/* A leaf alone, inside a subtree whose parent the full pass already made current. */
+void test_fk_leaf_range_equals_full_pass(void) { fk_partial_matches_full(JOINT_HAND, 1); }
+
+/* [0, 3) starts at a root and stops inside spine's subtree: legal because the
+ * range spans no parent it has not computed. */
+void test_fk_root_range_ending_mid_subtree_equals_full_pass(void) { fk_partial_matches_full(0, 3); }
 
 void test_fk_whole_subtree_range_is_valid(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
@@ -276,6 +256,21 @@ void test_fk_traps_on_overlap(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, shared.local, shared.model, 0, ANIM_RIG_JOINT_COUNT));
 }
+
+/* out == g_joint: the composition reads the joint matrix it is overwriting. */
+void test_socket_traps_on_output_aliasing_the_joint(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
+
+    nt_anim_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.0F, 1.0F, 1.0F);
+    mat4 world;
+    anim_rig_ref_mat4_from_trs(&world_trs, world);
+    nt_anim_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
+
+    NT_TEST_EXPECT_ASSERT(nt_anim_socket((const float *)world, &model[JOINT_HAND], &socket_local, &model[JOINT_HAND]));
+}
 #endif
 
 /* ---- Sockets ---- */
@@ -288,15 +283,15 @@ void test_socket_matches_cglm_composition(void) {
     nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
 
     mat4 ref[ANIM_RIG_JOINT_COUNT];
-    ref_fk(local, ref);
+    anim_rig_ref_fk(local, ref);
 
     nt_anim_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.5F, 1.5F, 1.5F);
     mat4 world;
-    ref_mat4_from_trs(&world_trs, world);
+    anim_rig_ref_mat4_from_trs(&world_trs, world);
 
     nt_anim_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
     mat4 socket4;
-    ref_mat4_from_trs(&socket_local, socket4);
+    anim_rig_ref_mat4_from_trs(&socket_local, socket4);
 
     mat4 eg;
     glm_mat4_mul(world, ref[JOINT_HAND], eg);
@@ -306,7 +301,7 @@ void test_socket_matches_cglm_composition(void) {
     nt_anim_mat34_t out;
     nt_anim_socket((const float *)world, &model[JOINT_HAND], &socket_local, &out);
 
-    assert_mat34_equals_mat4(&out, expected, 1e-5F);
+    anim_rig_assert_mat34_equals_mat4(&out, expected, 1e-5F);
 }
 
 /* ---- Rig identity ---- */
@@ -491,6 +486,17 @@ void test_rig_compat_id_traps_on_small_scratch(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_anim_rig_compat_id(&rig.skel, scratch, RIG_VECTOR_BYTES - 1));
 }
+
+/* A non-finite rest value has no canonical binary32 form, so the id would not
+ * identify the data it was hashed from. */
+void test_rig_compat_id_traps_on_non_finite_rest(void) {
+    vector_rig_t rig;
+    make_vector_rig(&rig);
+    rig.rest[1].t[0] = NAN;
+    uint8_t scratch[RIG_VECTOR_BYTES];
+
+    NT_TEST_EXPECT_ASSERT(nt_anim_rig_compat_id(&rig.skel, scratch, (uint32_t)sizeof(scratch)));
+}
 #endif
 
 /* ---- Per-element checks ---- */
@@ -502,6 +508,35 @@ void test_fk_traps_on_non_finite_translation(void) {
     nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
 
     local[JOINT_HELPER].t[0] = NAN;
+    NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT));
+}
+
+void test_fk_traps_on_infinite_translation(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+
+    local[JOINT_HELPER].t[2] = INFINITY;
+    NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT));
+}
+
+void test_fk_traps_on_infinite_scale(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+
+    local[JOINT_HELPER].s[1] = INFINITY;
+    NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT));
+}
+
+/* An all-zero quaternion is the other side of the unit check from an oversized
+ * one, and the one a zeroed pose buffer produces. */
+void test_fk_traps_on_zero_quaternion(void) {
+    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+
+    memset(local[JOINT_HELPER].q, 0, sizeof(local[JOINT_HELPER].q));
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT));
 }
 
@@ -551,7 +586,7 @@ void test_socket_traps_on_non_unit_quaternion(void) {
 
     nt_anim_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.0F, 1.0F, 1.0F);
     mat4 world;
-    ref_mat4_from_trs(&world_trs, world);
+    anim_rig_ref_mat4_from_trs(&world_trs, world);
 
     nt_anim_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
     socket_local.q[3] = 2.0F;
@@ -572,6 +607,9 @@ int main(void) {
     RUN_TEST(test_fk_subtree_matches_full_pass);
     RUN_TEST(test_fk_root_spanning_range_equals_per_root_ranges);
     RUN_TEST(test_fk_whole_subtree_range_is_valid);
+    RUN_TEST(test_fk_single_root_range_equals_full_pass);
+    RUN_TEST(test_fk_leaf_range_equals_full_pass);
+    RUN_TEST(test_fk_root_range_ending_mid_subtree_equals_full_pass);
     RUN_TEST(test_socket_matches_cglm_composition);
     RUN_TEST(test_rig_id_bytes);
     RUN_TEST(test_rig_compat_id_published_vector);
@@ -584,10 +622,15 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_fk_traps_on_invalid_ranges);
     RUN_TEST(test_fk_traps_on_overlap);
+    RUN_TEST(test_socket_traps_on_output_aliasing_the_joint);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
+    RUN_TEST(test_rig_compat_id_traps_on_non_finite_rest);
 #endif
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
     RUN_TEST(test_fk_traps_on_non_finite_translation);
+    RUN_TEST(test_fk_traps_on_infinite_translation);
+    RUN_TEST(test_fk_traps_on_infinite_scale);
+    RUN_TEST(test_fk_traps_on_zero_quaternion);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);
     RUN_TEST(test_fk_traps_on_forward_parent);
     RUN_TEST(test_mat34_mul_traps_on_alias);

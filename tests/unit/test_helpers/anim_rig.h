@@ -2,6 +2,7 @@
 #define NT_TEST_HELPER_ANIM_RIG_H
 
 #include "anim/nt_anim.h"
+#include "math/nt_math.h"
 
 /* Asymmetric 9-joint procedural rig in preorder: two roots, a helper node with
  * no palette entry, and nonuniform scale that shears everything below it. The
@@ -46,5 +47,22 @@ void anim_rig_asymmetric(anim_rig_t *out);
  * over the bind pose, through a cglm mat4 FK chain as the independent reference
  * path. Both carry the rig's rig_compat_id and point into rig. */
 void anim_rig_bindings(anim_rig_t *rig, nt_skin_binding_t *a, nt_skin_binding_t *b);
+
+/* Replaces o's rotation with the axis-angle one; t and s are untouched. */
+void anim_rig_set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees);
+
+/* cglm reference path, shared by every animation test so the kernels are never
+ * verified against themselves. The pose pointers are non-const because cglm
+ * takes vec3/versor by mutable pointer; nothing here writes through them.
+ *
+ * out = T*R*S of one joint, reading t/q/s straight out of the AoS pose as
+ * vec3/versor: the ABI-alignment exercise that Debug UBSan checks. */
+void anim_rig_ref_mat4_from_trs(nt_anim_trs_t *trs, mat4 out);
+
+/* Whole-rig FK over this rig's parents, as a mat4 chain. */
+void anim_rig_ref_fk(nt_anim_trs_t *local, mat4 *out);
+
+/* Unity assertion that the 3x4 matrix holds the top three rows of ref. */
+void anim_rig_assert_mat34_equals_mat4(const nt_anim_mat34_t *m34, mat4 ref, float tol);
 
 #endif /* NT_TEST_HELPER_ANIM_RIG_H */

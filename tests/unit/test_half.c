@@ -2,6 +2,7 @@
 
 #include "nt_half.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,6 +18,15 @@ static uint32_t float_bits(float f) {
     } conv;
     conv.f = f;
     return conv.u;
+}
+
+static float float_from_bits(uint32_t u) {
+    union {
+        float f;
+        uint32_t u;
+    } conv;
+    conv.u = u;
+    return conv.f;
 }
 
 /* ---- float32 -> float16 known vectors ---- */
@@ -82,6 +92,15 @@ void test_f32_to_f16_infinity_and_nan(void) {
     TEST_ASSERT_EQUAL_HEX16(0x7C00, neg & 0x7C00);
     TEST_ASSERT_NOT_EQUAL(0, neg & 0x03FF);
     TEST_ASSERT_EQUAL_HEX16(0x8000, neg & 0x8000);
+}
+
+/* The exact NaN and extreme-subnormal encodings the bank may hand the codec. */
+void test_f32_to_f16_exact_edge_encodings(void) {
+    /* A signalling NaN: quieted with the canonical payload, sign kept. */
+    TEST_ASSERT_EQUAL_HEX16(0x7E00, nt_f32_to_f16(float_from_bits(0x7F800001U)));
+    TEST_ASSERT_EQUAL_HEX16(0xFE00, nt_f32_to_f16(-NAN));
+    /* The smallest float32 subnormal is far below half range: signed zero. */
+    TEST_ASSERT_EQUAL_HEX16(0x8000, nt_f32_to_f16(-FLT_TRUE_MIN));
 }
 
 void test_f16_to_f32_infinity_is_exact(void) {
@@ -194,6 +213,7 @@ int main(void) {
     RUN_TEST(test_f32_to_f16_smallest_normal);
     RUN_TEST(test_f32_to_f16_ties_to_even);
     RUN_TEST(test_f32_to_f16_infinity_and_nan);
+    RUN_TEST(test_f32_to_f16_exact_edge_encodings);
     RUN_TEST(test_f16_to_f32_known_vectors);
     RUN_TEST(test_f16_to_f32_infinity_is_exact);
     RUN_TEST(test_f16_to_f32_quiets_signaling_nan);

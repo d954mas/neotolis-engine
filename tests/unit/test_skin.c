@@ -13,10 +13,6 @@
 
 #include "test_helpers/nt_assert_trap.h"
 
-/* Unity is built with UNITY_EXCLUDE_FLOAT, so float comparisons go through
- * fabsf like everywhere else in the suite. */
-#define ASSERT_FLOAT_NEAR(expected, actual, tol) TEST_ASSERT_TRUE_MESSAGE(fabsf((expected) - (actual)) <= (tol), "float not within tolerance")
-
 enum { JOINT_ARM = 3, JOINT_HAND = 4, JOINT_TAIL1 = 7 };
 /* hand is palette entry 3 of binding A ({0,1,3,4,5}) and of binding B ({6,7,8,4}). */
 enum { HAND_ENTRY_A = 3, HAND_ENTRY_B = 3 };
@@ -32,57 +28,11 @@ void setUp(void) {
 
 void tearDown(void) {}
 
-/* ---- cglm reference path ---- */
-
-/* Reads t/q/s straight out of the AoS pose as vec3/versor: the ABI-alignment
- * exercise that Debug UBSan checks. */
-static void ref_mat4_from_trs(nt_anim_trs_t *trs, mat4 out) {
-    mat4 t;
-    glm_translate_make(t, trs->t);
-    mat4 r;
-    glm_quat_mat4(trs->q, r);
-    mat4 s;
-    glm_scale_make(s, trs->s);
-    mat4 tr;
-    glm_mat4_mul(t, r, tr);
-    glm_mat4_mul(tr, s, out);
-}
-
-static void ref_fk(nt_anim_trs_t *local, mat4 *out) {
-    for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
-        mat4 l;
-        ref_mat4_from_trs(&local[j], l);
-        const uint16_t p = g_rig.skel.parent[j];
-        if (p == NT_ANIM_NO_PARENT) {
-            glm_mat4_copy(l, out[j]);
-        } else {
-            glm_mat4_mul(out[p], l, out[j]);
-        }
-    }
-}
-
-static void assert_mat34_equals_mat4(const nt_anim_mat34_t *m34, mat4 ref, float tol) {
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 4; ++c) {
-            ASSERT_FLOAT_NEAR(ref[c][r], m34->r[r][c], tol);
-        }
-    }
-}
-
-static void set_axis_angle(nt_anim_trs_t *o, float ax, float ay, float az, float degrees) {
-    const float half = (degrees * 0.5F) * 0.017453292519943295F;
-    const float sn = sinf(half);
-    o->q[0] = ax * sn;
-    o->q[1] = ay * sn;
-    o->q[2] = az * sn;
-    o->q[3] = cosf(half);
-}
-
 /* Bind pose with arm and tail1 rotated: a pose no inverse bind cancels. */
 static void make_edited_pose(nt_anim_trs_t *local) {
     memcpy(local, g_rig.bind, (size_t)ANIM_RIG_JOINT_COUNT * sizeof(nt_anim_trs_t));
-    set_axis_angle(&local[JOINT_ARM], 0.0F, 0.0F, 1.0F, 47.0F);
-    set_axis_angle(&local[JOINT_TAIL1], 0.0F, 1.0F, 0.0F, -80.0F);
+    anim_rig_set_axis_angle(&local[JOINT_ARM], 0.0F, 0.0F, 1.0F, 47.0F);
+    anim_rig_set_axis_angle(&local[JOINT_TAIL1], 0.0F, 1.0F, 0.0F, -80.0F);
 }
 
 static bool is_identity(const nt_anim_mat34_t *m, float tol) {
@@ -142,17 +92,17 @@ void test_shared_joint_matches_in_both_bindings(void) {
 
     /* Equal to each other proves nothing unless both are also the right matrix. */
     mat4 ref_pose[ANIM_RIG_JOINT_COUNT];
-    ref_fk(local, ref_pose);
+    anim_rig_ref_fk(local, ref_pose);
     mat4 ref_bind[ANIM_RIG_JOINT_COUNT];
-    ref_fk(g_rig.bind, ref_bind);
+    anim_rig_ref_fk(g_rig.bind, ref_bind);
 
     mat4 inv;
     glm_mat4_inv(ref_bind[JOINT_HAND], inv);
     mat4 expected;
     glm_mat4_mul(ref_pose[JOINT_HAND], inv, expected);
 
-    assert_mat34_equals_mat4(&palette_a[HAND_ENTRY_A], expected, 1e-5F);
-    assert_mat34_equals_mat4(&palette_b[HAND_ENTRY_B], expected, 1e-5F);
+    anim_rig_assert_mat34_equals_mat4(&palette_a[HAND_ENTRY_A], expected, 1e-5F);
+    anim_rig_assert_mat34_equals_mat4(&palette_b[HAND_ENTRY_B], expected, 1e-5F);
 }
 
 /* An empty binding is a legal binding: it writes nothing and must not trap. */
@@ -180,9 +130,9 @@ void test_palette_matches_cglm_reference(void) {
     nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
 
     mat4 ref_pose[ANIM_RIG_JOINT_COUNT];
-    ref_fk(local, ref_pose);
+    anim_rig_ref_fk(local, ref_pose);
     mat4 ref_bind[ANIM_RIG_JOINT_COUNT];
-    ref_fk(g_rig.bind, ref_bind);
+    anim_rig_ref_fk(g_rig.bind, ref_bind);
 
     const nt_skin_binding_t *bindings[] = {&g_a, &g_b};
     for (size_t k = 0; k < sizeof(bindings) / sizeof(bindings[0]); ++k) {
@@ -196,7 +146,7 @@ void test_palette_matches_cglm_reference(void) {
             glm_mat4_inv(ref_bind[j], inv);
             mat4 expected;
             glm_mat4_mul(ref_pose[j], inv, expected);
-            assert_mat34_equals_mat4(&palette[p], expected, 1e-5F);
+            anim_rig_assert_mat34_equals_mat4(&palette[p], expected, 1e-5F);
         }
     }
 }
