@@ -36,15 +36,29 @@ and never picks a format; the transcoder is a codec with no GPU knowledge. That
 staging buffer is the same one mesh activation re-interleaves SoA vertices
 through — one grow-on-demand allocation, freed once it goes idle.
 
-The target selector walks BC7 → ASTC 4x4 → ETC2 (RGBA8 or RGB8 by the blob's
-alpha flag) → RGBA8 and takes the first candidate that the GPU
-(`nt_gfx_gpu_caps()`) reports and the build admits (`NT_BASISU_HAS_ETC2/BC7/ASTC`,
-[build options](../../build.md#basis-universal-admission)). BC7 additionally
-requires block-aligned level-0 dimensions (WebGL BPTC accepts the smaller
-levels of a halved chain as they come). RGBA8 is always the last candidate, so
-selection never fails. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`) is
-a pack from another configure, a developer error: `nt_basisu_info` asserts at
-the cross-check; there is no FAILED fallback for it.
+The target selector walks a fixed per-codec order and takes the first
+candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
+(`NT_BASISU_HAS_ETC2/BC7/ASTC`,
+[build options](../../build.md#basis-universal-admission)):
+
+- ETC1S: ETC2 → BC7 → ASTC 4x4 → RGBA8. ETC1S is a subset of ETC1, so the
+  color blocks unpack into ETC2 exactly (an alpha slice still goes through a
+  lookup table into EAC), and an opaque blob takes `ETC2_RGB8` at half the
+  bytes of BC7/ASTC; BC7 and ASTC are lookup-table approximations of the same
+  four-color blocks.
+- UASTC: ASTC 4x4 → BC7 → ETC2 → RGBA8. UASTC is a subset of ASTC, so that
+  target is an exact repack; BC7 is a mode-for-mode repack with requantized
+  endpoints; an ETC2 target is a real-time re-encode rather than a repack.
+
+ETC2 chooses `ETC2_RGBA8` or `ETC2_RGB8` by the blob's alpha flag. BC7
+additionally requires block-aligned level-0 dimensions (WebGL BPTC accepts the
+smaller levels of a halved chain as they come). RGBA8 is always the last
+candidate, so selection never fails. The caps are what the context reports,
+not whether the decode is native: desktop GL 4.3+ reports ETC2 even
+where the driver decompresses it on upload, so such a context stores an ETC1S
+texture at RGBA8 cost. A blob whose codec is OFF (`NT_BASISU_HAS_ETC1S/UASTC`)
+is a pack from another configure, a developer error: `nt_basisu_info` asserts
+at the cross-check; there is no FAILED fallback for it.
 
 The runtime accepts a single-level texture under any min filter, because
 `GL_TEXTURE_MAX_LEVEL` is then 0 and the storage is mip-complete; the builder

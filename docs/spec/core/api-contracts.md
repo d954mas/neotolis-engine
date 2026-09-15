@@ -343,11 +343,14 @@ boundary like every other header field, but it does not determine the target
 format: alpha and codec come from the blob, because the encoder drops alpha
 slices for a fully opaque source.
 
-The target format is the first entry that the GPU supports and the build
-admits (`NT_BASISU_HAS_BC7/ASTC/ETC2`) of `BC7_RGBA`, `ASTC_4x4_RGBA`, `ETC2_RGBA8` or
-`ETC2_RGB8` (by the blob's alpha), then `RGBA8` as the always-available
-fallback. `BC7_RGBA` is eligible only when both base dimensions are multiples
-of 4; otherwise selection continues with ASTC, ETC2, then RGBA8.
+The target format is the first entry of the per-codec order that the GPU
+supports and the build admits (`NT_BASISU_HAS_BC7/ASTC/ETC2`) — ETC1S:
+`ETC2_RGBA8`/`ETC2_RGB8` → `BC7_RGBA` → `ASTC_4x4_RGBA`; UASTC:
+`ASTC_4x4_RGBA` → `BC7_RGBA` → `ETC2_RGBA8`/`ETC2_RGB8` (ETC2 by the blob's
+alpha) — then `RGBA8` as the always-available fallback
+([runtime formats](../assets/runtime-formats.md#texture-activation-ttex)).
+`BC7_RGBA` is eligible only when both base dimensions are multiples of 4;
+otherwise selection continues with the next candidate of that order.
 `nt_gfx_texture_format` reports that choice.
 The activator transcodes the whole chain into the shared staging buffer with one
 codec call and then creates the texture through `nt_gfx_make_texture`, which is

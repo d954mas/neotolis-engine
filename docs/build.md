@@ -69,7 +69,7 @@ covers the common options; module specs own detailed ON/OFF behavior.
 | `NT_SKIP_EXAMPLE_PACKS` | Empty | Example pack generation to skip, such as `sponza`. |
 | `NT_BASISU_HAS_ETC1S` | ON | Basis ETC1S: the builder emits it, the runtime decodes it. See [Basis Universal admission](#basis-universal-admission). |
 | `NT_BASISU_HAS_UASTC` | ON | Basis UASTC LDR, same contract. Both codecs OFF is a configure error. |
-| `NT_BASISU_HAS_ETC2` | ON | Basis textures may transcode to ETC2 RGB8/RGBA8. |
+| `NT_BASISU_HAS_ETC2` | ON | Basis textures may transcode to ETC2 RGB8/RGBA8. OFF makes a UASTC blob fall through to RGBA8 on ETC2-only devices. |
 | `NT_BASISU_HAS_BC7` | ON | Basis textures may transcode to BC7. |
 | `NT_BASISU_HAS_ASTC` | ON | Basis textures may transcode to ASTC 4x4. RGBA8 is always available. |
 
@@ -147,10 +147,19 @@ ctest --test-dir build/_cmake/basisu-uastc-only --output-on-failure --no-tests=e
 cmake --preset native-debug-test -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-etc1s-etc2 --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
 ctest --test-dir build/_cmake/basisu-etc1s-etc2 --output-on-failure --no-tests=error -R "$tests"
+# Both codecs with BC7 as the only compressed target
+cmake --preset native-debug-test -B build/_cmake/basisu-bc7-only -DNT_BASISU_HAS_ETC2=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --build build/_cmake/basisu-bc7-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+ctest --test-dir build/_cmake/basisu-bc7-only --output-on-failure --no-tests=error -R "$tests"
 ```
 
-CI runs exactly these two rows (`NT_BASISU_ROWS` in `ci.yml`): together they
-cover both single-codec decoders and both target extremes. The native job runs
+CI runs exactly these three rows (`NT_BASISU_ROWS` in `ci.yml`): together they
+cover both single-codec decoders and upload and sample every compressed target
+through the runner's software GL. A single admitted target leaves nothing of
+the per-codec order
+([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)) to
+observe, so only the default set and the UASTC-only row pin it: the browser
+fixture pins the first candidate, `test_gfx_basis_activate` the full orders. The native job runs
 the five suites per row, the browser job drives the two `basis fixture:` tests
 per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
 with the production transcoder under Node. The default browser run still

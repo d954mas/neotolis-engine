@@ -215,18 +215,23 @@ static void check_against_reference(uint32_t level, uint8_t tolerance, bool opaq
     }
 }
 
-/* The selector's contract: the first of BC7 -> ASTC -> ETC2 the GPU reports
- * and NT_BASISU_HAS_* admits, RGBA8 otherwise. */
-static nt_texture_format_t expected_target(void) {
+/* The selector's contract: the first of the per-codec order (ETC1S: ETC2 -> BC7 ->
+ * ASTC; UASTC: ASTC -> BC7 -> ETC2) the GPU reports and NT_BASISU_HAS_* admits,
+ * RGBA8 otherwise. The fixture carries alpha, so ETC2 means ETC2_RGBA8. */
+static nt_texture_format_t expected_target(nt_basisu_codec_t codec) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
-    if (NT_BASISU_HAS_BC7 && caps->has_bc7) {
-        return NT_TEXTURE_FORMAT_BC7_RGBA;
-    }
-    if (NT_BASISU_HAS_ASTC && caps->has_astc) {
-        return NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
-    }
-    if (NT_BASISU_HAS_ETC2 && caps->has_etc2) {
-        return NT_TEXTURE_FORMAT_ETC2_RGBA8;
+    const bool bc7 = NT_BASISU_HAS_BC7 && caps->has_bc7;
+    const bool astc = NT_BASISU_HAS_ASTC && caps->has_astc;
+    const bool etc2 = NT_BASISU_HAS_ETC2 && caps->has_etc2;
+    const nt_texture_format_t etc1s_order[] = {etc2 ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_INVALID, bc7 ? NT_TEXTURE_FORMAT_BC7_RGBA : NT_TEXTURE_FORMAT_INVALID,
+                                               astc ? NT_TEXTURE_FORMAT_ASTC_4x4_RGBA : NT_TEXTURE_FORMAT_INVALID};
+    const nt_texture_format_t uastc_order[] = {astc ? NT_TEXTURE_FORMAT_ASTC_4x4_RGBA : NT_TEXTURE_FORMAT_INVALID, bc7 ? NT_TEXTURE_FORMAT_BC7_RGBA : NT_TEXTURE_FORMAT_INVALID,
+                                               etc2 ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_INVALID};
+    const nt_texture_format_t *order = codec == NT_BASISU_CODEC_ETC1S ? etc1s_order : uastc_order;
+    for (size_t i = 0; i < 3; i++) {
+        if (order[i] != NT_TEXTURE_FORMAT_INVALID) {
+            return order[i];
+        }
     }
     return NT_TEXTURE_FORMAT_RGBA8;
 }
@@ -251,7 +256,7 @@ static void check_activation(nt_basisu_codec_t codec, uint8_t tolerance) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_texture_t tex = {.id = handle};
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_INT(expected_target(), nt_gfx_texture_format(tex));
+    TEST_ASSERT_EQUAL_INT(expected_target(codec), nt_gfx_texture_format(tex));
     TEST_ASSERT_EQUAL_INT((int)s_info.level_count - 1, texture_max_level(tex));
 
     /* Level 0 through the asset's own LINEAR_MIPMAP_LINEAR default sampler. */
