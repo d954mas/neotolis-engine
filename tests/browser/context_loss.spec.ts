@@ -192,9 +192,9 @@ const FORMAT_ETC2_RGBA8 = 12;
 const FORMAT_BC7_RGBA = 13;
 const FORMAT_ASTC_4x4_RGBA = 14;
 
-// The activator's candidate order per codec (ETC1S: ETC2 -> BC7 -> ASTC; UASTC: ASTC -> BC7 -> ETC2)
-// over the formats both the GPU reports and the build admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque
-// texture takes ETC2 RGB8. RGBA8 is always the last candidate. Bits: 1 = BC7, 2 = ASTC, 4 = ETC2.
+// The activator's per-codec order (ETC1S: ETC2 -> BC7 -> ASTC; UASTC: ASTC -> BC7 -> ETC2) over the
+// formats both the GPU reports and the build admits (NT_BASISU_HAS_ETC2/BC7/ASTC); an opaque texture
+// takes ETC2 RGB8. RGBA8 is always the last candidate. Bits: 1 = BC7, 2 = ASTC, 4 = ETC2.
 const CODEC_ETC1S = 1;
 const CODEC_UASTC = 2;
 function expectedBasisFormat(caps: number, buildTargets: number, hasAlpha: boolean, codec: number): number {
@@ -220,7 +220,8 @@ function expectTexel(sample: number, expected: number[], tolerance: number, labe
 // sample texel (0,0) inside the left half; the 1x1 level 7 is the linear average of both halves.
 // Compressed targets approximate solid blocks, hence the tolerances: the level-3 corner measures
 // 13 off in red for UASTC through ASTC (the codec's own content, not a transcode) under SwiftShader,
-// so 16 keeps every real target while a channel swap, a flip or a wrong level still miss by 100+.
+// so 16 keeps every real target while a channel swap or a flip still misses by 160 and the 1x1
+// average by 80.
 const FIXTURE_LEFT = [200, 40, 40, 255];
 const FIXTURE_AVERAGE = [120, 40, 120, 191];
 const FIXTURE_TOLERANCE = 16;
@@ -291,7 +292,7 @@ test('basis fixture: a single pixel skips BC7 level-zero restrictions', async ({
   const buildTargets = await page.evaluate(() => window.__nt!.basis_build_targets());
   const buildCodecs = await page.evaluate(() => window.__nt!.basis_build_codecs());
   // The embedded blob is UASTC and the restriction under test is BC7's. The 1x1 observes it only
-  // where BC7 is UASTC's first candidate, i.e. no ASTC admitted and reported (the bc7-only CI row).
+  // where BC7 is UASTC's first candidate: no ASTC admitted and reported.
   test.skip((buildTargets & 1) === 0 || (buildCodecs & 2) === 0, 'build admits no BC7 target or no UASTC codec');
   const caps = await page.evaluate(() => window.__nt!.basis_caps());
   expect(caps & 1, 'BC7 must be available to exercise its level-zero restriction').toBe(1);

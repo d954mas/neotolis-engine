@@ -135,7 +135,7 @@ static NtTextureAssetHeader *fixture_header(basis_fixture_t *fixture) { return (
 
 // #region probes
 
-/* The selector's contract: the first of the codec's order (ETC1S: ETC2 -> BC7 ->
+/* The selector's contract: the first of the per-codec order (ETC1S: ETC2 -> BC7 ->
  * ASTC; UASTC: ASTC -> BC7 -> ETC2) that the GPU reports and NT_BASISU_HAS_*
  * admits, RGBA8 otherwise. */
 static nt_texture_format_t first_admitted(nt_basisu_codec_t codec, bool bc7, bool astc, bool etc2, bool alpha) {
@@ -156,7 +156,7 @@ static nt_texture_format_t first_admitted(nt_basisu_codec_t codec, bool bc7, boo
     return NT_TEXTURE_FORMAT_RGBA8;
 }
 
-/* Every GPU cap combination, so the two codec orders diverge on the mixed rows. */
+/* Every GPU cap combination, so the two codec orders diverge on the mixed ones. */
 static const bool s_caps_rows[][3] = {
     {true, true, true}, {true, true, false}, {true, false, true}, {false, true, true}, {true, false, false}, {false, true, false}, {false, false, true}, {false, false, false},
 };
@@ -274,8 +274,8 @@ static void caps_matrix_for_codec(nt_basisu_codec_t codec) {
     set_caps(false, false, false);
     check_target(&alpha, NT_TEXTURE_FORMAT_RGBA8);
 #if NT_BASISU_HAS_ETC2 && NT_BASISU_HAS_BC7 && NT_BASISU_HAS_ASTC
-    /* Literal anchors of the spec order on the rows where the two codecs
-     * diverge, independent of the first_admitted mirror. */
+    /* Literal anchors of the spec order on the cap combinations where the two
+     * codecs diverge, independent of the first_admitted mirror. */
     const bool etc1s = codec == NT_BASISU_CODEC_ETC1S;
     set_caps(true, true, true);
     check_target(&alpha, etc1s ? NT_TEXTURE_FORMAT_ETC2_RGBA8 : NT_TEXTURE_FORMAT_ASTC_4x4_RGBA);

@@ -215,7 +215,7 @@ static void check_against_reference(uint32_t level, uint8_t tolerance, bool opaq
     }
 }
 
-/* The selector's contract: the first of the codec's order (ETC1S: ETC2 -> BC7 ->
+/* The selector's contract: the first of the per-codec order (ETC1S: ETC2 -> BC7 ->
  * ASTC; UASTC: ASTC -> BC7 -> ETC2) the GPU reports and NT_BASISU_HAS_* admits,
  * RGBA8 otherwise. The fixture carries alpha, so ETC2 means ETC2_RGBA8. */
 static nt_texture_format_t expected_target(nt_basisu_codec_t codec) {

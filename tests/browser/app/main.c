@@ -353,8 +353,8 @@ static bool basis_handle_ready(nt_resource_t handle) {
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_ready(void) { return (basis_handle_ready(s_basis_tex_handle) && basis_handle_ready(s_basis_rgb_handle)) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_format(void) { return (int)nt_gfx_texture_format(basis_fixture_texture()); }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_rgb_format(void) { return (int)nt_gfx_texture_format((nt_texture_t){nt_resource_get(s_basis_rgb_handle)}); }
-/* Bitmasks the spec turns into the expected format with the codec's order (ETC1S: ETC2 -> BC7 -> ASTC;
- * UASTC: ASTC -> BC7 -> ETC2; RGBA8 last): what the GPU reports and what the NT_BASISU_HAS_* targets admit. */
+/* Bitmasks context_loss.spec.ts combines into the expected target: what the GPU reports and what
+ * the NT_BASISU_HAS_* targets admit. */
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     return (caps->has_bc7 ? 1 : 0) | (caps->has_astc ? 2 : 0) | (caps->has_etc2 ? 4 : 0);

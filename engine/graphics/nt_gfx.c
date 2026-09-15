@@ -2230,10 +2230,8 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* ---- Asset activators ---- */
 
-/* Basis transcode target: the first candidate of the codec's order that the GPU
- * reports and NT_BASISU_HAS_* admits, RGBA8 otherwise. ETC1S unpacks into ETC2
- * exactly (opaque at half the bytes of BC7/ASTC); UASTC is a subset of ASTC,
- * BC7 approximates it and an ETC2 target re-encodes it. */
+/* Per-codec order: ETC1S unpacks into ETC2 exactly (opaque at half the bytes of BC7/ASTC);
+ * UASTC is a subset of ASTC, BC7 approximates it and an ETC2 target re-encodes it. */
 static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt_basisu_codec_t codec, bool has_alpha, uint32_t width, uint32_t height) {
     /* WebGL BPTC requires block-aligned level-0 dimensions; the smaller levels of a halved chain are accepted as they come. */
     const bool bc7 = NT_BASISU_HAS_BC7 && caps->has_bc7 && width % 4 == 0 && height % 4 == 0;

@@ -42,7 +42,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
         caps.has_bc7 = true;
     }
     if (gl_ver >= 43) {
-        /* Core, but desktop drivers decompress it on upload: ETC1S blobs then cost RGBA8 VRAM here. */
+        /* Core, but desktop drivers commonly decompress it on upload (NVIDIA does; Intel Broadwell+ is native): ETC1S blobs can then cost RGBA8 VRAM. */
         caps.has_etc2 = true;
     }
     /* Float colour attachments are core in GL 3.0+ — no extension needed */
