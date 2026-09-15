@@ -8,10 +8,11 @@
 #include "hash/nt_hash.h"
 
 /*
- * nt_anim — pose ABI, skeleton view, 3x4 affine kernels, FK and sockets.
+ * nt_anim — pose ABI, skeleton view, 3x4 affine kernels, FK, sockets, rig
+ * identity, skin binding view and palette build.
  *
  * Column vectors: L = T*R*S, G[j] = G[parent[j]]*L[j], roots G = L.
- * Every function is void, allocates nothing and retains no pointer past the
+ * Every kernel is void, allocates nothing and retains no pointer past the
  * call. Preconditions are NT_ASSERT contracts, never recoverable results.
  */
 
@@ -25,7 +26,9 @@
 #endif
 #endif
 
-/* Local joint transform, AoS in joint order. Quaternion is unit xyzw. */
+/* Local joint transform, AoS in joint order. Quaternion is unit xyzw: a
+ * quaternion decoded from a lossy codec is renormalized by its decoder, because
+ * the unit check tolerance assumes float32 inputs. */
 typedef struct {
     float t[3];
     float q[4];
@@ -54,11 +57,6 @@ _Static_assert(_Alignof(nt_anim_mat34_t) == 4, "pose ABI: mat34 alignment 4");
 #endif
 
 #define NT_ANIM_NO_PARENT UINT16_MAX
-
-/* Version of the rig identity byte schema; a new value is a new rig identity. */
-#define NT_ANIM_RIG_SCHEMA_VERSION 1
-/* Unit/axis convention of the hashed rest pose: glTF metres, Y-up, right-handed. */
-#define NT_ANIM_RIG_CONVENTION_GLTF 1
 
 /* Immutable borrowed view of one rig. The owner is whoever built the arrays
  * (a skeleton activator or a test fixture); it keeps them alive and unchanged
@@ -143,10 +141,6 @@ static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *a, const nt_anim_mat
  * The plain float pointer is deliberate: pose buffers are never cast to mat4*. */
 void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out);
 
-/* Copies the rest pose into the caller's local buffer of joint_count entries.
- * local is caller-owned and must not overlap skel->rest. */
-void nt_anim_pose_rest(const nt_anim_skeleton_t *skel, nt_anim_trs_t *local);
-
 /* Forward kinematics over [first, first + count): model[j] = model[parent[j]] *
  * mat34_from_trs(local[j]), roots take the local matrix unchanged.
  *
@@ -162,20 +156,55 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_a
  * mapping skeleton space to world. out must not alias g_joint. */
 void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const nt_anim_trs_t *socket_local, nt_anim_mat34_t *out);
 
-/* Bytes the rig identity hashes over: 8 header + 46 per joint. */
-uint32_t nt_anim_rig_compat_id_size(uint16_t joint_count);
+// #region skin
+/*
+ * A binding describes how one mesh's vertices attach to a skeleton: a palette of
+ * joints the vertices address by palette index, and one inverse bind matrix per
+ * palette entry taking mesh space to that joint's space at the bind pose. Every
+ * mesh exported from the same skin shares one binding, and a binding is only
+ * valid with the skeleton whose rig_compat_id it carries.
+ *
+ * Model, inverse bind and palette matrices all use the nt_anim_mat34_t layout.
+ */
 
-/* 46 B per joint is 3 MB at UINT16_MAX joints: the scratch belongs on the heap
- * or in a sized pool, never on the WASM stack or in the frame scratch arena. */
+/* Immutable borrowed view (same ownership contract as nt_anim_skeleton_t): the
+ * owner built the arrays, keeps them alive and unchanged until it republishes
+ * or destroys them, and kernels neither store nor free them. Both arrays are
+ * non-NULL and hold palette_count entries. */
+typedef struct {
+    nt_hash64_t rig_compat_id;
+    const uint16_t *remap;               /* palette entry p -> skeleton joint */
+    const nt_anim_mat34_t *inverse_bind; /* mesh space -> joint space at the bind pose, per palette entry */
+    uint16_t palette_count;
+} nt_skin_binding_t;
+
+/* out[p] = model[remap[p]] * inverse_bind[p] for p in [0, palette_count).
+ *
+ * model is the caller's model-pose buffer of model_count joints and out the
+ * caller's palette buffer of capacity entries; out must not overlap model.
+ * Unconditional per-call contracts: palette_count <= capacity, and out does not
+ * overlap model. Under NT_ANIM_CHECKS the per-element contract
+ * remap[p] < model_count is asserted too: release builds trust remap because the
+ * binding activator validates it before publishing a view.
+ *
+ * No rig-id argument: the game asserts binding/skeleton compatibility once when
+ * it pairs them, not on every frame. */
+void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *model, uint16_t model_count, nt_anim_mat34_t *out, uint16_t capacity);
+// #endregion
+
+/* Bytes the rig identity hashes over: 8 header + 46 per joint. */
+#define NT_ANIM_RIG_ID_BYTES(joint_count) (8U + (46U * (uint32_t)(joint_count)))
 
 /* rig_compat_id of the skeleton: hash64 over the canonical little-endian byte
  * schema (tag "NRIG", schema version, convention id, joint count, then per
  * joint in index order the stable id, the parent index and the rest TRS as
  * canonical binary32). scratch is caller storage of at least
- * nt_anim_rig_compat_id_size(skel->joint_count) bytes (asserted); the function
- * writes the schema into it and retains no pointer. Activation/build time only,
- * never a frame operation. Ignores skel->rig_compat_id, which is the output
- * slot this value fills. */
+ * NT_ANIM_RIG_ID_BYTES(skel->joint_count) bytes (asserted); the function writes
+ * the schema into it and retains no pointer. 46 B per joint is 3 MB at
+ * UINT16_MAX joints, so the scratch belongs on the heap or in a sized pool,
+ * never on the WASM stack or in the frame scratch arena. Activation/build time
+ * only, never a frame operation. Ignores skel->rig_compat_id, which is the
+ * output slot this value fills. */
 nt_hash64_t nt_anim_rig_compat_id(const nt_anim_skeleton_t *skel, void *scratch, uint32_t scratch_size);
 
 #endif /* NT_ANIM_H */

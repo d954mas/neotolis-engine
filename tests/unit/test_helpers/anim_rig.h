@@ -2,7 +2,6 @@
 #define NT_TEST_HELPER_ANIM_RIG_H
 
 #include "anim/nt_anim.h"
-#include "anim/nt_skin.h"
 
 /* Asymmetric 9-joint procedural rig in preorder: two roots, a helper node with
  * no palette entry, and nonuniform scale that shears everything below it. The
@@ -36,8 +35,7 @@ typedef struct {
     nt_anim_trs_t rest[ANIM_RIG_JOINT_COUNT];
     nt_anim_mat34_t inverse_bind_a[ANIM_RIG_PALETTE_A_COUNT];
     nt_anim_mat34_t inverse_bind_b[ANIM_RIG_PALETTE_B_COUNT];
-    /* nt_anim_rig_compat_id_size(ANIM_RIG_JOINT_COUNT) = 8 + 46*9. */
-    uint8_t rig_scratch[8U + (46U * ANIM_RIG_JOINT_COUNT)];
+    uint8_t rig_scratch[NT_ANIM_RIG_ID_BYTES(ANIM_RIG_JOINT_COUNT)];
 } anim_rig_t;
 
 /* Fills the view (including rig_compat_id) and the bind pose. The caller owns

@@ -47,7 +47,7 @@ Both paths end in GPU skinning of the same mesh through **one vertex program** t
 
 ### 3.1 Skeleton (`NSKL`)
 
-Immutable resource: joint count, parent indices, local rest pose, stable joint identifiers, `rig_compat_id` (`nt_hash64_t`). **Rig identity schema:** `rig_compat_id = hash64` (existing `nt_hash`, seed 0) over one padding-free little-endian byte sequence. The stable joint id is `uint32_t` = `nt_hash32_str(node name)`, so renaming a bone is a different rig; the unit/axis convention id is `uint8_t`, `NT_ANIM_RIG_CONVENTION_GLTF = 1` (glTF: metres, Y-up, right-handed); the schema version is `NT_ANIM_RIG_SCHEMA_VERSION = 1` and a new value is a new rig identity. The sequence is `8 + 46·J` bytes:
+Immutable resource: joint count, parent indices, local rest pose, stable joint identifiers, `rig_compat_id` (`nt_hash64_t`). **Rig identity schema:** `rig_compat_id = hash64` (existing `nt_hash`, seed 0) over one padding-free little-endian byte sequence. The stable joint id is `uint32_t` = `nt_hash32_str(node name)`, so renaming a bone is a different rig; the schema version is 1 and a new value is a new rig identity. The convention byte is a reserved `uint8_t` fixed at 1: every rig the engine hashes carries the glTF convention (metres, Y-up, right-handed), so it is a schema constant, not a per-rig property. The sequence is `8 + 46·J` bytes (`NT_ANIM_RIG_ID_BYTES`):
 
 ```
 "NRIG"  u8 schema  u8 convention  u16 joint_count                        8 B
@@ -79,7 +79,7 @@ cglm rule: kernels that call cglm link `nt_math`, which sets `CGLM_ALL_UNALIGNED
 
 `ModelPose` is a separate array of `nt_anim_mat34_t` — float32 affine 3×4 (three vec4 matrix rows `[m_r0 m_r1 m_r2 m_r3]`, 48 bytes) — in skeleton space; it preserves shear from hierarchical TRS. `SkinPalette` uses the same element type. Neither is local TRS.
 
-`PoseInstance` = borrowed Skeleton view + caller-owned local and model buffers. The Skeleton view is `nt_anim_skeleton_t` (`nt_anim.h`) and the SkinBinding view of §3.4 is `nt_skin_binding_t` (`nt_skin.h`). Independently mutable instances need separate buffers; shared instances are read-only for all sharers. Views are pointer+count; no resource lookup, generation pool or content hash in hot arguments.
+`PoseInstance` = borrowed Skeleton view + caller-owned local and model buffers. The Skeleton view is `nt_anim_skeleton_t` and the SkinBinding view of §3.4 is `nt_skin_binding_t`, both in `nt_anim.h`. Independently mutable instances need separate buffers; shared instances are read-only for all sharers. Views are pointer+count; no resource lookup, generation pool or content hash in hot arguments.
 
 ### 3.4 SkinBinding (`NSKN`)
 
@@ -160,7 +160,7 @@ R4 is a **separate one-element TRS signal**, not joint −1: `nt_anim_sample_obj
 
 Composition ends at a local pose. The game applies local edits and runs FK (whole rig or the edited subtree; same contract). A local write makes the model pose stale until FK; no dirty graph. Sockets per §4; no bone entities.
 
-`nt_anim_fk(skel, local, model, first, count)` evaluates `[first, first + count)` — one contract for the whole rig and for a subtree, which the game enters as `first = j`, `count = subtree_end[j] − j`. A range starting at a root may span several roots; a range starting inside a subtree must stay inside it, asserted as `parent[first] == NT_ANIM_NO_PARENT || first + count ≤ subtree_end[first]`, so every in-range parent is either in the range or is `parent[first]`. Precondition, documented and not guarded because it is unverifiable: when `parent[first]` exists, `model[parent[first]]` is already current.
+`nt_anim_fk(skel, local, model, first, count)` evaluates `[first, first + count)` — one contract for the whole rig and for a subtree, which the game enters as `first = j`, `count = subtree_end[j] − j`. A range starting at a root may span several roots; a range starting inside a subtree must stay inside it, asserted as `parent[first] == NT_ANIM_NO_PARENT || first + count ≤ subtree_end[first]`, so every in-range parent is either in the range or is `parent[first]`. `local` and `model` are caller-owned and must not overlap, asserted per call. Precondition, documented and not guarded because it is unverifiable: when `parent[first]` exists, `model[parent[first]]` is already current.
 
 IK (extension #481): aim and analytic two-bone are functions over gathered transforms, target point, pole direction, local bend axis and parameters; they return rotation deltas **expressed in the joint's local frame** (applied by postmultiplying the local rotation) plus solved/clamped/degenerate status and target error before external weighting; the game applies deltas with a mask and re-runs FK. Replacing a solver = calling another C function. Two hands: main hand → weapon socket → off-hand target → off-hand IK → FK, no dependency cycle.
 
@@ -249,7 +249,7 @@ Order: import → normalize spaces/units → canonical hierarchy/remap → valid
 
 ## 17. Modules and composition checks
 
-- `anim` (`engine/anim`, one module `nt_anim`): `nt_anim.h` — pose ABI, skeleton view, 3×4 kernels, FK, sockets, rig identity, plus sample and mix/override/additive, with `tracks_advance` in a separate object file; `nt_skin.h` — binding view, palette build. The radius bounds helper (§14) lands with its first consumer (#479).
+- `anim` (`engine/anim`, one module `nt_anim`): `nt_anim.h` — pose ABI, skeleton view, 3×4 kernels, FK, sockets, rig identity, skin binding view and palette build, plus sample and mix/override/additive, with `tracks_advance` in a separate object file. A radius bounds helper (§14) is added with its first consumer.
 - `anim_bank`: bank init/bake/lookup over `anim` + gfx interface.
 - `anim_gpu`: staging/upload, DeformationBinding; depends on the gfx interface.
 - `skinned_mesh_renderer` + `skin_comp`.

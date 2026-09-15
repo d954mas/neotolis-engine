@@ -5,7 +5,7 @@
  * Builder FLOAT16 streams and the runtime animation bank both convert through
  * this header so a value baked offline and a value computed at runtime round to
  * the same bits. Out of line on purpose: both callers are cold (glyph-cache
- * miss, bank bake), and inlining the rounding paths costs ~2 KB of wasm text. */
+ * miss, bank bake). */
 
 #include <stdint.h>
 

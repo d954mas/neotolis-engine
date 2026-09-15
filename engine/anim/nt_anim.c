@@ -48,15 +48,6 @@ void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out) {
     }
 }
 
-void nt_anim_pose_rest(const nt_anim_skeleton_t *skel, nt_anim_trs_t *local) {
-    NT_ASSERT(skel != NULL);
-    NT_ASSERT(skel->rest != NULL);
-    NT_ASSERT(local != NULL);
-    NT_ASSERT(local + skel->joint_count <= skel->rest || skel->rest + skel->joint_count <= local);
-
-    memcpy(local, skel->rest, (size_t)skel->joint_count * sizeof(nt_anim_trs_t));
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_anim_mat34_t *model, uint16_t first, uint16_t count) {
     NT_ASSERT(skel != NULL);
@@ -67,6 +58,9 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, nt_a
     NT_ASSERT(count >= 1U);
     NT_ASSERT((uint32_t)first + (uint32_t)count <= (uint32_t)skel->joint_count);
     NT_ASSERT(skel->parent[first] == NT_ANIM_NO_PARENT || (uint32_t)first + (uint32_t)count <= (uint32_t)skel->subtree_end[first]);
+    /* A model buffer overlapping the locals would feed later joints matrices
+     * built from their own output. */
+    NT_ASSERT((const char *)(local + skel->joint_count) <= (const char *)model || (const char *)(model + skel->joint_count) <= (const char *)local);
 
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
     nt_anim_check_locals(skel, local, first, count);
@@ -110,12 +104,38 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
     nt_anim_mat34_mul(&eg, &s, out);
 }
 
+// #region skin
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34_t *model, uint16_t model_count, nt_anim_mat34_t *out, uint16_t capacity) {
+    NT_ASSERT(binding != NULL);
+    NT_ASSERT(binding->remap != NULL);
+    NT_ASSERT(binding->inverse_bind != NULL);
+    NT_ASSERT(model != NULL);
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(binding->palette_count <= capacity);
+    NT_ASSERT(out + binding->palette_count <= model || model + model_count <= out);
+
+#if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)
+    for (uint16_t p = 0; p < binding->palette_count; ++p) {
+        NT_ASSERT(binding->remap[p] < model_count);
+    }
+#endif
+
+    for (uint16_t p = 0; p < binding->palette_count; ++p) {
+        nt_anim_mat34_mul(&model[binding->remap[p]], &binding->inverse_bind[p], &out[p]);
+    }
+}
+
+// #endregion
+
 // #region rig identity
 
-/* Header bytes: "NRIG", schema version, convention id, joint count. */
-#define NT_ANIM_RIG_HEADER_BYTES 8U
-/* Per joint: u32 id + u16 parent + 10 canonical binary32 of the rest TRS. */
-#define NT_ANIM_RIG_JOINT_BYTES 46U
+/* Version of the rig identity byte schema; a new value is a new rig identity. */
+#define NT_ANIM_RIG_SCHEMA_VERSION 1
+/* Reserved: every rig this engine hashes is glTF metres, Y-up, right-handed, so
+ * the byte is always 1. */
+#define NT_ANIM_RIG_CONVENTION_GLTF 1
 
 static uint32_t nt_anim_put_u8(uint8_t *bytes, uint32_t offset, uint8_t v) {
     bytes[offset] = v;
@@ -165,8 +185,6 @@ static void nt_anim_canonical_quat(const float q[4], float out[4]) {
     }
 }
 
-uint32_t nt_anim_rig_compat_id_size(uint16_t joint_count) { return NT_ANIM_RIG_HEADER_BYTES + (NT_ANIM_RIG_JOINT_BYTES * (uint32_t)joint_count); }
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_hash64_t nt_anim_rig_compat_id(const nt_anim_skeleton_t *skel, void *scratch, uint32_t scratch_size) {
     NT_ASSERT(skel != NULL);
@@ -175,7 +193,7 @@ nt_hash64_t nt_anim_rig_compat_id(const nt_anim_skeleton_t *skel, void *scratch,
     NT_ASSERT(skel->rest != NULL);
     NT_ASSERT(scratch != NULL);
 
-    const uint32_t size = nt_anim_rig_compat_id_size(skel->joint_count);
+    const uint32_t size = NT_ANIM_RIG_ID_BYTES(skel->joint_count);
     NT_ASSERT(scratch_size >= size);
 
     uint8_t *bytes = (uint8_t *)scratch;

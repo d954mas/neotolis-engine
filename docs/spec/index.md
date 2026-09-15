@@ -95,7 +95,7 @@ lifetime, and naming vocabulary.
 | `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md) (`nt_ui`), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) (optional `nt_ui_rich` / `nt_ui_rich_fx`) |
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
-| `engine/anim` | [anim/skeletal-animation.md](anim/skeletal-animation.md) (`nt_anim.h` pose ABI/FK/sockets/rig identity, `nt_skin.h` binding + palette) |
+| `engine/anim` | [anim/skeletal-animation.md](anim/skeletal-animation.md) (`nt_anim.h` pose ABI/FK/sockets/rig identity, skin binding + palette) |
 | *(`engine/anim_bank`, `engine/anim_gpu`, `engine/skin_comp`, skinned renderer in `engine/renderers` — planned, epic #472)* | [anim/skeletal-animation.md](anim/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |

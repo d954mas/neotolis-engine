@@ -86,7 +86,7 @@ static nt_anim_trs_t make_trs(float tx, float ty, float tz, float ax, float ay, 
 
 void test_mat34_from_trs_matches_cglm(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
-    nt_anim_pose_rest(&g_rig.skel, local);
+    memcpy(local, g_rig.skel.rest, sizeof(local));
 
     for (uint16_t j = 0; j < ANIM_RIG_JOINT_COUNT; ++j) {
         mat4 ref;
@@ -197,7 +197,7 @@ void test_fk_transforms_points_as_column_vectors(void) {
 
 void test_fk_subtree_matches_full_pass(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
-    nt_anim_pose_rest(&g_rig.skel, local);
+    memcpy(local, g_rig.skel.rest, sizeof(local));
 
     nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
     nt_anim_fk(&g_rig.skel, local, model, 0, ANIM_RIG_JOINT_COUNT);
@@ -264,34 +264,17 @@ void test_fk_traps_on_invalid_ranges(void) {
     /* [3, 6) leaves arm's subtree, which ends at 5. */
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, local, model, JOINT_ARM, 3));
 }
-#endif
 
-/* ---- Rest pose ---- */
+/* One buffer read as both poses: writing model[j] would overwrite locals that
+ * later joints still have to read. */
+void test_fk_traps_on_overlap(void) {
+    union {
+        nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
+        nt_anim_mat34_t model[ANIM_RIG_JOINT_COUNT];
+    } shared;
+    memcpy(shared.local, g_rig.bind, sizeof(shared.local));
 
-void test_pose_rest_then_fk_matches_fk_over_rest(void) {
-    nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
-    nt_anim_pose_rest(&g_rig.skel, local);
-
-    nt_anim_mat34_t copied[ANIM_RIG_JOINT_COUNT];
-    nt_anim_fk(&g_rig.skel, local, copied, 0, ANIM_RIG_JOINT_COUNT);
-
-    nt_anim_mat34_t direct[ANIM_RIG_JOINT_COUNT];
-    nt_anim_fk(&g_rig.skel, g_rig.skel.rest, direct, 0, ANIM_RIG_JOINT_COUNT);
-
-    TEST_ASSERT_EQUAL_MEMORY(direct, copied, sizeof(direct));
-}
-
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-void test_pose_rest_traps_on_overlap(void) {
-    NT_TEST_EXPECT_ASSERT(nt_anim_pose_rest(&g_rig.skel, (nt_anim_trs_t *)g_rig.skel.rest));
-
-    /* Shifted by one joint inside one buffer: still overlapping, so memcpy would
-     * read joints it had already written. */
-    nt_anim_trs_t shared[ANIM_RIG_JOINT_COUNT + 1];
-    memcpy(&shared[1], g_rig.skel.rest, (size_t)ANIM_RIG_JOINT_COUNT * sizeof(nt_anim_trs_t));
-    nt_anim_skeleton_t overlapping = g_rig.skel;
-    overlapping.rest = &shared[1];
-    NT_TEST_EXPECT_ASSERT(nt_anim_pose_rest(&overlapping, &shared[0]));
+    NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, shared.local, shared.model, 0, ANIM_RIG_JOINT_COUNT));
 }
 #endif
 
@@ -371,10 +354,10 @@ static uint64_t vector_rig_id(const vector_rig_t *r) {
     return nt_anim_rig_compat_id(&r->skel, scratch, (uint32_t)sizeof(scratch)).value;
 }
 
-void test_rig_compat_id_size(void) {
-    TEST_ASSERT_EQUAL_UINT32(RIG_VECTOR_BYTES, nt_anim_rig_compat_id_size(RIG_VECTOR_JOINTS));
-    TEST_ASSERT_EQUAL_UINT32(422U, nt_anim_rig_compat_id_size(9));
-    TEST_ASSERT_EQUAL_UINT32(8U, nt_anim_rig_compat_id_size(0));
+void test_rig_id_bytes(void) {
+    TEST_ASSERT_EQUAL_UINT32(8U, NT_ANIM_RIG_ID_BYTES(0));
+    TEST_ASSERT_EQUAL_UINT32(422U, NT_ANIM_RIG_ID_BYTES(9));
+    TEST_ASSERT_EQUAL_UINT32(3014618U, NT_ANIM_RIG_ID_BYTES(UINT16_MAX));
 }
 
 void test_rig_compat_id_published_vector(void) {
@@ -589,9 +572,8 @@ int main(void) {
     RUN_TEST(test_fk_subtree_matches_full_pass);
     RUN_TEST(test_fk_root_spanning_range_equals_per_root_ranges);
     RUN_TEST(test_fk_whole_subtree_range_is_valid);
-    RUN_TEST(test_pose_rest_then_fk_matches_fk_over_rest);
     RUN_TEST(test_socket_matches_cglm_composition);
-    RUN_TEST(test_rig_compat_id_size);
+    RUN_TEST(test_rig_id_bytes);
     RUN_TEST(test_rig_compat_id_published_vector);
     RUN_TEST(test_rig_compat_id_ignores_quaternion_sign);
     RUN_TEST(test_rig_compat_id_tie_break_follows_the_earlier_component);
@@ -601,7 +583,7 @@ int main(void) {
     RUN_TEST(test_rig_compat_id_changes_with_the_rig);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_fk_traps_on_invalid_ranges);
-    RUN_TEST(test_pose_rest_traps_on_overlap);
+    RUN_TEST(test_fk_traps_on_overlap);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
 #endif
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE != NT_ASSERT_OFF)

@@ -6,7 +6,6 @@
 #include <string.h>
 
 #include "anim/nt_anim.h"
-#include "anim/nt_skin.h"
 #include "math/nt_math.h"
 #include "test_helpers/anim_rig.h"
 

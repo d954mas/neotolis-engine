@@ -1,5 +1,5 @@
 /*
- * anim_layout -- pose-storage experiment for the #473 pose ABI.
+ * anim_layout -- pose-storage experiment for the pose ABI.
  *
  * Runs a synthetic sample -> mix -> FK loop over three storages of the same
  * local pose and reports ns per skeleton joint per stage:
@@ -13,8 +13,7 @@
  * startup cross-check compares the three FK outputs before any measurement.
  *
  * The joint x character x track matrix is the workload named in
- * docs/spec/anim/skeletal-animation.md section 18, which #487 measures on the
- * real kernels and #492 revisits with SIMD.
+ * docs/spec/anim/skeletal-animation.md section 18.
  *
  * Research tool: plain printf, single translation unit, not an engine target.
  */
