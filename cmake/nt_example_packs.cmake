@@ -2,7 +2,7 @@
 # the .expected_packs manifest the CI guard verifies. Native presets run the
 # builder at build time; wasm copies a prior native build's packs or fails loudly.
 function(nt_example_packs)
-    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS" ${ARGN})
+    cmake_parse_arguments(PACKS "" "NAME;TARGET;BUILDER;PACK_DIR;ASSETS_DIR" "PACKS;OPTIONAL_PACKS;INPUT_DIRS" ${ARGN})
     if(PACKS_UNPARSED_ARGUMENTS OR NOT PACKS_NAME OR NOT PACKS_TARGET OR NOT PACKS_BUILDER
        OR NOT PACKS_PACK_DIR OR NOT PACKS_ASSETS_DIR OR NOT PACKS_PACKS)
         message(FATAL_ERROR "nt_example_packs(${PACKS_NAME}): bad or missing arguments"
@@ -20,6 +20,20 @@ function(nt_example_packs)
     set(_copy_list "")
     set(_stamp "")
     if(NOT EMSCRIPTEN AND NOT _skipped)
+        set(_input_deps "")
+        foreach(INPUT_DIR IN LISTS PACKS_INPUT_DIRS)
+            get_filename_component(_input_dir "${INPUT_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+            file(GLOB_RECURSE _dir_inputs CONFIGURE_DEPENDS LIST_DIRECTORIES FALSE "${_input_dir}/*")
+            list(APPEND _input_deps ${_dir_inputs})
+        endforeach()
+        if(PACKS_INPUT_DIRS)
+            list(REMOVE_DUPLICATES _input_deps)
+            list(SORT _input_deps)
+            # Membership changes must rebuild even after deletion or adding an older file.
+            set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/${PACKS_NAME}_pack_inputs.txt")
+            file(GENERATE OUTPUT "${_input_manifest}" CONTENT "${_input_deps}\n")
+            list(APPEND _input_deps "${_input_manifest}")
+        endif()
         foreach(PACK ${PACKS_PACKS})
             list(APPEND _pack_files "${PACKS_PACK_DIR}/${PACK}")
         endforeach()
@@ -35,7 +49,7 @@ function(nt_example_packs)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKS_PACK_DIR}"
             COMMAND "$<TARGET_FILE:${PACKS_BUILDER}>" "${PACKS_PACK_DIR}"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
-            DEPENDS ${PACKS_BUILDER}
+            DEPENDS ${PACKS_BUILDER} ${_input_deps}
             WORKING_DIRECTORY "${NT_ENGINE_ROOT}"
             COMMENT "Building ${PACKS_NAME} pack(s)"
         )
