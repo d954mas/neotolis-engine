@@ -41,6 +41,9 @@ nt_example_packs(
     PACK_DIR "${RTT_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${RTT_SHOWCASE_ASSETS_DIR}"
     PACKS rtt_showcase.ntpack
+    INPUT_DIRS
+        "${NT_ENGINE_ROOT}/examples/ui_showcase/raw"
+        "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 if(NT_CDN_URL)

@@ -46,6 +46,7 @@ nt_example_packs(
     PACK_DIR "${UI_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${UI_SHOWCASE_ASSETS_DIR}"
     PACKS ui_showcase.ntpack
+    INPUT_DIRS raw "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 # Optional CDN base URL

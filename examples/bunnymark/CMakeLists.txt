@@ -65,7 +65,8 @@ endif()
 
 # HD pack guard — HD art may not exist yet.
 # The demo ships SD-only when examples/bunnymark/raw/hd/ is absent. When the
-# user drops 5 PNGs in raw/hd/ and reconfigures, the HD branch in build_packs.c
+# user drops 5 PNGs in raw/hd/, the next native build reconfigures automatically;
+# the HD branch in build_packs.c
 # emits bunnymark_hd.ntpack and main.c sees BUNNYMARK_HD_AVAILABLE = 1.
 set(BUNNYMARK_PACK_NAMES bunnymark_sd.ntpack)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/raw/hd")
@@ -90,6 +91,9 @@ nt_example_packs(
     PACK_DIR "${BUNNYMARK_PACK_DIR}"
     ASSETS_DIR "${BUNNYMARK_ASSETS_DIR}"
     PACKS ${BUNNYMARK_PACK_NAMES}
+    INPUT_DIRS raw
+        "${NT_ENGINE_ROOT}/assets/fonts"
+        "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 # Optional CDN base URL

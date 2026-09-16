@@ -40,6 +40,10 @@ nt_example_packs(
     PACK_DIR "${TQ_PACK_DIR}"
     ASSETS_DIR "${TQ_ASSETS_DIR}"
     PACKS base.ntpack lenna_pixel.ntpack lenna_hires.ntpack
+    INPUT_DIRS
+        "${NT_ENGINE_ROOT}/assets/meshes"
+        "${NT_ENGINE_ROOT}/assets/shaders"
+        "${NT_ENGINE_ROOT}/assets/textures"
 )
 
 # Optional CDN base URL (set by CI for deployed builds)

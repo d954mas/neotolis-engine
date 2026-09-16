@@ -41,6 +41,9 @@ nt_example_packs(
     PACK_DIR "${SP_PACK_DIR}"
     ASSETS_DIR "${SP_ASSETS_DIR}"
     PACKS sponza_core.ntpack sponza_geo.ntpack sponza_tex.ntpack sponza_full.ntpack
+    INPUT_DIRS
+        "${NT_ENGINE_ROOT}/assets/sponza"
+        "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 # Optional CDN base URL (set by CI for deployed builds)
