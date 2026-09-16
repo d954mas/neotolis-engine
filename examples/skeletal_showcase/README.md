@@ -35,6 +35,14 @@ code-defined data in `main.c`, with 21 joints and a symmetric rest pose.
 `Test pose` is a reproducible asymmetric pose for checking forward-kinematic
 propagation.
 
+Source: [examples/skeletal_showcase/main.c](main.c).
+
+The properties panel shows the selected joint's local offset in degrees and its
+resulting model-space 3x4 matrix. Offsets are composed in the fixed order
+`q_offset = qz * qy * qx`, then `q_local = q_offset * q_rest`; the displayed
+matrix comes from the full `nt_skeletal_fk` pass. `Step` advances the app clock
+by exactly `1/60` second, and `Axes on` draws local X/Y/Z axes in RGB.
+
 Visual QA: start the native executable, confirm the T-pose and ground grid,
 select `left_forearm`, rotate it in the properties panel, then compare the
 opposite arm and legs. Try `Test pose`, `Rest pose`, and `Reset scene`; reset

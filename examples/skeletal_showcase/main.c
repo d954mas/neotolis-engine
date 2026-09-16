@@ -6,6 +6,20 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#ifdef NT_DEVAPI_ENABLED
+#include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_groups.h"
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+#include "devapi/nt_devapi_capture.h"
+#endif
+#ifdef NT_PLATFORM_WEB
+#include "devapi/nt_devapi_web.h"
+#else
+#include "devapi/nt_devapi_net.h"
+#endif
+#else
+#include "devapi/nt_devapi_stub.h"
+#endif
 #include "font/nt_font.h"
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
@@ -31,6 +45,7 @@
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
+#include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
 #include "window/nt_window.h"
 
@@ -51,7 +66,7 @@
 #define SCRATCH_ARENA_SIZE ((size_t)128 * 1024)
 #define STAGE_ID "skeletal_showcase/stage"
 #define CAMERA_MIN 3.5F
-#define CAMERA_MAX 12.0F
+#define CAMERA_MAX 18.0F
 #define CAMERA_PITCH_LIMIT 1.25F
 
 static const char *const s_joint_names[JOINT_COUNT] = {
@@ -118,7 +133,11 @@ static bool s_font_bound;
 static uint32_t s_white_region;
 static nt_ui_button_style_t s_button_style;
 static nt_ui_slider_style_t s_slider_style;
+static nt_ui_scroll_style_t s_joint_scroll_style;
 static bool s_ids_ready;
+static bool s_camera_auto_fit;
+static float s_camera_fit_width;
+static float s_camera_fit_height;
 // #endregion
 
 // #region pose and camera
@@ -178,16 +197,19 @@ static void reset_scene(void) {
     s_camera_target[0] = 0.0F;
     s_camera_target[1] = 2.0F;
     s_camera_target[2] = 0.0F;
+    s_camera_auto_fit = true;
+    s_camera_fit_width = 0.0F;
+    s_camera_fit_height = 0.0F;
     s_demo_time = 0.0F;
     s_clock_paused = true;
 }
 
 static void make_camera_vp(mat4 vp, float aspect, float eye[3]) {
     const float cp = cosf(s_camera_pitch);
-    eye[0] = sinf(s_camera_yaw) * cp * s_camera_distance;
-    eye[1] = 1.55F + sinf(s_camera_pitch) * s_camera_distance;
-    eye[2] = cosf(s_camera_yaw) * cp * s_camera_distance;
     vec3 target = {s_camera_target[0], s_camera_target[1], s_camera_target[2]};
+    eye[0] = target[0] + sinf(s_camera_yaw) * cp * s_camera_distance;
+    eye[1] = target[1] + sinf(s_camera_pitch) * s_camera_distance;
+    eye[2] = target[2] + cosf(s_camera_yaw) * cp * s_camera_distance;
     vec3 up = {0.0F, 1.0F, 0.0F};
     mat4 view;
     mat4 proj;
@@ -198,6 +220,20 @@ static void make_camera_vp(mat4 vp, float aspect, float eye[3]) {
 
 static bool stage_contains(float x, float y) {
     return s_stage_bbox.found && x >= s_stage_bbox.x && x <= s_stage_bbox.x + s_stage_bbox.width && y >= s_stage_bbox.y && y <= s_stage_bbox.y + s_stage_bbox.height;
+}
+
+static void fit_camera_to_stage(float stage_w, float stage_h) {
+    const float vertical_fov = glm_rad(45.0F);
+    const float horizontal_fov = 2.0F * atanf(tanf(vertical_fov * 0.5F) * (stage_w / stage_h));
+    const float vertical_distance = 4.15F / (2.0F * tanf(vertical_fov * 0.5F));
+    const float horizontal_distance = 4.98F / (2.0F * tanf(horizontal_fov * 0.5F));
+    s_camera_distance = vertical_distance > horizontal_distance ? vertical_distance : horizontal_distance;
+    if (s_camera_distance < CAMERA_MIN) {
+        s_camera_distance = CAMERA_MIN;
+    }
+    if (s_camera_distance > CAMERA_MAX) {
+        s_camera_distance = CAMERA_MAX;
+    }
 }
 
 static void update_stage_camera(const nt_pointer_t *pointer, float fb_h) {
@@ -284,6 +320,9 @@ static void init_ui_styles(void) {
     s_button_style.slice9_scale = 1.0F;
 
     s_slider_style = nt_ui_slider_style_defaults();
+    s_joint_scroll_style = nt_ui_scroll_style_defaults();
+    s_joint_scroll_style.scroll_x = false;
+    s_joint_scroll_style.scroll_y = true;
     const nt_atlas_region_ref_t track = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_TRACK.value);
     const nt_atlas_region_ref_t fill = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_FILL.value);
     const nt_atlas_region_ref_t thumb = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_THUMB.value);
@@ -296,7 +335,7 @@ static void init_ui_styles(void) {
     for (int i = 1; i < 4; ++i) {
         s_slider_style.states[i] = s_slider_style.states[0];
     }
-    s_slider_style.track_w = 230.0F;
+    s_slider_style.track_w = 175.0F;
     s_slider_style.track_h = 14.0F;
     s_slider_style.thumb_w = 22.0F;
     s_slider_style.thumb_h = 22.0F;
@@ -364,15 +403,25 @@ static void declare_joint_list(void) {
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Scene", label_style(17.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Skeleton & Pose", label_style(14.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Joints", label_style(13.0F, (Clay_Color){165.0F, 175.0F, 195.0F, 255.0F}));
-        for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
-            char text[48];
-            const uint16_t p = s_parent[j];
-            const int depth = p == NT_SKELETAL_NO_PARENT ? 0 : (p < 3 ? 1 : (p < 5 ? 2 : 3));
-            (void)snprintf(text, sizeof text, "%*s%s", depth * 2, "", s_joint_names[j]);
-            if (text_button(s_ui_joint_ids[j], text, (int)j == s_selected_joint)) {
-                s_selected_joint = (int)j;
+        nt_ui_scroll_begin(s_ui, NULL, nt_ui_id("skeletal_showcase/joint_scroll"), &s_joint_scroll_style,
+                           &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2}}) {
+            for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
+                char text[48];
+                const uint16_t p = s_parent[j];
+                int depth = 0;
+                uint16_t ancestor = p;
+                while (ancestor != NT_SKELETAL_NO_PARENT) {
+                    ++depth;
+                    ancestor = s_parent[ancestor];
+                }
+                (void)snprintf(text, sizeof text, "%*s%s", depth * 2, "", s_joint_names[j]);
+                if (text_button(s_ui_joint_ids[j], text, (int)j == s_selected_joint)) {
+                    s_selected_joint = (int)j;
+                }
             }
         }
+        nt_ui_scroll_end(s_ui);
     }
 }
 
@@ -389,9 +438,9 @@ static void declare_properties(void) {
         static const char *const axes[3] = {"X", "Y", "Z"};
         static const uint32_t angle_ids[3] = {0xA11CE001U, 0xA11CE002U, 0xA11CE003U};
         for (int axis = 0; axis < 3; ++axis) {
-            char label[8];
-            (void)snprintf(label, sizeof label, "%s", axes[axis]);
             float degrees = s_angles[s_selected_joint][axis] * 57.2957795F;
+            char label[32];
+            (void)snprintf(label, sizeof label, "%s %+03.0f deg", axes[axis], (double)degrees);
             (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_fmix_id(angle_ids[axis], (uint32_t)s_selected_joint), label, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
                                      &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, true);
             s_angles[s_selected_joint][axis] = degrees * 0.0174532925F;
@@ -416,9 +465,10 @@ static void declare_ui(float fb_w, float fb_h) {
         declare_header();
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
             declare_joint_list();
-            CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(12)}}) {
+            CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 5, .padding = CLAY_PADDING_ALL(12)}}) {
                 nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "T-pose stage", label_style(16.0F, (Clay_Color){145.0F, 215.0F, 255.0F, 255.0F}));
                 nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Existing nt_skeletal FK + shape renderer", label_style(12.0F, (Clay_Color){150.0F, 165.0F, 185.0F, 255.0F}));
+                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Source: examples/skeletal_showcase/main.c", label_style(11.0F, (Clay_Color){120.0F, 170.0F, 205.0F, 255.0F}));
             }
             declare_properties();
         }
@@ -471,13 +521,19 @@ static void draw_stage(void) {
     }
     for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
         const float p[3] = {s_model[j].r[0][3], s_model[j].r[1][3], s_model[j].r[2][3]};
-        const float *color = j == (uint32_t)s_selected_joint ? (const float[4]){1.0F, 0.9F, 0.2F, 1.0F}
-                                                             : (in_selected_subtree(j) ? (const float[4]){1.0F, 0.55F, 0.15F, 1.0F} : (const float[4]){0.30F, 0.85F, 0.95F, 1.0F});
+        const float *color;
+        if (j == (uint32_t)s_selected_joint) {
+            color = (const float[4]){1.0F, 0.9F, 0.2F, 1.0F};
+        } else if (in_selected_subtree(j)) {
+            color = (const float[4]){1.0F, 0.55F, 0.15F, 1.0F};
+        } else {
+            color = (const float[4]){0.30F, 0.85F, 0.95F, 1.0F};
+        }
         nt_shape_renderer_sphere(p, j == (uint32_t)s_selected_joint ? 0.105F : 0.075F, color);
         if (s_show_axes) {
             const float axis_colors[3][4] = {{1.0F, 0.2F, 0.2F, 1.0F}, {0.2F, 1.0F, 0.3F, 1.0F}, {0.2F, 0.5F, 1.0F, 1.0F}};
             for (int axis = 0; axis < 3; ++axis) {
-                const float end[3] = {p[0] + s_model[j].r[0][axis] * 0.23F, p[1] + s_model[j].r[1][axis] * 0.23F, p[2] + s_model[j].r[2][axis] * 0.23F};
+                const float end[3] = {p[0] + (s_model[j].r[0][axis] * 0.23F), p[1] + (s_model[j].r[1][axis] * 0.23F), p[2] + (s_model[j].r[2][axis] * 0.23F)};
                 nt_shape_renderer_line(p, end, axis_colors[axis]);
             }
         }
@@ -496,7 +552,6 @@ static void ensure_ids(void) {
     for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
         char name[64];
         (void)snprintf(name, sizeof name, "skeletal_showcase/joint/%s", s_joint_names[j]);
-        s_joint_ids[j] = nt_hash32_str(name).value;
         s_ui_joint_ids[j] = nt_ui_id(name);
     }
     s_ids_ready = true;
@@ -504,6 +559,9 @@ static void ensure_ids(void) {
 
 static void frame(void) {
     nt_window_poll();
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_update();
+#endif
     nt_input_poll();
     nt_mem_scratch_reset();
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -548,11 +606,16 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         nt_gfx_end_frame();
-        nt_window_swap_buffers();
+        if (nt_app_render_enabled()) {
+            nt_window_swap_buffers();
+        }
         return;
     }
     nt_font_step();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.035F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
+    const bool render_enabled = nt_app_render_enabled();
+    if (render_enabled) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.035F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
+    }
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
@@ -561,6 +624,13 @@ static void frame(void) {
         ensure_ids();
         declare_ui(fb_w, fb_h);
         s_stage_bbox = nt_ui_get_bbox(s_ui, nt_ui_id(STAGE_ID));
+        const bool stage_resized = fabsf(s_camera_fit_width - s_stage_bbox.width) > 0.5F || fabsf(s_camera_fit_height - s_stage_bbox.height) > 0.5F;
+        if ((s_camera_auto_fit || stage_resized) && s_stage_bbox.found && s_stage_bbox.height > 1.0F) {
+            fit_camera_to_stage(s_stage_bbox.width, s_stage_bbox.height);
+            s_camera_auto_fit = false;
+            s_camera_fit_width = s_stage_bbox.width;
+            s_camera_fit_height = s_stage_bbox.height;
+        }
         update_stage_camera(&g_nt_input.pointers[0], fb_h);
         mat4 stage_vp;
         float eye[3];
@@ -573,21 +643,27 @@ static void frame(void) {
         uniforms.camera_pos[0] = eye[0];
         uniforms.camera_pos[1] = eye[1];
         uniforms.camera_pos[2] = eye[2];
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-        draw_stage();
+        if (render_enabled) {
+            nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
+            nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+            draw_stage();
 
-        nt_ui_make_screen_view_proj(fb_w, fb_h, uniforms.view_proj);
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-        nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
-        nt_ui_walk(s_ui, &target);
-        nt_sprite_renderer_flush();
-        nt_text_renderer_flush();
+            nt_ui_make_screen_view_proj(fb_w, fb_h, uniforms.view_proj);
+            nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
+            nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+            nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
+            nt_ui_walk(s_ui, &target);
+            nt_sprite_renderer_flush();
+            nt_text_renderer_flush();
+        }
     }
-    nt_gfx_end_pass();
+    if (render_enabled) {
+        nt_gfx_end_pass();
+    }
     nt_gfx_end_frame();
-    nt_window_swap_buffers();
+    if (render_enabled) {
+        nt_window_swap_buffers();
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -653,6 +729,29 @@ int main(int argc, char *argv[]) {
     nt_ui_set_sprite_material(s_ui, s_sprite_material);
     nt_ui_set_text_material(s_ui, s_text_material);
 
+#ifdef NT_DEVAPI_ENABLED
+    if (nt_devapi_init() != NT_OK) {
+        nt_log_error("skeletal_showcase: devapi init failed");
+        return 1;
+    }
+    nt_devapi_register_default();
+#ifdef NT_DEVAPI_GROUP_UI
+    nt_devapi_ui_register_context("showcase", s_ui);
+#endif
+#ifndef NT_PLATFORM_WEB
+    if (!nt_devapi_net_start((uint16_t)NT_DEVAPI_DEFAULT_PORT)) {
+        nt_log_error("skeletal_showcase: devapi port %u unavailable", (unsigned)NT_DEVAPI_DEFAULT_PORT);
+        nt_devapi_shutdown();
+        return 1;
+    }
+#else
+    nt_devapi_web_install_shim();
+#endif
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    nt_devapi_capture_install_seam();
+#endif
+#endif
+
     s_skeleton.parent = s_parent;
     s_skeleton.subtree_end = s_subtree_end;
     s_skeleton.joint_id = s_joint_ids;
@@ -671,6 +770,10 @@ int main(int argc, char *argv[]) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_net_stop();
+    nt_devapi_shutdown();
+#endif
     nt_ui_destroy_context(s_ui);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();

@@ -3,6 +3,17 @@ set(SKELETAL_SHOWCASE_ASSETS_DIR "${SKELETAL_SHOWCASE_OUTPUT_DIR}/assets")
 set(SKELETAL_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/skeletal_showcase")
 
 add_executable(skeletal_showcase main.c)
+if(NT_DEVAPI_ENABLED)
+    if(EMSCRIPTEN)
+        target_link_libraries(skeletal_showcase PRIVATE nt_devapi_web nt_devapi_default)
+        target_link_options(skeletal_showcase PRIVATE
+            "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll','_nt_devapi_web_reset']"
+            "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
+        )
+    else()
+        target_link_libraries(skeletal_showcase PRIVATE nt_devapi_net nt_devapi_default)
+    endif()
+endif()
 target_link_libraries(skeletal_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas nt_skeletal
