@@ -225,8 +225,9 @@ static bool stage_contains(float x, float y) {
 static void fit_camera_to_stage(float stage_w, float stage_h) {
     const float vertical_fov = glm_rad(45.0F);
     const float horizontal_fov = 2.0F * atanf(tanf(vertical_fov * 0.5F) * (stage_w / stage_h));
-    const float vertical_distance = 4.15F / (2.0F * tanf(vertical_fov * 0.5F));
-    const float horizontal_distance = 4.98F / (2.0F * tanf(horizontal_fov * 0.5F));
+    /* Frame the full humanoid with room for joint spheres and perspective at the lower edge. */
+    const float vertical_distance = 5.20F / (2.0F * tanf(vertical_fov * 0.5F));
+    const float horizontal_distance = 5.20F / (2.0F * tanf(horizontal_fov * 0.5F));
     s_camera_distance = vertical_distance > horizontal_distance ? vertical_distance : horizontal_distance;
     if (s_camera_distance < CAMERA_MIN) {
         s_camera_distance = CAMERA_MIN;
@@ -441,7 +442,8 @@ static void declare_properties(void) {
             float degrees = s_angles[s_selected_joint][axis] * 57.2957795F;
             char label[32];
             (void)snprintf(label, sizeof label, "%s %+03.0f deg", axes[axis], (double)degrees);
-            (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_fmix_id(angle_ids[axis], (uint32_t)s_selected_joint), label, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), label, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
+            (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_fmix_id(angle_ids[axis], (uint32_t)s_selected_joint), NULL, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
                                      &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, true);
             s_angles[s_selected_joint][axis] = degrees * 0.0174532925F;
         }
