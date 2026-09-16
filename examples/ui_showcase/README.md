@@ -111,8 +111,8 @@ into the **existing** vitrine tabs (no new example dir).
 
 The GL surface is **not reliably headless-capturable** here, so these widgets are verified
 by the **user's eyes** — there is no automated screenshot regression. If any showcase atlas
-asset changed, **force-delete the stale `.ntpack`** before this run (the pack depends only on the
-builder exe, not the asset source) so QA sees fresh art. Build + run the native showcase (see
+asset changed, rebuild the example pack through its normal target so the tracked input
+directories invalidate the pack automatically. Build + run the native showcase (see
 **Build & run** below), then confirm:
 
 1. **MIXED dash** (Toggles tab) — with some children on and some off, the parent renders a

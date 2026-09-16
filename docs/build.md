@@ -37,10 +37,29 @@ packs cause an explicit WASM build failure.
 The first Sponza encode can take hours. To defer it, configure native builds
 with `-DNT_SKIP_EXAMPLE_PACKS=sponza`; this cache setting persists. Reset it with
 `-DNT_SKIP_EXAMPLE_PACKS=` when Sponza is needed. Warm encodes reuse
-`build/examples/*/_cache`. Packs depend on the builder executable; after changing
-shader/asset sources, delete the relevant `.ntpack` before visual QA to force a
-repack. Generated `examples/*/generated/*.h` are deterministic tracked output;
-commit refreshed copies when a pack build reveals they were stale.
+`build/examples/*/_cache`. Packs depend on the builder executable and files in
+the example's `INPUT_DIRS`. Native builds detect edits, additions and removals
+recursively, including shader includes and new subdirectories. An unchanged
+input tree does not rerun the builder. Generated `examples/*/generated/*.h` are
+deterministic tracked output; commit refreshed copies when a pack build reveals
+they were stale.
+
+Declare input directories once in `nt_example_packs`, for example:
+
+```cmake
+INPUT_DIRS raw "${NT_ENGINE_ROOT}/assets/shaders"
+```
+
+Relative paths are resolved from the example's source directory. Include shared
+asset directories used by its builder; procedural-only packs need no
+`INPUT_DIRS`. Keep pack outputs, generated headers and caches outside these
+directories. Every file within a listed directory is a dependency, even if the
+builder does not consume it. The builder still decides what goes into the pack.
+File discovery runs during builds, without a background watcher; an automatically
+generated file list also invalidates packs when inputs are removed or added with
+old timestamps. Skipped examples do not scan inputs or rebuild packs. WASM still
+requires a native build after asset edits; reconfigure WASM if the required pack
+set changes, such as adding Bunnymark HD art.
 
 ## Build options
 
@@ -148,7 +167,7 @@ same files and never regenerate them. The examples require the default set
 cmake --preset native-debug-test
 cmake --build --preset native-debug-test --target test_basisu_golden_produce
 ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
-skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase;skeletal_showcase"
 tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
 # UASTC only (the smallest transcoder)
 cmake --preset native-debug-test -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"

@@ -47,6 +47,7 @@ nt_example_packs(
     PACK_DIR "${SLICE9_DEMO_PACK_DIR}"
     ASSETS_DIR "${SLICE9_DEMO_ASSETS_DIR}"
     PACKS slice9_demo.ntpack
+    INPUT_DIRS raw "${NT_ENGINE_ROOT}/assets/shaders"
 )
 
 # Optional CDN base URL
