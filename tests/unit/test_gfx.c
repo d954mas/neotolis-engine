@@ -1684,7 +1684,7 @@ void test_gfx_make_texture_compressed_requires_gpu_caps(void) {
     /* Fake caps report no compressed support. */
     nt_texture_t tex = {0};
     uint32_t creates = nt_gfx_fake_texture_create_count();
-#ifdef NT_DEBUG
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     EXPECT_ASSERT(tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA));
 #else
     tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA);

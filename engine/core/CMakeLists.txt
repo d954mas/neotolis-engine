@@ -12,6 +12,7 @@ target_link_libraries(nt_core PUBLIC nt_shared nt_log_interface)
 
 # Components share the configuration without linking the introspection collector.
 target_compile_definitions(nt_core PUBLIC
+    NT_ASSERT_MODE=${NT_ASSERT_MODE}
     NT_INTROSPECT_ENABLED=$<BOOL:${NT_INTROSPECT_ENABLED}>
     NT_INTROSPECT_WRITE_ENABLED=$<BOOL:${NT_INTROSPECT_WRITE_ENABLED}>
 )

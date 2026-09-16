@@ -37,7 +37,8 @@
                 "CMAKE_C_STANDARD": "17",
                 "CMAKE_C_STANDARD_REQUIRED": "ON",
                 "CMAKE_C_COMPILER": "clang",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "NT_HTTP_CURL": "ON"
             }
         },
         {
@@ -55,7 +56,9 @@
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
                 "NT_RESOURCE_TIMING_ENABLED": "ON",
-                "NT_GFX_GPU_TIMING_ENABLED": "ON"
+                "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                "NT_ASSERT_MODE": "2",
+                "NT_SKELETAL_CHECKS": "ON"
             }
         },
         {
@@ -73,7 +76,9 @@
                 "NT_LOG_MIN_LEVEL": "1",
                 "NT_UI_TIMING_ENABLED": "OFF",
                 "NT_RESOURCE_TIMING_ENABLED": "OFF",
-                "NT_GFX_GPU_TIMING_ENABLED": "OFF"
+                "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+                "NT_ASSERT_MODE": "1",
+                "NT_SKELETAL_CHECKS": "OFF"
             }
         },
         {
@@ -127,7 +132,10 @@
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
                 "NT_RESOURCE_TIMING_ENABLED": "ON",
-                "NT_GFX_GPU_TIMING_ENABLED": "ON"
+                "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                "NT_ASSERT_MODE": "2",
+                "NT_SKELETAL_CHECKS": "ON",
+                "NT_GFX_NATIVE_GL_DEBUG": "ON"
             }
         },
         {
@@ -146,7 +154,10 @@
                 "NT_LOG_MIN_LEVEL": "1",
                 "NT_UI_TIMING_ENABLED": "OFF",
                 "NT_RESOURCE_TIMING_ENABLED": "OFF",
-                "NT_GFX_GPU_TIMING_ENABLED": "OFF"
+                "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+                "NT_ASSERT_MODE": "1",
+                "NT_SKELETAL_CHECKS": "OFF",
+                "NT_GFX_NATIVE_GL_DEBUG": "OFF"
             }
         },
         {
@@ -165,7 +176,7 @@
             "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
             "cacheVariables": {
                 "NT_ASSERT_MODE": "2",
-                "NT_SKELETAL_CHECKS": "1",
+                "NT_SKELETAL_CHECKS": "ON",
                 "NT_BUILD_TESTS": "ON",
                 "NT_UI_DEBUG_TOOLS": "ON",
                 "NT_LOG_RING_ENABLED": "ON",

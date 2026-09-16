@@ -1,4 +1,5 @@
 nt426_consumer(sibling_core CORE nt_core)
+nt426_consumer(sibling_skeletal SKELETAL nt_skeletal)
 nt426_consumer(sibling_component COMPONENT nt_transform_comp)
 nt426_consumer(sibling_metrics METRICS nt_metrics)
 nt426_consumer(sibling_ring RING nt_log_ring)

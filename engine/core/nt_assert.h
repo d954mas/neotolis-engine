@@ -9,7 +9,7 @@ extern "C" {
 
 /* Asserts are contracts, not error handling.
    A failed assert means the program is broken — continuing would mask bugs.
-   Release default is TRAP (immediate crash, no strings, minimal overhead).
+   Release presets select TRAP (immediate crash, no strings, minimal overhead).
    OFF is a supported build mode without runtime guarantees. Violating an
    asserted precondition there requires no fallback path.
    Assert expressions must be side-effect-free because OFF does not evaluate them.
@@ -21,14 +21,10 @@ extern "C" {
 #define NT_ASSERT_TRAP 1
 #define NT_ASSERT_FULL 2
 
-/* NT_ASSERT_MODE default: debug → FULL, release → TRAP.
-   CMake can override via -DNT_ASSERT_MODE=<level>. */
 #ifndef NT_ASSERT_MODE
-#ifdef NT_DEBUG
-#define NT_ASSERT_MODE NT_ASSERT_FULL
-#else
-#define NT_ASSERT_MODE NT_ASSERT_TRAP
-#endif
+#error "NT_ASSERT_MODE must be defined by the nt_core target (0..2)"
+#elif NT_ASSERT_MODE < NT_ASSERT_OFF || NT_ASSERT_MODE > NT_ASSERT_FULL
+#error "NT_ASSERT_MODE must be in 0..2"
 #endif
 
 /* Handler type: receives stringified expression, file, and line.

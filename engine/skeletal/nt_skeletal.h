@@ -16,20 +16,8 @@
  * call. Preconditions are NT_ASSERT contracts, never recoverable results.
  */
 
-/* Per-element input validation (finite t/s, unit quaternion). On in Debug,
- * overridable from CMake (`NT_SKELETAL_CHECKS`). */
 #ifndef NT_SKELETAL_CHECKS
-#ifdef NT_DEBUG
-#define NT_SKELETAL_CHECKS 1
-#else
-#define NT_SKELETAL_CHECKS 0
-#endif
-#endif
-
-/* Checks are plain NT_ASSERTs: without asserts they would only warn as unused. */
-#if NT_ASSERT_MODE == NT_ASSERT_OFF
-#undef NT_SKELETAL_CHECKS
-#define NT_SKELETAL_CHECKS 0
+#error "NT_SKELETAL_CHECKS must be defined by the nt_skeletal target (0 or 1)"
 #endif
 
 /* Local joint transform, AoS in joint order. Quaternion is unit xyzw: a
@@ -99,8 +87,7 @@ static inline void nt_skeletal_mat34_from_trs(const nt_skeletal_trs_t *trs, nt_s
         NT_ASSERT((trs->t[c] - trs->t[c]) == 0.0F);
         NT_ASSERT((trs->s[c] - trs->s[c]) == 0.0F);
     }
-    const float dot = xx + yy + zz + (w * w);
-    NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
+    NT_ASSERT((xx + yy + zz + (w * w) - 1.0F) < 1e-3F && (1.0F - (xx + yy + zz + (w * w))) < 1e-3F);
 #endif
     const float xy = x * y;
     const float xz = x * z;

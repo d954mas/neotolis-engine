@@ -4,6 +4,7 @@
 #include "log/nt_log.h"
 _Static_assert(NT_LOG_MIN_LEVEL == NT426_EXPECT_LOG, "log interface floor");
 #elif defined(NT426_CHECK_CORE) || defined(NT426_CHECK_COMPONENT)
+#include "core/nt_assert.h"
 #include "introspect/nt_introspect.h"
 #if defined(NT426_CHECK_COMPONENT)
 #include "transform_comp/nt_transform_comp.h"
@@ -11,6 +12,11 @@ _Static_assert(NT_LOG_MIN_LEVEL == NT426_EXPECT_LOG, "log interface floor");
 _Static_assert(NT_INTROSPECT_ENABLED == NT426_EXPECT_INTROSPECT, "core introspection configuration");
 _Static_assert(NT_INTROSPECT_WRITE_ENABLED == NT426_EXPECT_INTROSPECT_WRITE, "core introspection write configuration");
 _Static_assert(NT_LOG_MIN_LEVEL == NT426_EXPECT_LOG, "core log floor");
+_Static_assert(NT_ASSERT_MODE == NT426_EXPECT_ASSERT_MODE, "core assert configuration");
+#elif defined(NT426_CHECK_SKELETAL)
+#include "skeletal/nt_skeletal.h"
+_Static_assert(NT_ASSERT_MODE == NT426_EXPECT_ASSERT_MODE, "skeletal assert configuration");
+_Static_assert(NT_SKELETAL_CHECKS == NT426_EXPECT_SKELETAL_CHECKS, "skeletal check configuration");
 #elif defined(NT426_CHECK_UI) || defined(NT426_CHECK_UI_STUB)
 #include "ui/nt_ui.h"
 _Static_assert(NT_UI_TIMING_ENABLED == NT426_EXPECT_UI_TIMING, "UI timing configuration");

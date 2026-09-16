@@ -1,5 +1,6 @@
 #include "render/nt_render_defs.h"
 #include "sort/nt_sort.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
 /* Instantiate sort locally — test does not depend on nt_render */
@@ -188,6 +189,17 @@ void test_sort_pass_skip(void) {
     TEST_ASSERT_EQUAL_UINT64(0xAAAAAAAAAAAA0004ULL, items[3].sort_key);
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+void test_sort_rejects_invalid_buffers(void) {
+    nt_render_item_t items[2] = {{.sort_key = 1}, {.sort_key = 1}};
+    nt_render_item_t scratch[2];
+
+    NT_TEST_EXPECT_ASSERT(test_sort_fn(items, 2, items));
+    NT_TEST_EXPECT_ASSERT(test_sort_fn(NULL, 2, scratch));
+    NT_TEST_EXPECT_ASSERT(test_sort_fn(items, 2, NULL));
+}
+#endif
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -202,5 +214,8 @@ int main(void) {
     RUN_TEST(test_sort_stability);
     RUN_TEST(test_sort_large_keys);
     RUN_TEST(test_sort_pass_skip);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_sort_rejects_invalid_buffers);
+#endif
     return UNITY_END();
 }

@@ -1044,7 +1044,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         return result;
     }
     if (local_desc.width > g_nt_gfx.gpu_caps.max_texture_size || local_desc.height > g_nt_gfx.gpu_caps.max_texture_size) {
-#ifdef NT_DEBUG
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
         NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
 #endif
         NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", local_desc.width, local_desc.height, g_nt_gfx.gpu_caps.max_texture_size);
@@ -1066,7 +1066,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         /* WebGL BPTC requires block-aligned base dimensions, including tiny textures. */
         NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
         if (!texture_compressed_format_supported(local_desc.format)) {
-#ifdef NT_DEBUG
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
             NT_ASSERT(0 && "make_texture: compressed format is not supported by the GPU");
 #endif
             NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);

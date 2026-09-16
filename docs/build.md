@@ -50,19 +50,28 @@ final executable. Numeric feature definitions propagate through module targets.
 [CMakePresets.json](../CMakePresets.json) defines preset overrides. This table
 covers the common options; module specs own detailed ON/OFF behavior.
 
+Optional features and diagnostics have fixed CMake defaults, independent of
+build type, include order, or unrelated features. Presets select their values explicitly;
+headers require the definitions exported by their module targets. Reconfigure
+older build directories with a preset or explicit values: empty `NT_ASSERT_MODE`
+is no longer a valid configuration.
+
 | Option | Plain CMake default | Preset/usage notes |
 |---|---|---|
 | `NT_STATIC_CRT` | ON | Static release CRT on Windows; OFF inherits the embedding application's CRT. |
 | `NT_BUILD_TESTS` | ON | `native-release` OFF; `native-release-test` ON. |
-| `NT_ASSERT_MODE` | Automatic | Debug FULL (2), Release TRAP (1); release-test FULL. OFF (0) is a supported build mode without runtime guarantees. |
-| `NT_SKELETAL_CHECKS` | Automatic | Per-element animation input checks (finite values, unit quaternions, palette indices): Debug 1, Release 0; `native-release-test` pins 1, exercising checked paths under NDEBUG and the configured Release optimization flags. `1` keeps them in a release build, checking each element immediately before computation in the same loop, useful while content or a procedural rig is still unverified. They are ordinary `NT_ASSERT`s, so `NT_ASSERT_MODE=0` drops them regardless. |
+| `NT_ASSERT_MODE` | 1 (TRAP) | Debug and release-test presets select FULL (2); production Release presets select TRAP (1). OFF (0) is a supported build mode without runtime guarantees. |
+| `NT_SKELETAL_CHECKS` | OFF | Per-element skeletal input checks (finite values, unit quaternions, palette indices). Debug/release-test presets select ON; production Release selects OFF. Explicit ON enables checks in any build type. `NT_ASSERT_MODE=0` removes the assertions without rewriting this flag. |
 | `NT_LOG_MIN_LEVEL` | 0 (INFO) | Debug/release-test 0; production Release 1 (WARN). Also 2 ERROR, 3 NONE. |
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_GFX_GPU_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_DEBUG_TOOLS` | OFF | Debug/release-test ON; production Release OFF. |
-| `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | Follow `NT_UI_DEBUG_TOOLS` | Debug/release-test ON; production Release OFF. |
-| `NT_INTROSPECT_WRITE_ENABLED` | Follows `NT_INTROSPECT_ENABLED` | Debug/release-test ON; production Release OFF. |
+| `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | OFF | Independent options. Debug/release-test presets select ON; production Release selects OFF. |
+| `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |
+| `NT_GFX_NATIVE_GL_DEBUG` | OFF | Requests a native GL debug context and installs the KHR_debug callback when available. `native-debug` selects ON; native Release presets select OFF. Can be enabled explicitly in Release. |
+| `NT_GFX_WEB_GL_DEBUG` | OFF | Opt-in Emscripten GL parameter checks and per-call logging. |
+| `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. |
 | `NT_HYBRID_HPG` | ON | Windows hybrid-GPU preference hint; per-app Windows graphics preferences override it. |
 | `NT_FONT_EMBOLDEN_ENABLED` | OFF | Explicit opt-in, including Debug. |
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
@@ -321,7 +330,7 @@ specified in the UI chapters linked above.
 - **Shared display:** CI ctest stays serial because real-GL tests share xvfb.
   Local parallel runs use the desktop display; GL tests have `RESOURCE_LOCK
   gl_display` in `cmake/test_target.cmake`.
-- **Assert define collision:** CI Release supplies a global `NT_ASSERT_MODE`.
+- **Assert define collision:** `nt_core` exports the configured `NT_ASSERT_MODE`.
   For tests requiring another mode, use a wrapper TU with `#undef`/`#define`,
   following `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`, not a conflicting
   target `-D` that trips `-Wmacro-redefined`.

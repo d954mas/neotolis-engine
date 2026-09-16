@@ -90,19 +90,18 @@ nt_entity_t nt_entity_create(void) {
 
 void nt_entity_destroy(nt_entity_t entity) {
     uint16_t index = nt_entity_index(entity);
-    uint16_t gen = nt_entity_generation(entity);
 
     /* Bounds check */
     NT_ASSERT(index > 0 && index <= s_entity.max_entities);
 
     /* Double destroy: slot already dead */
     if (!s_entity.alive[index]) {
-        NT_ASSERT(false); /* debug: catch double destroy */
-        return;           /* release: silent ignore */
+        NT_ASSERT(false);
+        return;
     }
 
     /* Stale handle: slot alive but generation mismatch (old handle for recycled slot) */
-    NT_ASSERT(s_entity.generations[index] == gen);
+    NT_ASSERT(s_entity.generations[index] == nt_entity_generation(entity));
 
     /* Call on_destroy callbacks WHILE entity is still alive.
        Callbacks may call comp_get() which asserts is_alive. */

@@ -6,6 +6,7 @@
 
 # Header-only interface carries nt_gfx.h's include root; the exe selects the impl.
 nt_declare_interface(nt_gfx)
+target_link_libraries(nt_gfx_interface INTERFACE nt_core)
 target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_GPU_TIMING_ENABLED=$<BOOL:${NT_GFX_GPU_TIMING_ENABLED}>)
 
 if(EMSCRIPTEN)
@@ -29,6 +30,7 @@ else()
     )
     target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface nt_basisu_transcoder_interface nt_meshwire_interface)
     target_link_libraries(nt_gfx PRIVATE glad)
+    target_compile_definitions(nt_gfx PRIVATE NT_GFX_NATIVE_GL_DEBUG=$<BOOL:${NT_GFX_NATIVE_GL_DEBUG}>)
     find_package(OpenGL REQUIRED)
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
 endif()

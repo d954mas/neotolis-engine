@@ -248,7 +248,7 @@ fi
 collect_ctest
 
 if [ "$MODE" = "push" ]; then
-    # Release compiles the ENGINE TUs with NDEBUG (asserts -> TRAP, so NT_ASSERT_FULL-only code drops
+    # Release compiles the ENGINE TUs with NDEBUG and explicit TRAP asserts (NT_ASSERT_FULL-only code drops
     # out) and -O2: a variable only an assert reads is -Wunused under -Werror here and nowhere in the
     # debug builds. tests/ is NOT in this build (NT_BUILD_TESTS=OFF) -- test TUs meet NDEBUG only in
     # ci.yml's native-release-test job. Mirrors ci.yml's native-release job.
@@ -261,8 +261,8 @@ if [ "$MODE" = "push" ]; then
     fi
     # A hand-passed -DNT_ASSERT_MODE=2 here makes this step green and empty: NT_ASSERT_FULL-only code
     # compiles again and the -Wunused class the step exists for disappears.
-    if ! grep -q '^NT_ASSERT_MODE:STRING=$' "$NR_CACHE"; then
-        echo "ERROR: native-release cache overrides NT_ASSERT_MODE — it must stay empty (auto -> TRAP)."
+    if ! grep -q '^NT_ASSERT_MODE:STRING=1$' "$NR_CACHE"; then
+        echo "ERROR: native-release cache must set NT_ASSERT_MODE=1 (TRAP) — reconfigure it: cmake --preset native-release"
         exit 1
     fi
     # The preset pins NT_BUILD_TESTS=OFF, but a directory configured before that pin keeps the

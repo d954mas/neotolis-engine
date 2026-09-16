@@ -119,6 +119,9 @@ neither renderer's key encodes them.
 
 The game decides sort mode for each pass. Typical modes: sort by material/state, sort by depth, no sort, custom order + tie-break.
 
+`NT_SORT_DEFINE` checks buffer preconditions through `NT_ASSERT` using the mode
+exported by `nt_core`, independent of header include order.
+
 `nt_sort_by_key(items, count, scratch)` sorts ascending and stably by
 `sort_key` only. It deliberately ignores `batch_key`, so equal primary keys
 preserve the game's input order.

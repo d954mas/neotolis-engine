@@ -17,6 +17,8 @@ FIXTURE = ROOT / "tests" / "submodule" / "diagnostics"
 LEVELS = ("INFO", "WARN", "ERROR")
 FORMS = ("PLAIN", "ONCE", "UNIQUE", "DOMAIN_PLAIN", "DOMAIN_ONCE", "DOMAIN_UNIQUE")
 DEFINES = {
+    "NT_ASSERT_MODE": 1,
+    "NT_SKELETAL_CHECKS": 0,
     "NT_LOG_MIN_LEVEL": 0,
     "NT_METRICS_ENABLED": 0,
     "NT_LOG_RING_ENABLED": 0,
@@ -80,6 +82,8 @@ class Checks:
     def headers(self):
         self.compile("resource-header-without-timing", '#include "resource/nt_resource.h"\n', DEFINES)
         headers = {
+            "NT_ASSERT_MODE": "core/nt_assert.h",
+            "NT_SKELETAL_CHECKS": "skeletal/nt_skeletal.h",
             "NT_LOG_MIN_LEVEL": "log/nt_log.h",
             "NT_METRICS_ENABLED": "metrics/nt_metrics.h",
             "NT_LOG_RING_ENABLED": "log/nt_log_ring.h",
@@ -94,6 +98,15 @@ class Checks:
             missing = dict(DEFINES)
             del missing[define]
             self.compile(f"missing-{define}", source, missing, rf"error:[^\n]*{define}[^\n]*defined")
+        for mode in range(3):
+            for checks in (0, 1):
+                source = ('#include "skeletal/nt_skeletal.h"\n'
+                          f'_Static_assert(NT_ASSERT_MODE == {mode}, "explicit assert mode");\n'
+                          f'_Static_assert(NT_SKELETAL_CHECKS == {checks}, "explicit skeletal checks");\n')
+                for build_define in ("NT_DEBUG", "NDEBUG"):
+                    defines = dict(DEFINES, NT_ASSERT_MODE=mode, NT_SKELETAL_CHECKS=checks)
+                    defines[build_define] = 1
+                    self.compile(f"asserts-{mode}-skeletal-{checks}-{build_define}", source, defines)
         for floor in (-1, 4):
             self.compile(f"invalid-floor-{floor}", '#include "log/nt_log.h"\n',
                          {"NT_LOG_MIN_LEVEL": floor}, r"error:[^\n]*NT_LOG_MIN_LEVEL must be in 0\.\.3")
@@ -109,30 +122,32 @@ class Checks:
                                  {"NT_LOG_MIN_LEVEL": floor}, r"NT_LOG_DOMAIN not defined")
                     self.compile(f"domain-present-{floor}-{macro}", '#define NT_LOG_DOMAIN "probe"\n' + source,
                                  {"NT_LOG_MIN_LEVEL": floor})
-        print("PASS: missing configuration, invalid floors and missing domains fail for the intended diagnostics")
+        print("PASS: required configuration, explicit assert/skeletal modes under NT_DEBUG/NDEBUG, invalid floors and missing domains")
 
     def cmake(self):
         work = Path(tempfile.mkdtemp(prefix="cmake-", dir=self.output)).resolve()
         source = work / "parent"
         shutil.copytree(FIXTURE, source)
-        common = [self.args.cmake, "-S", str(source), "-G", self.args.generator,
+        common = [self.args.cmake, "-G", self.args.generator,
                   f"-DENGINE_ROOT={ROOT.as_posix()}", f"-DCMAKE_C_COMPILER={self.args.cc}",
                   f"-DCMAKE_CXX_COMPILER={self.args.cxx}", "-DCMAKE_BUILD_TYPE=Release",
-                  "-DNT_BUILD_TESTS=OFF", "-DNT_HTTP_CURL=OFF", "-DNT_STATIC_CRT=OFF",
+                  "-DNT_BUILD_TESTS=OFF", "-DNT_STATIC_CRT=OFF",
                   "-DNT_DEVAPI_ENABLED=OFF", "-DNT_UI_DEBUG_TOOLS=OFF",
                   "-DNT_DEVAPI_GROUP_UI=ON", "-DNT_DEVAPI_GROUP_OBS=ON", "-DNT_DEVAPI_GROUP_ENTITY_WRITE=ON"]
         policies = {
-            "off": {"NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+            "off": {"NT_ASSERT_MODE": "0", "NT_SKELETAL_CHECKS": "ON",
+                    "NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
                     "NT_INTROSPECT_ENABLED": "ON", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                     "NT_METRICS_ENABLED": "OFF", "NT_LOG_RING_ENABLED": "OFF"},
-            "on": {"NT_RESOURCE_TIMING_ENABLED": "ON", "NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
+            "on": {"NT_ASSERT_MODE": "2", "NT_SKELETAL_CHECKS": "OFF",
+                   "NT_RESOURCE_TIMING_ENABLED": "ON", "NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
                    "NT_INTROSPECT_ENABLED": "OFF", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }
         for name, settings in policies.items():
             build = work / name
             args = [f"-D{k}={v}" for k, v in settings.items()]
-            output = self.command(f"configure-{name}", common + ["-B", str(build), f"-DNT_PRESET_NAME=diagnostics-{name}"] + args)
+            output = self.command(f"configure-{name}", common + ["-S", str(source), "-B", str(build), f"-DNT_PRESET_NAME=diagnostics-{name}"] + args)
             for block in output.split("\n\n"):
                 if "CMake Warning" in block and "NT_DEVAPI" in block:
                     raise RuntimeError(f"disabled devapi emitted a warning:\n{block}")
@@ -155,6 +170,20 @@ class Checks:
                     raise RuntimeError("NONE logger retains runtime logger storage")
                 if re.search(r"printf|nt_hash|malloc|calloc", undefined):
                     raise RuntimeError("NONE logger retains formatting/hash/allocation references")
+        defaults = {"NT_ASSERT_MODE": "1", "NT_SKELETAL_CHECKS": "OFF", "NT_GFX_NATIVE_GL_DEBUG": "OFF",
+                    "NT_LOG_RING_ENABLED": "OFF", "NT_METRICS_ENABLED": "OFF", "NT_INTROSPECT_ENABLED": "OFF",
+                    "NT_INTROSPECT_WRITE_ENABLED": "OFF", "NT_HTTP_CURL": "OFF"}
+        for name, project, build_type, settings in (
+                ("defaults-debug", ROOT, "Debug", {}),
+                ("defaults-release-ui", source, "Release", {"NT_UI_DEBUG_TOOLS": "ON", "NT_METRICS_ENABLED": "ON"}),
+                ("defaults-debug-introspect", source, "Debug", {"NT_INTROSPECT_ENABLED": "ON"})):
+            build = work / name
+            self.command(f"configure-{name}", common + ["-S", str(project), "-B", str(build), f"-DCMAKE_BUILD_TYPE={build_type}"]
+                         + [f"-D{k}={v}" for k, v in settings.items()])
+            cache = (build / "CMakeCache.txt").read_text(encoding="utf-8")
+            for key, value in dict(defaults, **settings).items():
+                if not re.search(rf"^{key}:[^=\n]+={value}$", cache, re.M):
+                    raise RuntimeError(f"{name}: expected independent {key}={value}")
         invalid = [
             ("ui-input", {"NT_DEVAPI_GROUP_INPUT": "OFF"}, r"NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT"),
             ("ui-debug", {}, r"NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS"),
@@ -164,11 +193,14 @@ class Checks:
         ]
         for name, settings, expected in invalid:
             build = work / f"invalid-{name}"
-            self.command(f"configure-invalid-{name}", common + ["-B", str(build), "-DNT_DEVAPI_ENABLED=ON"]
+            self.command(f"configure-invalid-{name}", common + ["-S", str(source), "-B", str(build), "-DNT_DEVAPI_ENABLED=ON"]
                          + [f"-D{k}={v}" for k, v in settings.items()], expected)
         for value in ("-1", "4", "WARN", "1x"):
-            self.command(f"configure-floor-{value}", common + ["-B", str(work / f"invalid-floor-{value}"),
+            self.command(f"configure-floor-{value}", common + ["-S", str(source), "-B", str(work / f"invalid-floor-{value}"),
                          f"-DNT_LOG_MIN_LEVEL={value}"], r"NT_LOG_MIN_LEVEL must be 0")
+        for index, value in enumerate(("", "-1", "3", "FULL", "1x")):
+            self.command(f"configure-asserts-{index}", common + ["-S", str(source), "-B", str(work / f"invalid-asserts-{index}"),
+                         f"-DNT_ASSERT_MODE={value}"], r"NT_ASSERT_MODE must be")
         if work.parent != self.output.resolve():
             raise RuntimeError(f"refusing to remove build directory outside evidence: {work}")
         shutil.rmtree(work)

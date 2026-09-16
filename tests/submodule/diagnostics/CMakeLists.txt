@@ -7,6 +7,11 @@ endif()
 add_subdirectory("${ENGINE_ROOT}" "${CMAKE_BINARY_DIR}/engine" EXCLUDE_FROM_ALL)
 
 set(NT426_EXPECT_LOG ${NT_LOG_MIN_LEVEL})
+set(NT426_EXPECT_ASSERT_MODE ${NT_ASSERT_MODE})
+set(NT426_EXPECT_SKELETAL_CHECKS 0)
+if(NT_SKELETAL_CHECKS)
+    set(NT426_EXPECT_SKELETAL_CHECKS 1)
+endif()
 foreach(_feature RESOURCE_TIMING UI_TIMING GFX_GPU_TIMING INTROSPECT INTROSPECT_WRITE METRICS LOG_RING)
     if(NT_${_feature}_ENABLED)
         set(NT426_EXPECT_${_feature} 1)
@@ -29,6 +34,7 @@ endfunction()
 
 nt426_consumer(parent_log LOG nt_log_interface)
 nt426_consumer(parent_core CORE nt_core)
+nt426_consumer(parent_skeletal SKELETAL nt_skeletal)
 nt426_consumer(parent_resource RESOURCE nt_resource)
 nt426_consumer(parent_ui UI nt_ui_interface nt_shared)
 nt426_consumer(parent_gfx GFX nt_gfx_interface nt_shared)
@@ -53,6 +59,6 @@ add_executable(log_missing EXCLUDE_FROM_ALL log_missing.c)
 target_link_libraries(log_missing PRIVATE nt_log_interface)
 
 add_custom_target(diagnostics_config ALL DEPENDS
-    parent_log parent_core parent_ui parent_gfx parent_resource
-    sibling_core sibling_component sibling_metrics sibling_ring sibling_ui_stub log_real log_stub)
+    parent_log parent_core parent_skeletal parent_ui parent_gfx parent_resource
+    sibling_core sibling_skeletal sibling_component sibling_metrics sibling_ring sibling_ui_stub log_real log_stub)
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/log_archive.path" CONTENT "$<TARGET_FILE:nt_log>")

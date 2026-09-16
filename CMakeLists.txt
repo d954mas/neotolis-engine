@@ -45,10 +45,11 @@ option(NT_HYBRID_HPG "Prefer the discrete GPU on hybrid-GPU Windows systems." ON
 # GL call params) + GL_DEBUG (log every GL call). OFF by default EVEN in debug: GL_DEBUG logs every GL
 # call, so it is opt-in for active GL bug-hunts only. Inert on native builds (warned below).
 option(NT_GFX_WEB_GL_DEBUG "Enable Emscripten GL_ASSERTIONS + GL_DEBUG on WASM builds." OFF)
+option(NT_GFX_NATIVE_GL_DEBUG "Request a native GL debug context and install the KHR_debug callback." OFF)
 if(NT_GFX_WEB_GL_DEBUG AND NOT EMSCRIPTEN)
     message(WARNING "NT_GFX_WEB_GL_DEBUG=ON has no effect on a native build — it only adds Emscripten "
         "GL_ASSERTIONS/GL_DEBUG to WASM link lines. Native GL errors go through the KHR_debug callback "
-        "(debug builds, always on, no flag).")
+        "(NT_GFX_NATIVE_GL_DEBUG).")
 endif()
 
 # Inspector + hit-zone overlay; OFF strips ~30 KB binary and ~9 KB ctx state.
@@ -92,14 +93,12 @@ endforeach()
 option(NT_UI_TIMING_ENABLED "Measure UI layout, tree building and walking." OFF)
 option(NT_RESOURCE_TIMING_ENABLED "Measure pack parsing and resource steps." OFF)
 option(NT_GFX_GPU_TIMING_ENABLED "Build optional GPU timer queries and segment labels." OFF)
-# OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
-option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
-# Independent of NT_DEVAPI_ENABLED. OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror.
-option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
+option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." OFF)
+option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." OFF)
 # Published by nt_core so component describe()/registration agree without linking introspect.
-option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
+option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." OFF)
 # Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Published by nt_core so component apply()/registration agree without linking introspect.
-option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
+option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." OFF)
 # OFF skips tests/ entirely, which is also how a build ends up without the NT_TEST_ACCESS compile
 # define: tests/ is what hands that define to the engine libraries it links. A release measurement
 # build must carry no probe state and no probe bookkeeping in its draw and emit paths.
@@ -126,12 +125,13 @@ option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write
 # Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
 option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
 
-set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off (no runtime guarantees), 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap).")
-if(NOT NT_ASSERT_MODE STREQUAL "")
-    add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
+set(NT_ASSERT_MODE "1" CACHE STRING "Assert mode: 0=off (no runtime guarantees), 1=trap, 2=full.")
+set_property(CACHE NT_ASSERT_MODE PROPERTY STRINGS 0 1 2)
+if(NOT NT_ASSERT_MODE MATCHES "^[0-2]$")
+    message(FATAL_ERROR "NT_ASSERT_MODE must be 0 (OFF), 1 (TRAP), or 2 (FULL).")
 endif()
 
-set(NT_SKELETAL_CHECKS "" CACHE STRING "Skeletal animation per-element input checks (finite values, unit quaternions, palette indices): 1=on, 0=off. Empty=auto (debug->1, release->0).")
+option(NT_SKELETAL_CHECKS "Check skeletal animation elements (finite values, unit quaternions, palette indices)." OFF)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")
@@ -217,16 +217,10 @@ if(NOT EMSCRIPTEN)
     # so everything referencing the removed dirs stays OFF; disabling Perl also
     # kills curl's codegen target that writes into the vendored source tree.
     # OFF drops the dependency: native nt_http becomes the always-fail stub (loudly:
-    # configure STATUS + runtime WARN at nt_http_init). Subprojects default OFF so a
-    # consumer linking only nt_http_stub never pays the curl configure, which
-    # hard-requires OpenSSL headers off-Windows; linking real nt_http needs an
-    # explicit -DNT_HTTP_CURL=ON (a pre-provided CURL::libcurl then skips the
-    # vendored configure but does not replace the ON).
-    if(PROJECT_IS_TOP_LEVEL)
-        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" ON)
-    else()
-        option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" OFF)
-    endif()
+    # configure STATUS + runtime WARN at nt_http_init). Enable explicitly to avoid
+    # requiring OpenSSL headers for consumers that only need nt_http_stub.
+    # A pre-provided CURL::libcurl skips the vendored configure when enabled.
+    option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" OFF)
     if(NT_HTTP_CURL AND NOT TARGET CURL::libcurl)
         # block(): BUILD_* and CMAKE_DISABLE_* are generic names a consumer
         # superproject may own, and later add_subdirectory() calls in THIS file

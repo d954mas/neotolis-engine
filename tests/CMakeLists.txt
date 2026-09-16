@@ -485,7 +485,8 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_sponza_program_assignment)
 
     # --- Sort module tests ---
-    add_executable(test_sort unit/test_sort.c)
+    add_executable(test_sort unit/test_sort.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_sort PRIVATE unit)
     target_link_libraries(test_sort PRIVATE nt_sort unity)
     nt_set_warning_flags(test_sort)
     nt_set_sanitizer_flags(test_sort)
