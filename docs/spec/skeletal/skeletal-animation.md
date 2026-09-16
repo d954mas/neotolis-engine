@@ -255,7 +255,121 @@ Not ready → the game continues old playback, holds a pose or omits the item. P
 
 Order: import → normalize spaces/units → canonical hierarchy/remap → validate clips/skin → prepare absolute/additive and object curves → retarget if requested → CPU codec → bounds and bake certificate (§10, §14) → pack. Clips stay independent. Rates and error budgets come from content profiles. Content errors (invalid rigs, channels, ranges, weights, failed certificates) are `NT_BUILD_ASSERT` after a logged diagnostic, per the existing builder policy; the ATLAS graceful-error channel is not extended.
 
-**v1 payloads:** `NSKL`, `NSKN`, `NANM` (F32 direct-access: constant/default tracks, uniform samples, exact STEP, kind/reference, object curve, bounds numbers, certificate; Q16 is #486). `NANM` uses an explicit little-endian header plus bounded `tag/offset/count/stride` section descriptors for its v1 sections (fixed parsing, no extensible registry); `NSKL`/`NSKN` keep simple fixed layouts. `NSKL` carries `subtree_end` next to the parent indices (§3.1), and the builder computes `rig_compat_id` by calling `nt_skeletal_rig_compat_id` rather than reimplementing the schema. Major version = incompatible layout or semantics; minor = explicitly skippable optional sections only, never flags that change decode semantics; unsupported required features/codecs are rejected; the outer pack still requires an exact version and a rebuild. The pack CRC32 detects accidental corruption, does not authenticate content and does not replace payload-local validation; no per-asset CRC. Asset types 7–9 extend the enum in `shared/include/nt_pack_format.h`; `NT_RESOURCE_MAX_ASSET_TYPES` (`engine/resource/nt_resource_internal.h`) goes 8 → 12; the parser's `> NT_ASSET_ATLAS` bound becomes `> NT_ASSET_LAST` (still recoverable pack validation; unregistered activators keep asserting); every enumeration site is updated (#475 lists them); activators are registered explicitly by applications that link them. A shared `shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder (FLOAT16 weights) and the bank. Little-endian fields, magic/version, explicit counts/offsets, overflow and range checks before views; no struct casting; adapters copy into aligned memory when needed. glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
+**v1 payloads:** `NSKL`, `NSKN` and `NANM`, all little-endian, all defined in
+`shared/include/nt_skeletal_format.h` and shared by builder and runtime. The
+codec is F32 direct-access (Q16 is #486). Wire layout is not runtime layout: a
+consumer never casts pack bytes to a struct, it validates counts, offsets and
+ranges and then copies fields and arrays out into the runtime layout the sampler
+(§7) defines. `NSKL` and `NSKN` are fixed layouts; `NANM` is an explicit header
+plus bounded `tag/offset/count/stride` section descriptors for its fixed v1
+section set (no extensible registry). The builder computes `rig_compat_id` by
+calling `nt_skeletal_rig_compat_id` rather than reimplementing the schema.
+
+`version` is `major << 8 | minor` in all three (v1 = `0x0100`). A major mismatch rejects the
+payload; a higher minor stays readable because the only minor-compatible change
+is a new optional `NANM` section, and unknown section tags are ignored — never a
+flag that changes decode semantics. A missing known tag rejects. Unsupported
+required features or codecs are rejected; the outer pack still requires an exact
+version and a rebuild. The pack CRC32 detects accidental corruption, does not
+authenticate content and does not replace payload-local validation; there is no
+per-asset CRC.
+
+**NSKL** — `NT_SKL_SIZE(J) = 16 + 48·J` bytes, exact:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NSKL"` |
+| 4 | `u16 version` | |
+| 6 | `u16 joint_count` (J) | ≥ 1 |
+| 8 | `u64 rig_compat_id` | carried as-is, never recomputed |
+| 16 | `u16 parent[J]` | `0xFFFF` = root, else `< j` (preorder) |
+| 16+2J | `u16 subtree_end[J]` | subtree of j = `[j, subtree_end[j])` |
+| 16+4J | `u32 joint_id[J]` | `nt_hash32_str(node name)` |
+| 16+8J | `f32 rest[J][10]` | AoS `t[3] q[4] s[3]`, q unit xyzw |
+
+Activation checks the exact size, `joint_count ≥ 1`, preorder parents, nested
+`subtree_end` (`j < subtree_end[j] ≤ J`, a child inside its parent's range, a
+root subtree ending where the next root starts and the last at `J`), finite rest
+translations and scales, and unit quaternions.
+
+**NSKN** — `NT_SKN_SIZE(P) = 28 + 50·P` bytes, exact:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NSKN"` |
+| 4 | `u16 version` | |
+| 6 | `u16 palette_count` (P) | ≥ 1 |
+| 8 | `u64 rig_compat_id` | |
+| 16 | `u8 mesh_space` | 0 = glTF mesh-node space, the only v1 value |
+| 17 | `u8 _pad[3]` | |
+| 20 | `f32 reach` | ≥ 0 (§3.4) |
+| 24 | `f32 any_pose_radius` | ≥ 0 (§14) |
+| 28 | `u16 remap[P]` | palette entry → skeleton joint |
+| 28+2P | `f32 inverse_bind[P][12]` | `nt_skeletal_mat34_t` row order `r[3][4]` |
+
+`remap[p]` is not bounded against a skeleton at activation — no skeleton is
+available there; `nt_skin_palette_build` asserts `remap[p] < model_count` where
+both exist.
+
+**NANM** — 56-byte header, then `section_count` 16-byte descriptors, then the
+section data:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NANM"` |
+| 4 | `u16 version` | |
+| 6 | `u16 section_count` | |
+| 8 | `u16 joint_count` (J) | ≥ 1 |
+| 10 | `u8 kind` | 0 absolute, 1 additive |
+| 11 | `u8 codec` | 0 = F32 |
+| 12 | `u64 rig_compat_id` | |
+| 20 | `u64 additive_ref_id` | 0 iff `kind == 0` |
+| 28 | `f32 duration` | finite, ≥ 0 |
+| 32 | `u32 sample_count` (N) | ≥ 1 |
+| 36 | `f32 r_joints`, `r_root`, `s_max` | bounds (§14), finite ≥ 0 |
+| 48 | `f32 bake_fps_min`, `bake_reach` | certificate (§10), finite ≥ 0 |
+
+A descriptor is `u32 tag, offset, count, stride`; `offset` is from the payload
+start, a multiple of 4 and at least `56 + 16·section_count`, and
+`offset + count·stride` (computed in 64 bits) must lie inside the payload. The
+v1 set is exactly these seven, each once, in this order:
+
+| tag | count | stride | content |
+|---|---|---|---|
+| `CHAN` | `3·(J+1)` | 4 | `{u8 mode; u8 pad; u16 index}` per channel |
+| `PLNT` | sampled t channels | `N·12` | row = `f32[N][3]`, one row per sampled t channel in channel order |
+| `PLNQ` | sampled q channels | `N·16` | `f32[N][4]`, unit xyzw |
+| `PLNS` | sampled s channels | `N·12` | `f32[N][3]` |
+| `CNST` | constant channels | 16 | `f32[4]`; t/s use `[0..2]` and leave `[3]` at 0, q is unit |
+| `STPT` | step channels | 8 | `{u32 first_key; u32 key_count}` in channel order |
+| `STPK` | total step keys | 20 | `{f32 time; f32 v[4]}`, tracks concatenated |
+
+Channel `c` addresses joint `c / 3` and component `c % 3` (0 = t, 1 = q,
+2 = s); the last three channels are the object curve (§7.5), so a clip has one
+even when nothing drives it. Modes: 0 ABSENT (index 0), 1 CONSTANT (`index <
+CNST.count`, several channels may share one entry), 2 SAMPLED (`index` = the
+sampled channels of that component kind before this one, so rows are in channel
+order), 3 STEP (`index` = the step channels before this one). Every SAMPLED
+channel shares one uniform grid on `[0, duration]` with N samples; STEP channels
+keep exact timestamps, strictly increasing per track, the first at 0 and the
+last at or before `duration`. `sample_count == 1` means no plane holds a row — a
+clip built only from constant and step channels may still have a duration.
+Every float in a payload is finite.
+
+Asset types 7–9 extend the enum in `shared/include/nt_pack_format.h` and
+`NT_ASSET_LAST` bounds it; `NT_RESOURCE_MAX_ASSET_TYPES`
+(`engine/resource/nt_resource_internal.h`) goes 8 → 12; the parser's
+`> NT_ASSET_ATLAS` bound becomes `> NT_ASSET_LAST` (still recoverable pack
+validation; unregistered activators keep asserting); every enumeration site is
+updated (#475 lists them); activators are registered explicitly by applications
+that link them. The builder writes these payloads from in-memory import results
+through `nt_builder_encode_skeleton/skin_binding/clip` and registers them with
+`nt_builder_add_skeleton/skin_binding/clip`; a source violation of any rule above
+is `NT_BUILD_ASSERT`, because the importer is the only producer. A shared
+`shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder
+(FLOAT16 weights) and the bank. Adapters copy into aligned memory when needed.
+
+glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
 
 ## 17. Modules and composition checks
 

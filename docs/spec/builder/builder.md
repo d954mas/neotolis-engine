@@ -61,6 +61,13 @@ nt_builder_add_texture_from_memory / add_texture_raw   /* in-memory pixels */
 nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
+
+/* Skeletal assets from in-memory import results (wire formats: skeletal §16).
+ * encode_* returns the payload the pack stores, malloc'd for the caller;
+ * add_* encodes and registers in one step, like add_blob. */
+nt_builder_encode_skeleton / add_skeleton          /* NSKL, from nt_skeletal_skeleton_t */
+nt_builder_encode_skin_binding / add_skin_binding  /* NSKN, binding + reach + any_pose_radius */
+nt_builder_encode_clip / add_clip                  /* NANM, from nt_builder_clip_t */
 /* Font opts: charset (required), name override, target_units_per_em. */
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.

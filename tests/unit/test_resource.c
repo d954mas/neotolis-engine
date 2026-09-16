@@ -3691,7 +3691,7 @@ static void test_parse_invalid_asset_type_rejects_before_allocation(void) {
     uint8_t blob[TEST_TWO_OWNER_PACK_SIZE];
     build_two_owner_pack(blob, NT_ASSET_MESH);
     NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
-    const uint8_t invalid_types[] = {0, NT_ASSET_ATLAS + 1, NT_RESOURCE_MAX_ASSET_TYPES, UINT8_MAX};
+    const uint8_t invalid_types[] = {0, NT_ASSET_LAST + 1, NT_RESOURCE_MAX_ASSET_TYPES, UINT8_MAX};
     for (uint32_t i = 0; i < sizeof(invalid_types) / sizeof(invalid_types[0]); i++) {
         entries[1].asset_type = invalid_types[i];
         TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_parse_pack(pack, blob, sizeof blob));

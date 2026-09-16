@@ -9,10 +9,12 @@
 #include <stdlib.h>
 
 #include "hash/nt_hash.h"
-#include "nt_atlas_format.h"   /* NT_ATLAS_XFORM_* stored transform values */
-#include "nt_font_format.h"    /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
-#include "nt_mesh_format.h"    /* nt_stream_type_t */
-#include "nt_texture_format.h" /* nt_texture_pixel_format_t */
+#include "nt_atlas_format.h"      /* NT_ATLAS_XFORM_* stored transform values */
+#include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
+#include "nt_mesh_format.h"       /* nt_stream_type_t */
+#include "nt_skeletal_format.h"   /* nt_anm_kind_t, nt_anm_channel_mode_t */
+#include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
+#include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
 
 /* Always-on fatal assert for builder (never compiled out by NDEBUG).
  * The test hook may non-locally observe a failure; the builder context is not
@@ -527,6 +529,63 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+
+/* --- Skeletal API (NSKL skeleton, NSKN skin binding, NANM clip) ---
+ *
+ * The encoders turn in-memory import results into exactly the bytes the pack
+ * stores; the caller owns the returned buffer and releases it with free(). The
+ * add_* calls encode and register the asset in one step, like add_blob.
+ *
+ * Every rule of the wire format is an invariant of the importer that produced
+ * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
+ * diagnostic instead of returning a code (skeletal spec §16). */
+void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
+void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
+
+/* reach and any_pose_radius are the builder-computed bounds numbers of §3.4;
+ * the mesh-space convention is glTF mesh-node space, the only one v1 stores. */
+void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, float reach, float any_pose_radius, uint8_t **out, uint32_t *out_size);
+void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, float reach, float any_pose_radius, const char *resource_id);
+
+/* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
+ * joint c / 3 and component c % 3 (0 = translation, 1 = rotation, 2 = scale);
+ * the last three channels are the object curve (§7.5). comps = 4 for a
+ * rotation, 3 otherwise; only the fields the mode needs are read.
+ *
+ * ABSENT   nothing
+ * CONSTANT constant[0..comps-1]; a translation or scale leaves constant[3] at 0
+ * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
+ * STEP     step_times and step_values (always 4 floats per key), step_count
+ *          keys with strictly increasing times starting at 0 */
+typedef struct {
+    const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
+    const float *step_times;  /* STEP: step_count seconds */
+    const float *step_values; /* STEP: 4 floats per key */
+    uint32_t step_count;      /* STEP: number of keys */
+    float constant[4];        /* CONSTANT: the channel value */
+    uint8_t mode;             /* nt_anm_channel_mode_t */
+} nt_builder_anim_channel_t;
+
+/* One clip ready to encode. duration, bounds and the bake certificate are the
+ * builder's own numbers (§10, §14); sample_count is the uniform grid on
+ * [0, duration] every SAMPLED channel shares (1 = no sampled channel). */
+typedef struct {
+    uint64_t rig_compat_id;
+    uint64_t additive_ref_id; /* 0 iff kind is NT_ANM_KIND_ABSOLUTE */
+    uint8_t kind;             /* nt_anm_kind_t */
+    uint16_t joint_count;
+    uint32_t sample_count;
+    float duration;
+    float r_joints;
+    float r_root;
+    float s_max;
+    float bake_fps_min;
+    float bake_reach;
+    const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
+} nt_builder_clip_t;
+
+void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32_t *out_size);
+void nt_builder_add_clip(NtBuilderContext *ctx, const nt_builder_clip_t *clip, const char *resource_id);
 
 /* --- Atlas API ---
  *

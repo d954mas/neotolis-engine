@@ -87,7 +87,7 @@ reserved or records modified. Parsing requires a file mount; virtual packs
 accept registrations only. Invalid ranges, zero resource IDs or malformed
 owner links reject the pack through the existing recoverable parse error; a
 corrected pack can load into the same mount. Manifest types outside the defined
-`NT_ASSET_MESH..NT_ASSET_ATLAS` range also reject the pack. Every non-BLOB file
+`NT_ASSET_MESH..NT_ASSET_LAST` range also reject the pack. Every non-BLOB file
 type requires an activator configured before the first mount; missing one asserts
 before reserving records or retaining bytes. Capacity exhaustion asserts.
 

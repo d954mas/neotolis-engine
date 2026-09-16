@@ -47,7 +47,7 @@ typedef enum {
 
 /* ---- Activator callbacks ---- */
 
-#define NT_RESOURCE_MAX_ASSET_TYPES 8
+#define NT_RESOURCE_MAX_ASSET_TYPES 12
 
 typedef struct {
     nt_resource_type_desc_t desc;

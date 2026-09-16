@@ -25,6 +25,9 @@ typedef enum {
     NT_BUILD_ASSET_FONT = 4,
     NT_BUILD_ASSET_ATLAS = 5,
     NT_BUILD_ASSET_ATLAS_REGION = 6, /* codegen-only: region entry (no pack data, dedup_original >= 0) */
+    NT_BUILD_ASSET_SKELETON = 7,
+    NT_BUILD_ASSET_SKIN_BINDING = 8,
+    NT_BUILD_ASSET_CLIP = 9,
 } nt_build_asset_kind_t;
 
 /* Type-specific data for shader entries */
@@ -190,6 +193,9 @@ struct NtBuilderContext {
     uint32_t blob_count;
     uint32_t font_count;
     uint32_t atlas_count;
+    uint32_t skeleton_count;
+    uint32_t skin_binding_count;
+    uint32_t clip_count;
 
     /* Per-atlas dedup statistics, appended by each successful atlas commit. The
      * count precedes its array so the 8-aligned array absorbs the pad this run of

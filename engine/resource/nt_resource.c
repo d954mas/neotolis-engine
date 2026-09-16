@@ -1015,7 +1015,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Reject the whole pack before reserving any slots. */
     for (uint32_t i = 0; i < h->asset_count; i++) {
         const NtAssetEntry *entry = &entries[i];
-        if (entry->asset_type < NT_ASSET_MESH || entry->asset_type > NT_ASSET_ATLAS) {
+        if (entry->asset_type < NT_ASSET_MESH || entry->asset_type > NT_ASSET_LAST) {
             NT_LOG_ERROR("unsupported asset type");
             goto parse_done;
         }
@@ -1669,6 +1669,24 @@ void nt_resource_dump_pack(nt_hash32_t pack_id) {
             break;
         case NT_ASSET_SHADER_CODE:
             tname = "shader";
+            break;
+        case NT_ASSET_BLOB:
+            tname = "blob";
+            break;
+        case NT_ASSET_FONT:
+            tname = "font";
+            break;
+        case NT_ASSET_ATLAS:
+            tname = "atlas";
+            break;
+        case NT_ASSET_SKELETON:
+            tname = "skeleton";
+            break;
+        case NT_ASSET_SKIN_BINDING:
+            tname = "skin";
+            break;
+        case NT_ASSET_CLIP:
+            tname = "clip";
             break;
         default:
             break;

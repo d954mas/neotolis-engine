@@ -422,8 +422,15 @@ typedef enum {
         NT_ASSET_BLOB = 4,  /* generic binary data (game-defined) */
         NT_ASSET_FONT = 5,  /* font glyph data (Slug format) */
         NT_ASSET_ATLAS = 6, /* atlas region metadata (vertices + UVs + origin) */
+        NT_ASSET_SKELETON = 7,     /* skeleton rig (NSKL) */
+        NT_ASSET_SKIN_BINDING = 8, /* skin binding: palette remap + inverse binds (NSKN) */
+        NT_ASSET_CLIP = 9,         /* animation clip (NANM) */
     } nt_asset_type_t;
 ```
+
+`NT_ASSET_LAST` is the highest defined type; the pack parser rejects a manifest
+type above it. The three skeletal formats are specified in
+[Skeletal animation §16](../skeletal/skeletal-animation.md).
 
 Additional types (material, audio) will be added as needed.
 
