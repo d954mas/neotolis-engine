@@ -13,19 +13,6 @@
 static bool nt_anim_is_finite(float x) { return (x - x) == 0.0F; }
 #endif
 
-#if NT_ANIM_CHECKS
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void nt_anim_check_trs(const nt_anim_trs_t *l) {
-    for (int c = 0; c < 3; ++c) {
-        NT_ASSERT(nt_anim_is_finite(l->t[c]));
-        NT_ASSERT(nt_anim_is_finite(l->s[c]));
-    }
-    const float dot = (l->q[0] * l->q[0]) + (l->q[1] * l->q[1]) + (l->q[2] * l->q[2]) + (l->q[3] * l->q[3]);
-    /* Two-sided instead of fabsf: a NaN dot fails both comparisons. */
-    NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
-}
-#endif
-
 void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out) {
     NT_ASSERT(m != NULL);
     NT_ASSERT(out != NULL);
@@ -57,7 +44,6 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *restrict lo
         const uint16_t p = skel->parent[j];
 #if NT_ANIM_CHECKS
         NT_ASSERT(p == NT_ANIM_NO_PARENT || p < j);
-        nt_anim_check_trs(&local[j]);
 #endif
         nt_anim_mat34_t l;
         nt_anim_mat34_from_trs(&local[j], &l);
@@ -77,10 +63,6 @@ void nt_anim_socket(const float world[16], const nt_anim_mat34_t *g_joint, const
     NT_ASSERT(socket_local != NULL);
     NT_ASSERT(out != NULL);
     NT_ASSERT(out != g_joint);
-
-#if NT_ANIM_CHECKS
-    nt_anim_check_trs(socket_local);
-#endif
 
     nt_anim_mat34_t e;
     nt_anim_mat34_from_mat4(world, &e);

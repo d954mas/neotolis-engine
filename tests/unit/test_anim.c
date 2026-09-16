@@ -502,6 +502,39 @@ void test_rig_compat_id_traps_on_non_finite_rest(void) {
 /* ---- Per-element checks ---- */
 
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
+void test_mat34_from_trs_traps_on_invalid_quaternion(void) {
+    const float invalid[] = {0.0F, 2.0F, NAN, INFINITY};
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        nt_anim_trs_t trs = {{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F, invalid[i]}, {1.0F, 1.0F, 1.0F}};
+        nt_anim_mat34_t out;
+        NT_TEST_EXPECT_ASSERT(nt_anim_mat34_from_trs(&trs, &out));
+    }
+}
+
+void test_mat34_from_trs_traps_on_non_finite_translation(void) {
+    const float invalid[] = {NAN, INFINITY, -INFINITY};
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        for (int c = 0; c < 3; ++c) {
+            nt_anim_trs_t trs = {{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}};
+            trs.t[c] = invalid[i];
+            nt_anim_mat34_t out;
+            NT_TEST_EXPECT_ASSERT(nt_anim_mat34_from_trs(&trs, &out));
+        }
+    }
+}
+
+void test_mat34_from_trs_traps_on_non_finite_scale(void) {
+    const float invalid[] = {NAN, INFINITY, -INFINITY};
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        for (int c = 0; c < 3; ++c) {
+            nt_anim_trs_t trs = {{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}};
+            trs.s[c] = invalid[i];
+            nt_anim_mat34_t out;
+            NT_TEST_EXPECT_ASSERT(nt_anim_mat34_from_trs(&trs, &out));
+        }
+    }
+}
+
 void test_fk_traps_on_non_finite_translation(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));
@@ -627,6 +660,9 @@ int main(void) {
     RUN_TEST(test_rig_compat_id_traps_on_non_finite_rest);
 #endif
 #if NT_ANIM_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
+    RUN_TEST(test_mat34_from_trs_traps_on_invalid_quaternion);
+    RUN_TEST(test_mat34_from_trs_traps_on_non_finite_translation);
+    RUN_TEST(test_mat34_from_trs_traps_on_non_finite_scale);
     RUN_TEST(test_fk_traps_on_non_finite_translation);
     RUN_TEST(test_fk_traps_on_infinite_translation);
     RUN_TEST(test_fk_traps_on_infinite_scale);

@@ -79,7 +79,8 @@ typedef struct {
 } nt_anim_skeleton_t;
 
 /* out = T*R*S from a unit quaternion; the rotation columns carry the scale and
- * column 3 the translation. Hand-written so no mat4 temporary is needed. */
+ * column 3 the translation. NT_ANIM_CHECKS validates finite t/s and unit q. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static inline void nt_anim_mat34_from_trs(const nt_anim_trs_t *trs, nt_anim_mat34_t *out) {
     NT_ASSERT(trs != NULL);
     NT_ASSERT(out != NULL);
@@ -92,6 +93,15 @@ static inline void nt_anim_mat34_from_trs(const nt_anim_trs_t *trs, nt_anim_mat3
     const float xx = x * x;
     const float yy = y * y;
     const float zz = z * z;
+#if NT_ANIM_CHECKS
+    /* x - x rejects non-finite values without libm; requires strict IEEE math. */
+    for (int c = 0; c < 3; ++c) {
+        NT_ASSERT((trs->t[c] - trs->t[c]) == 0.0F);
+        NT_ASSERT((trs->s[c] - trs->s[c]) == 0.0F);
+    }
+    const float dot = xx + yy + zz + (w * w);
+    NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
+#endif
     const float xy = x * y;
     const float xz = x * z;
     const float yz = y * z;
