@@ -1,34 +1,34 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: a072ed5
+# Commit: 776d9d3
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 253 B
+Type                 258 B
 Import               605 B
-Function             201 B
+Function             202 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                  95 B
-Code              215639 B
+Elem                  96 B
+Code              214422 B
 Data              208847 B
-Custom             11455 B
+Custom             11471 B
 ---------------- ----------
-TOTAL             437199 B
+TOTAL             436005 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-30940 B   frame
+30943 B   frame
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17739 B   nt_gfx_activate_texture
- 9355 B   nt_font_lookup_glyph_offset
  7756 B   main
+ 7737 B   nt_font_lookup_glyph_offset
  5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -42,20 +42,20 @@ TOTAL             437199 B
  1839 B   nt_program_ref_update
  1678 B   basist::bitwise_decoder::read_huffman_table(basist::huffman_decoding_table&)
  1621 B   atlas_on_resolve
+ 1376 B   emit_glyph_pass
  1284 B   nt_gfx_backend_create_texture
  1277 B   nt_gfx_apply_texture_bindings
  1254 B   nt_gfx_make_vertex_input
  1241 B   basist::bc7_mode_5_encoder::eval_weights(basist::color32 const*, unsigned char*, int, int, int, int, int, int)
  1218 B   basist::transcode_uastc_to_etc2_eac_a8(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
- 1211 B   emit_glyph_pass
  1135 B   spawn_one_defold
  1119 B   nt_input_web_on_blur
  1100 B   nt_hash32_str
  1090 B   nt_gfx_bind_pipeline
  1072 B   find_or_create_pipeline_240
 
-Total functions: 199
-Total code size: 215315 B
+Total functions: 200
+Total code size: 214096 B
 
 ## Built Engine Archives
 
@@ -76,8 +76,8 @@ libnt_core.a                2180 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
-libnt_font.a              197998 B
-libnt_gfx.a                80240 B
+libnt_font.a              196228 B
+libnt_gfx.a                80212 B
 libnt_gfx_stub.a            5238 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -103,21 +103,22 @@ libnt_postfx_blur.a         8622 B
 libnt_render.a              7674 B
 libnt_resource.a          215010 B
 libnt_shape_renderer.a   1144652 B
+libnt_skeletal.a            4130 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
-libnt_text_renderer.a    1243320 B
+libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                349684 B
-libnt_ui_rich.a            39804 B
+libnt_ui.a                353778 B
+libnt_ui_rich.a            39964 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4201162 B
+TOTAL (archives)         4207856 B
 
 ## Data Segments Summary
 

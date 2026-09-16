@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: a072ed5
+# Commit: 776d9d3
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  76 B
-Code              193732 B
+Code              193721 B
 Data              212328 B
 Custom             10780 B
 ---------------- ----------
-TOTAL             418045 B
+TOTAL             418034 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             418045 B
   738 B   emmalloc_aligned_realloc
 
 Total functions: 169
-Total code size: 193461 B
+Total code size: 193450 B
 
 ## Built Engine Archives
 
@@ -76,8 +76,8 @@ libnt_core.a                2180 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
-libnt_font.a              197998 B
-libnt_gfx.a                80240 B
+libnt_font.a              196228 B
+libnt_gfx.a                80212 B
 libnt_gfx_stub.a            5238 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -103,21 +103,22 @@ libnt_postfx_blur.a         8622 B
 libnt_render.a              7674 B
 libnt_resource.a          215010 B
 libnt_shape_renderer.a   1144652 B
+libnt_skeletal.a            4130 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
-libnt_text_renderer.a    1243320 B
+libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                349684 B
-libnt_ui_rich.a            39804 B
+libnt_ui.a                353778 B
+libnt_ui_rich.a            39964 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4201162 B
+TOTAL (archives)         4207856 B
 
 ## Data Segments Summary
 
