@@ -1,7 +1,7 @@
 # Pose Layout Experiment Results
 
 **Date:** 2026-09-15
-**Benchmark source:** `tools/research/anim_layout/main.c`
+**Benchmark source:** `tools/research/skeletal_layout/main.c`
 **Machine:** Windows 11 x86_64, Intel Core i9-14900HX
 **Compiler / preset:** clang 19.1.7, `native-release` (`-O3 -DNDEBUG`, asserts in TRAP mode)
 **Method:** synthetic `sample → mix → FK` over three pose storages with shared
@@ -15,7 +15,7 @@ while `FK` does not).
 
 | Layout | Storage | FK |
 |--------|---------|----|
-| AoS 40 B | `nt_anim_trs_t[]` — the shipped ABI | `nt_anim_fk` |
+| AoS 40 B | `nt_skeletal_trs_t[]` — the shipped ABI | `nt_skeletal_fk` |
 | AoS 48 B | `{ _Alignas(16) float t[4]; float q[4]; float s[4]; }[]` | local, same expressions |
 | SoA 10ch | ten `float[]` planes (tx ty tz qx qy qz qw sx sy sz) | local, same expressions |
 
@@ -137,7 +137,7 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 7. **Small differences need repeated measurements.** These medians do not
    establish confidence intervals. Repetitions interleave layouts in a fixed
    order, so timing drift can still favour one layout. AoS40 also pays the public
-   `nt_anim_fk` call and its configured checks, unlike the local AoS48/SoA FKs.
+   `nt_skeletal_fk` call and its configured checks, unlike the local AoS48/SoA FKs.
    Checked builds add parent-index and TRS validation only to the AoS40 FK path;
    use the recorded production Release configuration for comparisons.
 8. **Decision: keep AoS 40 B as the initial ABI.** Re-run this tool against the

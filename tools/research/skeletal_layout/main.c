@@ -14,7 +14,7 @@
 #include <time.h>
 #endif
 
-#include "anim/nt_anim.h"
+#include "skeletal/nt_skeletal.h"
 
 #define MAX_JOINTS 100U
 #define MAX_CHARS 1000U
@@ -71,21 +71,21 @@ typedef struct {
     uint16_t parent[MAX_JOINTS];
     uint16_t subtree_end[MAX_JOINTS];
     uint32_t joint_id[MAX_JOINTS];
-    nt_anim_trs_t rest[MAX_JOINTS];
-    nt_anim_skeleton_t view;
+    nt_skeletal_trs_t rest[MAX_JOINTS];
+    nt_skeletal_skeleton_t view;
 } rig_t;
 
 typedef struct {
-    nt_anim_trs_t *key40; /* 2 * MAX_TRACKS * MAX_JOINTS */
+    nt_skeletal_trs_t *key40; /* 2 * MAX_TRACKS * MAX_JOINTS */
     pose48_t *key48;
     soa_pose_t key_soa;
-    nt_anim_trs_t *trk40; /* MAX_TRACKS * MAX_CHARS * MAX_JOINTS */
+    nt_skeletal_trs_t *trk40; /* MAX_TRACKS * MAX_CHARS * MAX_JOINTS */
     pose48_t *trk48;
     soa_pose_t trk_soa;
-    nt_anim_trs_t *mix40; /* MAX_CHARS * MAX_JOINTS */
+    nt_skeletal_trs_t *mix40; /* MAX_CHARS * MAX_JOINTS */
     pose48_t *mix48;
     soa_pose_t mix_soa;
-    nt_anim_mat34_t *model[LAYOUT_COUNT]; /* MAX_CHARS * MAX_JOINTS */
+    nt_skeletal_mat34_t *model[LAYOUT_COUNT]; /* MAX_CHARS * MAX_JOINTS */
     float gain[MAX_TRACKS];
     float phase[MAX_TRACKS];
     float step[MAX_TRACKS];
@@ -107,7 +107,7 @@ static const char *layout_name(layout_t layout) {
 static void *xmalloc(size_t bytes) {
     void *p = malloc(bytes);
     if (p == NULL) {
-        (void)fprintf(stderr, "anim_layout: out of memory (%zu bytes)\n", bytes);
+        (void)fprintf(stderr, "skeletal_layout: out of memory (%zu bytes)\n", bytes);
         abort();
     }
     return p;
@@ -145,17 +145,17 @@ static void bench_alloc(bench_t *b) {
     const size_t tracks = (size_t)MAX_TRACKS * MAX_CHARS * MAX_JOINTS;
     const size_t poses = (size_t)MAX_CHARS * MAX_JOINTS;
 
-    b->key40 = (nt_anim_trs_t *)xmalloc(keys * sizeof(nt_anim_trs_t));
+    b->key40 = (nt_skeletal_trs_t *)xmalloc(keys * sizeof(nt_skeletal_trs_t));
     b->key48 = (pose48_t *)xmalloc(keys * sizeof(pose48_t));
     soa_alloc(&b->key_soa, keys);
-    b->trk40 = (nt_anim_trs_t *)xmalloc(tracks * sizeof(nt_anim_trs_t));
+    b->trk40 = (nt_skeletal_trs_t *)xmalloc(tracks * sizeof(nt_skeletal_trs_t));
     b->trk48 = (pose48_t *)xmalloc(tracks * sizeof(pose48_t));
     soa_alloc(&b->trk_soa, tracks);
-    b->mix40 = (nt_anim_trs_t *)xmalloc(poses * sizeof(nt_anim_trs_t));
+    b->mix40 = (nt_skeletal_trs_t *)xmalloc(poses * sizeof(nt_skeletal_trs_t));
     b->mix48 = (pose48_t *)xmalloc(poses * sizeof(pose48_t));
     soa_alloc(&b->mix_soa, poses);
     for (int l = 0; l < LAYOUT_COUNT; ++l) {
-        b->model[l] = (nt_anim_mat34_t *)xmalloc(poses * sizeof(nt_anim_mat34_t));
+        b->model[l] = (nt_skeletal_mat34_t *)xmalloc(poses * sizeof(nt_skeletal_mat34_t));
     }
     for (uint32_t t = 0; t < MAX_TRACKS; ++t) {
         b->gain[t] = 1.0F / (float)(t + 1U);
@@ -188,7 +188,7 @@ static uint32_t lcg_next(uint64_t *s) {
 
 static float lcg_signed(uint64_t *s) { return ((float)lcg_next(s) / 1073741824.0F) - 1.0F; }
 
-static void random_trs(uint64_t *s, nt_anim_trs_t *out) {
+static void random_trs(uint64_t *s, nt_skeletal_trs_t *out) {
     for (int i = 0; i < 3; ++i) {
         out->t[i] = lcg_signed(s) * 0.5F;
         out->s[i] = 0.75F + (lcg_signed(s) * 0.25F);
@@ -211,7 +211,7 @@ static void random_trs(uint64_t *s, nt_anim_trs_t *out) {
     }
 }
 
-static void pose48_store(pose48_t *p, const nt_anim_trs_t *v) {
+static void pose48_store(pose48_t *p, const nt_skeletal_trs_t *v) {
     for (int i = 0; i < 3; ++i) {
         p->t[i] = v->t[i];
         p->s[i] = v->s[i];
@@ -223,7 +223,7 @@ static void pose48_store(pose48_t *p, const nt_anim_trs_t *v) {
     }
 }
 
-static void soa_store(const soa_pose_t *s, size_t i, const nt_anim_trs_t *v) {
+static void soa_store(const soa_pose_t *s, size_t i, const nt_skeletal_trs_t *v) {
     s->tx[i] = v->t[0];
     s->ty[i] = v->t[1];
     s->tz[i] = v->t[2];
@@ -238,9 +238,9 @@ static void soa_store(const soa_pose_t *s, size_t i, const nt_anim_trs_t *v) {
 
 /* Raw tree: 80 % of joints continue the chain, the rest branch off a random
  * earlier joint. parent[j] < j holds, contiguous subtrees do not -- rig_preorder
- * relabels the result so nt_anim_fk's preorder precondition holds. */
+ * relabels the result so nt_skeletal_fk's preorder precondition holds. */
 static void rig_gen_parents(uint16_t *raw_parent, uint16_t joint_count, uint64_t *s) {
-    raw_parent[0] = NT_ANIM_NO_PARENT;
+    raw_parent[0] = NT_SKELETAL_NO_PARENT;
     for (uint16_t j = 1; j < joint_count; ++j) {
         if ((lcg_next(s) % 100U) < 80U) {
             raw_parent[j] = (uint16_t)(j - 1U);
@@ -321,7 +321,7 @@ static void rig_build(rig_t *rig, uint16_t joint_count, uint64_t seed) {
 
     for (uint16_t j = 0; j < joint_count; ++j) {
         const uint16_t raw = order[j];
-        rig->parent[j] = (raw_parent[raw] == NT_ANIM_NO_PARENT) ? NT_ANIM_NO_PARENT : new_index[raw_parent[raw]];
+        rig->parent[j] = (raw_parent[raw] == NT_SKELETAL_NO_PARENT) ? NT_SKELETAL_NO_PARENT : new_index[raw_parent[raw]];
         rig->joint_id[j] = (uint32_t)j + 1U;
         random_trs(&s, &rig->rest[j]);
     }
@@ -337,7 +337,7 @@ static void keys_init(const bench_t *b, uint16_t joints, uint16_t tracks, uint64
     uint64_t s = seed;
     const size_t count = (size_t)2U * tracks * joints;
     for (size_t i = 0; i < count; ++i) {
-        nt_anim_trs_t v;
+        nt_skeletal_trs_t v;
         random_trs(&s, &v);
         b->key40[i] = v;
         pose48_store(&b->key48[i], &v);
@@ -426,7 +426,7 @@ static void mix_add(mix_acc_t *m, const float t[3], const float q[4], const floa
     m->count += 1;
 }
 
-static void mix_finish(const mix_acc_t *m, const nt_anim_trs_t *def, float out_t[3], float out_q[4], float out_s[3]) {
+static void mix_finish(const mix_acc_t *m, const nt_skeletal_trs_t *def, float out_t[3], float out_q[4], float out_s[3]) {
     if (m->w_sum <= 0.0F) {
         for (int i = 0; i < 3; ++i) {
             out_t[i] = def->t[i];
@@ -452,9 +452,9 @@ static void mix_finish(const mix_acc_t *m, const nt_anim_trs_t *def, float out_t
     }
 }
 
-/* Same expressions as nt_anim_mat34_from_trs, reading loose parts. */
+/* Same expressions as nt_skeletal_mat34_from_trs, reading loose parts. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void mat34_from_parts(const float t[3], const float q[4], const float s[3], nt_anim_mat34_t *out) {
+static void mat34_from_parts(const float t[3], const float q[4], const float s[3], nt_skeletal_mat34_t *out) {
     const float x = q[0];
     const float y = q[1];
     const float z = q[2];
@@ -494,12 +494,12 @@ static void mat34_from_parts(const float t[3], const float q[4], const float s[3
 // #region sample stage
 static void stage_sample_aos40(const bench_t *b, uint32_t chars_n, uint16_t joints, uint16_t tracks, uint32_t frame) {
     for (uint16_t t = 0; t < tracks; ++t) {
-        const nt_anim_trs_t *ka = &b->key40[(size_t)2U * t * joints];
-        const nt_anim_trs_t *kb = &ka[joints];
+        const nt_skeletal_trs_t *ka = &b->key40[(size_t)2U * t * joints];
+        const nt_skeletal_trs_t *kb = &ka[joints];
         const float phase = b->phase[t] + ((float)frame * b->step[t]);
         for (uint32_t c = 0; c < chars_n; ++c) {
             const float alpha = wrap01(phase + ((float)c * 1e-4F));
-            nt_anim_trs_t *out = &b->trk40[(((size_t)t * chars_n) + c) * joints];
+            nt_skeletal_trs_t *out = &b->trk40[(((size_t)t * chars_n) + c) * joints];
             for (uint16_t j = 0; j < joints; ++j) {
                 lerp_parts(ka[j].t, ka[j].q, ka[j].s, kb[j].t, kb[j].q, kb[j].s, alpha, out[j].t, out[j].q, out[j].s);
             }
@@ -577,15 +577,15 @@ static void stage_sample_soa(const bench_t *b, uint32_t chars_n, uint16_t joints
 // #endregion
 
 // #region mix stage
-static void stage_mix_aos40(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
+static void stage_mix_aos40(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
     const uint16_t joints = skel->joint_count;
     for (uint32_t c = 0; c < chars_n; ++c) {
-        nt_anim_trs_t *out = &b->mix40[(size_t)c * joints];
+        nt_skeletal_trs_t *out = &b->mix40[(size_t)c * joints];
         for (uint16_t j = 0; j < joints; ++j) {
             mix_acc_t m;
             mix_begin(&m);
             for (uint16_t t = 0; t < tracks; ++t) {
-                const nt_anim_trs_t *in = &b->trk40[((((size_t)t * chars_n) + c) * joints) + j];
+                const nt_skeletal_trs_t *in = &b->trk40[((((size_t)t * chars_n) + c) * joints) + j];
                 mix_add(&m, in->t, in->q, in->s, b->gain[t]);
             }
             mix_finish(&m, &skel->rest[j], out[j].t, out[j].q, out[j].s);
@@ -593,7 +593,7 @@ static void stage_mix_aos40(const bench_t *b, const nt_anim_skeleton_t *skel, ui
     }
 }
 
-static void stage_mix_aos48(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
+static void stage_mix_aos48(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
     const uint16_t joints = skel->joint_count;
     for (uint32_t c = 0; c < chars_n; ++c) {
         pose48_t *out = &b->mix48[(size_t)c * joints];
@@ -609,7 +609,7 @@ static void stage_mix_aos48(const bench_t *b, const nt_anim_skeleton_t *skel, ui
     }
 }
 
-static void stage_mix_soa(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
+static void stage_mix_soa(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
     const uint16_t joints = skel->joint_count;
     for (uint32_t c = 0; c < chars_n; ++c) {
         const size_t base_o = (size_t)c * joints;
@@ -634,39 +634,39 @@ static void stage_mix_soa(const bench_t *b, const nt_anim_skeleton_t *skel, uint
 // #endregion
 
 // #region FK stage
-static void fk_aos48(const nt_anim_skeleton_t *skel, const pose48_t *local, nt_anim_mat34_t *model) {
+static void fk_aos48(const nt_skeletal_skeleton_t *skel, const pose48_t *local, nt_skeletal_mat34_t *model) {
     for (uint16_t j = 0; j < skel->joint_count; ++j) {
-        nt_anim_mat34_t l;
+        nt_skeletal_mat34_t l;
         mat34_from_parts(local[j].t, local[j].q, local[j].s, &l);
         const uint16_t p = skel->parent[j];
-        if (p == NT_ANIM_NO_PARENT) {
+        if (p == NT_SKELETAL_NO_PARENT) {
             model[j] = l;
         } else {
-            nt_anim_mat34_mul(&model[p], &l, &model[j]);
+            nt_skeletal_mat34_mul(&model[p], &l, &model[j]);
         }
     }
 }
 
-static void fk_soa(const nt_anim_skeleton_t *skel, const soa_pose_t *local, size_t base, nt_anim_mat34_t *model) {
+static void fk_soa(const nt_skeletal_skeleton_t *skel, const soa_pose_t *local, size_t base, nt_skeletal_mat34_t *model) {
     for (uint16_t j = 0; j < skel->joint_count; ++j) {
         float t[3];
         float q[4];
         float s[3];
         soa_load(local, base + j, t, q, s);
-        nt_anim_mat34_t l;
+        nt_skeletal_mat34_t l;
         mat34_from_parts(t, q, s, &l);
         const uint16_t p = skel->parent[j];
-        if (p == NT_ANIM_NO_PARENT) {
+        if (p == NT_SKELETAL_NO_PARENT) {
             model[j] = l;
         } else {
-            nt_anim_mat34_mul(&model[p], &l, &model[j]);
+            nt_skeletal_mat34_mul(&model[p], &l, &model[j]);
         }
     }
 }
 // #endregion
 
 // #region stage dispatch
-static void run_sample(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, uint32_t frame) {
+static void run_sample(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, uint32_t frame) {
     switch (layout) {
     case LAYOUT_AOS40:
         stage_sample_aos40(b, chars_n, skel->joint_count, tracks, frame);
@@ -682,7 +682,7 @@ static void run_sample(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_
     }
 }
 
-static void run_mix(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout) {
+static void run_mix(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout) {
     switch (layout) {
     case LAYOUT_AOS40:
         stage_mix_aos40(b, skel, chars_n, tracks);
@@ -698,13 +698,13 @@ static void run_mix(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t c
     }
 }
 
-static void run_fk(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, layout_t layout) {
+static void run_fk(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, layout_t layout) {
     const uint16_t joints = skel->joint_count;
     switch (layout) {
     case LAYOUT_AOS40:
         for (uint32_t c = 0; c < chars_n; ++c) {
             const size_t base = (size_t)c * joints;
-            nt_anim_fk(skel, &b->mix40[base], &b->model[LAYOUT_AOS40][base], 0U, joints);
+            nt_skeletal_fk(skel, &b->mix40[base], &b->model[LAYOUT_AOS40][base], 0U, joints);
         }
         break;
     case LAYOUT_AOS48:
@@ -724,7 +724,7 @@ static void run_fk(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t ch
     }
 }
 
-static void run_frame(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, uint32_t frame) {
+static void run_frame(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, uint32_t frame) {
     run_sample(b, skel, chars_n, tracks, layout, frame);
     run_mix(b, skel, chars_n, tracks, layout);
     run_fk(b, skel, chars_n, layout);
@@ -732,7 +732,7 @@ static void run_frame(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t
 // #endregion
 
 // #region cross-layout check
-static int verify_layouts(const bench_t *b, const nt_anim_skeleton_t *skel, uint16_t tracks) {
+static int verify_layouts(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint16_t tracks) {
     for (int l = 0; l < LAYOUT_COUNT; ++l) {
         run_frame(b, skel, 1U, tracks, (layout_t)l, 0U);
     }
@@ -775,7 +775,7 @@ static double median5(const double v[BENCH_REPS]) {
     return a[BENCH_REPS / 2];
 }
 
-static void run_one(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, int stage, uint32_t frame) {
+static void run_one(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, int stage, uint32_t frame) {
     switch (stage) {
     case 0:
         run_sample(b, skel, chars_n, tracks, layout, frame);
@@ -802,7 +802,7 @@ static uint32_t clamp_batch(double want) {
 /* One warm-up frame, then a batch grown until it clears 1 ms so the ~100 ns
  * timer tick is amortized, then the measured run. Returns ns per skeleton joint
  * per frame for the stage. */
-static double time_stage(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, int stage) {
+static double time_stage(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, int stage) {
     run_frame(b, skel, chars_n, tracks, layout, 0U);
 
     uint32_t probe = 1U;
@@ -830,7 +830,7 @@ static double time_stage(const bench_t *b, const nt_anim_skeleton_t *skel, uint3
     return (elapsed * 1e9) / joints;
 }
 
-static stage_ns_t measure(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout) {
+static stage_ns_t measure(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout) {
     stage_ns_t out;
     out.sample = time_stage(b, skel, chars_n, tracks, layout, 0);
     out.mix = time_stage(b, skel, chars_n, tracks, layout, 1);
@@ -868,7 +868,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--quick") == 0) {
             quick = 1;
         } else {
-            (void)fprintf(stderr, "usage: anim_layout [--quick]\n");
+            (void)fprintf(stderr, "usage: skeletal_layout [--quick]\n");
             return 1;
         }
     }

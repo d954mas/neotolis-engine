@@ -131,7 +131,7 @@ if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
 
-set(NT_ANIM_CHECKS "" CACHE STRING "Animation per-element input checks (finite values, unit quaternions, palette indices): 1=on, 0=off. Empty=auto (debug->1, release->0).")
+set(NT_SKELETAL_CHECKS "" CACHE STRING "Skeletal animation per-element input checks (finite values, unit quaternions, palette indices): 1=on, 0=off. Empty=auto (debug->1, release->0).")
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")
@@ -352,7 +352,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(NOT EMSCRIPTEN)
         # Declared before tests/ so NT_TEST_ACCESS_LIBS can gate the builder's test surface.
         add_subdirectory(tools/builder)
-        add_subdirectory(tools/research/anim_layout)
+        add_subdirectory(tools/research/skeletal_layout)
         add_subdirectory(tools/research/hash_benchmark)
         add_subdirectory(tools/research/atlas_bench)
     endif()

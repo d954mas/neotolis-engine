@@ -59,15 +59,15 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_half)
 
     # --- Skeletal animation kernels (pose ABI, 3x4 math, FK, sockets) ---
-    # nt_math is the independent cglm reference path of the test, not a nt_anim
-    # dependency; anim_rig.c is the shared asymmetric fixture rig.
-    add_executable(test_anim unit/test_anim.c unit/test_helpers/anim_rig.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_anim PRIVATE nt_anim nt_hash nt_core nt_log_stub nt_math unity)
-    target_include_directories(test_anim PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
-    nt_setup_test_target(test_anim)
+    # nt_math is the independent cglm reference path of the test, not a nt_skeletal
+    # dependency; skeletal_rig.c is the shared asymmetric fixture rig.
+    add_executable(test_skeletal unit/test_skeletal.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
+    target_include_directories(test_skeletal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal)
 
-    add_executable(test_skin unit/test_skin.c unit/test_helpers/anim_rig.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_skin PRIVATE nt_anim nt_hash nt_core nt_log_stub nt_math unity)
+    add_executable(test_skin unit/test_skin.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skin PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skin)
 
