@@ -55,7 +55,7 @@ covers the common options; module specs own detailed ON/OFF behavior.
 | `NT_STATIC_CRT` | ON | Static release CRT on Windows; OFF inherits the embedding application's CRT. |
 | `NT_BUILD_TESTS` | ON | `native-release` OFF; `native-release-test` ON. |
 | `NT_ASSERT_MODE` | Automatic | Debug FULL (2), Release TRAP (1); release-test FULL. OFF (0) is unsupported. |
-| `NT_ANIM_CHECKS` | Automatic | Per-element animation input checks (finite values, unit quaternions, palette indices): Debug 1, Release 0; `native-release-test` pins 1, so the checked paths meet NDEBUG and -O2 there. `1` keeps them in a release build, checking each element immediately before computation in the same loop, useful while content or a procedural rig is still unverified. They are ordinary `NT_ASSERT`s, so `NT_ASSERT_MODE=0` drops them regardless. |
+| `NT_ANIM_CHECKS` | Automatic | Per-element animation input checks (finite values, unit quaternions, palette indices): Debug 1, Release 0; `native-release-test` pins 1, exercising checked paths under NDEBUG and the configured Release optimization flags. `1` keeps them in a release build, checking each element immediately before computation in the same loop, useful while content or a procedural rig is still unverified. They are ordinary `NT_ASSERT`s, so `NT_ASSERT_MODE=0` drops them regardless. |
 | `NT_LOG_MIN_LEVEL` | 0 (INFO) | Debug/release-test 0; production Release 1 (WARN). Also 2 ERROR, 3 NONE. |
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |

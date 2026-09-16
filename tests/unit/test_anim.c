@@ -257,7 +257,7 @@ void test_fk_traps_on_overlap(void) {
     NT_TEST_EXPECT_ASSERT(nt_anim_fk(&g_rig.skel, shared.local, shared.model, 0, ANIM_RIG_JOINT_COUNT));
 }
 
-/* out == g_joint: the composition reads the joint matrix it is overwriting. */
+/* The socket output must not overwrite the model-space joint pose. */
 void test_socket_traps_on_output_aliasing_the_joint(void) {
     nt_anim_trs_t local[ANIM_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));

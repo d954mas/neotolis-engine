@@ -110,33 +110,36 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 
 ## Reading
 
-1. **Sample and FK do not separate the two AoS layouts.** Sample stays within
-   ±2.5 % across the whole matrix (15.47 vs 15.30 ns at J=100, C=100, T=4) and FK
-   sits in a 6.5–7.3 ns band for all three layouts, a spread under 12 %.
-2. **The padded 48 B layout wins only in mix**, by 21–28 %: 3.66 vs 4.82 ns at
-   T=1, 6.01 vs 8.32 at T=2, 12.71 vs 15.99 at T=4 (J=100, C=100). Both AoS
+1. **Sample and FK show no consistent AoS winner.** Across the published matrix,
+   AoS48 sample time differs from AoS40 by −2.5 % to +3.9 %. FK spans
+   6.52–7.34 ns across all three layouts, with no consistent ranking.
+2. **The padded 48 B layout consistently wins in mix**, by 15.6–27.8 %: 3.66 vs
+   4.82 ns at T=1, 6.01 vs 8.32 at T=2, 12.71 vs 15.99 at T=4 (J=100, C=100). Both AoS
    layouts use compiler-generated SIMD in the native Release build, including
    vector quaternion arithmetic at the 40-byte stride. These timings do not
    isolate the cause of the gap; alignment alone is not an established explanation.
-3. **That one stage is the whole total-column gap:** 8–10 % (34.82 vs 38.11 ns
-   at J=100, C=100, T=4), bought with 20 % more pose memory in every local
-   buffer, snapshot and scratch the game owns.
-4. **SoA loses every stage** — 27–31 % on total (49.64 vs 38.11 ns) and 60 % on
-   sample alone — because each joint costs ten gathers and ten scatters that the
-   shared per-joint arithmetic does not vectorize across joints. Native compiler
+3. **AoS48 reduces the total column by 4.0–10.4 %**, primarily through mix,
+   with 20 % more pose memory in every local buffer, snapshot and scratch the
+   game owns. Total is the sum of stage medians, not a measured full-frame time.
+4. **SoA is slower in sample, mix and summed total.** Total is 24.1–34.1 %
+   above AoS40; FK does not establish a consistent winner. This layout accesses
+   ten separate planes without explicit SIMD across joints. Native compiler
    SIMD within a joint is already present; this is not a baseline-WASM measurement.
-5. **Joint and character count barely matter:** per-joint cost is flat within
-   2.5 % from J=30 to J=100 and from C=1 to C=1000, so at these sizes the
-   workload is compute-bound in all three layouts, not bandwidth-bound.
+5. **Cost varies with joint and character count.** At J=60, T=1, changing
+   C=1 to C=1000 raises AoS48 mix from 3.55 to 3.97 ns (+11.8 %). This timing
+   matrix alone does not identify whether computation or memory bandwidth limits
+   performance.
 6. **Nothing here justifies moving away from AoS 40 B before the real kernels
    exist.** The single win is a synthetic stand-in for the §7.3 mix (no joint
    weights, no zero-total path, constant gains), it is confined to one stage, and
    SIMD mix kernels would reopen the alignment question for both AoS variants at
    once.
-7. Read single cells as ±5 %: this run is clean, but a repeat under background
-   load moved individual cells by up to 60 % while leaving the ranking unchanged.
-   AoS 40 B also pays one out-of-line call per character for `nt_anim_fk` that
-   the two local FKs avoid; that asymmetry is inside the FK band.
+7. **Small differences need repeated measurements.** These medians do not
+   establish confidence intervals. Repetitions interleave layouts in a fixed
+   order, so timing drift can still favour one layout. AoS40 also pays the public
+   `nt_anim_fk` call and its configured checks, unlike the local AoS48/SoA FKs.
+   Checked builds add parent-index and TRS validation only to the AoS40 FK path;
+   use the recorded production Release configuration for comparisons.
 8. **Decision: keep AoS 40 B as the initial ABI.** Re-run this tool against the
    real kernels in #487 and revisit the layout in #492, where a SIMD mix is the
    deciding measurement rather than this one.

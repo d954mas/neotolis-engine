@@ -1,22 +1,5 @@
-/*
- * anim_layout -- pose-storage experiment for the pose ABI.
- *
- * Runs a synthetic sample -> mix -> FK loop over three storages of the same
- * local pose and reports ns per skeleton joint per stage:
- *
- *   1. AoS 40 B  -- nt_anim_trs_t, the shipped ABI, FK through nt_anim_fk.
- *   2. AoS 48 B  -- 16-byte-aligned t/q/s, SIMD-friendly padding, local FK.
- *   3. SoA       -- ten float planes (tx ty tz qx qy qz qw sx sy sz), local FK.
- *
- * The arithmetic is shared between the three (lerp_parts, mix_add/mix_finish,
- * mat34_from_parts + nt_anim_mat34_mul), so only the memory layout differs; a
- * startup cross-check compares the three FK outputs before any measurement.
- *
- * The joint x character x track matrix is the workload named in
- * docs/spec/anim/skeletal-animation.md section 18.
- *
- * Research tool: plain printf, single translation unit, not an engine target.
- */
+/* AoS40 uses the public FK call and its configured checks; the other layouts
+ * use local kernels. Workload, method and measurements: RESULTS.md. */
 
 #include <math.h>
 #include <stddef.h>
@@ -42,7 +25,6 @@
 #define RIG_SEED 0x9E3779B97F4A7C15ULL
 
 // #region timing
-
 static double get_time_sec(void) {
 #ifdef _WIN32
     LARGE_INTEGER freq;
@@ -59,7 +41,6 @@ static double get_time_sec(void) {
 // #endregion
 
 // #region layouts and storage
-
 typedef struct {
     _Alignas(16) float t[4];
     float q[4];
@@ -200,7 +181,6 @@ static void bench_free(const bench_t *b) {
 // #endregion
 
 // #region deterministic data
-
 static uint32_t lcg_next(uint64_t *s) {
     *s = (*s * 6364136223846793005ULL) + 1442695040888963407ULL;
     return (uint32_t)(*s >> 33U);
@@ -367,7 +347,6 @@ static void keys_init(const bench_t *b, uint16_t joints, uint16_t tracks, uint64
 // #endregion
 
 // #region shared arithmetic
-
 static float wrap01(float x) { return x - floorf(x); }
 
 /* Two-key sample: lerp on T and S, shortest-path nlerp on Q. */
@@ -513,7 +492,6 @@ static void mat34_from_parts(const float t[3], const float q[4], const float s[3
 // #endregion
 
 // #region sample stage
-
 static void stage_sample_aos40(const bench_t *b, uint32_t chars_n, uint16_t joints, uint16_t tracks, uint32_t frame) {
     for (uint16_t t = 0; t < tracks; ++t) {
         const nt_anim_trs_t *ka = &b->key40[(size_t)2U * t * joints];
@@ -599,7 +577,6 @@ static void stage_sample_soa(const bench_t *b, uint32_t chars_n, uint16_t joints
 // #endregion
 
 // #region mix stage
-
 static void stage_mix_aos40(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
     const uint16_t joints = skel->joint_count;
     for (uint32_t c = 0; c < chars_n; ++c) {
@@ -657,7 +634,6 @@ static void stage_mix_soa(const bench_t *b, const nt_anim_skeleton_t *skel, uint
 // #endregion
 
 // #region FK stage
-
 static void fk_aos48(const nt_anim_skeleton_t *skel, const pose48_t *local, nt_anim_mat34_t *model) {
     for (uint16_t j = 0; j < skel->joint_count; ++j) {
         nt_anim_mat34_t l;
@@ -690,7 +666,6 @@ static void fk_soa(const nt_anim_skeleton_t *skel, const soa_pose_t *local, size
 // #endregion
 
 // #region stage dispatch
-
 static void run_sample(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t chars_n, uint16_t tracks, layout_t layout, uint32_t frame) {
     switch (layout) {
     case LAYOUT_AOS40:
@@ -757,7 +732,6 @@ static void run_frame(const bench_t *b, const nt_anim_skeleton_t *skel, uint32_t
 // #endregion
 
 // #region cross-layout check
-
 static int verify_layouts(const bench_t *b, const nt_anim_skeleton_t *skel, uint16_t tracks) {
     for (int l = 0; l < LAYOUT_COUNT; ++l) {
         run_frame(b, skel, 1U, tracks, (layout_t)l, 0U);
@@ -780,7 +754,6 @@ static int verify_layouts(const bench_t *b, const nt_anim_skeleton_t *skel, uint
 // #endregion
 
 // #region measurement
-
 typedef struct {
     double sample;
     double mix;
@@ -870,7 +843,7 @@ static void run_config(const bench_t *b, const rig_t *rig, uint32_t chars_n, uin
     double mix[LAYOUT_COUNT][BENCH_REPS];
     double fk[LAYOUT_COUNT][BENCH_REPS];
 
-    /* Repetitions outermost so drift hits every layout the same way. */
+    /* Interleave layouts across repetitions to limit long-term timing drift. */
     for (int r = 0; r < BENCH_REPS; ++r) {
         for (int l = 0; l < LAYOUT_COUNT; ++l) {
             const stage_ns_t t = measure(b, &rig->view, chars_n, tracks, (layout_t)l);

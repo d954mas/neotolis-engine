@@ -465,9 +465,11 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Curve coordinates use round-to-nearest-even FP16. Band membership includes the
 FP16 rounding error bound (maximum absolute control coordinate / 2048 per axis).
-Text quads include the corresponding bbox-based font-unit padding plus 0.5 pixel
-for antialiasing; their sample coordinates expand with the quad, while the
-undilated bbox still defines the shader's bands. Layout metrics stay unchanged.
+Text quads include the corresponding bbox-based font-unit padding plus 0.5 local
+unit for antialiasing, before the model transform. This equals 0.5 screen pixel
+only at a one-to-one local-unit-to-pixel mapping. Sample coordinates expand with
+the quad, while the undilated bbox still defines the shader's bands. Layout
+metrics stay unchanged.
 
 **v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. The runtime version guard rejects stale v4 packs to tofu, so all font `.ntpack` assets must be rebuilt.
 

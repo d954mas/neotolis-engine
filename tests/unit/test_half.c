@@ -94,7 +94,7 @@ void test_f32_to_f16_infinity_and_nan(void) {
     TEST_ASSERT_EQUAL_HEX16(0x8000, neg & 0x8000);
 }
 
-/* The exact NaN and extreme-subnormal encodings the bank may hand the codec. */
+/* Exact encodings keep NaN and extreme-subnormal handling deterministic. */
 void test_f32_to_f16_exact_edge_encodings(void) {
     /* A signalling NaN: quieted with the canonical payload, sign kept. */
     TEST_ASSERT_EQUAL_HEX16(0x7E00, nt_f32_to_f16(float_from_bits(0x7F800001U)));
@@ -108,8 +108,7 @@ void test_f16_to_f32_infinity_is_exact(void) {
     TEST_ASSERT_EQUAL_HEX32(0xFF800000U, float_bits(nt_f16_to_f32(0xFC00)));
 }
 
-/* A signaling half NaN must widen into a quiet float NaN: a signaling one
- * raises an invalid-operation trap on the first arithmetic that touches it. */
+/* Widening must produce a quiet NaN while preserving its sign. */
 void test_f16_to_f32_quiets_signaling_nan(void) {
     const float f = nt_f16_to_f32(0x7C01);
     TEST_ASSERT_TRUE(isnan(f));
@@ -200,8 +199,7 @@ static void assert_nearest_even_over(float span) {
 
 void test_rounding_is_nearest_even(void) { assert_nearest_even_over(70000.0F); }
 
-/* The wide sweep almost never produces a subnormal; this range is nothing but
- * subnormals, both signs and zero. */
+/* Concentrate samples near zero to cover half subnormals and small normals. */
 void test_rounding_is_nearest_even_near_zero(void) { assert_nearest_even_over(1e-4F); }
 
 int main(void) {

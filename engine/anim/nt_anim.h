@@ -154,11 +154,13 @@ static inline void nt_anim_mat34_mul(const nt_anim_mat34_t *restrict a, const nt
 }
 
 /* out = the top three rows of a cglm column-major mat4 (m[col*4 + row]).
- * The plain float pointer is deliberate: pose buffers are never cast to mat4*. */
+ * m and out must not overlap. The plain float pointer avoids casting pose
+ * buffers to aligned mat4*. */
 void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out);
 
 /* Forward kinematics over [first, first + count): model[j] = model[parent[j]] *
  * mat34_from_trs(local[j]), roots take the local matrix unchanged.
+ * count >= 1 and first + count <= joint_count are required.
  *
  * local and model are caller-owned, must not overlap, and model holds
  * joint_count entries even when the range is a subtree. A range that starts at
