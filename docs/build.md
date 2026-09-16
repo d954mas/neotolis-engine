@@ -61,7 +61,7 @@ is no longer a valid configuration.
 | `NT_STATIC_CRT` | ON | Static release CRT on Windows; OFF inherits the embedding application's CRT. |
 | `NT_BUILD_TESTS` | ON | `native-release` OFF; `native-release-test` ON. |
 | `NT_ASSERT_MODE` | 1 (TRAP) | Debug and release-test presets select FULL (2); production Release presets select TRAP (1). OFF (0) is a supported build mode without runtime guarantees. |
-| `NT_SKELETAL_CHECKS` | OFF | Per-element skeletal input checks (finite values, unit quaternions, palette indices). Debug/release-test presets select ON; production Release selects OFF. Explicit ON enables checks in any build type. `NT_ASSERT_MODE=0` removes the assertions without rewriting this flag. |
+| `NT_SKELETAL_CHECKS` | OFF | Expensive skeletal numerical checks (finite TRS values, unit quaternions). Cheap pointer, index, count and capacity assertions remain independent of this flag, including inside joint/palette loops. Debug/release-test presets select ON; production Release selects OFF. Explicit ON enables checks in any build type. `NT_ASSERT_MODE=0` removes the assertions without rewriting this flag. |
 | `NT_LOG_MIN_LEVEL` | 0 (INFO) | Debug/release-test 0; production Release 1 (WARN). Also 2 ERROR, 3 NONE. |
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |

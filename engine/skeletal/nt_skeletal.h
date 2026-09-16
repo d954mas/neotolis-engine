@@ -123,11 +123,7 @@ static inline void nt_skeletal_mat34_mul(const nt_skeletal_mat34_t *restrict a, 
     NT_ASSERT(a != NULL);
     NT_ASSERT(b != NULL);
     NT_ASSERT(out != NULL);
-/* Unlike the NULL checks, this one does not fold away: it runs per joint and
- * per palette entry, so it is a checked-build contract. */
-#if NT_SKELETAL_CHECKS
     NT_ASSERT(out != a && out != b);
-#endif
 
     for (int i = 0; i < 3; ++i) {
         const float a0 = a->r[i][0];
@@ -187,10 +183,8 @@ typedef struct {
  *
  * model is the caller's model-pose buffer of model_count joints and out the
  * caller's palette buffer of capacity entries; out must not overlap model.
- * Unconditional per-call contracts: palette_count <= capacity, and out does not
- * overlap model. Under NT_SKELETAL_CHECKS the per-element contract
- * remap[p] < model_count is asserted too: release builds trust remap because the
- * binding activator validates it before publishing a view.
+ * NT_ASSERT checks palette_count <= capacity, non-overlapping out/model, and
+ * remap[p] < model_count independently of NT_SKELETAL_CHECKS.
  *
  * No rig-id argument: the game asserts binding/skeleton compatibility once when
  * it pairs them, not on every frame. */

@@ -497,9 +497,35 @@ void test_rig_compat_id_traps_on_non_finite_rest(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_skeletal_rig_compat_id(&rig.skel, scratch, (uint32_t)sizeof(scratch)));
 }
+
+/* Preorder is what lets FK write model[j] while it reads model[parent[j]]. */
+void test_fk_traps_on_forward_parent(void) {
+    nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
+    memcpy(local, g_rig.bind, sizeof(local));
+    nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
+
+    uint16_t parent[SKELETAL_RIG_JOINT_COUNT];
+    memcpy(parent, g_rig.skel.parent, sizeof(parent));
+    parent[JOINT_ARM] = JOINT_HAND;
+
+    nt_skeletal_skeleton_t broken = g_rig.skel;
+    broken.parent = parent;
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_fk(&broken, local, model, 0, SKELETAL_RIG_JOINT_COUNT));
+}
+
+void test_mat34_mul_traps_on_alias(void) {
+    nt_skeletal_trs_t a = make_trs(0.3F, -1.2F, 2.0F, 0.0F, 1.0F, 0.0F, 37.0F, 1.0F, 2.5F, 0.4F);
+    nt_skeletal_mat34_t ma;
+    nt_skeletal_mat34_from_trs(&a, &ma);
+    nt_skeletal_mat34_t mb;
+    nt_skeletal_mat34_from_trs(&a, &mb);
+
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mat34_mul(&ma, &mb, &ma));
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mat34_mul(&ma, &mb, &mb));
+}
 #endif
 
-/* ---- Per-element checks ---- */
+/* ---- Numerical checks ---- */
 
 #if NT_SKELETAL_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
 void test_mat34_from_trs_traps_on_invalid_quaternion(void) {
@@ -585,32 +611,6 @@ void test_fk_traps_on_non_unit_quaternion(void) {
     NT_TEST_EXPECT_ASSERT(nt_skeletal_fk(&g_rig.skel, local, model, 0, SKELETAL_RIG_JOINT_COUNT));
 }
 
-/* Preorder is what lets FK write model[j] while it reads model[parent[j]]. */
-void test_fk_traps_on_forward_parent(void) {
-    nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
-    memcpy(local, g_rig.bind, sizeof(local));
-    nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
-
-    uint16_t parent[SKELETAL_RIG_JOINT_COUNT];
-    memcpy(parent, g_rig.skel.parent, sizeof(parent));
-    parent[JOINT_ARM] = JOINT_HAND;
-
-    nt_skeletal_skeleton_t broken = g_rig.skel;
-    broken.parent = parent;
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_fk(&broken, local, model, 0, SKELETAL_RIG_JOINT_COUNT));
-}
-
-void test_mat34_mul_traps_on_alias(void) {
-    nt_skeletal_trs_t a = make_trs(0.3F, -1.2F, 2.0F, 0.0F, 1.0F, 0.0F, 37.0F, 1.0F, 2.5F, 0.4F);
-    nt_skeletal_mat34_t ma;
-    nt_skeletal_mat34_from_trs(&a, &ma);
-    nt_skeletal_mat34_t mb;
-    nt_skeletal_mat34_from_trs(&a, &mb);
-
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_mat34_mul(&ma, &mb, &ma));
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_mat34_mul(&ma, &mb, &mb));
-}
-
 void test_socket_traps_on_non_unit_quaternion(void) {
     nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
     memcpy(local, g_rig.bind, sizeof(local));
@@ -658,6 +658,8 @@ int main(void) {
     RUN_TEST(test_socket_traps_on_output_aliasing_the_joint);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
     RUN_TEST(test_rig_compat_id_traps_on_non_finite_rest);
+    RUN_TEST(test_mat34_mul_traps_on_alias);
+    RUN_TEST(test_fk_traps_on_forward_parent);
 #endif
 #if NT_SKELETAL_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
     RUN_TEST(test_mat34_from_trs_traps_on_invalid_quaternion);
@@ -668,8 +670,6 @@ int main(void) {
     RUN_TEST(test_fk_traps_on_infinite_scale);
     RUN_TEST(test_fk_traps_on_zero_quaternion);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);
-    RUN_TEST(test_fk_traps_on_forward_parent);
-    RUN_TEST(test_mat34_mul_traps_on_alias);
     RUN_TEST(test_socket_traps_on_non_unit_quaternion);
 #endif
     return UNITY_END();

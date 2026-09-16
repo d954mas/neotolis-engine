@@ -131,7 +131,7 @@ if(NOT NT_ASSERT_MODE MATCHES "^[0-2]$")
     message(FATAL_ERROR "NT_ASSERT_MODE must be 0 (OFF), 1 (TRAP), or 2 (FULL).")
 endif()
 
-option(NT_SKELETAL_CHECKS "Check skeletal animation elements (finite values, unit quaternions, palette indices)." OFF)
+option(NT_SKELETAL_CHECKS "Enable expensive skeletal numerical checks (finite TRS values, unit quaternions)." OFF)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

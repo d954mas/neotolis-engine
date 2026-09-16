@@ -31,9 +31,7 @@ void nt_skeletal_fk(const nt_skeletal_skeleton_t *skel, const nt_skeletal_trs_t 
     const uint16_t end = (uint16_t)(first + count);
     for (uint16_t j = first; j < end; ++j) {
         const uint16_t p = skel->parent[j];
-#if NT_SKELETAL_CHECKS
         NT_ASSERT(p == NT_SKELETAL_NO_PARENT || p < j);
-#endif
         nt_skeletal_mat34_t l;
         nt_skeletal_mat34_from_trs(&local[j], &l);
         if (p == NT_SKELETAL_NO_PARENT) {
@@ -78,9 +76,7 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
     NT_ASSERT((uintptr_t)(out + binding->palette_count) <= (uintptr_t)model || (uintptr_t)(model + model_count) <= (uintptr_t)out);
 
     for (uint16_t p = 0; p < binding->palette_count; ++p) {
-#if NT_SKELETAL_CHECKS
         NT_ASSERT(binding->remap[p] < model_count);
-#endif
         nt_skeletal_mat34_mul(&model[binding->remap[p]], &binding->inverse_bind[p], &out[p]);
     }
 }

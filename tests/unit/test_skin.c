@@ -170,9 +170,7 @@ void test_palette_build_traps_on_overlapping_output(void) {
 
     NT_TEST_EXPECT_ASSERT(nt_skin_palette_build(&g_a, model, SKELETAL_RIG_JOINT_COUNT, &model[1], SKELETAL_RIG_PALETTE_A_COUNT));
 }
-#endif
 
-#if NT_SKELETAL_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
 void test_palette_build_traps_on_out_of_range_remap(void) {
     nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
     nt_skeletal_fk(&g_rig.skel, g_rig.bind, model, 0, SKELETAL_RIG_JOINT_COUNT);
@@ -197,8 +195,6 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_palette_build_traps_on_small_capacity);
     RUN_TEST(test_palette_build_traps_on_overlapping_output);
-#endif
-#if NT_SKELETAL_CHECKS && (NT_ASSERT_MODE == NT_ASSERT_FULL)
     RUN_TEST(test_palette_build_traps_on_out_of_range_remap);
 #endif
     return UNITY_END();
