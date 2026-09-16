@@ -24,16 +24,6 @@ static void nt_anim_check_trs(const nt_anim_trs_t *l) {
     /* Two-sided instead of fabsf: a NaN dot fails both comparisons. */
     NT_ASSERT((dot - 1.0F) < 1e-3F && (1.0F - dot) < 1e-3F);
 }
-
-/* The parent indices are checked here rather than at FK's per-call contracts:
- * preorder is what makes model[j] safe to write while model[parent[j]] is read. */
-static void nt_anim_check_locals(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *local, uint16_t first, uint16_t count) {
-    const uint16_t end = (uint16_t)(first + count);
-    for (uint16_t j = first; j < end; ++j) {
-        NT_ASSERT(skel->parent[j] == NT_ANIM_NO_PARENT || skel->parent[j] < j);
-        nt_anim_check_trs(&local[j]);
-    }
-}
 #endif
 
 void nt_anim_mat34_from_mat4(const float m[16], nt_anim_mat34_t *out) {
@@ -62,15 +52,15 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *restrict lo
      * built from their own output. */
     NT_ASSERT((uintptr_t)(local + skel->joint_count) <= (uintptr_t)model || (uintptr_t)(model + skel->joint_count) <= (uintptr_t)local);
 
-#if NT_ANIM_CHECKS
-    nt_anim_check_locals(skel, local, first, count);
-#endif
-
     const uint16_t end = (uint16_t)(first + count);
     for (uint16_t j = first; j < end; ++j) {
+        const uint16_t p = skel->parent[j];
+#if NT_ANIM_CHECKS
+        NT_ASSERT(p == NT_ANIM_NO_PARENT || p < j);
+        nt_anim_check_trs(&local[j]);
+#endif
         nt_anim_mat34_t l;
         nt_anim_mat34_from_trs(&local[j], &l);
-        const uint16_t p = skel->parent[j];
         if (p == NT_ANIM_NO_PARENT) {
             model[j] = l;
         } else {
@@ -116,13 +106,10 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34
     NT_ASSERT(binding->palette_count <= capacity);
     NT_ASSERT((uintptr_t)(out + binding->palette_count) <= (uintptr_t)model || (uintptr_t)(model + model_count) <= (uintptr_t)out);
 
+    for (uint16_t p = 0; p < binding->palette_count; ++p) {
 #if NT_ANIM_CHECKS
-    for (uint16_t p = 0; p < binding->palette_count; ++p) {
         NT_ASSERT(binding->remap[p] < model_count);
-    }
 #endif
-
-    for (uint16_t p = 0; p < binding->palette_count; ++p) {
         nt_anim_mat34_mul(&model[binding->remap[p]], &binding->inverse_bind[p], &out[p]);
     }
 }
