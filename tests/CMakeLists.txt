@@ -924,6 +924,19 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_builder_skeletal PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder_skeletal WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Builder -> pack -> runtime for the skeletal formats: the only place the
+    # encoders and the activators meet, so a format skew is visible here first.
+    add_executable(test_skeletal_assets unit/test_skeletal_assets.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_assets PRIVATE
+        nt_skeletal_assets nt_builder nt_resource nt_skeletal nt_hash nt_http_stub nt_fs_stub nt_log unity nt_meshwire)
+    target_include_directories(test_skeletal_assets PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_skeletal_assets PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_skeletal_assets WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     add_executable(test_builder_codegen unit/test_builder_codegen.c)
     target_link_libraries(test_builder_codegen PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder_codegen PRIVATE NT_LOG_DOMAIN="builder_codegen_test" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)

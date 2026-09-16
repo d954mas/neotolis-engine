@@ -251,7 +251,14 @@ Publication change detection uses three pieces of state: published asset identit
 
 ### Blob pinning
 
-Two consumption models exist for asset types that derive state from pack bytes:
+A plain activator (`activate`/`deactivate`, no resolve callbacks) is already
+copy-out: it turns the payload into a self-contained runtime object and never
+reads the blob again. MESH does it with GPU buffers; the skeletal types
+(`NSKL`, `NSKN`, `NANM`, `engine/skeletal_assets`) do it with one CPU allocation
+per asset holding the decoded runtime tables. Neither pins.
+
+Two consumption models exist for asset types that derive state from pack bytes
+through the resolve callbacks:
 
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
 - **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.

@@ -177,6 +177,8 @@ typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *remap;                   /* palette entry p -> skeleton joint */
     const nt_skeletal_mat34_t *inverse_bind; /* mesh space -> joint space at the bind pose, per palette entry */
+    float reach;                             /* builder: max |inverse_bind[p] * v| over bound vertices */
+    float any_pose_radius;                   /* builder: conservative skinned radius over any pose */
     uint16_t palette_count;
 } nt_skin_binding_t;
 

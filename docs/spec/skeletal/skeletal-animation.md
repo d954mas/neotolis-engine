@@ -253,7 +253,11 @@ The max of two clip radii is *not* a bound for their mix (two 80° bends mixed a
 
 ## 15. Resources and lifetimes
 
-`rig_compat_id` (`nt_hash64_t`) is shared by NSKL, NANM and NSKN (order, parents, rest semantics, units); binding a clip, skeleton and skin together asserts equality; nothing else is cross-checked at runtime (§2 item 5). Handles/generations still protect slots. Adapters validate their own payload, publish immutable views and own runtime memory. Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank owns its texels and survives the unload of the clips it was baked from.
+`rig_compat_id` (`nt_hash64_t`) is shared by NSKL, NANM and NSKN (order, parents, rest semantics, units); binding a clip, skeleton and skin together asserts equality; nothing else is cross-checked at runtime (§2 item 5). Handles/generations still protect slots. Adapters validate their own payload, publish immutable views and own runtime memory.
+
+**The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the *whole* payload before it allocates or publishes anything, then copies the wire tables out into **one** allocation laid out as §7.2 describes and returns a handle; a rejected payload logs one warning and returns 0, which leaves the asset FAILED with nothing allocated. Nothing reads the blob after activation, so any blob policy may drop it. `nt_skeletal_assets_init` takes the pool capacities (`max_skeletons`, `max_skin_bindings`, `max_clips`; 8/16/64 by default) and allocates them once — activating past a capacity is an assert, not a load failure. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views; they stay valid until their asset is deactivated (unmount, reload, shutdown), so the game refetches them after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation. The binding view carries the NSKN `reach`/`any_pose_radius` numbers; the §14 bounds helper that consumes them arrives with its first consumer.
+
+Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank owns its texels and survives the unload of the clips it was baked from.
 
 **Pack grouping.** Activation and unmount are whole-pack (default `NT_RESOURCE_MAX_PACKS` = 16), and mounting a pack that contains a non-BLOB type whose activator is not registered asserts (`nt_resource.c`, parse). Builder manifests therefore group by **co-residency**: a rig/mesh pack (MESH, NSKL, NSKN); clip-group packs (NANM, e.g. base locomotion vs. dances loaded mid-game). Applications that link animation register the three activators; the manifest keeps peak mounted packs (old + new + prefetch) within the limit or overrides it deliberately.
 
@@ -375,7 +379,11 @@ through `nt_builder_encode_skeleton/skin_binding/clip` and registers them with
 `nt_builder_add_skeleton/skin_binding/clip`; a source violation of any rule above
 is `NT_BUILD_ASSERT`, because the importer is the only producer. A shared
 `shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder
-(FLOAT16 weights) and the bank. Adapters copy into aligned memory when needed.
+(FLOAT16 weights) and the bank. Adapters copy into aligned memory when needed:
+`engine/skeletal_assets` (§15) validates a payload, then decodes CHAN, the three
+planes, CNST, STPT and STPK into the §7.2 runtime layout — per-sample frame
+blocks, per-kind constant tables, step tracks and the object curve — so the
+sampler never sees a wire table.
 
 glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
 
@@ -385,10 +393,10 @@ glTF is the normative source reference; import selects the canonical rig (skin/n
 - `skeletal_bank`: bank init/bake/lookup over `skeletal` + gfx interface.
 - `skeletal_gpu`: staging/upload, DeformationBinding; depends on the gfx interface.
 - `skinned_mesh_renderer` + `skin_comp`.
-- Optional asset adapters (NSKL/NSKN/NANM); `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade helpers live in the showcase.
+- `skeletal_assets` (`engine/skeletal_assets`, one module `nt_skeletal_assets`): the optional NSKL/NSKN/NANM adapters (§15) over `skeletal` + `resource`. `skeletal` itself links neither, so a headless CPU build links no pack code. `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade helpers live in the showcase.
 - Kernels retain no inputs and keep no mutable global evaluation state; concurrent calls (if a game ever schedules them) need immutable shared inputs, disjoint outputs/workspaces and caller synchronization — no engine job system, staging reservation or atomics exist or are planned.
 
-v1 composition checks without LTO (#488): no animation (no animation symbols at all); headless CPU without gfx (`skeletal` only); full v1. Extensions add CPU + IK (#481) and CPU + retarget (#483). A bank-only character allocates no PoseInstance.
+v1 composition checks without LTO (#488): no animation (no animation symbols at all, `skeletal_assets` included); headless CPU without gfx (`skeletal` only, no resource symbol through it); full v1. Extensions add CPU + IK (#481) and CPU + retarget (#483). A bank-only character allocates no PoseInstance.
 
 ## 18. Verification
 

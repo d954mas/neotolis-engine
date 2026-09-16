@@ -188,7 +188,15 @@ static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double tim
     }
 }
 
-#if NT_SKELETAL_CHECKS
+/* The pose check is nothing but asserts, so NT_ASSERT_MODE=OFF empties it: the
+ * function and its calls compile out together instead of leaving locals behind. */
+#if NT_SKELETAL_CHECKS && NT_ASSERT_MODE != NT_ASSERT_OFF
+#define NT_SKELETAL_CHECK_POSE 1
+#else
+#define NT_SKELETAL_CHECK_POSE 0
+#endif
+
+#if NT_SKELETAL_CHECK_POSE
 /* x - x rejects non-finite values without libm; requires strict IEEE math. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_skeletal_check_pose(const nt_skeletal_trs_t *pose, uint32_t count) {
@@ -258,7 +266,7 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
     }
     // #endregion
 
-#if NT_SKELETAL_CHECKS
+#if NT_SKELETAL_CHECK_POSE
     nt_skeletal_check_pose(out, clip->joint_count);
 #endif
 }
@@ -333,7 +341,7 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
         memcpy(out->s, nt_skeletal_step_value(curve->step_times, curve->step_values, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
     }
 
-#if NT_SKELETAL_CHECKS
+#if NT_SKELETAL_CHECK_POSE
     nt_skeletal_check_pose(out, 1U);
 #endif
 }
